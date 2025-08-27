@@ -39,13 +39,53 @@ build/Release
 
 # Dependency directories
 node_modules/
+*/node_modules/
 jspm_packages/
+
+# Package lock files (regenerated each time)
+package-lock.json
+*/package-lock.json
+yarn.lock
+*/yarn.lock
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/
 
 # TypeScript cache
 *.tsbuildinfo
+*/*.tsbuildinfo
+
+# Build outputs
+build/
+dist/
+*/build/
+*/dist/
+
+# Environment variables (per directory)
+.env
+.env.*
+!.env.example
+*/.env
+*/.env.*
+!*/.env.example
+
+# Reports and uploads
+reports/
+uploads/
+backend/reports/
+backend/uploads/
+
+# Database files
+*.sql.backup
+database/backups/
+backend/database/backups/
+
+# IDE and OS files
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # Optional npm cache directory
 .npm
@@ -137,3 +177,117 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# =======================================================
+# STAFFSCHEDULER SPECIFIC
+# =======================================================
+
+# Environment files with sensitive data
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.production
+.env.staging
+
+# Database connection files
+database.json
+db-config.json
+
+# SSL certificates and keys
+*.pem
+*.key
+*.crt
+*.csr
+ssl/
+certs/
+
+# Backup files
+backups/
+*.sql
+*.backup
+*.dump
+
+# Log files
+logs/
+*.log.*
+audit.log
+error.log
+access.log
+
+# Upload directories
+uploads/
+temp/
+tmp/
+
+# Report files
+reports/
+exports/
+*.pdf
+*.xlsx
+*.csv
+
+# Docker compose override files
+docker-compose.override.yml
+docker-compose.production.yml
+docker-compose.staging.yml
+
+# Database data directories
+mysql_data/
+postgres_data/
+redis_data/
+
+# IDE and editor files
+.vscode/settings.json
+.vscode/launch.json
+.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Security and secrets
+secrets/
+private-keys/
+*.secret
+api-keys.json
+service-account.json
+
+# Testing and development
+test-data/
+dev-data/
+mock-data/
+.test-env
+
+# Performance and profiling
+*.prof
+*.heapsnapshot
+.clinic/
+
+# Documentation build files
+docs/build/
+docs/.vuepress/dist/
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
+# =======================================================
+# PRODUCTION SECURITY
+# =======================================================
+
+# Never commit these files to version control:
+# - Database passwords
+# - JWT secrets
+# - API keys
+# - SSL certificates
+# - User data
+# - Backup files
+# - Log files with sensitive information
