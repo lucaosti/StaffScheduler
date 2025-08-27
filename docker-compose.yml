@@ -39,6 +39,7 @@ services:
       - mysql
     environment:
       NODE_ENV: development
+      PORT: 3001
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: staff_scheduler
@@ -50,8 +51,9 @@ services:
       EMAIL_PORT: 587
       EMAIL_USER: your-email@gmail.com
       EMAIL_PASSWORD: your-app-password
-      OPTIMIZATION_ENGINE: or-tools
+      OPTIMIZATION_ENGINE: javascript
       CORS_ORIGIN: http://localhost:3000
+      CORS_CREDENTIALS: true
     ports:
       - "3001:3001"
     volumes:

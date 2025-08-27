@@ -13,7 +13,9 @@ import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import employeeRoutes from './routes/employees';
 import shiftRoutes from './routes/shifts';
+import assignmentRoutes from './routes/assignments';
 import scheduleRoutes from './routes/schedules';
+import dashboardRoutes from './routes/dashboard';
 import healthRoutes from './routes/health';
 
 const app = express();
@@ -70,7 +72,9 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/shifts', shiftRoutes);
+app.use('/api/assignments', assignmentRoutes);
 app.use('/api/schedules', scheduleRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 app.use('/api', healthRoutes);
 
 // 404 handler

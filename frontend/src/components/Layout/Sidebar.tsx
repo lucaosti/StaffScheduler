@@ -85,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
         {user && (
           <div className="text-white mb-2">
             <small>
-              {user.firstName} {user.lastName}
+              {user.email}
               <br />
               <span className="text-muted">{user.role}</span>
             </small>

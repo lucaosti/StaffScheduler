@@ -29,7 +29,7 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
           </button>
           <ul className="dropdown-menu dropdown-menu-end">
             <li><h6 className="dropdown-header">Notifications</h6></li>
-            <li><a className="dropdown-item" href="#">No new notifications</a></li>
+            <li><button className="dropdown-item" type="button">No new notifications</button></li>
           </ul>
         </div>
       </div>

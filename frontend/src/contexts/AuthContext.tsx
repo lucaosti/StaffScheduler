@@ -1,6 +1,15 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
-import { User, AuthState, LoginRequest, LoginResponse, ApiResponse } from '../types';
+import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
+
+// Local AuthState interface to avoid type conflicts
+interface AuthState {
+  user: Omit<User, 'passwordHash' | 'salt'> | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+}
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginRequest) => Promise<void>;
@@ -12,10 +21,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 type AuthAction =
   | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: { user: User; token: string } }
+  | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'>; token: string } }
   | { type: 'LOGIN_FAILURE' }
   | { type: 'LOGOUT' }
-  | { type: 'SET_USER'; payload: User }
+  | { type: 'SET_USER'; payload: Omit<User, 'passwordHash' | 'salt'> }
   | { type: 'SET_LOADING'; payload: boolean };
 
 const authReducer = (state: AuthState, action: AuthAction): AuthState => {
@@ -69,6 +78,7 @@ const initialState: AuthState = {
   token: null,
   isAuthenticated: false,
   isLoading: true,
+  error: null,
 };
 
 interface AuthProviderProps {
@@ -120,7 +130,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           payload: { user, token },
         });
       } else {
-        throw new Error(response.message || 'Login failed');
+        throw new Error((response.error as any)?.message || 'Login failed');
       }
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE' });

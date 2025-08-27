@@ -1,6 +1,6 @@
 // User Authentication (with N-level hierarchy)
 export interface User {
-  id: number;
+  id: string;
   username: string;
   email: string; // Used as username
   firstName: string;
@@ -60,21 +60,114 @@ export interface DelegatedAuthority {
 
 // Employee (with matrix organization support)
 export interface Employee {
-  id: string;
-  name: string;
+  employeeId: string;
+  firstName: string;
+  lastName: string;
   email: string;
-  roles: string[]; // Can cover multiple roles, no seniority
+  phone: string;
+  position: string;
+  department: string;
+  hireDate: string;
   contractFrom: string; // ISO date
   contractTo: string;   // ISO date
-  restHours?: number; // Override default role rest hours
-  preferences?: Preference[];
-  isActive: boolean;
-  targetHours?: Record<string, number>; // per horizon type
-  primaryUnit: string; // Main organizational unit
+  workPatterns: WorkPattern;
+  skills: string[];
+  preferences: EmployeePreferences;
+  emergencyContact: EmergencyContact;
+  primaryUnit?: string; // Main organizational unit
   secondaryUnits?: string[]; // Additional units for cross-functional work
   primarySupervisor: string; // Main supervisor ID
   secondarySupervisors?: string[]; // Matrix supervisors for specific projects
   hierarchyPath: string; // Materialized path in org tree
+  restHours?: number; // Override default role rest hours
+  targetHours?: Record<string, number>; // per horizon type
+  roles?: string[]; // Can cover multiple roles, no seniority
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  supervisorName?: string | null;
+}
+
+export interface WorkPattern {
+  preferredShifts: string[];
+  maxHoursPerWeek: number;
+  minHoursPerWeek: number;
+  availableDays: string[];
+  unavailableDates: string[];
+  preferredTimeSlots: TimeSlot[];
+  restrictions?: string[];
+}
+
+export interface TimeSlot {
+  startTime: string;  // HH:MM
+  endTime: string;    // HH:MM
+  days: string[];     // ['monday', 'tuesday', ...]
+}
+
+export interface EmployeePreferences {
+  preferredDepartments: string[];
+  avoidNightShifts: boolean;
+  flexibleSchedule: boolean;
+  maxConsecutiveDays: number;
+  preferredDaysOff: string[];
+  notes?: string;
+}
+
+export interface EmergencyContact {
+  name: string;
+  phone: string;
+  relationship: string;
+  email?: string;
+}
+
+export interface CreateEmployeeRequest {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  position: string;
+  department: string;
+  hireDate: string;
+  contractFrom: string;
+  contractTo: string;
+  workPatterns: WorkPattern;
+  skills: string[];
+  preferences: EmployeePreferences;
+  emergencyContact: EmergencyContact;
+  primarySupervisor: string;
+  primaryUnit?: string;
+}
+
+export interface UpdateEmployeeRequest {
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  phone?: string;
+  position?: string;
+  department?: string;
+  contractFrom?: string;
+  contractTo?: string;
+  workPatterns?: WorkPattern;
+  skills?: string[];
+  preferences?: EmployeePreferences;
+  emergencyContact?: EmergencyContact;
+}
+
+export interface EmployeeFilters {
+  department?: string;
+  position?: string;
+  active?: boolean;
+  hierarchyPath?: string;
+  skills?: string[];
+  search?: string;
+}
+
+export interface PaginationParams {
+  page: number;
+  limit: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 // Notification
@@ -93,20 +186,74 @@ export interface Notification {
 // Shift (including special shifts)
 export interface Shift {
   id: string;
-  start: string; // ISO datetime
-  end: string;   // ISO datetime
-  type: 'regular' | 'special'; // Distinguish shift types
+  name: string;
+  startTime: string;  // Time format HH:MM
+  endTime: string;    // Time format HH:MM
+  date: string;       // ISO date YYYY-MM-DD
+  department: string;
+  position: string;
+  requiredSkills: string[];
+  minimumStaff: number;
+  maximumStaff: number;
+  type: 'regular' | 'special';
   specialType?: 'on_call' | 'overtime' | 'emergency' | 'holiday';
-  rolesRequired: Record<string, number>; // role -> min required
-  priority: number; // For constraint resolution
+  priority: number;
   location?: string;
   description?: string;
-  unitId: string; // Organizational unit
+  status: 'draft' | 'published' | 'archived';
+  rolesRequired: Record<string, number>;  // role -> minimum count
   createdBy: string;
-  isPublished?: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdByName?: string | null;
 }
 
-// Assignment
+export interface CreateShiftRequest {
+  name: string;
+  startTime: string;
+  endTime: string;
+  date: string;
+  department: string;
+  position: string;
+  requiredSkills: string[];
+  minimumStaff: number;
+  maximumStaff: number;
+  type?: 'regular' | 'special';
+  specialType?: 'on_call' | 'overtime' | 'emergency' | 'holiday';
+  priority?: number;
+  location?: string;
+  description?: string;
+  rolesRequired: Record<string, number>;
+}
+
+export interface UpdateShiftRequest {
+  name?: string;
+  startTime?: string;
+  endTime?: string;
+  date?: string;
+  department?: string;
+  position?: string;
+  requiredSkills?: string[];
+  minimumStaff?: number;
+  maximumStaff?: number;
+  type?: 'regular' | 'special';
+  specialType?: 'on_call' | 'overtime' | 'emergency' | 'holiday';
+  priority?: number;
+  location?: string;
+  description?: string;
+  rolesRequired?: Record<string, number>;
+  status?: 'draft' | 'published' | 'archived';
+}
+
+export interface ShiftFilters {
+  startDate?: string;
+  endDate?: string;
+  department?: string;
+  type?: 'regular' | 'special';
+  status?: 'draft' | 'published' | 'archived';
+  position?: string;
+}
+
 export interface Assignment {
   id: string;
   employeeId: string;
@@ -114,11 +261,10 @@ export interface Assignment {
   role: string;
   status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   assignedAt: Date;
-  assignedBy: string; // Supervisor who made assignment
   approvedBy?: string;
   approvedAt?: Date;
-  exemptions?: string[]; // IDs of exemptions applied
-  rejectionReason?: string;
+  rejectedReason?: string;
+  notes?: string;
 }
 
 // Preference system
@@ -364,4 +510,65 @@ declare module 'express-session' {
     role?: string;
     lastActivity?: Date;
   }
+}
+
+// Schedule management types
+export interface Schedule {
+  id: string;
+  name: string;
+  description?: string;
+  startDate: string;
+  endDate: string;
+  status: 'draft' | 'published' | 'archived';
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  publishedAt?: string;
+  publishedBy?: string;
+}
+
+export interface CreateScheduleRequest {
+  name: string;
+  description?: string;
+  startDate: string;
+  endDate: string;
+}
+
+export interface UpdateScheduleRequest {
+  name?: string;
+  description?: string;
+  startDate?: string;
+  endDate?: string;
+  status?: 'draft' | 'published' | 'archived';
+}
+
+export interface OptimizationOptions {
+  startDate: string;
+  endDate: string;
+  departments?: string[];
+  roles?: string[];
+  employees?: string[];
+  constraints: {
+    maxConsecutiveDays?: number;
+    minRestHours?: number;
+    respectPreferences?: boolean;
+    allowOvertime?: boolean;
+  };
+  weights: {
+    coverage: number;
+    fairness: number;
+    preferences: number;
+    stability: number;
+  };
+}
+
+export interface DashboardStats {
+  totalEmployees: number;
+  activeSchedules: number;
+  todayShifts: number;
+  pendingApprovals: number;
+  monthlyHours: number;
+  monthlyCost: number;
+  coverageRate: number;
+  employeeSatisfaction: number;
 }

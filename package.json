@@ -16,6 +16,9 @@
     "test:backend": "cd backend && npm test",
     "test:frontend": "cd frontend && npm test",
     "clean": "rm -rf frontend/node_modules backend/node_modules frontend/build backend/dist",
+    "lint": "npm run lint:backend && npm run lint:frontend",
+    "lint:backend": "cd backend && npm run lint",
+    "lint:frontend": "cd frontend && npm run lint",
     "demo:install": "cd backend && npm run demo:install",
     "demo:remove": "cd backend && npm run demo:remove",
     "demo:report": "cd backend && npm run demo:report",
@@ -23,7 +26,8 @@
     "docker:down": "docker-compose down",
     "docker:logs": "docker-compose logs -f",
     "docker:build": "docker-compose build --no-cache",
-    "docker:restart": "docker-compose restart"
+    "docker:restart": "docker-compose restart",
+    "status": "echo '✅ Checking project status...' && npm run build && echo '✅ Build successful! Project is ready.'"
   },
   "keywords": [
     "workforce-management",
