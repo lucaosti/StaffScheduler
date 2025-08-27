@@ -1,3 +1,6 @@
+// Types for StaffScheduler Frontend
+export {};
+
 // User Authentication (with N-level hierarchy)
 export interface User {
   id: string;
@@ -39,6 +42,14 @@ export interface LoginResponse {
   token: string;
 }
 
+export interface AuthState {
+  user: User | null;
+  token: string | null;
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  error: string | null;
+}
+
 export interface Permission {
   resource: 'employees' | 'shifts' | 'schedules' | 'reports' | 'settings' | 'users';
   action: 'read' | 'write' | 'delete' | 'approve' | 'create_user';
@@ -60,6 +71,7 @@ export interface DelegatedAuthority {
 
 // Employee (with matrix organization support)
 export interface Employee {
+  id?: number; // Optional database ID for mock data compatibility
   employeeId: string;
   firstName: string;
   lastName: string;
@@ -67,18 +79,21 @@ export interface Employee {
   phone: string;
   position: string;
   department: string;
-  hireDate: string;
-  contractFrom: string; // ISO date
-  contractTo: string;   // ISO date
-  workPatterns: WorkPattern;
-  skills: string[];
-  preferences: EmployeePreferences;
-  emergencyContact: EmergencyContact;
+  employeeType?: string; // full-time, part-time, contract
+  hourlyRate?: number; // Hourly wage rate
+  maxHoursPerWeek?: number; // Maximum weekly hours
+  hireDate?: string;
+  contractFrom?: string; // ISO date
+  contractTo?: string;   // ISO date
+  workPatterns?: WorkPattern;
+  skills?: string[];
+  preferences?: EmployeePreferences;
+  emergencyContact?: EmergencyContact;
   primaryUnit?: string; // Main organizational unit
   secondaryUnits?: string[]; // Additional units for cross-functional work
-  primarySupervisor: string; // Main supervisor ID
+  primarySupervisor?: string; // Main supervisor ID
   secondarySupervisors?: string[]; // Matrix supervisors for specific projects
-  hierarchyPath: string; // Materialized path in org tree
+  hierarchyPath?: string; // Materialized path in org tree
   restHours?: number; // Override default role rest hours
   targetHours?: Record<string, number>; // per horizon type
   roles?: string[]; // Can cover multiple roles, no seniority
@@ -267,244 +282,6 @@ export interface Assignment {
   notes?: string;
 }
 
-// Preference system
-export interface Preference {
-  id: string;
-  employeeId: string;
-  type: 'day_off' | 'avoid_interval' | 'preferred_shift' | 'max_consecutive';
-  priority: 1 | 2 | 3; // 1 = highest, 3 = lowest
-  timeInterval?: {
-    start: string; // ISO datetime or date
-    end: string;
-  };
-  weeklyPattern?: {
-    daysOfWeek: number[]; // 0 = Sunday, 1 = Monday, etc.
-    timeSlots?: { start: string; end: string }[];
-  };
-  value?: number; // For numeric preferences like max_consecutive
-  isActive: boolean;
-  validFrom: string; // ISO date
-  validTo?: string;  // ISO date
-}
-
-// Legal/Union constraints
-export interface LegalConstraint {
-  id: string;
-  name: string;
-  description: string;
-  type: 'max_consecutive_days' | 'min_rest_hours' | 'max_weekly_hours' | 'max_monthly_hours';
-  value: number;
-  appliesTo: 'all' | 'role' | 'employee' | 'unit'; // Scope
-  targetId?: string;
-  hierarchyLevel: number;
-  organizationUnit: string;
-  canOverride: boolean;
-  isActive: boolean;
-  createdBy: string;
-  createdAt: Date;
-}
-
-// Role (job roles)
-export interface Role {
-  id: string;
-  name: string;
-  description?: string;
-  defaultRestHours: number;
-  colorCode?: string;
-  isActive: boolean;
-}
-
-// Organizational Unit
-export interface OrganizationalUnit {
-  id: string;
-  name: string;
-  description?: string;
-  parentUnitId?: string;
-  hierarchyPath: string;
-  managerId?: string;
-  isActive: boolean;
-}
-
-// Schedule generation parameters
-export interface ScheduleParameters {
-  startDate: string; // ISO date
-  endDate: string;   // ISO date
-  mode: 'strict' | 'partial'; // strict = all shifts covered, partial = allow uncovered
-  roleMode: 'strict' | 'flexible'; // strict = exact role match, flexible = cross-training
-  optimizationGoals: {
-    preferenceWeight: number;    // 0-1
-    fairnessWeight: number;      // 0-1
-    targetHoursWeight: number;   // 0-1
-    stabilityWeight: number;     // 0-1 (minimize changes from previous)
-  };
-  constraints: {
-    enforceRestPeriods: boolean;
-    allowOvertime: boolean;
-    maxOvertimePercent: number;
-    respectAvailability: boolean;
-  };
-  excludeEmployees?: string[]; // Employees to exclude from scheduling
-  forceAssignments?: Assignment[]; // Pre-assigned shifts
-}
-
-// Schedule generation result
-export interface ScheduleResult {
-  id: string;
-  parameters: ScheduleParameters;
-  assignments: Assignment[];
-  unassignedShifts: string[]; // Shift IDs that couldn't be covered
-  constraintViolations: ConstraintViolation[];
-  statistics: {
-    totalShifts: number;
-    assignedShifts: number;
-    coveragePercent: number;
-    averageFairness: number;
-    employeeUtilization: Record<string, number>; // employeeId -> utilization %
-  };
-  generatedAt: Date;
-  generatedBy: string;
-  status: 'draft' | 'approved' | 'published' | 'archived';
-  approvedBy?: string;
-  approvedAt?: Date;
-}
-
-export interface ConstraintViolation {
-  type: 'hard' | 'soft';
-  constraintId: string;
-  employeeId: string;
-  shiftId: string;
-  description: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-}
-
-// Report configuration
-export interface ReportConfig {
-  type: 'schedule' | 'utilization' | 'fairness' | 'violations' | 'custom';
-  timeRange: {
-    start: string; // ISO date
-    end: string;
-  };
-  filters: {
-    employees?: string[];
-    roles?: string[];
-    units?: string[];
-    shiftTypes?: string[];
-  };
-  format: 'pdf' | 'excel' | 'csv';
-  includeGraphics: boolean;
-  groupBy?: 'employee' | 'role' | 'unit' | 'week' | 'month';
-}
-
-export interface ReportResult {
-  id: string;
-  config: ReportConfig;
-  data: any[][]; // Raw data matrix
-  columns: string[];
-  generatedAt: Date;
-  generatedBy: string;
-  downloadUrl?: string;
-}
-
-// Conflict resolution
-export interface Conflict {
-  id: string;
-  type: 'overlapping_assignments' | 'constraint_violation' | 'authority_dispute' | 'resource_conflict';
-  involvedEmployees: string[];
-  involvedSupervisors: string[];
-  description: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  resolutionStrategy: 'manual_review' | 'automatic_precedence' | 'escalate_to_superior';
-  status: 'open' | 'in_review' | 'resolved' | 'escalated';
-  createdAt: Date;
-  resolvedAt?: Date;
-  resolvedBy?: string;
-  resolutionNotes?: string;
-}
-
-// Audit trail
-export interface AuditLog {
-  id: string;
-  userId: string;
-  action: string;
-  resourceType: string;
-  resourceId: string;
-  changes: Record<string, { old: any; new: any }>;
-  timestamp: Date;
-  ipAddress?: string;
-  userAgent?: string;
-  reason?: string; // For sensitive operations
-}
-
-// API Response types
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-    details?: any;
-  };
-  meta?: {
-    total?: number;
-    page?: number;
-    limit?: number;
-    totalPages?: number;
-    hasNext?: boolean;
-    hasPrev?: boolean;
-  };
-}
-
-export interface PaginationOptions {
-  page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
-  search?: string;
-  filters?: Record<string, any>;
-}
-
-// Authentication types
-export interface LoginRequest {
-  username?: string;
-  email?: string;
-  password: string;
-  rememberMe?: boolean;
-}
-
-export interface PasswordResetRequest {
-  email: string;
-}
-
-export interface PasswordResetConfirm {
-  token: string;
-  newPassword: string;
-}
-
-// Validation types
-export interface ValidationError {
-  field: string;
-  message: string;
-  value?: any;
-}
-
-export interface ValidationResult {
-  isValid: boolean;
-  errors: ValidationError[];
-}
-
-// Database result types
-export interface DatabaseInsertResult {
-  insertId: string | number;
-  affectedRows: number;
-}
-
-export interface DatabaseUpdateResult {
-  affectedRows: number;
-  changedRows: number;
-}
-
-// Session extension
-
 // Schedule management types
 export interface Schedule {
   id: string;
@@ -553,6 +330,51 @@ export interface OptimizationOptions {
     preferences: number;
     stability: number;
   };
+}
+
+// API Response types
+export interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+  meta?: {
+    total?: number;
+    page?: number;
+    limit?: number;
+    totalPages?: number;
+    hasNext?: boolean;
+    hasPrev?: boolean;
+  };
+}
+
+export interface PaginationOptions {
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  search?: string;
+  filters?: Record<string, any>;
+}
+
+// Authentication types
+export interface LoginRequest {
+  username?: string;
+  email?: string;
+  password: string;
+  rememberMe?: boolean;
+}
+
+export interface PasswordResetRequest {
+  email: string;
+}
+
+export interface PasswordResetConfirm {
+  token: string;
+  newPassword: string;
 }
 
 export interface DashboardStats {
