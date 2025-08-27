@@ -63,6 +63,7 @@ The Staff Scheduler aims to assign employees to shifts over a given time horizon
 
 #### 1. Forced Assignments (Management Directives)
 For any forced assignment $(i,t)$ mandated by authorized supervisor:
+
 $$x_{i,t} = 1$$
 
 **Priority**: Highest - overrides all other constraints except basic feasibility
@@ -74,6 +75,7 @@ $$x_{i,t} = 1$$
 
 #### 3. Minimum Rest Requirements (Legal/Union)
 For each employee $i$ and shift pair $(t,t')$:
+
 $$x_{i,t} + x_{i,t'} \leq 1 \quad \text{if } \Delta(t,t') < \text{rest\_hrs}_i$$
 
 Where $\text{rest\_hrs}_i$ comes from personal override or role default.
@@ -87,11 +89,14 @@ For constraint $C$ imposed at hierarchy level $h$ on organizational unit $u$:
   - Higher-level supervisor (level $< h$) through exemption approval
 
 Mathematically, if constraint $C$ requires $\sum_{i \in U_{sub}} x_{i,T_C} \leq B_C$:
+
 $$\sum_{i \in \text{descendants}(u)} x_{i,t} \leq B_C \quad \forall t \in T_C$$
+
 unless exemption $E_{i,t,C}$ is approved.
 
 #### 5. Coverage Requirements
 For each coverage interval $f$ and role $r$:
+
 $$\text{min}_{f,r} \leq \sum_{t \in \text{overlap}(f)} \sum_{i \in E_r} \phi_{i,t,r} \leq \text{max}_{f,r}$$
 
 Where:
@@ -99,28 +104,38 @@ Where:
 - **Flexible mode**: $\phi_{i,t,r} = y_{i,t,r}$
 
 #### 6. Role Assignment Consistency (Flexible Mode)
+
 $$\sum_r y_{i,t,r} = x_{i,t} \quad \forall i,t$$
+
 $$y_{i,t,r} \leq A_{i,r} \quad \forall i,t,r$$
 
 ### Soft Constraints (Preference Optimization)
 
 #### 1. Employee Preferences (Hierarchical Priority)
 **Level 1 (Highest Soft Priority)**: Day-off requests
+
 $$u^{(1)}_{i,g} \leq 1 - \sum_{t \in \text{day}(g)} x_{i,t}$$
 
 **Level 2**: Avoid specific intervals
+
 $$u^{(2)}_{i,g,X} \leq 1 - \sum_{t \in (\text{day}(g) \cap X)} x_{i,t}$$
 
 **Level 3 (Lowest Soft Priority)**: Minimize undesired assignments
+
 $$m_{i,X} = \sum_{t \in X} x_{i,t}$$
 
 #### 2. Target Hours Deviation
+
 $$\text{hours}_i - \text{target}_i \leq \delta_i \quad \forall i$$
+
 $$\text{target}_i - \text{hours}_i \leq \delta_i \quad \forall i$$
+
 Where: $\text{hours}_i = \sum_t x_{i,t} \cdot \text{duration}(t)$
 
 #### 3. Fairness (Max-Min Satisfaction)
+
 $$S_i = \sum u^{(1)}_{i,\cdot} + \sum u^{(2)}_{i,\cdot,\cdot} - \alpha \sum_X m_{i,X}$$
+
 $$z \leq S_i \quad \forall i$$
 
 ### Hierarchical Management Constraints
@@ -133,24 +148,31 @@ If user $s_1$ delegates authority $A$ to user $s_2$ for scope $\Sigma$:
 
 #### Exemption Request System
 For exemption $E$ from constraint $C$ imposed by supervisor $s$:
+
 $$\text{valid}(E) \iff (\text{requestor} \text{ subordinate of } s) \land (\text{approver} \geq \text{level}(s))$$
 
 ### Objective Function (Lexicographic Optimization)
 
 **Phase 1**: Maximize hard constraint satisfaction
+
 $$\max \text{feasibility\_score}$$
 
 **Phase 2**: Optimize soft constraints with hierarchy
+
 $$\max W_1 \sum u^{(1)} + W_2 \sum u^{(2)} - W_3 \sum m_{i,X}$$
+
 Where $W_1 > W_2 > W_3$ ensures preference hierarchy.
 
 **Phase 3**: Maximize fairness
+
 $$\max z$$
 
 **Phase 4**: Minimize target deviation
+
 $$\min \sum_i \delta_i$$
 
 **Phase 5** (Optional): Minimize schedule changes
+
 $$\min \sum_{i,t} |x_{i,t} - x^{\text{prev}}_{i,t}|$$
 
 ### Conflict Resolution Algorithm
@@ -165,6 +187,7 @@ Since supervisors at same level can modify each other's constraints:
 
 #### Mathematical Representation
 For conflicting constraints $C_1, C_2$ from supervisors at same level:
+
 $$\text{active\_constraint} = \arg\max_{C \in \{C_1, C_2\}} \text{timestamp}(C)$$
 
 ### Exemption and Override System
@@ -173,10 +196,12 @@ $$\text{active\_constraint} = \arg\max_{C \in \{C_1, C_2\}} \text{timestamp}(C)$
 $e_{i,t,C} \in \{0,1\}$: Exemption granted for employee $i$ in shift $t$ from constraint $C$
 
 Modified constraint becomes:
+
 $$\text{original\_constraint}(i,t) \lor e_{i,t,C} = 1$$
 
 #### Approval Chain
 Exemption $e_{i,t,C}$ valid only if:
+
 $$\exists s : (\text{level}(s) \leq \text{level}(\text{creator}(C))) \land \text{approved\_by}(e,s)$$
 
 This mathematical model ensures:
@@ -883,6 +908,7 @@ $$\text{applies}(C_h, i) \iff (\text{unit}(i) \in \text{descendants}(u)) \land \
 Where $E_{i,C_h}^{\text{approved}}$ represents an approved exemption.
 
 **Exemption Approval Logic**:
+
 $$\text{valid}(E_{i,C_h}) \iff \exists s : (\text{level}(s) \leq h) \land (\text{scope}(s) \supseteq \text{scope}(C_h)) \land \text{signed}(s, E_{i,C_h})$$
 
 **Delegation Authority Transfer**:
@@ -892,6 +918,7 @@ If supervisor $s_1$ delegates authority $A$ to $s_2$ for scope $\Sigma$:
 - $s_1$ retains all original authorities
 
 **Forced Assignment Override System**:
+
 $$x_{i,t} = 1 \quad \forall (i,t) \in \mathcal{F}$$
 
 Where $\mathcal{F}$ is the set of all active forced assignments. These override all soft constraints and most hard constraints (except basic feasibility).
