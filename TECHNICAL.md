@@ -2880,7 +2880,7 @@ export interface Config {
 
 export const config: Config = {
   server: {
-    port: parseInt(process.env.PORT || '5000'),
+    port: parseInt(process.env.PORT || '3001'),
     host: process.env.HOST || '0.0.0.0',
     cors: {
       origin: process.env.CORS_ORIGIN?.split(',') || 'http://localhost:3000',
@@ -2920,12 +2920,12 @@ export const config: Config = {
     email: {
       enabled: process.env.EMAIL_ENABLED === 'true',
       smtp: {
-        host: process.env.SMTP_HOST || 'localhost',
-        port: parseInt(process.env.SMTP_PORT || '587'),
-        secure: process.env.SMTP_SECURE === 'true',
+        host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: process.env.EMAIL_SECURE === 'false',
         auth: {
-          user: process.env.SMTP_USER || '',
-          pass: process.env.SMTP_PASS || ''
+          user: process.env.EMAIL_USER || '',
+          pass: process.env.EMAIL_PASSWORD || ''
         }
       }
     },
@@ -3223,9 +3223,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --chown=backend:nodejs . .
 RUN npm run build
 USER backend
-EXPOSE 5000
+EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:5000/api/health || exit 1
+  CMD curl -f http://localhost:3001/api/health || exit 1
 CMD ["npm", "start"]
 ```
 
@@ -3261,7 +3261,7 @@ services:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -3310,14 +3310,14 @@ BCRYPT_SALT_ROUNDS=12
 
 # Application
 NODE_ENV=production
-PORT=5000
+PORT=3001
 LOG_LEVEL=info
 
 # External Services
-SMTP_HOST=${SMTP_HOST}
-SMTP_PORT=587
-SMTP_USER=${SMTP_USER}
-SMTP_PASS=${SMTP_PASS}
+EMAIL_HOST=${EMAIL_HOST}
+EMAIL_PORT=587
+EMAIL_USER=${EMAIL_USER}
+EMAIL_PASSWORD=${EMAIL_PASSWORD}
 
 # Monitoring
 SENTRY_DSN=${SENTRY_DSN}
@@ -3346,7 +3346,7 @@ spec:
       - name: backend
         image: staffscheduler/backend:latest
         ports:
-        - containerPort: 5000
+        - containerPort: 3001
         env:
         - name: DB_HOST
           value: "mysql-service"
@@ -3365,13 +3365,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /api/health
-            port: 5000
+            port: 3001
           initialDelaySeconds: 30
           periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /api/ready
-            port: 5000
+            port: 3001
           initialDelaySeconds: 5
           periodSeconds: 5
 ```
