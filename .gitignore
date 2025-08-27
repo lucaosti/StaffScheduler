@@ -69,8 +69,8 @@ dist/
 */.env.*
 !*/.env.example
 
-# Reports and uploads
-reports/
+# Reports and uploads (generated files only)
+/reports/
 uploads/
 backend/reports/
 backend/uploads/
@@ -205,7 +205,8 @@ certs/
 
 # Backup files
 backups/
-*.sql
+*.sql.backup
+*.sql.dump
 *.backup
 *.dump
 
@@ -221,8 +222,8 @@ uploads/
 temp/
 tmp/
 
-# Report files
-reports/
+# Report files (generated files only)
+/reports/
 exports/
 *.pdf
 *.xlsx
