@@ -1,8 +1,35 @@
+/**
+ * Authentication Context Provider
+ * 
+ * Manages application-wide authentication state using React Context API.
+ * Provides authentication methods and user state to all child components.
+ * 
+ * Features:
+ * - JWT token management with localStorage persistence
+ * - Automatic token verification on app startup
+ * - Login/logout functionality
+ * - Token refresh capabilities
+ * - Error handling for authentication failures
+ * - Loading states for better UX
+ * 
+ * Security:
+ * - Automatic token cleanup on logout
+ * - Token verification with backend
+ * - Secure token storage practices
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
 
-// Local AuthState interface to avoid type conflicts
+/**
+ * Authentication State Interface
+ * 
+ * Defines the structure of authentication state managed by the context.
+ * Excludes sensitive user data like password hashes.
+ */
 interface AuthState {
   user: Omit<User, 'passwordHash' | 'salt'> | null;
   token: string | null;
@@ -11,14 +38,32 @@ interface AuthState {
   error: string | null;
 }
 
+/**
+ * Authentication Context Interface
+ * 
+ * Extends AuthState with methods for authentication actions.
+ * Provides the complete API for authentication management.
+ */
 interface AuthContextType extends AuthState {
   login: (credentials: LoginRequest) => Promise<void>;
   logout: () => void;
   refreshToken: () => Promise<void>;
 }
 
+/**
+ * Create Authentication Context
+ * 
+ * Creates the React context for authentication state management.
+ * Initially undefined to ensure proper error handling.
+ */
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/**
+ * Authentication Action Types
+ * 
+ * Defines all possible actions for the authentication reducer.
+ * Uses discriminated unions for type safety.
+ */
 type AuthAction =
   | { type: 'LOGIN_START' }
   | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'>; token: string } }
@@ -27,12 +72,23 @@ type AuthAction =
   | { type: 'SET_USER'; payload: Omit<User, 'passwordHash' | 'salt'> }
   | { type: 'SET_LOADING'; payload: boolean };
 
+/**
+ * Authentication State Reducer
+ * 
+ * Manages authentication state transitions based on dispatched actions.
+ * Implements immutable state updates for predictable state management.
+ * 
+ * @param state - Current authentication state
+ * @param action - Action to process
+ * @returns New authentication state
+ */
 const authReducer = (state: AuthState, action: AuthAction): AuthState => {
   switch (action.type) {
     case 'LOGIN_START':
       return {
         ...state,
         isLoading: true,
+        error: null,
       };
     case 'LOGIN_SUCCESS':
       return {
@@ -41,6 +97,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         token: action.payload.token,
         isAuthenticated: true,
         isLoading: false,
+        error: null,
       };
     case 'LOGIN_FAILURE':
       return {

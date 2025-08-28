@@ -1,9 +1,65 @@
+/**
+ * Assignment Service
+ * 
+ * Handles all business logic related to shift assignments including
+ * creation, approval, conflict detection, and status management.
+ * 
+ * Features:
+ * - Comprehensive assignment lifecycle management
+ * - Advanced conflict detection and resolution
+ * - Multi-status workflow support
+ * - Employee availability validation
+ * - Assignment history tracking
+ * - Approval workflow management
+ * 
+ * Business Rules:
+ * - Prevents double assignments
+ * - Validates time conflicts
+ * - Enforces approval workflows
+ * - Maintains assignment integrity
+ * - Supports bulk operations
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { database } from '../config/database';
 import { Assignment } from '../types';
 import { logger } from '../config/logger';
 import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * Assignment Service Class
+ * 
+ * Provides comprehensive shift assignment management functionality with
+ * conflict detection, approval workflows, and business rule validation.
+ */
 export class AssignmentService {
+  
+  /**
+   * Create New Assignment
+   * 
+   * Creates a new shift assignment with comprehensive validation.
+   * Prevents conflicts and ensures business rule compliance.
+   * 
+   * @param employeeId - Unique employee identifier
+   * @param shiftId - Unique shift identifier
+   * @param role - Role for the assignment (e.g., "charge nurse", "staff nurse")
+   * @param assignedBy - User ID of the assigner for audit purposes
+   * @returns Promise<Assignment> - Created assignment object
+   * 
+   * @throws {Error} When employee already assigned to shift
+   * @throws {Error} When time conflicts exist
+   * @throws {Error} When validation fails
+   * 
+   * @example
+   * const assignment = await assignmentService.createAssignment(
+   *   "EMP001", 
+   *   "shift-123", 
+   *   "staff nurse", 
+   *   "manager123"
+   * );
+   * console.log(`Assignment created: ${assignment.id}`);
+   */
   async createAssignment(employeeId: string, shiftId: string, role: string, assignedBy: string): Promise<Assignment> {
     // Check if assignment already exists
     const existingAssignment = await this.findByEmployeeAndShift(employeeId, shiftId);
@@ -42,6 +98,28 @@ export class AssignmentService {
     return assignment;
   }
 
+  /**
+   * Approve Assignment
+   * 
+   * Approves a pending assignment, changing status to approved.
+   * Records approval details and optional notes for audit trail.
+   * 
+   * @param assignmentId - Unique assignment identifier
+   * @param approvedBy - User ID of the approver
+   * @param notes - Optional approval notes
+   * @returns Promise<Assignment> - Updated assignment object
+   * 
+   * @throws {Error} When assignment not found
+   * @throws {Error} When assignment not pending
+   * 
+   * @example
+   * const approved = await assignmentService.approveAssignment(
+   *   "assignment-123", 
+   *   "supervisor456", 
+   *   "Approved for overtime coverage"
+   * );
+   * console.log(`Assignment approved: ${approved.id}`);
+   */
   async approveAssignment(assignmentId: string, approvedBy: string, notes?: string): Promise<Assignment> {
     const existingAssignment = await this.findById(assignmentId);
     if (!existingAssignment) {
@@ -69,6 +147,28 @@ export class AssignmentService {
     return updatedAssignment;
   }
 
+  /**
+   * Reject Assignment
+   * 
+   * Rejects a pending assignment, changing status to rejected.
+   * Records rejection details and mandatory reason for audit trail.
+   * 
+   * @param assignmentId - Unique assignment identifier
+   * @param rejectedBy - User ID of the rejector
+   * @param reason - Mandatory rejection reason
+   * @returns Promise<Assignment> - Updated assignment object
+   * 
+   * @throws {Error} When assignment not found
+   * @throws {Error} When assignment not pending
+   * 
+   * @example
+   * const rejected = await assignmentService.rejectAssignment(
+   *   "assignment-123", 
+   *   "supervisor456", 
+   *   "Employee unavailable due to vacation"
+   * );
+   * console.log(`Assignment rejected: ${rejected.id}`);
+   */
   async rejectAssignment(assignmentId: string, rejectedBy: string, reason: string): Promise<Assignment> {
     const existingAssignment = await this.findById(assignmentId);
     if (!existingAssignment) {
@@ -96,6 +196,21 @@ export class AssignmentService {
     return updatedAssignment;
   }
 
+  /**
+   * Cancel Assignment
+   * 
+   * Cancels an existing assignment by updating its status to cancelled.
+   * Can be used for assignments that are no longer needed.
+   * 
+   * @param assignmentId - Unique assignment identifier
+   * @returns Promise<void>
+   * 
+   * @throws {Error} When assignment not found
+   * 
+   * @example
+   * await assignmentService.cancelAssignment("assignment-123");
+   * console.log("Assignment cancelled successfully");
+   */
   async cancelAssignment(assignmentId: string): Promise<void> {
     const existingAssignment = await this.findById(assignmentId);
     if (!existingAssignment) {
@@ -113,6 +228,21 @@ export class AssignmentService {
     logger.info(`Assignment cancelled: ${assignmentId}`);
   }
 
+  /**
+   * Delete Assignment
+   * 
+   * Permanently removes an assignment from the system.
+   * Use with caution as this action cannot be undone.
+   * 
+   * @param assignmentId - Unique assignment identifier
+   * @returns Promise<void>
+   * 
+   * @throws {Error} When assignment not found
+   * 
+   * @example
+   * await assignmentService.deleteAssignment("assignment-123");
+   * console.log("Assignment permanently deleted");
+   */
   async deleteAssignment(assignmentId: string): Promise<void> {
     const existingAssignment = await this.findById(assignmentId);
     if (!existingAssignment) {
@@ -125,6 +255,21 @@ export class AssignmentService {
     logger.info(`Assignment deleted: ${assignmentId}`);
   }
 
+  /**
+   * Find Assignment by ID
+   * 
+   * Retrieves detailed assignment information by unique identifier.
+   * Includes employee and shift details through JOIN operations.
+   * 
+   * @param assignmentId - Unique assignment identifier
+   * @returns Promise<Assignment | null> - Assignment object or null if not found
+   * 
+   * @example
+   * const assignment = await assignmentService.findById("assignment-123");
+   * if (assignment) {
+   *   console.log(`Assignment: ${assignment.employeeName} -> ${assignment.shiftName}`);
+   * }
+   */
   async findById(assignmentId: string): Promise<Assignment | null> {
     const query = `
       SELECT sa.*, 
@@ -153,6 +298,22 @@ export class AssignmentService {
     return this.mapRowToAssignment(rows[0]);
   }
 
+  /**
+   * Find Assignment by Employee and Shift
+   * 
+   * Retrieves assignment for a specific employee and shift combination.
+   * Used to check for existing assignments and prevent duplicates.
+   * 
+   * @param employeeId - Unique employee identifier
+   * @param shiftId - Unique shift identifier
+   * @returns Promise<Assignment | null> - Assignment object or null if not found
+   * 
+   * @example
+   * const existing = await assignmentService.findByEmployeeAndShift("EMP001", "shift-123");
+   * if (existing) {
+   *   console.log("Employee already assigned to this shift");
+   * }
+   */
   async findByEmployeeAndShift(employeeId: string, shiftId: string): Promise<Assignment | null> {
     const query = `
       SELECT sa.*, 
@@ -181,6 +342,20 @@ export class AssignmentService {
     return this.mapRowToAssignment(rows[0]);
   }
 
+  /**
+   * Find Assignments by Employee
+   * 
+   * Retrieves all assignments for a specific employee.
+   * Optionally filters by assignment status.
+   * 
+   * @param employeeId - Unique employee identifier
+   * @param status - Optional status filter
+   * @returns Promise<Assignment[]> - Array of assignment objects
+   * 
+   * @example
+   * const assignments = await assignmentService.findByEmployee("EMP001", "approved");
+   * console.log(`Employee has ${assignments.length} approved assignments`);
+   */
   async findByEmployee(employeeId: string, status?: string): Promise<Assignment[]> {
     let query = `
       SELECT sa.*, 
@@ -212,6 +387,20 @@ export class AssignmentService {
     return (results as any[]).map(row => this.mapRowToAssignment(row));
   }
 
+  /**
+   * Find Assignments by Shift
+   * 
+   * Retrieves all assignments for a specific shift.
+   * Optionally filters by assignment status.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @param status - Optional status filter
+   * @returns Promise<Assignment[]> - Array of assignment objects
+   * 
+   * @example
+   * const assignments = await assignmentService.findByShift("shift-123", "approved");
+   * console.log(`Shift has ${assignments.length} approved assignments`);
+   */
   async findByShift(shiftId: string, status?: string): Promise<Assignment[]> {
     let query = `
       SELECT sa.*, 
@@ -243,6 +432,25 @@ export class AssignmentService {
     return (results as any[]).map(row => this.mapRowToAssignment(row));
   }
 
+  /**
+   * Get Conflicting Shifts
+   * 
+   * Identifies shifts that conflict with a target shift for a specific employee.
+   * Checks for time overlaps on the same date to prevent double booking.
+   * 
+   * @param employeeId - Unique employee identifier
+   * @param shiftId - Target shift to check conflicts against
+   * @returns Promise<any[]> - Array of conflicting shift assignments
+   * 
+   * @private
+   * @internal
+   * 
+   * @example
+   * const conflicts = await this.getConflictingShifts("EMP001", "shift-123");
+   * if (conflicts.length > 0) {
+   *   throw new Error("Employee has conflicting assignments");
+   * }
+   */
   private async getConflictingShifts(employeeId: string, shiftId: string): Promise<any[]> {
     const query = `
       SELECT sa.*, s.date, s.start_time, s.end_time
@@ -263,6 +471,18 @@ export class AssignmentService {
     return results as any[];
   }
 
+  /**
+   * Map Database Row to Assignment Object
+   * 
+   * Transforms raw database row data into properly typed Assignment objects.
+   * Handles complex joins and builds readable names from related entities.
+   * 
+   * @param row - Raw database row data
+   * @returns Assignment - Properly typed and formatted assignment object
+   * 
+   * @private
+   * @internal
+   */
   private mapRowToAssignment(row: any): Assignment {
     return {
       id: row.id,
@@ -279,4 +499,10 @@ export class AssignmentService {
   }
 }
 
+/**
+ * Assignment Service Singleton Instance
+ * 
+ * Exports a singleton instance of the AssignmentService class for
+ * consistent usage across the application.
+ */
 export const assignmentService = new AssignmentService();

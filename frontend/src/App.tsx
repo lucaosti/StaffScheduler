@@ -1,3 +1,25 @@
+/**
+ * Staff Scheduler Frontend Application
+ * 
+ * Main React application component that defines the routing structure and provides
+ * global context for authentication and state management.
+ * 
+ * Features:
+ * - Protected routes with authentication
+ * - Role-based access control
+ * - Responsive layout with sidebar navigation
+ * - Modern React Router v6 implementation
+ * - Context-based authentication state management
+ * 
+ * Architecture:
+ * - Uses React Router for client-side routing
+ * - AuthProvider wraps entire app for authentication context
+ * - Layout component provides consistent UI structure
+ * - ProtectedRoute guards private pages
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
@@ -17,20 +39,41 @@ import Settings from './pages/Settings/Settings';
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
 
+/**
+ * Main Application Component
+ * 
+ * Defines the complete routing structure and provides authentication context.
+ * Implements a nested routing pattern with protected routes.
+ * 
+ * Route Structure:
+ * - /login: Public authentication page
+ * - /: Protected layout with nested routes
+ *   - /dashboard: Main overview and statistics
+ *   - /employees: Employee management
+ *   - /shifts: Shift templates and management
+ *   - /schedule: Schedule generation and viewing
+ *   - /reports: Analytics and reporting
+ *   - /settings: Application configuration
+ * 
+ * @returns JSX element containing the complete application
+ */
 const App: React.FC = () => {
   return (
     <AuthProvider>
       <Routes>
-        {/* Public Routes */}
+        {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
         
-        {/* Protected Routes */}
+        {/* Protected Routes - Require authentication */}
         <Route path="/" element={
           <ProtectedRoute>
             <Layout />
           </ProtectedRoute>
         }>
+          {/* Default redirect to dashboard */}
           <Route index element={<Navigate to="/dashboard" replace />} />
+          
+          {/* Main application pages */}
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="employees" element={<Employees />} />
           <Route path="shifts" element={<Shifts />} />
@@ -39,7 +82,7 @@ const App: React.FC = () => {
           <Route path="settings" element={<Settings />} />
         </Route>
         
-        {/* Catch all route */}
+        {/* Catch-all route - Redirect unknown paths to dashboard */}
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </AuthProvider>

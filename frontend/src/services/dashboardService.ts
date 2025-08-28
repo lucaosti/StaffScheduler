@@ -1,8 +1,33 @@
+/**
+ * Dashboard Service for Staff Scheduler Frontend
+ * 
+ * Handles all dashboard-related API calls including statistics retrieval,
+ * analytics data, metrics calculation, and overview information.
+ * 
+ * Features:
+ * - Real-time statistics and metrics
+ * - Performance analytics data
+ * - Employee and shift summaries
+ * - Cost and hour tracking
+ * - Coverage and satisfaction metrics
+ * - Error handling with custom ApiError
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { ApiResponse, DashboardStats } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
+/**
+ * Custom error class for API-related errors
+ */
 class ApiError extends Error {
+  /**
+   * Creates an ApiError instance
+   * @param message - Error message
+   * @param status - HTTP status code (optional)
+   */
   constructor(message: string, public status?: number) {
     super(message);
     this.name = 'ApiError';

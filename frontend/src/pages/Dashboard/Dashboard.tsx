@@ -1,7 +1,35 @@
+/**
+ * Dashboard Component for Staff Scheduler
+ * 
+ * Main overview page that displays key metrics, statistics, and quick actions
+ * for staff scheduling management. Provides a comprehensive view of current
+ * operational status and performance indicators.
+ * 
+ * Features:
+ * - Real-time statistics display
+ * - Employee metrics and analytics
+ * - Schedule status overview
+ * - Quick action buttons for common tasks
+ * - Responsive grid layout for cards
+ * - Error handling and loading states
+ * 
+ * Statistics Displayed:
+ * - Total employees and active schedules
+ * - Today's shifts and pending approvals
+ * - Monthly hours and cost tracking
+ * - Coverage rates and satisfaction metrics
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { DashboardStats } from '../../types';
 
+/**
+ * Dashboard component that displays the main overview of the scheduling system
+ * @returns JSX element containing dashboard statistics and navigation
+ */
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -12,6 +40,10 @@ const Dashboard: React.FC = () => {
     loadDashboardData();
   }, []);
 
+  /**
+   * Loads dashboard statistics and metrics
+   * Currently uses mock data until backend endpoints are implemented
+   */
   const loadDashboardData = async () => {
     try {
       setLoading(true);

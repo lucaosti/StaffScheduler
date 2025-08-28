@@ -1,14 +1,46 @@
+/**
+ * Shift Service for Staff Scheduler Frontend
+ * 
+ * Handles all shift-related API calls including CRUD operations,
+ * template management, scheduling, and shift status updates.
+ * 
+ * Features:
+ * - Full CRUD operations for shift management
+ * - Date-based filtering and querying
+ * - Shift template creation and management
+ * - Status updates (draft, published, cancelled)
+ * - Conflict detection and validation
+ * - Error handling with custom ApiError
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { ApiResponse, Shift } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
+/**
+ * Custom error class for API-related errors
+ */
 class ApiError extends Error {
+  /**
+   * Creates an ApiError instance
+   * @param message - Error message
+   * @param status - HTTP status code (optional)
+   */
   constructor(message: string, public status?: number) {
     super(message);
     this.name = 'ApiError';
   }
 }
 
+/**
+ * Handles API response parsing and error checking
+ * @template T - Expected response data type
+ * @param response - Fetch API response object
+ * @returns Parsed API response or throws ApiError
+ * @throws {ApiError} When response is not ok or parsing fails
+ */
 const handleResponse = async <T>(response: Response): Promise<ApiResponse<T>> => {
   const contentType = response.headers.get('content-type');
   const isJson = contentType && contentType.includes('application/json');
@@ -25,6 +57,10 @@ const handleResponse = async <T>(response: Response): Promise<ApiResponse<T>> =>
   return data;
 };
 
+/**
+ * Gets authentication headers including JWT token if available
+ * @returns Headers object with Content-Type and Authorization if token exists
+ */
 const getAuthHeaders = (): HeadersInit => {
   const token = localStorage.getItem('token');
   return {

@@ -1,6 +1,41 @@
+/**
+ * Winston Logger Configuration for Staff Scheduler Backend
+ * 
+ * Provides centralized logging functionality with file rotation,
+ * multiple transport options, and environment-specific formatting.
+ * 
+ * Features:
+ * - File-based logging with rotation (10MB max, configurable files)
+ * - Console logging for development environments
+ * - JSON structured logging for production
+ * - Error stack trace capture
+ * - Timestamp and service metadata
+ * - Configurable log levels
+ * 
+ * Configuration:
+ * - Production: File logging only with JSON format
+ * - Development: Both file and colorized console logging
+ * - Log rotation prevents disk space issues
+ * 
+ * @author Luca Ostinelli
+ */
+
 import winston from 'winston';
 import { config } from '../config';
 
+/**
+ * Main application logger instance with configured transports and formatting
+ * 
+ * Transport Configuration:
+ * - File transport: Always enabled with rotation settings
+ * - Console transport: Only enabled in non-production environments
+ * 
+ * Format Configuration:
+ * - Timestamp: ISO format for all log entries
+ * - Error handling: Stack traces captured for Error objects
+ * - JSON: Structured logging for easier parsing
+ * - Service metadata: Identifies logs from this service
+ */
 const logger = winston.createLogger({
   level: config.logging.level,
   format: winston.format.combine(

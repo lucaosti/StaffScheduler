@@ -1,10 +1,31 @@
+/**
+ * Utility Functions for Staff Scheduler Backend
+ * 
+ * Collection of common utility functions for cryptography, validation,
+ * data transformation, and general-purpose operations.
+ * 
+ * Modules:
+ * - CryptoUtils: Password hashing and token generation
+ * - ValidationUtils: Input validation and sanitization
+ * - DateUtils: Date/time manipulation and formatting
+ * - StringUtils: String processing and transformation
+ * 
+ * @author Luca Ostinelli
+ */
+
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { config } from '../config';
 
+/**
+ * Cryptographic utility functions for secure password handling
+ * and token generation.
+ */
 export class CryptoUtils {
   /**
-   * Hash a password using bcrypt
+   * Hash a password using bcrypt with salt
+   * @param password - Plain text password to hash
+   * @returns Promise resolving to hash and salt
    */
   static async hashPassword(password: string): Promise<{ hash: string; salt: string }> {
     const salt = await bcrypt.genSalt(config.security.bcryptRounds);
