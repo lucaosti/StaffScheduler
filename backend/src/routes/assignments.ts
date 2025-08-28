@@ -1,10 +1,47 @@
+/**
+ * Assignment Routes
+ * 
+ * Handles all shift assignment operations including creation, approval,
+ * rejection, and status management with comprehensive workflow support.
+ * 
+ * Features:
+ * - Complete assignment lifecycle management
+ * - Approval and rejection workflows
+ * - Conflict detection and prevention
+ * - Employee and shift filtering
+ * - Status tracking and management
+ * 
+ * Security:
+ * - Authentication required for all endpoints
+ * - Role-based access control
+ * - Input validation and sanitization
+ * - Audit trail for all operations
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { assignmentService } from '../services/AssignmentService';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-// Get all assignments
+/**
+ * Get Assignments Endpoint
+ * 
+ * Retrieves assignments with filtering by employee, shift, or status.
+ * Requires at least one filter parameter for performance optimization.
+ * 
+ * @route GET /api/assignments
+ * @param {string} [employeeId] - Filter by employee ID
+ * @param {string} [shiftId] - Filter by shift ID
+ * @param {string} [status] - Filter by assignment status
+ * @returns {Object} Filtered assignment list
+ * 
+ * @example
+ * GET /api/assignments?employeeId=EMP001&status=approved
+ * Returns: { success: true, data: [...], pagination: {...} }
+ */
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const employeeId = req.query.employeeId as string;
@@ -45,7 +82,9 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Get assignment by ID
+/**
+ * Get Assignment by ID Endpoint
+ */
 router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const assignmentId = req.params.id;
@@ -76,7 +115,9 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Create new assignment
+/**
+ * Create New Assignment Endpoint
+ */
 router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
     const { employeeId, shiftId, role } = req.body;

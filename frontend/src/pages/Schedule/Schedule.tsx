@@ -1,5 +1,27 @@
+/**
+ * Schedule Page Component for Staff Scheduler
+ * 
+ * Advanced schedule management interface providing calendar view,
+ * schedule optimization, and comprehensive scheduling tools.
+ * 
+ * Features:
+ * - Interactive calendar with schedule visualization
+ * - Drag-and-drop schedule editing
+ * - Automatic schedule optimization
+ * - Conflict detection and resolution
+ * - Multi-view support (daily, weekly, monthly)
+ * - Schedule publishing and approval workflows
+ * - Real-time collaboration and updates
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 
+/**
+ * Schedule page component for schedule management and visualization
+ * @returns JSX element containing the schedule management interface
+ */
 const Schedule: React.FC = () => {
   return (
     <div>

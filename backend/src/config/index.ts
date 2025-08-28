@@ -1,3 +1,21 @@
+/**
+ * Application Configuration Module
+ * 
+ * Centralizes all configuration settings for the Staff Scheduler backend.
+ * Loads environment variables and provides typed configuration objects
+ * for different application components.
+ * 
+ * Features:
+ * - Environment variable loading with defaults
+ * - Type-safe configuration objects
+ * - Database connection settings
+ * - JWT and session management config
+ * - Logging configuration
+ * - Server and security settings
+ * 
+ * @author Luca Ostinelli
+ */
+
 import dotenv from 'dotenv';
 
 dotenv.config();

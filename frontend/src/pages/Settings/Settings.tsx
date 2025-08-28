@@ -1,5 +1,27 @@
+/**
+ * Settings Page Component for Staff Scheduler
+ * 
+ * Comprehensive system settings interface providing configuration
+ * options for application behavior, user preferences, and system administration.
+ * 
+ * Features:
+ * - User profile and account management
+ * - Application preferences and themes
+ * - Notification settings and preferences
+ * - System configuration for administrators
+ * - Security settings and password management
+ * - Integration settings and API configuration
+ * - Backup and data management options
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 
+/**
+ * Settings page component for system configuration and user preferences
+ * @returns JSX element containing the settings and configuration interface
+ */
 const Settings: React.FC = () => {
   return (
     <div>

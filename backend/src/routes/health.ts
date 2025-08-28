@@ -1,9 +1,26 @@
+/**
+ * Health Check Routes
+ * 
+ * Provides system health monitoring and status endpoints.
+ * Used for application monitoring and load balancer health checks.
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { config } from '../config';
 
 const router = Router();
 
-// Health check endpoint
+/**
+ * Health Check Endpoint
+ * 
+ * Returns system health status and performance metrics.
+ * Used by monitoring systems and load balancers.
+ * 
+ * @route GET /api/health
+ * @returns {Object} System health status and metrics
+ */
 router.get('/health', async (req: Request, res: Response) => {
   try {
     const healthCheck = {

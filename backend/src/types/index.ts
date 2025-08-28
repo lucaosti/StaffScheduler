@@ -1,3 +1,20 @@
+/**
+ * Type Definitions for Staff Scheduler Backend
+ * 
+ * Comprehensive type definitions covering all data models, interfaces,
+ * and API contracts for the Staff Scheduler application.
+ * 
+ * Modules:
+ * - User Authentication and Authorization
+ * - Employee Management
+ * - Shift and Schedule Management
+ * - Assignment and Approval Workflows
+ * - API Request/Response Types
+ * - Database Entity Types
+ * 
+ * @author Luca Ostinelli
+ */
+
 // User Authentication (with N-level hierarchy)
 export interface User {
   id: string;

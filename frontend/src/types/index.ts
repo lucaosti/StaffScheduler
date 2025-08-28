@@ -1,3 +1,20 @@
+/**
+ * Type Definitions for Staff Scheduler Frontend
+ * 
+ * Comprehensive type definitions covering all data models, interfaces,
+ * and API contracts for the Staff Scheduler React application.
+ * 
+ * Modules:
+ * - User Authentication and Authorization
+ * - Employee Management
+ * - Shift and Schedule Management
+ * - Assignment and Approval Workflows
+ * - API Request/Response Types
+ * - Component Props and State Types
+ * 
+ * @author Luca Ostinelli
+ */
+
 // Types for StaffScheduler Frontend
 export {};
 
