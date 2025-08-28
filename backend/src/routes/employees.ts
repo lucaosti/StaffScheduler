@@ -1,10 +1,51 @@
+/**
+ * Employee Routes
+ * 
+ * Handles all employee management operations including CRUD operations,
+ * search functionality, and employee data management.
+ * 
+ * Features:
+ * - Complete employee lifecycle management
+ * - Advanced filtering and pagination
+ * - Employee search capabilities
+ * - Data validation and error handling
+ * - Role-based access control
+ * 
+ * Security:
+ * - Authentication required for all endpoints
+ * - Input validation and sanitization
+ * - Error message standardization
+ * - Audit trail for modifications
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { employeeService } from '../services/EmployeeService';
 import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
-// Get all employees
+/**
+ * Get All Employees Endpoint
+ * 
+ * Retrieves employees with filtering, pagination, and sorting support.
+ * Supports department, position filtering and text search.
+ * 
+ * @route GET /api/employees
+ * @param {string} [department] - Filter by department
+ * @param {string} [position] - Filter by position
+ * @param {string} [search] - Text search across employee data
+ * @param {number} [page=1] - Page number for pagination
+ * @param {number} [limit=20] - Items per page (max 100)
+ * @param {string} [sortBy=firstName] - Field to sort by
+ * @param {string} [sortOrder=asc] - Sort order (asc/desc)
+ * @returns {Object} Paginated employee list with metadata
+ * 
+ * @example
+ * GET /api/employees?department=Nursing&page=1&limit=10&search=john
+ * Returns: { success: true, data: [...], pagination: {...} }
+ */
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const filters = {
@@ -45,7 +86,20 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Get employee by ID
+/**
+ * Get Employee by ID Endpoint
+ * 
+ * Retrieves detailed information for a specific employee.
+ * Returns complete employee profile including supervisor information.
+ * 
+ * @route GET /api/employees/:id
+ * @param {string} id - Employee ID (path parameter)
+ * @returns {Object} Employee object with complete details
+ * 
+ * @example
+ * GET /api/employees/EMP001
+ * Returns: { success: true, data: { employeeId: "EMP001", ... } }
+ */
 router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const employeeId = req.params.id;
@@ -76,7 +130,28 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Create new employee
+/**
+ * Create New Employee Endpoint
+ * 
+ * Creates a new employee record with comprehensive validation.
+ * Validates required fields and ensures data integrity.
+ * 
+ * @route POST /api/employees
+ * @param {Object} body - Employee data object
+ * @param {string} body.employeeId - Unique employee identifier
+ * @param {string} body.firstName - Employee first name
+ * @param {string} body.lastName - Employee last name
+ * @param {string} body.email - Employee email address
+ * @param {string} [body.phone] - Employee phone number
+ * @param {string} body.position - Employee position/role
+ * @param {string} body.department - Employee department
+ * @returns {Object} Created employee object
+ * 
+ * @example
+ * POST /api/employees
+ * Body: { employeeId: "EMP001", firstName: "John", lastName: "Doe", ... }
+ * Returns: { success: true, data: { employeeId: "EMP001", ... } }
+ */
 router.post('/', authenticate, async (req: Request, res: Response) => {
   try {
     const employeeData = req.body;
@@ -112,7 +187,22 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Update employee
+/**
+ * Update Employee Endpoint
+ * 
+ * Updates existing employee information with partial data support.
+ * Validates employee existence and prevents email conflicts.
+ * 
+ * @route PUT /api/employees/:id
+ * @param {string} id - Employee ID (path parameter)
+ * @param {Object} body - Partial employee data to update
+ * @returns {Object} Updated employee object
+ * 
+ * @example
+ * PUT /api/employees/EMP001
+ * Body: { position: "Senior Nurse", department: "ICU" }
+ * Returns: { success: true, data: { employeeId: "EMP001", ... } }
+ */
 router.put('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const employeeId = req.params.id;
@@ -138,7 +228,20 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-// Delete employee
+/**
+ * Delete Employee Endpoint
+ * 
+ * Soft deletes an employee by marking them as inactive.
+ * Preserves historical data while preventing future access.
+ * 
+ * @route DELETE /api/employees/:id
+ * @param {string} id - Employee ID (path parameter)
+ * @returns {Object} Success confirmation message
+ * 
+ * @example
+ * DELETE /api/employees/EMP001
+ * Returns: { success: true, message: "Employee deleted successfully" }
+ */
 router.delete('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const employeeId = req.params.id;
@@ -163,4 +266,10 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Employee Router Module Export
+ * 
+ * Exports the configured Express router for employee management endpoints.
+ * All routes require authentication and return standardized JSON responses.
+ */
 export default router;

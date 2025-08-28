@@ -1,7 +1,34 @@
+/**
+ * Schedule Optimization Engine for Staff Scheduler
+ * 
+ * Advanced constraint-based optimization system for automatic staff
+ * scheduling with support for complex business rules and preferences.
+ * 
+ * Features:
+ * - Constraint programming for optimal assignments
+ * - Multi-objective optimization (cost, coverage, fairness)
+ * - Support for forced assignments and restrictions
+ * - Work-life balance considerations
+ * - Performance metrics and reporting
+ * - Scalable algorithms for large datasets
+ * 
+ * Optimization Goals:
+ * - Minimize labor costs
+ * - Maximize shift coverage
+ * - Ensure fair distribution of shifts
+ * - Respect employee preferences
+ * - Maintain legal compliance
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { Employee, Shift, Assignment, ScheduleParameters } from '../types';
 import { logger } from '../config/logger';
 import config from '../config';
 
+/**
+ * Interface defining the optimization problem parameters
+ */
 export interface OptimizationProblem {
   employees: Employee[];
   shifts: Shift[];
@@ -9,6 +36,9 @@ export interface OptimizationProblem {
   constraints: OptimizationConstraints;
 }
 
+/**
+ * Interface for optimization constraints and business rules
+ */
 export interface OptimizationConstraints {
   forcedAssignments: Assignment[];
   unavailableEmployees: { employeeId: string; shiftId: string }[];
@@ -16,6 +46,9 @@ export interface OptimizationConstraints {
   maxConsecutiveShifts: number;
 }
 
+/**
+ * Interface for optimization result with assignments and metrics
+ */
 export interface OptimizationResult {
   assignments: Assignment[];
   statistics: {

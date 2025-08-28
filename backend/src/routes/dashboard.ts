@@ -1,3 +1,18 @@
+/**
+ * Dashboard Routes
+ * 
+ * Provides dashboard data and analytics endpoints for the application.
+ * Includes statistics, metrics, and real-time information display.
+ * 
+ * Features:
+ * - Real-time statistics and KPIs
+ * - Department-specific metrics
+ * - Monthly performance analytics
+ * - Trend analysis and reporting
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { database } from '../config/database';
@@ -5,7 +20,15 @@ import { logger } from '../config/logger';
 
 const router = Router();
 
-// Get dashboard statistics
+/**
+ * Get Dashboard Statistics Endpoint
+ * 
+ * Retrieves key performance indicators and statistics for the dashboard.
+ * Provides real-time data for administrative oversight.
+ * 
+ * @route GET /api/dashboard/stats
+ * @returns {Object} Dashboard statistics and KPIs
+ */
 router.get('/stats', authenticate, async (req: Request, res: Response) => {
   try {
     // Get basic statistics

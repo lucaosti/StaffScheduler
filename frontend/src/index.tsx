@@ -1,3 +1,10 @@
+/**
+ * Main entry point for the Staff Scheduler React application.
+ * Sets up the global providers and renders the application with routing and query management.
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
@@ -15,6 +22,10 @@ import './index.css';
 import App from './App';
 
 // Create a React Query client
+/**
+ * React Query client configuration with optimized caching and retry policies.
+ * Configured for performance with reasonable stale times and minimal refetching.
+ */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -26,6 +37,10 @@ const queryClient = new QueryClient({
   },
 });
 
+/**
+ * React root element creation and app rendering with all necessary providers.
+ * Includes React Query for data fetching, routing with React Router, and development tools.
+ */
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );

@@ -1,13 +1,38 @@
+/**
+ * Login Page Component for Staff Scheduler
+ * 
+ * Provides user authentication interface with form validation,
+ * error handling, and post-login redirection functionality.
+ * 
+ * Features:
+ * - Username/password authentication form
+ * - Real-time form validation
+ * - Loading states during authentication
+ * - Error message display
+ * - Automatic redirect after successful login
+ * - Responsive design with Bootstrap styling
+ * - Integration with AuthContext for state management
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 
+/**
+ * Interface for location state with redirect information
+ */
 interface LocationState {
   from: {
     pathname: string;
   };
 }
 
+/**
+ * Login page component providing user authentication
+ * @returns JSX element containing the login form and interface
+ */
 const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({
     username: '',

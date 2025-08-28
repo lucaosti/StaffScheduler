@@ -1,9 +1,34 @@
+/**
+ * Header Component for Staff Scheduler Layout
+ * 
+ * Provides the top navigation bar with sidebar toggle, branding,
+ * and user actions for the application layout.
+ * 
+ * Features:
+ * - Sidebar toggle button with hamburger icon
+ * - Application branding and title
+ * - User profile and logout functionality
+ * - Responsive design with Bootstrap classes
+ * - Bootstrap Icons integration
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 
+/**
+ * Props interface for Header component
+ */
 interface HeaderProps {
+  /** Callback function to toggle sidebar visibility */
   onToggleSidebar: () => void;
 }
 
+/**
+ * Header component providing top navigation and controls
+ * @param onToggleSidebar - Function to toggle sidebar collapsed state
+ * @returns JSX element containing the header navigation
+ */
 const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
   return (
     <div className="header">

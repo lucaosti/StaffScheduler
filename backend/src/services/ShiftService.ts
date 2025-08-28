@@ -1,9 +1,65 @@
+/**
+ * Shift Service
+ * 
+ * Handles all business logic related to shift management including
+ * creation, scheduling, conflict detection, and optimization support.
+ * 
+ * Features:
+ * - Comprehensive shift lifecycle management
+ * - Advanced scheduling and conflict detection
+ * - Multi-department and role support
+ * - Skills requirement validation
+ * - Shift pattern management
+ * - Status tracking and automation
+ * 
+ * Business Rules:
+ * - Minimum/maximum staff validation
+ * - Skills requirement matching
+ * - Time conflict prevention
+ * - Department-specific constraints
+ * - Priority-based scheduling
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { database } from '../config/database';
 import { Shift, CreateShiftRequest, UpdateShiftRequest, ShiftFilters, PaginationParams } from '../types';
 import { logger } from '../config/logger';
 import { v4 as uuidv4 } from 'uuid';
 
+/**
+ * Shift Service Class
+ * 
+ * Provides comprehensive shift management functionality with
+ * scheduling optimization, conflict detection, and business rule validation.
+ */
 export class ShiftService {
+  
+  /**
+   * Create New Shift
+   * 
+   * Creates a new shift with comprehensive validation and conflict detection.
+   * Ensures business rules compliance and proper resource allocation.
+   * 
+   * @param shiftData - Complete shift information and requirements
+   * @param createdBy - User ID of the creator for audit purposes
+   * @returns Promise<Shift> - Created shift object with generated ID
+   * 
+   * @throws {Error} When validation fails
+   * @throws {Error} When time conflicts exist
+   * @throws {Error} When resource limits exceeded
+   * 
+   * @example
+   * const newShift = await shiftService.createShift({
+   *   name: "Morning Shift",
+   *   startTime: "08:00",
+   *   endTime: "16:00",
+   *   date: "2024-01-15",
+   *   department: "Nursing",
+   *   minimumStaff: 3,
+   *   maximumStaff: 5
+   * }, "user123");
+   */
   async createShift(shiftData: CreateShiftRequest, createdBy: string): Promise<Shift> {
     const {
       name,
@@ -63,6 +119,27 @@ export class ShiftService {
     return shift;
   }
 
+  /**
+   * Update Existing Shift
+   * 
+   * Updates shift information with validation and conflict checking.
+   * Supports partial updates while maintaining data integrity.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @param updateData - Partial shift data to update
+   * @returns Promise<Shift> - Updated shift object
+   * 
+   * @throws {Error} When shift not found
+   * @throws {Error} When validation fails
+   * @throws {Error} When update conflicts with existing data
+   * 
+   * @example
+   * const updatedShift = await shiftService.updateShift("shift-123", {
+   *   minimumStaff: 4,
+   *   maximumStaff: 6,
+   *   requiredSkills: ["ICU", "Emergency"]
+   * });
+   */
   async updateShift(shiftId: string, updateData: UpdateShiftRequest): Promise<Shift> {
     const existingShift = await this.findById(shiftId);
     if (!existingShift) {
@@ -156,6 +233,21 @@ export class ShiftService {
     return updatedShift;
   }
 
+  /**
+   * Find Shift by ID
+   * 
+   * Retrieves detailed shift information by unique identifier.
+   * Includes creator information through JOIN operation.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @returns Promise<Shift | null> - Shift object or null if not found
+   * 
+   * @example
+   * const shift = await shiftService.findById("shift-123");
+   * if (shift) {
+   *   console.log(`Found shift: ${shift.name} on ${shift.date}`);
+   * }
+   */
   async findById(shiftId: string): Promise<Shift | null> {
     const query = `
       SELECT s.*, u.first_name, u.last_name
@@ -174,6 +266,27 @@ export class ShiftService {
     return this.mapRowToShift(rows[0]);
   }
 
+  /**
+   * Find All Shifts with Filtering and Pagination
+   * 
+   * Retrieves shifts with advanced filtering and pagination support.
+   * Supports date ranges, department filters, and status filtering.
+   * 
+   * @param filters - Optional filtering criteria
+   * @param pagination - Pagination parameters (page, limit, sort)
+   * @returns Promise<{shifts: Shift[], total: number}> - Paginated shift list with total count
+   * 
+   * @example
+   * const result = await shiftService.findAll(
+   *   { 
+   *     startDate: "2024-01-01", 
+   *     endDate: "2024-01-31", 
+   *     department: "Nursing" 
+   *   },
+   *   { page: 1, limit: 10, sortBy: "date" }
+   * );
+   * console.log(`Found ${result.total} shifts, showing ${result.shifts.length}`);
+   */
   async findAll(filters: ShiftFilters = {}, pagination: PaginationParams = { page: 1, limit: 20 }): Promise<{ shifts: Shift[], total: number }> {
     let whereClause = 'WHERE 1=1';
     const params: any[] = [];
@@ -236,6 +349,22 @@ export class ShiftService {
     return { shifts, total };
   }
 
+  /**
+   * Delete Shift
+   * 
+   * Permanently removes a shift from the system.
+   * Validates that no assignments exist before deletion.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @returns Promise<void>
+   * 
+   * @throws {Error} When shift not found
+   * @throws {Error} When shift has existing assignments
+   * 
+   * @example
+   * await shiftService.deleteShift("shift-123");
+   * console.log("Shift deleted successfully");
+   */
   async deleteShift(shiftId: string): Promise<void> {
     const existingShift = await this.findById(shiftId);
     if (!existingShift) {
@@ -257,12 +386,40 @@ export class ShiftService {
     logger.info(`Shift deleted: ${shiftId}`);
   }
 
+  /**
+   * Publish Shift
+   * 
+   * Changes shift status to published, making it available for assignment.
+   * Published shifts become visible to employees and managers.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @returns Promise<Shift> - Updated shift object
+   * 
+   * @throws {Error} When shift not found
+   * 
+   * @example
+   * const publishedShift = await shiftService.publishShift("shift-123");
+   * console.log(`Shift ${publishedShift.name} is now published`);
+   */
   async publishShift(shiftId: string): Promise<Shift> {
     const shift = await this.updateShift(shiftId, { status: 'published' });
     logger.info(`Shift published: ${shiftId}`);
     return shift;
   }
 
+  /**
+   * Get Shift Assignments
+   * 
+   * Retrieves all employee assignments for a specific shift.
+   * Includes employee information through JOIN operation.
+   * 
+   * @param shiftId - Unique shift identifier
+   * @returns Promise<any[]> - Array of assignment records with employee details
+   * 
+   * @example
+   * const assignments = await shiftService.getShiftAssignments("shift-123");
+   * console.log(`Shift has ${assignments.length} assigned employees`);
+   */
   async getShiftAssignments(shiftId: string): Promise<any[]> {
     const query = `
       SELECT sa.*, e.first_name, e.last_name, e.employee_id
@@ -275,6 +432,18 @@ export class ShiftService {
     return results as any[];
   }
 
+  /**
+   * Map Database Row to Shift Object
+   * 
+   * Transforms raw database row data into properly typed Shift objects.
+   * Handles JSON parsing for complex fields and creator name concatenation.
+   * 
+   * @param row - Raw database row data
+   * @returns Shift - Properly typed and formatted shift object
+   * 
+   * @private
+   * @internal
+   */
   private mapRowToShift(row: any): Shift {
     return {
       id: row.id,
@@ -304,4 +473,10 @@ export class ShiftService {
   }
 }
 
+/**
+ * Shift Service Singleton Instance
+ * 
+ * Exports a singleton instance of the ShiftService class for
+ * consistent usage across the application.
+ */
 export const shiftService = new ShiftService();

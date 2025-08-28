@@ -1,8 +1,33 @@
+/**
+ * Assignment Service for Staff Scheduler Frontend
+ * 
+ * Handles all assignment-related API calls including CRUD operations,
+ * approval workflows, conflict detection, and assignment management.
+ * 
+ * Features:
+ * - Full CRUD operations for assignment management
+ * - Approval and rejection workflows
+ * - Conflict detection and resolution
+ * - Bulk assignment operations
+ * - Status tracking and updates
+ * - Error handling with custom ApiError
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { ApiResponse, Assignment } from '../types';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
+/**
+ * Custom error class for API-related errors
+ */
 class ApiError extends Error {
+  /**
+   * Creates an ApiError instance
+   * @param message - Error message
+   * @param status - HTTP status code (optional)
+   */
   constructor(message: string, public status?: number) {
     super(message);
     this.name = 'ApiError';

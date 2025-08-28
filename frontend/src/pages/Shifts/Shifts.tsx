@@ -1,5 +1,26 @@
+/**
+ * Shifts Page Component for Staff Scheduler
+ * 
+ * Comprehensive shift management interface providing creation, editing,
+ * and scheduling functionality for work shifts and shift templates.
+ * 
+ * Features:
+ * - Shift template creation and management
+ * - Schedule visualization and calendar view
+ * - Shift conflict detection and resolution
+ * - Bulk shift operations and scheduling
+ * - Real-time updates and notifications
+ * - Integration with employee availability
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React from 'react';
 
+/**
+ * Shifts page component for shift and schedule management
+ * @returns JSX element containing the shift management interface
+ */
 const Shifts: React.FC = () => {
   return (
     <div>

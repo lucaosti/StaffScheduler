@@ -1,3 +1,21 @@
+/**
+ * Employees Page Component for Staff Scheduler
+ * 
+ * Comprehensive employee management interface providing CRUD operations,
+ * search functionality, and detailed employee information display.
+ * 
+ * Features:
+ * - Employee listing with pagination and sorting
+ * - Advanced search and filtering capabilities
+ * - Add, edit, and delete employee operations
+ * - Employee details modal with full information
+ * - Bulk operations for multiple employees
+ * - Export functionality for employee data
+ * - Real-time updates and error handling
+ * 
+ * @author Luca Ostinelli
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
@@ -10,6 +28,10 @@ type EmployeeWithOptionals = Employee & {
   maxHoursPerWeek?: number;
 };
 
+/**
+ * Employees page component providing complete employee management
+ * @returns JSX element containing the employee management interface
+ */
 const Employees: React.FC = () => {
   const [employees, setEmployees] = useState<EmployeeWithOptionals[]>([]);
   const [loading, setLoading] = useState(true);

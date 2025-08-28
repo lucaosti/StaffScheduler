@@ -1,7 +1,37 @@
+/**
+ * Schedule Service
+ * 
+ * Handles all business logic related to schedule management including
+ * creation, optimization, publishing, and lifecycle management.
+ * 
+ * Features:
+ * - Comprehensive schedule lifecycle management
+ * - Advanced schedule optimization algorithms
+ * - Multi-period schedule support
+ * - Status workflow management
+ * - Conflict detection and resolution
+ * - Performance analytics and reporting
+ * 
+ * Business Rules:
+ * - Schedule period validation
+ * - Resource allocation optimization
+ * - Status transition controls
+ * - Publishing workflow enforcement
+ * - Archive management
+ * 
+ * @author Luca Ostinelli
+ */
+
 import { database } from '../config/database';
 import { logger } from '../config/logger';
 import { Schedule, CreateScheduleRequest, UpdateScheduleRequest, OptimizationOptions } from '../types';
 
+/**
+ * Schedule Row Interface
+ * 
+ * Defines the structure of schedule data as retrieved from the database.
+ * Used for type safety in database operations.
+ */
 interface ScheduleRow {
   id: string;
   name: string;
@@ -17,7 +47,31 @@ interface ScheduleRow {
   created_by_email?: string;
 }
 
+/**
+ * Schedule Service Class
+ * 
+ * Provides comprehensive schedule management functionality with
+ * optimization support, workflow management, and business rule validation.
+ */
 class ScheduleService {
+  
+  /**
+   * Find All Schedules with Filtering
+   * 
+   * Retrieves schedules with optional filtering by status, date range, and creator.
+   * Includes creator information through JOIN operation.
+   * 
+   * @param filters - Optional filtering criteria
+   * @returns Promise<Schedule[]> - Array of filtered schedule objects
+   * 
+   * @example
+   * const schedules = await scheduleService.findAll({
+   *   status: "published",
+   *   startDate: "2024-01-01",
+   *   endDate: "2024-12-31"
+   * });
+   * console.log(`Found ${schedules.length} published schedules`);
+   */
   async findAll(filters: {
     status?: string;
     startDate?: string;
@@ -76,6 +130,23 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Find Schedule by ID
+   * 
+   * Retrieves detailed schedule information by unique identifier.
+   * Includes creator information through JOIN operation.
+   * 
+   * @param id - Unique schedule identifier
+   * @returns Promise<Schedule | null> - Schedule object or null if not found
+   * 
+   * @throws {Error} When database operation fails
+   * 
+   * @example
+   * const schedule = await scheduleService.findById("schedule-123");
+   * if (schedule) {
+   *   console.log(`Found schedule: ${schedule.name}`);
+   * }
+   */
   async findById(id: string): Promise<Schedule | null> {
     try {
       const query = `
@@ -110,6 +181,28 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Create New Schedule
+   * 
+   * Creates a new schedule with validation and business rule enforcement.
+   * Initializes schedule in draft status for further configuration.
+   * 
+   * @param data - Complete schedule information
+   * @param createdBy - User ID of the creator for audit purposes
+   * @returns Promise<Schedule> - Created schedule object
+   * 
+   * @throws {Error} When validation fails
+   * @throws {Error} When database operation fails
+   * @throws {Error} When date range conflicts exist
+   * 
+   * @example
+   * const newSchedule = await scheduleService.create({
+   *   name: "January 2024 Schedule",
+   *   description: "Monthly nursing schedule",
+   *   startDate: "2024-01-01",
+   *   endDate: "2024-01-31"
+   * }, "manager123");
+   */
   async create(data: CreateScheduleRequest, createdBy: string): Promise<Schedule> {
     try {
       const scheduleId = this.generateId();
@@ -144,6 +237,26 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Update Existing Schedule
+   * 
+   * Updates schedule information with validation and conflict checking.
+   * Supports partial updates while maintaining data integrity.
+   * 
+   * @param id - Unique schedule identifier
+   * @param data - Partial schedule data to update
+   * @returns Promise<Schedule | null> - Updated schedule object or null if not found
+   * 
+   * @throws {Error} When validation fails
+   * @throws {Error} When database operation fails
+   * @throws {Error} When schedule is published and cannot be modified
+   * 
+   * @example
+   * const updated = await scheduleService.update("schedule-123", {
+   *   name: "Updated January Schedule",
+   *   description: "Modified description"
+   * });
+   */
   async update(id: string, data: UpdateScheduleRequest): Promise<Schedule | null> {
     try {
       const now = new Date().toISOString();
@@ -188,6 +301,24 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Delete Schedule
+   * 
+   * Permanently removes a schedule from the system.
+   * Use with caution as this action cannot be undone.
+   * 
+   * @param id - Unique schedule identifier
+   * @returns Promise<boolean> - True if deletion was successful
+   * 
+   * @throws {Error} When database operation fails
+   * @throws {Error} When schedule has dependencies that prevent deletion
+   * 
+   * @example
+   * const deleted = await scheduleService.delete("schedule-123");
+   * if (deleted) {
+   *   console.log("Schedule deleted successfully");
+   * }
+   */
   async delete(id: string): Promise<boolean> {
     try {
       const query = 'DELETE FROM schedules WHERE id = ?';
@@ -201,6 +332,26 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Publish Schedule
+   * 
+   * Changes schedule status to published, making it active and visible.
+   * Records publication details for audit trail.
+   * 
+   * @param id - Unique schedule identifier
+   * @param publishedBy - User ID of the publisher
+   * @returns Promise<Schedule | null> - Updated schedule object or null if not found
+   * 
+   * @throws {Error} When schedule not found
+   * @throws {Error} When schedule is already published
+   * @throws {Error} When database operation fails
+   * 
+   * @example
+   * const published = await scheduleService.publish("schedule-123", "manager456");
+   * if (published) {
+   *   console.log(`Schedule ${published.name} is now live`);
+   * }
+   */
   async publish(id: string, publishedBy: string): Promise<Schedule | null> {
     try {
       const now = new Date().toISOString();
@@ -221,6 +372,27 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Generate Optimized Schedule
+   * 
+   * Creates an optimized schedule using advanced algorithms.
+   * Balances resource allocation, fairness, and coverage requirements.
+   * 
+   * @param options - Optimization parameters and constraints
+   * @returns Promise<Object> - Optimization results with assignments and statistics
+   * 
+   * @throws {Error} When optimization fails
+   * @throws {Error} When constraints cannot be satisfied
+   * 
+   * @example
+   * const optimized = await scheduleService.generateOptimizedSchedule({
+   *   startDate: "2024-01-01",
+   *   endDate: "2024-01-31",
+   *   department: "Nursing",
+   *   prioritizeExperience: true
+   * });
+   * console.log(`Generated ${optimized.assignments.length} assignments`);
+   */
   async generateOptimizedSchedule(options: OptimizationOptions): Promise<{
     scheduleId: string;
     assignments: Array<{
@@ -274,6 +446,21 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Get Schedule Assignments
+   * 
+   * Retrieves all assignments for a specific schedule with employee details.
+   * Includes shift and employee information through JOIN operations.
+   * 
+   * @param scheduleId - Unique schedule identifier
+   * @returns Promise<Array> - Array of assignment objects with employee details
+   * 
+   * @throws {Error} When database operation fails
+   * 
+   * @example
+   * const assignments = await scheduleService.getScheduleAssignments("schedule-123");
+   * console.log(`Schedule has ${assignments.length} assignments`);
+   */
   async getScheduleAssignments(scheduleId: string): Promise<Array<{
     id: string;
     shiftId: string;
@@ -310,10 +497,26 @@ class ScheduleService {
     }
   }
 
+  /**
+   * Generate Unique Schedule ID
+   * 
+   * Creates a unique identifier for new schedules using timestamp and random string.
+   * 
+   * @returns string - Unique schedule identifier
+   * 
+   * @private
+   * @internal
+   */
   private generateId(): string {
     return `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 }
 
+/**
+ * Schedule Service Singleton Instance
+ * 
+ * Exports a singleton instance of the ScheduleService class for
+ * consistent usage across the application.
+ */
 export const scheduleService = new ScheduleService();
 export default scheduleService;
