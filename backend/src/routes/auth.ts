@@ -14,10 +14,22 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { userService } from '../services/UserService';
+import { Pool } from 'mysql2/promise';
+import { UserService } from '../services/UserService';
 import { authenticate } from '../middleware/auth';
+import jwt from 'jsonwebtoken';
 
-const router = Router();
+// Extend Express Request to include user
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: import('../types').User;
+  }
+}
+import { config } from '../config';
+
+export const createAuthRouter = (pool: Pool) => {
+  const router = Router();
+  const userService = new UserService(pool);
 
 /**
  * User Login Endpoint
@@ -52,25 +64,51 @@ const router = Router();
  */
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const { username, password } = req.body;
+    const { email, password } = req.body;
 
     // Input validation
-    if (!username || !password) {
+    if (!email || !password) {
       return res.status(400).json({
         success: false,
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Username and password are required'
+          message: 'Email and password are required'
         }
       });
     }
 
     // Authenticate user and generate token
-    const result = await userService.login({ username, password });
+    const user = await userService.validatePassword(email, password);
+    
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'LOGIN_FAILED',
+          message: 'Invalid email or password'
+        }
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      config.jwt.secret,
+      { expiresIn: '7d' }
+    );
     
     res.json({
       success: true,
-      data: result
+      data: { 
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          role: user.role
+        }
+      }
     });
   } catch (error) {
     res.status(401).json({
@@ -122,10 +160,8 @@ router.get('/verify', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // Remove sensitive data before sending response
-    const { passwordHash, salt, ...userWithoutPassword } = user;
-    
-    res.json({
+    // Remove sensitive fields before sending response
+    const { password_hash, salt, ...userWithoutPassword } = user as any;    res.json({
       success: true,
       data: userWithoutPassword
     });
@@ -183,7 +219,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
     // TODO: In production, implement proper token refresh logic
     // This would involve generating a new token with extended expiry
     // and potentially invalidating the old token
-    const { passwordHash, salt, ...userWithoutPassword } = user;
+    const { password_hash, salt, ...userWithoutPassword } = user as any;
     
     res.json({
       success: true,
@@ -245,4 +281,5 @@ router.post('/logout', authenticate, async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+  return router;
+};

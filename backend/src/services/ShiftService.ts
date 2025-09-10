@@ -1,482 +1,514 @@
-/**
- * Shift Service
- * 
- * Handles all business logic related to shift management including
- * creation, scheduling, conflict detection, and optimization support.
- * 
- * Features:
- * - Comprehensive shift lifecycle management
- * - Advanced scheduling and conflict detection
- * - Multi-department and role support
- * - Skills requirement validation
- * - Shift pattern management
- * - Status tracking and automation
- * 
- * Business Rules:
- * - Minimum/maximum staff validation
- * - Skills requirement matching
- * - Time conflict prevention
- * - Department-specific constraints
- * - Priority-based scheduling
- * 
- * @author Luca Ostinelli
- */
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { Shift, CreateShiftRequest, UpdateShiftRequest, ShiftTemplate, CreateShiftTemplateRequest, UpdateShiftTemplateRequest } from '../types';
 
-import { database } from '../config/database';
-import { Shift, CreateShiftRequest, UpdateShiftRequest, ShiftFilters, PaginationParams } from '../types';
-import { logger } from '../config/logger';
-import { v4 as uuidv4 } from 'uuid';
-
-/**
- * Shift Service Class
- * 
- * Provides comprehensive shift management functionality with
- * scheduling optimization, conflict detection, and business rule validation.
- */
 export class ShiftService {
-  
-  /**
-   * Create New Shift
-   * 
-   * Creates a new shift with comprehensive validation and conflict detection.
-   * Ensures business rules compliance and proper resource allocation.
-   * 
-   * @param shiftData - Complete shift information and requirements
-   * @param createdBy - User ID of the creator for audit purposes
-   * @returns Promise<Shift> - Created shift object with generated ID
-   * 
-   * @throws {Error} When validation fails
-   * @throws {Error} When time conflicts exist
-   * @throws {Error} When resource limits exceeded
-   * 
-   * @example
-   * const newShift = await shiftService.createShift({
-   *   name: "Morning Shift",
-   *   startTime: "08:00",
-   *   endTime: "16:00",
-   *   date: "2024-01-15",
-   *   department: "Nursing",
-   *   minimumStaff: 3,
-   *   maximumStaff: 5
-   * }, "user123");
-   */
-  async createShift(shiftData: CreateShiftRequest, createdBy: string): Promise<Shift> {
-    const {
-      name,
-      startTime,
-      endTime,
-      date,
-      department,
-      position,
-      requiredSkills,
-      minimumStaff,
-      maximumStaff,
-      type = 'regular',
-      specialType,
-      priority = 1,
-      location,
-      description,
-      rolesRequired
-    } = shiftData;
+  constructor(private pool: Pool) {}
 
-    const shiftId = uuidv4();
-
+  // Shift Template Management
+  async getAllShiftTemplates(): Promise<ShiftTemplate[]> {
     const query = `
-      INSERT INTO shifts (
-        id, name, start_time, end_time, date, department, position,
-        required_skills, minimum_staff, maximum_staff, type, special_type,
-        priority, location, description, status, roles_required,
-        created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, NOW(), NOW())
+      SELECT 
+        st.template_id as id,
+        st.name,
+        st.start_time as startTime,
+        st.end_time as endTime,
+        st.break_duration as breakDuration,
+        st.required_staff as requiredStaff,
+        st.department_id as departmentId,
+        st.is_active as isActive,
+        st.created_at as createdAt,
+        st.updated_at as updatedAt,
+        d.name as departmentName
+      FROM shift_templates st
+      LEFT JOIN departments d ON st.department_id = d.department_id
+      WHERE st.is_active = 1
+      ORDER BY st.name
     `;
-
-    await database.query(query, [
-      shiftId,
-      name,
-      startTime,
-      endTime,
-      date,
-      department,
-      position,
-      JSON.stringify(requiredSkills),
-      minimumStaff,
-      maximumStaff,
-      type,
-      specialType,
-      priority,
-      location,
-      description,
-      JSON.stringify(rolesRequired),
-      createdBy
-    ]);
-
-    const shift = await this.findById(shiftId);
-    if (!shift) {
-      throw new Error('Failed to create shift');
-    }
-
-    logger.info(`Shift created: ${name}`, { shiftId, department, date });
-    return shift;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query);
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      breakDuration: row.breakDuration,
+      requiredStaff: row.requiredStaff,
+      departmentId: row.departmentId,
+      requiredSkills: [], // Will be loaded separately if needed
+      isActive: row.isActive === 1,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
   }
 
-  /**
-   * Update Existing Shift
-   * 
-   * Updates shift information with validation and conflict checking.
-   * Supports partial updates while maintaining data integrity.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @param updateData - Partial shift data to update
-   * @returns Promise<Shift> - Updated shift object
-   * 
-   * @throws {Error} When shift not found
-   * @throws {Error} When validation fails
-   * @throws {Error} When update conflicts with existing data
-   * 
-   * @example
-   * const updatedShift = await shiftService.updateShift("shift-123", {
-   *   minimumStaff: 4,
-   *   maximumStaff: 6,
-   *   requiredSkills: ["ICU", "Emergency"]
-   * });
-   */
-  async updateShift(shiftId: string, updateData: UpdateShiftRequest): Promise<Shift> {
-    const existingShift = await this.findById(shiftId);
-    if (!existingShift) {
-      throw new Error('Shift not found');
-    }
-
-    const fields = [];
-    const values = [];
-
-    if (updateData.name !== undefined) {
-      fields.push('name = ?');
-      values.push(updateData.name);
-    }
-    if (updateData.startTime !== undefined) {
-      fields.push('start_time = ?');
-      values.push(updateData.startTime);
-    }
-    if (updateData.endTime !== undefined) {
-      fields.push('end_time = ?');
-      values.push(updateData.endTime);
-    }
-    if (updateData.date !== undefined) {
-      fields.push('date = ?');
-      values.push(updateData.date);
-    }
-    if (updateData.department !== undefined) {
-      fields.push('department = ?');
-      values.push(updateData.department);
-    }
-    if (updateData.position !== undefined) {
-      fields.push('position = ?');
-      values.push(updateData.position);
-    }
-    if (updateData.requiredSkills !== undefined) {
-      fields.push('required_skills = ?');
-      values.push(JSON.stringify(updateData.requiredSkills));
-    }
-    if (updateData.minimumStaff !== undefined) {
-      fields.push('minimum_staff = ?');
-      values.push(updateData.minimumStaff);
-    }
-    if (updateData.maximumStaff !== undefined) {
-      fields.push('maximum_staff = ?');
-      values.push(updateData.maximumStaff);
-    }
-    if (updateData.type !== undefined) {
-      fields.push('type = ?');
-      values.push(updateData.type);
-    }
-    if (updateData.specialType !== undefined) {
-      fields.push('special_type = ?');
-      values.push(updateData.specialType);
-    }
-    if (updateData.priority !== undefined) {
-      fields.push('priority = ?');
-      values.push(updateData.priority);
-    }
-    if (updateData.location !== undefined) {
-      fields.push('location = ?');
-      values.push(updateData.location);
-    }
-    if (updateData.description !== undefined) {
-      fields.push('description = ?');
-      values.push(updateData.description);
-    }
-    if (updateData.status !== undefined) {
-      fields.push('status = ?');
-      values.push(updateData.status);
-    }
-    if (updateData.rolesRequired !== undefined) {
-      fields.push('roles_required = ?');
-      values.push(JSON.stringify(updateData.rolesRequired));
-    }
-
-    if (fields.length === 0) {
-      return existingShift;
-    }
-
-    fields.push('updated_at = NOW()');
-    values.push(shiftId);
-
-    const query = `UPDATE shifts SET ${fields.join(', ')} WHERE id = ?`;
-    await database.query(query, values);
-
-    const updatedShift = await this.findById(shiftId);
-    if (!updatedShift) {
-      throw new Error('Failed to update shift');
-    }
-
-    logger.info(`Shift updated: ${shiftId}`);
-    return updatedShift;
-  }
-
-  /**
-   * Find Shift by ID
-   * 
-   * Retrieves detailed shift information by unique identifier.
-   * Includes creator information through JOIN operation.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @returns Promise<Shift | null> - Shift object or null if not found
-   * 
-   * @example
-   * const shift = await shiftService.findById("shift-123");
-   * if (shift) {
-   *   console.log(`Found shift: ${shift.name} on ${shift.date}`);
-   * }
-   */
-  async findById(shiftId: string): Promise<Shift | null> {
+  async getShiftTemplateById(id: number): Promise<ShiftTemplate | null> {
     const query = `
-      SELECT s.*, u.first_name, u.last_name
-      FROM shifts s
-      LEFT JOIN users u ON s.created_by = u.id
-      WHERE s.id = ?
+      SELECT 
+        st.template_id as id,
+        st.name,
+        st.start_time as startTime,
+        st.end_time as endTime,
+        st.break_duration as breakDuration,
+        st.required_staff as requiredStaff,
+        st.department_id as departmentId,
+        st.is_active as isActive,
+        st.created_at as createdAt,
+        st.updated_at as updatedAt
+      FROM shift_templates st
+      WHERE st.template_id = ?
     `;
-
-    const results = await database.query(query, [shiftId]);
-    const rows = results as any[];
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    return this.mapRowToShift(rows[0]);
-  }
-
-  /**
-   * Find All Shifts with Filtering and Pagination
-   * 
-   * Retrieves shifts with advanced filtering and pagination support.
-   * Supports date ranges, department filters, and status filtering.
-   * 
-   * @param filters - Optional filtering criteria
-   * @param pagination - Pagination parameters (page, limit, sort)
-   * @returns Promise<{shifts: Shift[], total: number}> - Paginated shift list with total count
-   * 
-   * @example
-   * const result = await shiftService.findAll(
-   *   { 
-   *     startDate: "2024-01-01", 
-   *     endDate: "2024-01-31", 
-   *     department: "Nursing" 
-   *   },
-   *   { page: 1, limit: 10, sortBy: "date" }
-   * );
-   * console.log(`Found ${result.total} shifts, showing ${result.shifts.length}`);
-   */
-  async findAll(filters: ShiftFilters = {}, pagination: PaginationParams = { page: 1, limit: 20 }): Promise<{ shifts: Shift[], total: number }> {
-    let whereClause = 'WHERE 1=1';
-    const params: any[] = [];
-
-    // Build dynamic WHERE clause
-    if (filters.startDate && filters.endDate) {
-      whereClause += ' AND s.date BETWEEN ? AND ?';
-      params.push(filters.startDate, filters.endDate);
-    } else if (filters.startDate) {
-      whereClause += ' AND s.date >= ?';
-      params.push(filters.startDate);
-    } else if (filters.endDate) {
-      whereClause += ' AND s.date <= ?';
-      params.push(filters.endDate);
-    }
-
-    if (filters.department) {
-      whereClause += ' AND s.department = ?';
-      params.push(filters.department);
-    }
-
-    if (filters.position) {
-      whereClause += ' AND s.position = ?';
-      params.push(filters.position);
-    }
-
-    if (filters.type) {
-      whereClause += ' AND s.type = ?';
-      params.push(filters.type);
-    }
-
-    if (filters.status) {
-      whereClause += ' AND s.status = ?';
-      params.push(filters.status);
-    }
-
-    // Count total for pagination
-    const countQuery = `SELECT COUNT(*) as total FROM shifts s ${whereClause}`;
-    const countResult = await database.query(countQuery, params);
-    const total = (countResult as any[])[0]?.total || 0;
-
-    // Build main query with sorting and pagination
-    const sortBy = pagination.sortBy || 'date';
-    const sortOrder = pagination.sortOrder || 'asc';
-    const offset = (pagination.page - 1) * pagination.limit;
-
-    const query = `
-      SELECT s.*, u.first_name, u.last_name
-      FROM shifts s
-      LEFT JOIN users u ON s.created_by = u.id
-      ${whereClause}
-      ORDER BY s.${sortBy} ${sortOrder}, s.start_time ASC
-      LIMIT ? OFFSET ?
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [id]);
+    if (rows.length === 0) return null;
+    
+    const row = rows[0];
+    
+    // Get required skills
+    const skillsQuery = `
+      SELECT skill_id FROM shift_template_skills WHERE template_id = ?
     `;
-
-    params.push(pagination.limit, offset);
-    const results = await database.query(query, params);
-    const shifts = (results as any[]).map(row => this.mapRowToShift(row));
-
-    return { shifts, total };
-  }
-
-  /**
-   * Delete Shift
-   * 
-   * Permanently removes a shift from the system.
-   * Validates that no assignments exist before deletion.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @returns Promise<void>
-   * 
-   * @throws {Error} When shift not found
-   * @throws {Error} When shift has existing assignments
-   * 
-   * @example
-   * await shiftService.deleteShift("shift-123");
-   * console.log("Shift deleted successfully");
-   */
-  async deleteShift(shiftId: string): Promise<void> {
-    const existingShift = await this.findById(shiftId);
-    if (!existingShift) {
-      throw new Error('Shift not found');
-    }
-
-    // Check if shift has assignments
-    const assignmentQuery = 'SELECT COUNT(*) as count FROM shift_assignments WHERE shift_id = ?';
-    const assignmentResult = await database.query(assignmentQuery, [shiftId]);
-    const assignmentCount = (assignmentResult as any[])[0]?.count || 0;
-
-    if (assignmentCount > 0) {
-      throw new Error('Cannot delete shift with existing assignments');
-    }
-
-    const query = 'DELETE FROM shifts WHERE id = ?';
-    await database.query(query, [shiftId]);
-
-    logger.info(`Shift deleted: ${shiftId}`);
-  }
-
-  /**
-   * Publish Shift
-   * 
-   * Changes shift status to published, making it available for assignment.
-   * Published shifts become visible to employees and managers.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @returns Promise<Shift> - Updated shift object
-   * 
-   * @throws {Error} When shift not found
-   * 
-   * @example
-   * const publishedShift = await shiftService.publishShift("shift-123");
-   * console.log(`Shift ${publishedShift.name} is now published`);
-   */
-  async publishShift(shiftId: string): Promise<Shift> {
-    const shift = await this.updateShift(shiftId, { status: 'published' });
-    logger.info(`Shift published: ${shiftId}`);
-    return shift;
-  }
-
-  /**
-   * Get Shift Assignments
-   * 
-   * Retrieves all employee assignments for a specific shift.
-   * Includes employee information through JOIN operation.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @returns Promise<any[]> - Array of assignment records with employee details
-   * 
-   * @example
-   * const assignments = await shiftService.getShiftAssignments("shift-123");
-   * console.log(`Shift has ${assignments.length} assigned employees`);
-   */
-  async getShiftAssignments(shiftId: string): Promise<any[]> {
-    const query = `
-      SELECT sa.*, e.first_name, e.last_name, e.employee_id
-      FROM shift_assignments sa
-      JOIN employees e ON sa.employee_id = e.employee_id
-      WHERE sa.shift_id = ?
-    `;
-
-    const results = await database.query(query, [shiftId]);
-    return results as any[];
-  }
-
-  /**
-   * Map Database Row to Shift Object
-   * 
-   * Transforms raw database row data into properly typed Shift objects.
-   * Handles JSON parsing for complex fields and creator name concatenation.
-   * 
-   * @param row - Raw database row data
-   * @returns Shift - Properly typed and formatted shift object
-   * 
-   * @private
-   * @internal
-   */
-  private mapRowToShift(row: any): Shift {
+    const [skillRows] = await this.pool.execute<RowDataPacket[]>(skillsQuery, [id]);
+    const requiredSkills = skillRows.map(skill => skill.skill_id);
+    
     return {
       id: row.id,
       name: row.name,
-      startTime: row.start_time,
-      endTime: row.end_time,
-      date: row.date,
-      department: row.department,
-      position: row.position,
-      requiredSkills: JSON.parse(row.required_skills || '[]'),
-      minimumStaff: row.minimum_staff,
-      maximumStaff: row.maximum_staff,
-      type: row.type,
-      specialType: row.special_type,
-      priority: row.priority,
-      location: row.location,
-      description: row.description,
-      status: row.status,
-      rolesRequired: JSON.parse(row.roles_required || '{}'),
-      createdBy: row.created_by,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      createdByName: row.first_name && row.last_name 
-        ? `${row.first_name} ${row.last_name}` 
-        : null
+      startTime: row.startTime,
+      endTime: row.endTime,
+      breakDuration: row.breakDuration,
+      requiredStaff: row.requiredStaff,
+      departmentId: row.departmentId,
+      requiredSkills,
+      isActive: row.isActive === 1,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
     };
   }
-}
 
-/**
- * Shift Service Singleton Instance
- * 
- * Exports a singleton instance of the ShiftService class for
- * consistent usage across the application.
- */
-export const shiftService = new ShiftService();
+  async createShiftTemplate(templateData: CreateShiftTemplateRequest): Promise<number> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const query = `
+        INSERT INTO shift_templates (
+          name, start_time, end_time, break_duration, required_staff, 
+          department_id, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, 1)
+      `;
+      
+      const [result] = await connection.execute<ResultSetHeader>(query, [
+        templateData.name,
+        templateData.startTime,
+        templateData.endTime,
+        templateData.breakDuration || 0,
+        templateData.requiredStaff,
+        templateData.departmentId
+      ]);
+
+      const templateId = result.insertId;
+
+      // Add required skills if provided
+      if (templateData.requiredSkills?.length) {
+        for (const skillId of templateData.requiredSkills) {
+          await connection.execute(
+            'INSERT INTO shift_template_skills (template_id, skill_id) VALUES (?, ?)',
+            [templateId, skillId]
+          );
+        }
+      }
+
+      await connection.commit();
+      return templateId;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async updateShiftTemplate(id: number, templateData: UpdateShiftTemplateRequest): Promise<boolean> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const updates: string[] = [];
+      const values: any[] = [];
+      
+      if (templateData.name !== undefined) {
+        updates.push('name = ?');
+        values.push(templateData.name);
+      }
+      if (templateData.startTime !== undefined) {
+        updates.push('start_time = ?');
+        values.push(templateData.startTime);
+      }
+      if (templateData.endTime !== undefined) {
+        updates.push('end_time = ?');
+        values.push(templateData.endTime);
+      }
+      if (templateData.breakDuration !== undefined) {
+        updates.push('break_duration = ?');
+        values.push(templateData.breakDuration);
+      }
+      if (templateData.requiredStaff !== undefined) {
+        updates.push('required_staff = ?');
+        values.push(templateData.requiredStaff);
+      }
+      if (templateData.departmentId !== undefined) {
+        updates.push('department_id = ?');
+        values.push(templateData.departmentId);
+      }
+      if (templateData.isActive !== undefined) {
+        updates.push('is_active = ?');
+        values.push(templateData.isActive ? 1 : 0);
+      }
+      
+      if (updates.length > 0) {
+        values.push(id);
+        const query = `UPDATE shift_templates SET ${updates.join(', ')} WHERE template_id = ?`;
+        await connection.execute(query, values);
+      }
+
+      // Update required skills if provided
+      if (templateData.requiredSkills !== undefined) {
+        // Remove existing skills
+        await connection.execute('DELETE FROM shift_template_skills WHERE template_id = ?', [id]);
+        
+        // Add new skills
+        for (const skillId of templateData.requiredSkills) {
+          await connection.execute(
+            'INSERT INTO shift_template_skills (template_id, skill_id) VALUES (?, ?)',
+            [id, skillId]
+          );
+        }
+      }
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async deleteShiftTemplate(id: number): Promise<boolean> {
+    const query = 'UPDATE shift_templates SET is_active = 0 WHERE template_id = ?';
+    const [result] = await this.pool.execute<ResultSetHeader>(query, [id]);
+    return result.affectedRows > 0;
+  }
+
+  // Shift Management
+  async getAllShifts(): Promise<Shift[]> {
+    const query = `
+      SELECT 
+        s.shift_id as id,
+        s.schedule_id as scheduleId,
+        s.template_id as templateId,
+        s.shift_date as date,
+        s.start_time as startTime,
+        s.end_time as endTime,
+        s.required_staff as requiredStaff,
+        s.department_id as departmentId,
+        s.status,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(a.assignment_id) as assignedStaff,
+        d.name as departmentName
+      FROM shifts s
+      LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+      LEFT JOIN departments d ON s.department_id = d.department_id
+      GROUP BY s.shift_id
+      ORDER BY s.shift_date, s.start_time
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query);
+    return rows.map(row => ({
+      id: row.id,
+      scheduleId: row.scheduleId,
+      templateId: row.templateId,
+      date: row.date,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      requiredStaff: row.requiredStaff,
+      assignedStaff: row.assignedStaff,
+      departmentId: row.departmentId,
+      assignments: [], // Will be loaded separately if needed
+      requiredSkills: [], // Will be loaded separately if needed
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async getShiftById(id: number): Promise<Shift | null> {
+    const query = `
+      SELECT 
+        s.shift_id as id,
+        s.schedule_id as scheduleId,
+        s.template_id as templateId,
+        s.shift_date as date,
+        s.start_time as startTime,
+        s.end_time as endTime,
+        s.required_staff as requiredStaff,
+        s.department_id as departmentId,
+        s.status,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(a.assignment_id) as assignedStaff
+      FROM shifts s
+      LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+      WHERE s.shift_id = ?
+      GROUP BY s.shift_id
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [id]);
+    if (rows.length === 0) return null;
+    
+    const row = rows[0];
+    
+    // Get required skills
+    const skillsQuery = `
+      SELECT skill_id FROM shift_skills WHERE shift_id = ?
+    `;
+    const [skillRows] = await this.pool.execute<RowDataPacket[]>(skillsQuery, [id]);
+    const requiredSkills = skillRows.map(skill => skill.skill_id);
+    
+    return {
+      id: row.id,
+      scheduleId: row.scheduleId,
+      templateId: row.templateId,
+      date: row.date,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      requiredStaff: row.requiredStaff,
+      assignedStaff: row.assignedStaff,
+      departmentId: row.departmentId,
+      assignments: [], // Will be loaded separately if needed
+      requiredSkills,
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    };
+  }
+
+  async createShift(shiftData: CreateShiftRequest): Promise<number> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const query = `
+        INSERT INTO shifts (
+          schedule_id, template_id, shift_date, start_time, end_time, 
+          required_staff, department_id, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
+      `;
+      
+      const [result] = await connection.execute<ResultSetHeader>(query, [
+        shiftData.scheduleId,
+        shiftData.templateId || null,
+        shiftData.date,
+        shiftData.startTime,
+        shiftData.endTime,
+        shiftData.requiredStaff,
+        shiftData.departmentId
+      ]);
+
+      const shiftId = result.insertId;
+
+      // Add required skills if provided
+      if (shiftData.requiredSkills?.length) {
+        for (const skillId of shiftData.requiredSkills) {
+          await connection.execute(
+            'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
+            [shiftId, skillId]
+          );
+        }
+      }
+
+      await connection.commit();
+      return shiftId;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async updateShift(id: number, shiftData: UpdateShiftRequest): Promise<boolean> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const updates: string[] = [];
+      const values: any[] = [];
+      
+      if (shiftData.date !== undefined) {
+        updates.push('shift_date = ?');
+        values.push(shiftData.date);
+      }
+      if (shiftData.startTime !== undefined) {
+        updates.push('start_time = ?');
+        values.push(shiftData.startTime);
+      }
+      if (shiftData.endTime !== undefined) {
+        updates.push('end_time = ?');
+        values.push(shiftData.endTime);
+      }
+      if (shiftData.requiredStaff !== undefined) {
+        updates.push('required_staff = ?');
+        values.push(shiftData.requiredStaff);
+      }
+      if (shiftData.departmentId !== undefined) {
+        updates.push('department_id = ?');
+        values.push(shiftData.departmentId);
+      }
+      
+      if (updates.length > 0) {
+        values.push(id);
+        const query = `UPDATE shifts SET ${updates.join(', ')} WHERE shift_id = ?`;
+        await connection.execute(query, values);
+      }
+
+      // Update required skills if provided
+      if (shiftData.requiredSkills !== undefined) {
+        // Remove existing skills
+        await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
+        
+        // Add new skills
+        for (const skillId of shiftData.requiredSkills) {
+          await connection.execute(
+            'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
+            [id, skillId]
+          );
+        }
+      }
+
+      await connection.commit();
+      return true;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async deleteShift(id: number): Promise<boolean> {
+    // Check if shift has assignments
+    const [assignmentRows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT COUNT(*) as count FROM assignments WHERE shift_id = ?', 
+      [id]
+    );
+    
+    if (assignmentRows[0].count > 0) {
+      throw new Error('Cannot delete shift with existing assignments');
+    }
+
+    const query = 'DELETE FROM shifts WHERE shift_id = ?';
+    const [result] = await this.pool.execute<ResultSetHeader>(query, [id]);
+    return result.affectedRows > 0;
+  }
+
+  async getShiftsBySchedule(scheduleId: number): Promise<Shift[]> {
+    const query = `
+      SELECT 
+        s.shift_id as id,
+        s.schedule_id as scheduleId,
+        s.template_id as templateId,
+        s.shift_date as date,
+        s.start_time as startTime,
+        s.end_time as endTime,
+        s.required_staff as requiredStaff,
+        s.department_id as departmentId,
+        s.status,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(a.assignment_id) as assignedStaff
+      FROM shifts s
+      LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+      WHERE s.schedule_id = ?
+      GROUP BY s.shift_id
+      ORDER BY s.shift_date, s.start_time
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [scheduleId]);
+    return rows.map(row => ({
+      id: row.id,
+      scheduleId: row.scheduleId,
+      templateId: row.templateId,
+      date: row.date,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      requiredStaff: row.requiredStaff,
+      assignedStaff: row.assignedStaff,
+      departmentId: row.departmentId,
+      assignments: [],
+      requiredSkills: [],
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async getShiftsByDepartment(departmentId: number, startDate?: string, endDate?: string): Promise<Shift[]> {
+    let query = `
+      SELECT 
+        s.shift_id as id,
+        s.schedule_id as scheduleId,
+        s.template_id as templateId,
+        s.shift_date as date,
+        s.start_time as startTime,
+        s.end_time as endTime,
+        s.required_staff as requiredStaff,
+        s.department_id as departmentId,
+        s.status,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(a.assignment_id) as assignedStaff
+      FROM shifts s
+      LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+      WHERE s.department_id = ?
+    `;
+    
+    const params: any[] = [departmentId];
+    
+    if (startDate) {
+      query += ' AND s.shift_date >= ?';
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ' AND s.shift_date <= ?';
+      params.push(endDate);
+    }
+    
+    query += ' GROUP BY s.shift_id ORDER BY s.shift_date, s.start_time';
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+    return rows.map(row => ({
+      id: row.id,
+      scheduleId: row.scheduleId,
+      templateId: row.templateId,
+      date: row.date,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      requiredStaff: row.requiredStaff,
+      assignedStaff: row.assignedStaff,
+      departmentId: row.departmentId,
+      assignments: [],
+      requiredSkills: [],
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+}

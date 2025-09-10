@@ -379,8 +379,7 @@ export interface PaginationOptions {
 
 // Authentication types
 export interface LoginRequest {
-  username?: string;
-  email?: string;
+  email: string;
   password: string;
   rememberMe?: boolean;
 }
