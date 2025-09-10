@@ -1,91 +1,121 @@
-version: '3.8'
-
 services:
+  # Database Service
   mysql:
     image: mysql:8.0
     container_name: staff_scheduler_mysql
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_DATABASE: staff_scheduler
-      MYSQL_USER: scheduler_user
-      MYSQL_PASSWORD: scheduler_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-StrongRootPassword123!}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-staff_scheduler}
+      MYSQL_USER: ${MYSQL_USER:-scheduler_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
     ports:
-      - "3306:3306"
+      - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql
-    command: --default-authentication-plugin=mysql_native_password
+      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./mysql/conf.d:/etc/mysql/conf.d:ro
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
     networks:
       - staff_scheduler_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
 
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    container_name: staff_scheduler_phpmyadmin
-    depends_on:
-      - mysql
-    environment:
-      PMA_HOST: mysql
-      PMA_USER: scheduler_user
-      PMA_PASSWORD: scheduler_password
-    ports:
-      - "8080:80"
-    networks:
-      - staff_scheduler_network
-
+  # Backend API Service
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
     container_name: staff_scheduler_backend
+    restart: unless-stopped
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     environment:
-      NODE_ENV: development
+      NODE_ENV: production
       PORT: 3001
       DB_HOST: mysql
       DB_PORT: 3306
-      DB_NAME: staff_scheduler
-      DB_USER: scheduler_user
-      DB_PASSWORD: scheduler_password
-      SESSION_SECRET: your-super-secret-session-key-change-in-production
-      JWT_SECRET: your-super-secret-jwt-key-change-in-production
-      EMAIL_HOST: smtp.gmail.com
-      EMAIL_PORT: 587
-      EMAIL_USER: your-email@gmail.com
-      EMAIL_PASSWORD: your-app-password
-      OPTIMIZATION_ENGINE: javascript
-      CORS_ORIGIN: http://localhost:3000
-      CORS_CREDENTIALS: true
+      DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
+      DB_USER: ${MYSQL_USER:-scheduler_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
+      SESSION_SECRET: ${SESSION_SECRET:-your-super-secret-session-key}
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     ports:
-      - "3001:3001"
+      - "${BACKEND_PORT:-3001}:3001"
     volumes:
-      - ./backend:/app
-      - /app/node_modules
-      - ./backend/reports:/app/reports
-      - ./backend/uploads:/app/uploads
-    command: npm run dev
+      - backend_logs:/app/logs
+      - backend_reports:/app/reports
+      - backend_uploads:/app/uploads
     networks:
       - staff_scheduler_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
+  # Frontend Service
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
     container_name: staff_scheduler_frontend
+    restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
-      REACT_APP_API_URL: http://localhost:3001
-      REACT_APP_APP_NAME: Staff Scheduler
-      REACT_APP_VERSION: 1.0.0
+      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001}
+      REACT_APP_APP_NAME: ${REACT_APP_APP_NAME:-Staff Scheduler}
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    command: npm start
+      - "${FRONTEND_PORT:-3000}:3000"
+    networks:
+      - staff_scheduler_network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Database Management Interface
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: staff_scheduler_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: ${MYSQL_USER:-scheduler_user}
+      PMA_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
+    ports:
+      - "${PHPMYADMIN_PORT:-8080}:80"
     networks:
       - staff_scheduler_network
 
+# Persistent volumes
 volumes:
   mysql_data:
+    driver: local
+  backend_logs:
+    driver: local
+  backend_reports:
+    driver: local
+  backend_uploads:
+    driver: local
 
+# Network configuration
 networks:
   staff_scheduler_network:
     driver: bridge
