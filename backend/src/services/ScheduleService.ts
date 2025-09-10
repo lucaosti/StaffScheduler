@@ -1,522 +1,435 @@
-/**
- * Schedule Service
- * 
- * Handles all business logic related to schedule management including
- * creation, optimization, publishing, and lifecycle management.
- * 
- * Features:
- * - Comprehensive schedule lifecycle management
- * - Advanced schedule optimization algorithms
- * - Multi-period schedule support
- * - Status workflow management
- * - Conflict detection and resolution
- * - Performance analytics and reporting
- * 
- * Business Rules:
- * - Schedule period validation
- * - Resource allocation optimization
- * - Status transition controls
- * - Publishing workflow enforcement
- * - Archive management
- * 
- * @author Luca Ostinelli
- */
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { Schedule, CreateScheduleRequest, UpdateScheduleRequest } from '../types';
 
-import { database } from '../config/database';
-import { logger } from '../config/logger';
-import { Schedule, CreateScheduleRequest, UpdateScheduleRequest, OptimizationOptions } from '../types';
+export class ScheduleService {
+  constructor(private pool: Pool) {}
 
-/**
- * Schedule Row Interface
- * 
- * Defines the structure of schedule data as retrieved from the database.
- * Used for type safety in database operations.
- */
-interface ScheduleRow {
-  id: string;
-  name: string;
-  description?: string;
-  start_date: string;
-  end_date: string;
-  status: 'draft' | 'published' | 'archived';
-  created_by: string;
-  created_at: string;
-  updated_at: string;
-  published_at?: string;
-  published_by?: string;
-  created_by_email?: string;
-}
-
-/**
- * Schedule Service Class
- * 
- * Provides comprehensive schedule management functionality with
- * optimization support, workflow management, and business rule validation.
- */
-class ScheduleService {
-  
-  /**
-   * Find All Schedules with Filtering
-   * 
-   * Retrieves schedules with optional filtering by status, date range, and creator.
-   * Includes creator information through JOIN operation.
-   * 
-   * @param filters - Optional filtering criteria
-   * @returns Promise<Schedule[]> - Array of filtered schedule objects
-   * 
-   * @example
-   * const schedules = await scheduleService.findAll({
-   *   status: "published",
-   *   startDate: "2024-01-01",
-   *   endDate: "2024-12-31"
-   * });
-   * console.log(`Found ${schedules.length} published schedules`);
-   */
-  async findAll(filters: {
-    status?: string;
-    startDate?: string;
-    endDate?: string;
-    createdBy?: string;
-  } = {}): Promise<Schedule[]> {
-    try {
-      let query = `
-        SELECT s.*, u.email as created_by_email
-        FROM schedules s
-        LEFT JOIN users u ON s.created_by = u.id
-        WHERE 1=1
-      `;
-      const params: any[] = [];
-
-      if (filters.status) {
-        query += ' AND s.status = ?';
-        params.push(filters.status);
-      }
-
-      if (filters.startDate) {
-        query += ' AND s.start_date >= ?';
-        params.push(filters.startDate);
-      }
-
-      if (filters.endDate) {
-        query += ' AND s.end_date <= ?';
-        params.push(filters.endDate);
-      }
-
-      if (filters.createdBy) {
-        query += ' AND s.created_by = ?';
-        params.push(filters.createdBy);
-      }
-
-      query += ' ORDER BY s.created_at DESC';
-
-      const rows = await database.query<ScheduleRow>(query, params);
-      
-      return rows.map((row: ScheduleRow) => ({
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        startDate: row.start_date,
-        endDate: row.end_date,
-        status: row.status,
-        createdBy: row.created_by,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        publishedAt: row.published_at,
-        publishedBy: row.published_by
-      }));
-    } catch (error) {
-      logger.error('Error fetching schedules:', error);
-      throw error;
-    }
+  async getAllSchedules(): Promise<Schedule[]> {
+    const query = `
+      SELECT 
+        s.schedule_id as id,
+        s.name,
+        s.start_date as startDate,
+        s.end_date as endDate,
+        s.status,
+        s.department_id as departmentId,
+        s.created_by as createdBy,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        d.name as departmentName,
+        u.first_name as createdByFirstName,
+        u.last_name as createdByLastName,
+        COUNT(sh.shift_id) as shiftCount
+      FROM schedules s
+      LEFT JOIN departments d ON s.department_id = d.department_id
+      LEFT JOIN users u ON s.created_by = u.user_id
+      LEFT JOIN shifts sh ON s.schedule_id = sh.schedule_id
+      GROUP BY s.schedule_id
+      ORDER BY s.created_at DESC
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query);
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: row.status,
+      departmentId: row.departmentId,
+      createdBy: row.createdBy,
+      shifts: [], // Will be loaded separately if needed
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
   }
 
-  /**
-   * Find Schedule by ID
-   * 
-   * Retrieves detailed schedule information by unique identifier.
-   * Includes creator information through JOIN operation.
-   * 
-   * @param id - Unique schedule identifier
-   * @returns Promise<Schedule | null> - Schedule object or null if not found
-   * 
-   * @throws {Error} When database operation fails
-   * 
-   * @example
-   * const schedule = await scheduleService.findById("schedule-123");
-   * if (schedule) {
-   *   console.log(`Found schedule: ${schedule.name}`);
-   * }
-   */
-  async findById(id: string): Promise<Schedule | null> {
-    try {
-      const query = `
-        SELECT s.*, u.email as created_by_email
-        FROM schedules s
-        LEFT JOIN users u ON s.created_by = u.id
-        WHERE s.id = ?
-      `;
-
-      const row = await database.queryOne<ScheduleRow>(query, [id]);
-      
-      if (!row) {
-        return null;
-      }
-
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        startDate: row.start_date,
-        endDate: row.end_date,
-        status: row.status,
-        createdBy: row.created_by,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        publishedAt: row.published_at,
-        publishedBy: row.published_by
-      };
-    } catch (error) {
-      logger.error('Error fetching schedule by ID:', error);
-      throw error;
-    }
+  async getScheduleById(id: number): Promise<Schedule | null> {
+    const query = `
+      SELECT 
+        s.schedule_id as id,
+        s.name,
+        s.start_date as startDate,
+        s.end_date as endDate,
+        s.status,
+        s.department_id as departmentId,
+        s.created_by as createdBy,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt
+      FROM schedules s
+      WHERE s.schedule_id = ?
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [id]);
+    if (rows.length === 0) return null;
+    
+    const row = rows[0];
+    return {
+      id: row.id,
+      name: row.name,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: row.status,
+      departmentId: row.departmentId,
+      createdBy: row.createdBy,
+      shifts: [], // Will be loaded separately if needed
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    };
   }
 
-  /**
-   * Create New Schedule
-   * 
-   * Creates a new schedule with validation and business rule enforcement.
-   * Initializes schedule in draft status for further configuration.
-   * 
-   * @param data - Complete schedule information
-   * @param createdBy - User ID of the creator for audit purposes
-   * @returns Promise<Schedule> - Created schedule object
-   * 
-   * @throws {Error} When validation fails
-   * @throws {Error} When database operation fails
-   * @throws {Error} When date range conflicts exist
-   * 
-   * @example
-   * const newSchedule = await scheduleService.create({
-   *   name: "January 2024 Schedule",
-   *   description: "Monthly nursing schedule",
-   *   startDate: "2024-01-01",
-   *   endDate: "2024-01-31"
-   * }, "manager123");
-   */
-  async create(data: CreateScheduleRequest, createdBy: string): Promise<Schedule> {
+  async createSchedule(scheduleData: CreateScheduleRequest, createdBy: number): Promise<number> {
+    const connection = await this.pool.getConnection();
+    
     try {
-      const scheduleId = this.generateId();
-      const now = new Date().toISOString();
+      await connection.beginTransaction();
 
       const query = `
-        INSERT INTO schedules (id, name, description, start_date, end_date, status, created_by, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?)
+        INSERT INTO schedules (
+          name, start_date, end_date, department_id, created_by, status
+        ) VALUES (?, ?, ?, ?, ?, 'draft')
       `;
-
-      await database.query(query, [
-        scheduleId,
-        data.name,
-        data.description || null,
-        data.startDate,
-        data.endDate,
-        createdBy,
-        now,
-        now
+      
+      const [result] = await connection.execute<ResultSetHeader>(query, [
+        scheduleData.name,
+        scheduleData.startDate,
+        scheduleData.endDate,
+        scheduleData.departmentId || null,
+        createdBy
       ]);
 
-      const schedule = await this.findById(scheduleId);
-      if (!schedule) {
-        throw new Error('Failed to create schedule');
-      }
+      const scheduleId = result.insertId;
 
-      logger.info(`Schedule created: ${scheduleId} by ${createdBy}`);
-      return schedule;
-    } catch (error) {
-      logger.error('Error creating schedule:', error);
-      throw error;
-    }
-  }
+      // Create shifts from templates if provided
+      if (scheduleData.templateIds?.length) {
+        // Get template details
+        const templateQuery = `
+          SELECT * FROM shift_templates WHERE template_id IN (${scheduleData.templateIds.map(() => '?').join(',')})
+        `;
+        const [templates] = await connection.execute<RowDataPacket[]>(templateQuery, scheduleData.templateIds);
 
-  /**
-   * Update Existing Schedule
-   * 
-   * Updates schedule information with validation and conflict checking.
-   * Supports partial updates while maintaining data integrity.
-   * 
-   * @param id - Unique schedule identifier
-   * @param data - Partial schedule data to update
-   * @returns Promise<Schedule | null> - Updated schedule object or null if not found
-   * 
-   * @throws {Error} When validation fails
-   * @throws {Error} When database operation fails
-   * @throws {Error} When schedule is published and cannot be modified
-   * 
-   * @example
-   * const updated = await scheduleService.update("schedule-123", {
-   *   name: "Updated January Schedule",
-   *   description: "Modified description"
-   * });
-   */
-  async update(id: string, data: UpdateScheduleRequest): Promise<Schedule | null> {
-    try {
-      const now = new Date().toISOString();
-      const setParts: string[] = ['updated_at = ?'];
-      const params: any[] = [now];
+        // Generate shifts for each day in the schedule period
+        const startDate = new Date(scheduleData.startDate);
+        const endDate = new Date(scheduleData.endDate);
+        
+        for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
+          for (const template of templates) {
+            const shiftQuery = `
+              INSERT INTO shifts (
+                schedule_id, template_id, shift_date, start_time, end_time, 
+                required_staff, department_id, status
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
+            `;
+            
+            const [shiftResult] = await connection.execute<ResultSetHeader>(shiftQuery, [
+              scheduleId,
+              template.template_id,
+              date.toISOString().split('T')[0],
+              template.start_time,
+              template.end_time,
+              template.required_staff,
+              template.department_id
+            ]);
 
-      if (data.name !== undefined) {
-        setParts.push('name = ?');
-        params.push(data.name);
-      }
-
-      if (data.description !== undefined) {
-        setParts.push('description = ?');
-        params.push(data.description);
-      }
-
-      if (data.startDate !== undefined) {
-        setParts.push('start_date = ?');
-        params.push(data.startDate);
-      }
-
-      if (data.endDate !== undefined) {
-        setParts.push('end_date = ?');
-        params.push(data.endDate);
-      }
-
-      if (data.status !== undefined) {
-        setParts.push('status = ?');
-        params.push(data.status);
-      }
-
-      params.push(id);
-
-      const query = `UPDATE schedules SET ${setParts.join(', ')} WHERE id = ?`;
-      await database.query(query, params);
-
-      logger.info(`Schedule updated: ${id}`);
-      return await this.findById(id);
-    } catch (error) {
-      logger.error('Error updating schedule:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Delete Schedule
-   * 
-   * Permanently removes a schedule from the system.
-   * Use with caution as this action cannot be undone.
-   * 
-   * @param id - Unique schedule identifier
-   * @returns Promise<boolean> - True if deletion was successful
-   * 
-   * @throws {Error} When database operation fails
-   * @throws {Error} When schedule has dependencies that prevent deletion
-   * 
-   * @example
-   * const deleted = await scheduleService.delete("schedule-123");
-   * if (deleted) {
-   *   console.log("Schedule deleted successfully");
-   * }
-   */
-  async delete(id: string): Promise<boolean> {
-    try {
-      const query = 'DELETE FROM schedules WHERE id = ?';
-      await database.query(query, [id]);
-
-      logger.info(`Schedule deleted: ${id}`);
-      return true;
-    } catch (error) {
-      logger.error('Error deleting schedule:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Publish Schedule
-   * 
-   * Changes schedule status to published, making it active and visible.
-   * Records publication details for audit trail.
-   * 
-   * @param id - Unique schedule identifier
-   * @param publishedBy - User ID of the publisher
-   * @returns Promise<Schedule | null> - Updated schedule object or null if not found
-   * 
-   * @throws {Error} When schedule not found
-   * @throws {Error} When schedule is already published
-   * @throws {Error} When database operation fails
-   * 
-   * @example
-   * const published = await scheduleService.publish("schedule-123", "manager456");
-   * if (published) {
-   *   console.log(`Schedule ${published.name} is now live`);
-   * }
-   */
-  async publish(id: string, publishedBy: string): Promise<Schedule | null> {
-    try {
-      const now = new Date().toISOString();
-      
-      const query = `
-        UPDATE schedules 
-        SET status = 'published', published_at = ?, published_by = ?, updated_at = ?
-        WHERE id = ? AND status = 'draft'
-      `;
-
-      await database.query(query, [now, publishedBy, now, id]);
-
-      logger.info(`Schedule published: ${id} by ${publishedBy}`);
-      return await this.findById(id);
-    } catch (error) {
-      logger.error('Error publishing schedule:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate Optimized Schedule
-   * 
-   * Creates an optimized schedule using advanced algorithms.
-   * Balances resource allocation, fairness, and coverage requirements.
-   * 
-   * @param options - Optimization parameters and constraints
-   * @returns Promise<Object> - Optimization results with assignments and statistics
-   * 
-   * @throws {Error} When optimization fails
-   * @throws {Error} When constraints cannot be satisfied
-   * 
-   * @example
-   * const optimized = await scheduleService.generateOptimizedSchedule({
-   *   startDate: "2024-01-01",
-   *   endDate: "2024-01-31",
-   *   department: "Nursing",
-   *   prioritizeExperience: true
-   * });
-   * console.log(`Generated ${optimized.assignments.length} assignments`);
-   */
-  async generateOptimizedSchedule(options: OptimizationOptions): Promise<{
-    scheduleId: string;
-    assignments: Array<{
-      shiftId: string;
-      employeeId: string;
-      role: string;
-    }>;
-    statistics: {
-      totalShifts: number;
-      totalAssignments: number;
-      coverageRate: number;
-      fairnessScore: number;
-    };
-  }> {
-    try {
-      // This is a simplified optimization algorithm
-      // In a real implementation, this would use sophisticated optimization techniques
-      
-      logger.info('Starting schedule optimization', options);
-
-      // Mock optimization result for now
-      const scheduleId = this.generateId();
-      
-      const result = {
-        scheduleId,
-        assignments: [
-          {
-            shiftId: 'shift_1',
-            employeeId: 'emp_001',
-            role: 'nurse'
-          },
-          {
-            shiftId: 'shift_2',
-            employeeId: 'emp_002',
-            role: 'doctor'
+            // Add required skills for the shift
+            const skillsQuery = `
+              SELECT skill_id FROM shift_template_skills WHERE template_id = ?
+            `;
+            const [skills] = await connection.execute<RowDataPacket[]>(skillsQuery, [template.template_id]);
+            
+            for (const skill of skills) {
+              await connection.execute(
+                'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
+                [shiftResult.insertId, skill.skill_id]
+              );
+            }
           }
-        ],
-        statistics: {
-          totalShifts: 10,
-          totalAssignments: 8,
-          coverageRate: 0.8,
-          fairnessScore: 0.85
         }
-      };
+      }
 
-      logger.info(`Schedule optimization completed: ${scheduleId}`);
-      return result;
+      await connection.commit();
+      return scheduleId;
     } catch (error) {
-      logger.error('Error generating optimized schedule:', error);
+      await connection.rollback();
       throw error;
+    } finally {
+      connection.release();
     }
   }
 
-  /**
-   * Get Schedule Assignments
-   * 
-   * Retrieves all assignments for a specific schedule with employee details.
-   * Includes shift and employee information through JOIN operations.
-   * 
-   * @param scheduleId - Unique schedule identifier
-   * @returns Promise<Array> - Array of assignment objects with employee details
-   * 
-   * @throws {Error} When database operation fails
-   * 
-   * @example
-   * const assignments = await scheduleService.getScheduleAssignments("schedule-123");
-   * console.log(`Schedule has ${assignments.length} assignments`);
-   */
-  async getScheduleAssignments(scheduleId: string): Promise<Array<{
-    id: string;
-    shiftId: string;
-    employeeId: string;
-    role: string;
-    status: 'assigned' | 'pending' | 'declined';
-    assignedAt: string;
-    assignedBy: string;
-  }>> {
+  async updateSchedule(id: number, scheduleData: UpdateScheduleRequest): Promise<boolean> {
+    const updates: string[] = [];
+    const values: any[] = [];
+    
+    if (scheduleData.name !== undefined) {
+      updates.push('name = ?');
+      values.push(scheduleData.name);
+    }
+    if (scheduleData.startDate !== undefined) {
+      updates.push('start_date = ?');
+      values.push(scheduleData.startDate);
+    }
+    if (scheduleData.endDate !== undefined) {
+      updates.push('end_date = ?');
+      values.push(scheduleData.endDate);
+    }
+    if (scheduleData.status !== undefined) {
+      updates.push('status = ?');
+      values.push(scheduleData.status);
+    }
+    if (scheduleData.departmentId !== undefined) {
+      updates.push('department_id = ?');
+      values.push(scheduleData.departmentId);
+    }
+    
+    if (updates.length === 0) return false;
+    
+    values.push(id);
+    const query = `UPDATE schedules SET ${updates.join(', ')} WHERE schedule_id = ?`;
+    
+    const [result] = await this.pool.execute<ResultSetHeader>(query, values);
+    return result.affectedRows > 0;
+  }
+
+  async deleteSchedule(id: number): Promise<boolean> {
+    const connection = await this.pool.getConnection();
+    
     try {
-      const query = `
-        SELECT sa.*, s.name as shift_name, e.first_name, e.last_name
-        FROM schedule_assignments sa
-        JOIN shifts s ON sa.shift_id = s.id
-        JOIN employees e ON sa.employee_id = e.id
-        WHERE sa.schedule_id = ?
-        ORDER BY s.start_time, e.last_name, e.first_name
-      `;
+      await connection.beginTransaction();
 
-      const rows = await database.query<any>(query, [scheduleId]);
+      // Check if schedule has assignments
+      const [assignmentRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) as count 
+         FROM assignments a 
+         INNER JOIN shifts s ON a.shift_id = s.shift_id 
+         WHERE s.schedule_id = ?`, 
+        [id]
+      );
       
-      return rows.map((row: any) => ({
-        id: row.id,
-        shiftId: row.shift_id,
-        employeeId: row.employee_id,
-        role: row.role,
-        status: row.status,
-        assignedAt: row.assigned_at,
-        assignedBy: row.assigned_by
-      }));
+      if (assignmentRows[0].count > 0) {
+        throw new Error('Cannot delete schedule with existing assignments');
+      }
+
+      // Delete shifts first
+      await connection.execute('DELETE FROM shifts WHERE schedule_id = ?', [id]);
+      
+      // Delete schedule
+      const [result] = await connection.execute<ResultSetHeader>(
+        'DELETE FROM schedules WHERE schedule_id = ?', 
+        [id]
+      );
+
+      await connection.commit();
+      return result.affectedRows > 0;
     } catch (error) {
-      logger.error('Error fetching schedule assignments:', error);
+      await connection.rollback();
       throw error;
+    } finally {
+      connection.release();
     }
   }
 
-  /**
-   * Generate Unique Schedule ID
-   * 
-   * Creates a unique identifier for new schedules using timestamp and random string.
-   * 
-   * @returns string - Unique schedule identifier
-   * 
-   * @private
-   * @internal
-   */
-  private generateId(): string {
-    return `schedule_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async getSchedulesByDepartment(departmentId: number): Promise<Schedule[]> {
+    const query = `
+      SELECT 
+        s.schedule_id as id,
+        s.name,
+        s.start_date as startDate,
+        s.end_date as endDate,
+        s.status,
+        s.department_id as departmentId,
+        s.created_by as createdBy,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(sh.shift_id) as shiftCount
+      FROM schedules s
+      LEFT JOIN shifts sh ON s.schedule_id = sh.schedule_id
+      WHERE s.department_id = ? OR s.department_id IS NULL
+      GROUP BY s.schedule_id
+      ORDER BY s.created_at DESC
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [departmentId]);
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: row.status,
+      departmentId: row.departmentId,
+      createdBy: row.createdBy,
+      shifts: [],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async getSchedulesByUser(userId: number): Promise<Schedule[]> {
+    const query = `
+      SELECT 
+        s.schedule_id as id,
+        s.name,
+        s.start_date as startDate,
+        s.end_date as endDate,
+        s.status,
+        s.department_id as departmentId,
+        s.created_by as createdBy,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt
+      FROM schedules s
+      WHERE s.created_by = ?
+      ORDER BY s.created_at DESC
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [userId]);
+    return rows.map(row => ({
+      id: row.id,
+      name: row.name,
+      startDate: row.startDate,
+      endDate: row.endDate,
+      status: row.status,
+      departmentId: row.departmentId,
+      createdBy: row.createdBy,
+      shifts: [],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async publishSchedule(id: number): Promise<boolean> {
+    const query = 'UPDATE schedules SET status = ? WHERE schedule_id = ?';
+    const [result] = await this.pool.execute<ResultSetHeader>(query, ['published', id]);
+    return result.affectedRows > 0;
+  }
+
+  async archiveSchedule(id: number): Promise<boolean> {
+    const query = 'UPDATE schedules SET status = ? WHERE schedule_id = ?';
+    const [result] = await this.pool.execute<ResultSetHeader>(query, ['archived', id]);
+    return result.affectedRows > 0;
+  }
+
+  async getScheduleWithShifts(id: number): Promise<Schedule | null> {
+    const schedule = await this.getScheduleById(id);
+    if (!schedule) return null;
+
+    // Get shifts for this schedule
+    const shiftsQuery = `
+      SELECT 
+        s.shift_id as id,
+        s.schedule_id as scheduleId,
+        s.template_id as templateId,
+        s.shift_date as date,
+        s.start_time as startTime,
+        s.end_time as endTime,
+        s.required_staff as requiredStaff,
+        s.department_id as departmentId,
+        s.status,
+        s.created_at as createdAt,
+        s.updated_at as updatedAt,
+        COUNT(a.assignment_id) as assignedStaff
+      FROM shifts s
+      LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+      WHERE s.schedule_id = ?
+      GROUP BY s.shift_id
+      ORDER BY s.shift_date, s.start_time
+    `;
+    
+    const [shiftRows] = await this.pool.execute<RowDataPacket[]>(shiftsQuery, [id]);
+    schedule.shifts = shiftRows.map(row => ({
+      id: row.id,
+      scheduleId: row.scheduleId,
+      templateId: row.templateId,
+      date: row.date,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      requiredStaff: row.requiredStaff,
+      assignedStaff: row.assignedStaff,
+      departmentId: row.departmentId,
+      assignments: [],
+      requiredSkills: [],
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+
+    return schedule;
+  }
+
+  async duplicateSchedule(id: number, newName: string, newStartDate: string, newEndDate: string, createdBy: number): Promise<number> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Get original schedule
+      const original = await this.getScheduleWithShifts(id);
+      if (!original) {
+        throw new Error('Schedule not found');
+      }
+
+      // Create new schedule
+      const scheduleQuery = `
+        INSERT INTO schedules (
+          name, start_date, end_date, department_id, created_by, status
+        ) VALUES (?, ?, ?, ?, ?, 'draft')
+      `;
+      
+      const [result] = await connection.execute<ResultSetHeader>(scheduleQuery, [
+        newName,
+        newStartDate,
+        newEndDate,
+        original.departmentId,
+        createdBy
+      ]);
+
+      const newScheduleId = result.insertId;
+
+      // Calculate date offset
+      const originalStart = new Date(original.startDate);
+      const newStart = new Date(newStartDate);
+      const dayOffset = Math.floor((newStart.getTime() - originalStart.getTime()) / (1000 * 60 * 60 * 24));
+
+      // Duplicate shifts
+      if (original.shifts?.length) {
+        for (const shift of original.shifts) {
+          const shiftDate = new Date(shift.date);
+          shiftDate.setDate(shiftDate.getDate() + dayOffset);
+          
+          const shiftQuery = `
+            INSERT INTO shifts (
+              schedule_id, template_id, shift_date, start_time, end_time, 
+              required_staff, department_id, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
+          `;
+          
+          const [shiftResult] = await connection.execute<ResultSetHeader>(shiftQuery, [
+            newScheduleId,
+            shift.templateId,
+            shiftDate.toISOString().split('T')[0],
+            shift.startTime,
+            shift.endTime,
+            shift.requiredStaff,
+            shift.departmentId
+          ]);
+
+          // Copy required skills
+          if (shift.requiredSkills?.length) {
+            for (const skillId of shift.requiredSkills) {
+              await connection.execute(
+                'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
+                [shiftResult.insertId, skillId]
+              );
+            }
+          }
+        }
+      }
+
+      await connection.commit();
+      return newScheduleId;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 }
-
-/**
- * Schedule Service Singleton Instance
- * 
- * Exports a singleton instance of the ScheduleService class for
- * consistent usage across the application.
- */
-export const scheduleService = new ScheduleService();
-export default scheduleService;

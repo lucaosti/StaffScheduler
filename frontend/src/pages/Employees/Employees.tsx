@@ -382,28 +382,220 @@ const Employees: React.FC = () => {
                 ></button>
               </div>
               <div className="modal-body">
-                <div className="text-center py-5">
-                  <i className="bi bi-tools text-muted" style={{ fontSize: '3rem' }}></i>
-                  <h5 className="mt-3">Employee Form</h5>
-                  <p className="text-muted">
-                    Employee creation/editing form will be implemented here
-                  </p>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => {
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.currentTarget);
+                  
+                  const employeeData = {
+                    employeeId: formData.get('employeeId') as string,
+                    firstName: formData.get('firstName') as string,
+                    lastName: formData.get('lastName') as string,
+                    email: formData.get('email') as string,
+                    phone: formData.get('phone') as string,
+                    department: formData.get('department') as string,
+                    position: formData.get('position') as string,
+                    employeeType: formData.get('employeeType') as 'full-time' | 'part-time' | 'contractor',
+                    hourlyRate: parseFloat(formData.get('hourlyRate') as string),
+                    maxHoursPerWeek: parseInt(formData.get('maxHoursPerWeek') as string),
+                    skills: (formData.get('skills') as string).split(',').map(s => s.trim()).filter(s => s.length > 0),
+                  };
+
+                  try {
+                    if (editingEmployee) {
+                      await employeeService.updateEmployee(editingEmployee.id!.toString(), employeeData);
+                    } else {
+                      await employeeService.createEmployee(employeeData);
+                    }
+                    await loadEmployees();
                     setShowAddModal(false);
                     setEditingEmployee(null);
-                  }}
-                >
-                  Cancel
-                </button>
-                <button type="button" className="btn btn-primary">
-                  {editingEmployee ? 'Update' : 'Create'} Employee
-                </button>
+                  } catch (err) {
+                    console.error('Save error:', err);
+                    alert('Failed to save employee');
+                  }
+                }}>
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="employeeId" className="form-label">Employee ID *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        id="employeeId"
+                        name="employeeId"
+                        defaultValue={editingEmployee?.employeeId || ''}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="email" className="form-label">Email *</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        id="email"
+                        name="email"
+                        defaultValue={editingEmployee?.email || ''}
+                        required
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="firstName" className="form-label">First Name *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        id="firstName"
+                        name="firstName"
+                        defaultValue={editingEmployee?.firstName || ''}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="lastName" className="form-label">Last Name *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        id="lastName"
+                        name="lastName"
+                        defaultValue={editingEmployee?.lastName || ''}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="phone" className="form-label">Phone</label>
+                      <input
+                        type="tel"
+                        className="form-control"
+                        id="phone"
+                        name="phone"
+                        defaultValue={editingEmployee?.phone || ''}
+                      />
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="department" className="form-label">Department *</label>
+                      <select
+                        className="form-select"
+                        id="department"
+                        name="department"
+                        defaultValue={editingEmployee?.department || ''}
+                        required
+                      >
+                        <option value="">Select Department</option>
+                        <option value="Emergency Medicine">Emergency Medicine</option>
+                        <option value="Intensive Care">Intensive Care</option>
+                        <option value="Surgery">Surgery</option>
+                        <option value="Cardiology">Cardiology</option>
+                        <option value="Oncology">Oncology</option>
+                        <option value="Pediatrics">Pediatrics</option>
+                        <option value="Nursing">Nursing</option>
+                        <option value="Radiology">Radiology</option>
+                        <option value="Laboratory">Laboratory</option>
+                        <option value="Administration">Administration</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="position" className="form-label">Position *</label>
+                      <select
+                        className="form-select"
+                        id="position"
+                        name="position"
+                        defaultValue={editingEmployee?.position || ''}
+                        required
+                      >
+                        <option value="">Select Position</option>
+                        <option value="Direttore Generale">Direttore Generale</option>
+                        <option value="Direttore Sanitario">Direttore Sanitario</option>
+                        <option value="Primario">Primario</option>
+                        <option value="Caposala">Caposala</option>
+                        <option value="Medico Strutturato">Medico Strutturato</option>
+                        <option value="Medico Specializzando">Medico Specializzando</option>
+                        <option value="Infermiere Coordinatore">Infermiere Coordinatore</option>
+                        <option value="Infermiere">Infermiere</option>
+                        <option value="OSS">OSS (Operatore Socio Sanitario)</option>
+                        <option value="Tecnico di Radiologia">Tecnico di Radiologia</option>
+                        <option value="Tecnico di Laboratorio">Tecnico di Laboratorio</option>
+                      </select>
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="employeeType" className="form-label">Employment Type *</label>
+                      <select
+                        className="form-select"
+                        id="employeeType"
+                        name="employeeType"
+                        defaultValue={editingEmployee?.employeeType || 'full-time'}
+                        required
+                      >
+                        <option value="full-time">Full Time</option>
+                        <option value="part-time">Part Time</option>
+                        <option value="contract">Contract</option>
+                        <option value="temporary">Temporary</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="hourlyRate" className="form-label">Hourly Rate (€)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="form-control"
+                        id="hourlyRate"
+                        name="hourlyRate"
+                        defaultValue={editingEmployee?.hourlyRate || ''}
+                      />
+                    </div>
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="maxHoursPerWeek" className="form-label">Max Hours Per Week</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="168"
+                        className="form-control"
+                        id="maxHoursPerWeek"
+                        name="maxHoursPerWeek"
+                        defaultValue={editingEmployee?.maxHoursPerWeek || 40}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="mb-3">
+                    <label htmlFor="skills" className="form-label">Skills (comma separated)</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      id="skills"
+                      name="skills"
+                      defaultValue={editingEmployee?.skills?.join(', ') || ''}
+                      placeholder="e.g. Patient Care, IV Therapy, Emergency Response"
+                    />
+                    <div className="form-text">Enter skills separated by commas</div>
+                  </div>
+
+                  <div className="modal-footer">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => {
+                        setShowAddModal(false);
+                        setEditingEmployee(null);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary">
+                      {editingEmployee ? 'Update' : 'Create'} Employee
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>

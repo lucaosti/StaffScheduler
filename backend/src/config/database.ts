@@ -46,7 +46,18 @@ class Database {
   }
 
   /**
-   * Get Database Connection
+   * Get Connection Pool
+   * 
+   * Returns the mysql connection pool for use in services.
+   * 
+   * @returns mysql.Pool - The connection pool instance
+   */
+  getPool(): mysql.Pool {
+    return this.pool;
+  }
+
+  /**
+   * Get Connection from Pool
    * 
    * Retrieves a connection from the pool for manual connection management.
    * Connection must be manually released after use.
@@ -55,9 +66,7 @@ class Database {
    */
   async getConnection(): Promise<mysql.PoolConnection> {
     return this.pool.getConnection();
-  }
-
-  /**
+  }  /**
    * Test Database Connection
    * 
    * Validates database connectivity by sending a ping command.

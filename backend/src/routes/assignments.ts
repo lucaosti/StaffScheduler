@@ -1,281 +1,360 @@
-/**
- * Assignment Routes
- * 
- * Handles all shift assignment operations including creation, approval,
- * rejection, and status management with comprehensive workflow support.
- * 
- * Features:
- * - Complete assignment lifecycle management
- * - Approval and rejection workflows
- * - Conflict detection and prevention
- * - Employee and shift filtering
- * - Status tracking and management
- * 
- * Security:
- * - Authentication required for all endpoints
- * - Role-based access control
- * - Input validation and sanitization
- * - Audit trail for all operations
- * 
- * @author Luca Ostinelli
- */
-
 import { Router, Request, Response } from 'express';
-import { assignmentService } from '../services/AssignmentService';
-import { authenticate } from '../middleware/auth';
+import { Pool } from 'mysql2/promise';
+import { AssignmentService } from '../services/AssignmentService';
+import { authenticate, requireRole } from '../middleware/auth';
 
-const router = Router();
+export const createAssignmentsRouter = (pool: Pool) => {
+  const router = Router();
+  const assignmentService = new AssignmentService(pool);
 
-/**
- * Get Assignments Endpoint
- * 
- * Retrieves assignments with filtering by employee, shift, or status.
- * Requires at least one filter parameter for performance optimization.
- * 
- * @route GET /api/assignments
- * @param {string} [employeeId] - Filter by employee ID
- * @param {string} [shiftId] - Filter by shift ID
- * @param {string} [status] - Filter by assignment status
- * @returns {Object} Filtered assignment list
- * 
- * @example
- * GET /api/assignments?employeeId=EMP001&status=approved
- * Returns: { success: true, data: [...], pagination: {...} }
- */
+// Get all assignments
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const employeeId = req.query.employeeId as string;
-    const shiftId = req.query.shiftId as string;
-    const status = req.query.status as string;
-
-    let assignments: any[] = [];
-
-    if (employeeId) {
-      assignments = await assignmentService.findByEmployee(employeeId, status);
-    } else if (shiftId) {
-      assignments = await assignmentService.findByShift(shiftId, status);
-    } else {
-      // Return empty array if no specific filter is provided
-      assignments = [];
-    }
-
-    res.json({
-      success: true,
-      data: assignments,
-      pagination: {
-        page: 1,
-        limit: assignments.length,
-        total: assignments.length,
-        pages: 1,
-        hasNext: false,
-        hasPrev: false
-      }
-    });
+    const assignments = await assignmentService.getAllAssignments();
+    res.json({ success: true, data: assignments });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: (error as Error).message
-      }
+    console.error('Error fetching assignments:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch assignments' }
     });
   }
 });
 
-/**
- * Get Assignment by ID Endpoint
- */
+// Get assignment by ID
 router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const assignmentId = req.params.id;
-    const assignment = await assignmentService.findById(assignmentId);
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
+      });
+    }
 
+    const assignment = await assignmentService.getAssignmentById(id);
     if (!assignment) {
-      return res.status(404).json({
-        success: false,
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Assignment not found'
-        }
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
       });
     }
 
-    res.json({
-      success: true,
-      data: assignment
-    });
+    res.json({ success: true, data: assignment });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: (error as Error).message
-      }
+    console.error('Error fetching assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch assignment' }
     });
   }
 });
 
-/**
- * Create New Assignment Endpoint
- */
-router.post('/', authenticate, async (req: Request, res: Response) => {
+// Create new assignment
+router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const { employeeId, shiftId, role } = req.body;
-
-    // Basic validation
-    if (!employeeId || !shiftId || !role) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Employee ID, shift ID, and role are required'
-        }
-      });
-    }
-
-    const assignment = await assignmentService.createAssignment(employeeId, shiftId, role, req.user?.id || 'system');
-
-    res.status(201).json({
-      success: true,
-      data: assignment
+    const assignmentId = await assignmentService.createAssignment(req.body);
+    const assignment = await assignmentService.getAssignmentById(assignmentId);
+    
+    res.status(201).json({ 
+      success: true, 
+      data: assignment,
+      message: 'Assignment created successfully'
     });
   } catch (error) {
-    const message = (error as Error).message;
-    let statusCode = 500;
-    
-    if (message.includes('not found')) statusCode = 404;
-    else if (message.includes('already assigned') || message.includes('conflict')) statusCode = 409;
-    
-    res.status(statusCode).json({
-      success: false,
-      error: {
-        code: statusCode === 404 ? 'NOT_FOUND' : statusCode === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
-        message
-      }
+    console.error('Error creating assignment:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Failed to create assignment';
+    res.status(500).json({ 
+      success: false, 
+      error: { message: errorMessage }
     });
   }
 });
 
-// Update assignment (can only cancel it)
-router.put('/:id', authenticate, async (req: Request, res: Response) => {
+// Update assignment
+router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const assignmentId = req.params.id;
-    const { action } = req.body;
-
-    if (action === 'cancel') {
-      await assignmentService.cancelAssignment(assignmentId);
-      
-      res.json({
-        success: true,
-        message: 'Assignment cancelled successfully'
-      });
-    } else {
-      res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Only cancel action is supported'
-        }
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
       });
     }
+
+    const success = await assignmentService.updateAssignment(id, req.body);
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
+      });
+    }
+
+    const assignment = await assignmentService.getAssignmentById(id);
+    res.json({ 
+      success: true, 
+      data: assignment,
+      message: 'Assignment updated successfully'
+    });
   } catch (error) {
-    const message = (error as Error).message;
-    const statusCode = message.includes('not found') ? 404 : 500;
-    
-    res.status(statusCode).json({
-      success: false,
-      error: {
-        code: statusCode === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
-        message
-      }
+    console.error('Error updating assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to update assignment' }
     });
   }
 });
 
 // Delete assignment
-router.delete('/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const assignmentId = req.params.id;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
+      });
+    }
 
-    await assignmentService.deleteAssignment(assignmentId);
+    const success = await assignmentService.deleteAssignment(id);
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
+      });
+    }
 
-    res.json({
-      success: true,
+    res.json({ 
+      success: true, 
       message: 'Assignment deleted successfully'
     });
   } catch (error) {
-    const message = (error as Error).message;
-    const statusCode = message.includes('not found') ? 404 : 500;
-    
-    res.status(statusCode).json({
-      success: false,
-      error: {
-        code: statusCode === 404 ? 'NOT_FOUND' : 'INTERNAL_ERROR',
-        message
-      }
+    console.error('Error deleting assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to delete assignment' }
     });
   }
 });
 
-// Approve assignment
-router.post('/:id/approve', authenticate, async (req: Request, res: Response) => {
+// Get assignments by user
+router.get('/user/:userId', authenticate, async (req: Request, res: Response) => {
   try {
-    const assignmentId = req.params.id;
-    const approvedBy = req.user?.id || 'system';
+    const userId = parseInt(req.params.userId);
+    if (isNaN(userId)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid user ID' }
+      });
+    }
 
-    const assignment = await assignmentService.approveAssignment(assignmentId, approvedBy);
+    const assignments = await assignmentService.getAssignmentsByUser(userId);
+    res.json({ success: true, data: assignments });
+  } catch (error) {
+    console.error('Error fetching assignments by user:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch assignments by user' }
+    });
+  }
+});
 
-    res.json({
-      success: true,
-      data: assignment,
-      message: 'Assignment approved successfully'
+// Get assignments by shift
+router.get('/shift/:shiftId', authenticate, async (req: Request, res: Response) => {
+  try {
+    const shiftId = parseInt(req.params.shiftId);
+    if (isNaN(shiftId)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid shift ID' }
+      });
+    }
+
+    const assignments = await assignmentService.getAssignmentsByShift(shiftId);
+    res.json({ success: true, data: assignments });
+  } catch (error) {
+    console.error('Error fetching assignments by shift:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch assignments by shift' }
+    });
+  }
+});
+
+// Get assignments by department
+router.get('/department/:departmentId', authenticate, async (req: Request, res: Response) => {
+  try {
+    const departmentId = parseInt(req.params.departmentId);
+    if (isNaN(departmentId)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid department ID' }
+      });
+    }
+
+    const { startDate, endDate } = req.query;
+    const assignments = await assignmentService.getAssignmentsByDepartment(
+      departmentId, 
+      startDate as string, 
+      endDate as string
+    );
+    res.json({ success: true, data: assignments });
+  } catch (error) {
+    console.error('Error fetching assignments by department:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch assignments by department' }
+    });
+  }
+});
+
+// Bulk create assignments
+router.post('/bulk', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+  try {
+    const { assignments } = req.body;
+    if (!Array.isArray(assignments)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Assignments must be an array' }
+      });
+    }
+
+    const assignmentIds = await assignmentService.bulkCreateAssignments(assignments);
+    
+    res.status(201).json({ 
+      success: true, 
+      data: { assignmentIds, count: assignmentIds.length },
+      message: `${assignmentIds.length} assignments created successfully`
     });
   } catch (error) {
-    const message = (error as Error).message;
-    let statusCode = 500;
-    
-    if (message.includes('not found')) statusCode = 404;
-    else if (message.includes('cannot approve')) statusCode = 409;
-    
-    res.status(statusCode).json({
-      success: false,
-      error: {
-        code: statusCode === 404 ? 'NOT_FOUND' : statusCode === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
-        message
-      }
+    console.error('Error bulk creating assignments:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to bulk create assignments' }
     });
   }
 });
 
-// Reject assignment
-router.post('/:id/reject', authenticate, async (req: Request, res: Response) => {
+// Confirm assignment
+router.patch('/:id/confirm', authenticate, async (req: Request, res: Response) => {
   try {
-    const assignmentId = req.params.id;
-    const rejectedBy = req.user?.id || 'system';
-    const reason = req.body.reason;
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
+      });
+    }
 
-    const assignment = await assignmentService.rejectAssignment(assignmentId, rejectedBy, reason);
+    const success = await assignmentService.confirmAssignment(id);
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
+      });
+    }
 
-    res.json({
-      success: true,
-      data: assignment,
-      message: 'Assignment rejected successfully'
+    res.json({ 
+      success: true, 
+      message: 'Assignment confirmed successfully'
     });
   } catch (error) {
-    const message = (error as Error).message;
-    let statusCode = 500;
-    
-    if (message.includes('not found')) statusCode = 404;
-    else if (message.includes('cannot reject')) statusCode = 409;
-    
-    res.status(statusCode).json({
-      success: false,
-      error: {
-        code: statusCode === 404 ? 'NOT_FOUND' : statusCode === 409 ? 'CONFLICT' : 'INTERNAL_ERROR',
-        message
-      }
+    console.error('Error confirming assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to confirm assignment' }
     });
   }
 });
 
-export default router;
+// Decline assignment
+router.patch('/:id/decline', authenticate, async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
+      });
+    }
+
+    const { notes } = req.body;
+    const success = await assignmentService.declineAssignment(id, notes);
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Assignment declined successfully'
+    });
+  } catch (error) {
+    console.error('Error declining assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to decline assignment' }
+    });
+  }
+});
+
+// Complete assignment
+router.patch('/:id/complete', authenticate, async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid assignment ID' }
+      });
+    }
+
+    const success = await assignmentService.completeAssignment(id);
+    if (!success) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Assignment not found' }
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Assignment completed successfully'
+    });
+  } catch (error) {
+    console.error('Error completing assignment:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to complete assignment' }
+    });
+  }
+});
+
+// Get available employees for shift
+router.get('/shift/:shiftId/available-employees', authenticate, async (req: Request, res: Response) => {
+  try {
+    const shiftId = parseInt(req.params.shiftId);
+    if (isNaN(shiftId)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid shift ID' }
+      });
+    }
+
+    const employees = await assignmentService.getAvailableEmployeesForShift(shiftId);
+    res.json({ success: true, data: employees });
+  } catch (error) {
+    console.error('Error fetching available employees:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to fetch available employees' }
+    });
+  }
+});
+
+  return router;
+};
+
+export default createAssignmentsRouter;

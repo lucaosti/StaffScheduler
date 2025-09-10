@@ -1,508 +1,412 @@
-/**
- * Assignment Service
- * 
- * Handles all business logic related to shift assignments including
- * creation, approval, conflict detection, and status management.
- * 
- * Features:
- * - Comprehensive assignment lifecycle management
- * - Advanced conflict detection and resolution
- * - Multi-status workflow support
- * - Employee availability validation
- * - Assignment history tracking
- * - Approval workflow management
- * 
- * Business Rules:
- * - Prevents double assignments
- * - Validates time conflicts
- * - Enforces approval workflows
- * - Maintains assignment integrity
- * - Supports bulk operations
- * 
- * @author Luca Ostinelli
- */
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { Assignment, CreateAssignmentRequest, UpdateAssignmentRequest } from '../types';
 
-import { database } from '../config/database';
-import { Assignment } from '../types';
-import { logger } from '../config/logger';
-import { v4 as uuidv4 } from 'uuid';
-
-/**
- * Assignment Service Class
- * 
- * Provides comprehensive shift assignment management functionality with
- * conflict detection, approval workflows, and business rule validation.
- */
 export class AssignmentService {
-  
-  /**
-   * Create New Assignment
-   * 
-   * Creates a new shift assignment with comprehensive validation.
-   * Prevents conflicts and ensures business rule compliance.
-   * 
-   * @param employeeId - Unique employee identifier
-   * @param shiftId - Unique shift identifier
-   * @param role - Role for the assignment (e.g., "charge nurse", "staff nurse")
-   * @param assignedBy - User ID of the assigner for audit purposes
-   * @returns Promise<Assignment> - Created assignment object
-   * 
-   * @throws {Error} When employee already assigned to shift
-   * @throws {Error} When time conflicts exist
-   * @throws {Error} When validation fails
-   * 
-   * @example
-   * const assignment = await assignmentService.createAssignment(
-   *   "EMP001", 
-   *   "shift-123", 
-   *   "staff nurse", 
-   *   "manager123"
-   * );
-   * console.log(`Assignment created: ${assignment.id}`);
-   */
-  async createAssignment(employeeId: string, shiftId: string, role: string, assignedBy: string): Promise<Assignment> {
-    // Check if assignment already exists
-    const existingAssignment = await this.findByEmployeeAndShift(employeeId, shiftId);
-    if (existingAssignment) {
-      throw new Error('Employee is already assigned to this shift');
-    }
+  constructor(private pool: Pool) {}
 
-    // Check for shift conflicts
-    const conflictingShifts = await this.getConflictingShifts(employeeId, shiftId);
-    if (conflictingShifts.length > 0) {
-      throw new Error('Employee has conflicting shift assignments');
-    }
-
-    const assignmentId = uuidv4();
-
+  async getAllAssignments(): Promise<Assignment[]> {
     const query = `
-      INSERT INTO shift_assignments (
-        id, employee_id, shift_id, role, status, assigned_at, assigned_by
-      ) VALUES (?, ?, ?, ?, 'pending', NOW(), ?)
+      SELECT 
+        a.assignment_id as id,
+        a.shift_id as shiftId,
+        a.user_id as userId,
+        a.status,
+        a.notes,
+        a.created_at as createdAt,
+        a.updated_at as updatedAt,
+        u.first_name,
+        u.last_name,
+        u.email,
+        s.shift_date,
+        s.start_time,
+        s.end_time,
+        d.name as departmentName
+      FROM assignments a
+      LEFT JOIN users u ON a.user_id = u.user_id
+      LEFT JOIN shifts s ON a.shift_id = s.shift_id
+      LEFT JOIN departments d ON s.department_id = d.department_id
+      ORDER BY s.shift_date, s.start_time, u.last_name
     `;
-
-    await database.query(query, [
-      assignmentId,
-      employeeId,
-      shiftId,
-      role,
-      assignedBy
-    ]);
-
-    const assignment = await this.findById(assignmentId);
-    if (!assignment) {
-      throw new Error('Failed to create assignment');
-    }
-
-    logger.info(`Assignment created: ${employeeId} -> ${shiftId}`, { assignmentId, role });
-    return assignment;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query);
+    return rows.map(row => ({
+      id: row.id,
+      shiftId: row.shiftId,
+      userId: row.userId,
+      status: row.status,
+      notes: row.notes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
   }
 
-  /**
-   * Approve Assignment
-   * 
-   * Approves a pending assignment, changing status to approved.
-   * Records approval details and optional notes for audit trail.
-   * 
-   * @param assignmentId - Unique assignment identifier
-   * @param approvedBy - User ID of the approver
-   * @param notes - Optional approval notes
-   * @returns Promise<Assignment> - Updated assignment object
-   * 
-   * @throws {Error} When assignment not found
-   * @throws {Error} When assignment not pending
-   * 
-   * @example
-   * const approved = await assignmentService.approveAssignment(
-   *   "assignment-123", 
-   *   "supervisor456", 
-   *   "Approved for overtime coverage"
-   * );
-   * console.log(`Assignment approved: ${approved.id}`);
-   */
-  async approveAssignment(assignmentId: string, approvedBy: string, notes?: string): Promise<Assignment> {
-    const existingAssignment = await this.findById(assignmentId);
-    if (!existingAssignment) {
-      throw new Error('Assignment not found');
-    }
-
-    if (existingAssignment.status !== 'pending') {
-      throw new Error('Assignment is not pending approval');
-    }
-
+  async getAssignmentById(id: number): Promise<Assignment | null> {
     const query = `
-      UPDATE shift_assignments 
-      SET status = 'approved', approved_by = ?, approved_at = NOW(), notes = ?
-      WHERE id = ?
+      SELECT 
+        a.assignment_id as id,
+        a.shift_id as shiftId,
+        a.user_id as userId,
+        a.status,
+        a.notes,
+        a.created_at as createdAt,
+        a.updated_at as updatedAt,
+        u.first_name,
+        u.last_name,
+        u.email,
+        s.shift_date,
+        s.start_time,
+        s.end_time
+      FROM assignments a
+      LEFT JOIN users u ON a.user_id = u.user_id
+      LEFT JOIN shifts s ON a.shift_id = s.shift_id
+      WHERE a.assignment_id = ?
     `;
-
-    await database.query(query, [approvedBy, notes, assignmentId]);
-
-    const updatedAssignment = await this.findById(assignmentId);
-    if (!updatedAssignment) {
-      throw new Error('Failed to approve assignment');
-    }
-
-    logger.info(`Assignment approved: ${assignmentId}`, { approvedBy });
-    return updatedAssignment;
-  }
-
-  /**
-   * Reject Assignment
-   * 
-   * Rejects a pending assignment, changing status to rejected.
-   * Records rejection details and mandatory reason for audit trail.
-   * 
-   * @param assignmentId - Unique assignment identifier
-   * @param rejectedBy - User ID of the rejector
-   * @param reason - Mandatory rejection reason
-   * @returns Promise<Assignment> - Updated assignment object
-   * 
-   * @throws {Error} When assignment not found
-   * @throws {Error} When assignment not pending
-   * 
-   * @example
-   * const rejected = await assignmentService.rejectAssignment(
-   *   "assignment-123", 
-   *   "supervisor456", 
-   *   "Employee unavailable due to vacation"
-   * );
-   * console.log(`Assignment rejected: ${rejected.id}`);
-   */
-  async rejectAssignment(assignmentId: string, rejectedBy: string, reason: string): Promise<Assignment> {
-    const existingAssignment = await this.findById(assignmentId);
-    if (!existingAssignment) {
-      throw new Error('Assignment not found');
-    }
-
-    if (existingAssignment.status !== 'pending') {
-      throw new Error('Assignment is not pending approval');
-    }
-
-    const query = `
-      UPDATE shift_assignments 
-      SET status = 'rejected', approved_by = ?, approved_at = NOW(), rejected_reason = ?
-      WHERE id = ?
-    `;
-
-    await database.query(query, [rejectedBy, reason, assignmentId]);
-
-    const updatedAssignment = await this.findById(assignmentId);
-    if (!updatedAssignment) {
-      throw new Error('Failed to reject assignment');
-    }
-
-    logger.info(`Assignment rejected: ${assignmentId}`, { rejectedBy, reason });
-    return updatedAssignment;
-  }
-
-  /**
-   * Cancel Assignment
-   * 
-   * Cancels an existing assignment by updating its status to cancelled.
-   * Can be used for assignments that are no longer needed.
-   * 
-   * @param assignmentId - Unique assignment identifier
-   * @returns Promise<void>
-   * 
-   * @throws {Error} When assignment not found
-   * 
-   * @example
-   * await assignmentService.cancelAssignment("assignment-123");
-   * console.log("Assignment cancelled successfully");
-   */
-  async cancelAssignment(assignmentId: string): Promise<void> {
-    const existingAssignment = await this.findById(assignmentId);
-    if (!existingAssignment) {
-      throw new Error('Assignment not found');
-    }
-
-    const query = `
-      UPDATE shift_assignments 
-      SET status = 'cancelled'
-      WHERE id = ?
-    `;
-
-    await database.query(query, [assignmentId]);
-
-    logger.info(`Assignment cancelled: ${assignmentId}`);
-  }
-
-  /**
-   * Delete Assignment
-   * 
-   * Permanently removes an assignment from the system.
-   * Use with caution as this action cannot be undone.
-   * 
-   * @param assignmentId - Unique assignment identifier
-   * @returns Promise<void>
-   * 
-   * @throws {Error} When assignment not found
-   * 
-   * @example
-   * await assignmentService.deleteAssignment("assignment-123");
-   * console.log("Assignment permanently deleted");
-   */
-  async deleteAssignment(assignmentId: string): Promise<void> {
-    const existingAssignment = await this.findById(assignmentId);
-    if (!existingAssignment) {
-      throw new Error('Assignment not found');
-    }
-
-    const query = 'DELETE FROM shift_assignments WHERE id = ?';
-    await database.query(query, [assignmentId]);
-
-    logger.info(`Assignment deleted: ${assignmentId}`);
-  }
-
-  /**
-   * Find Assignment by ID
-   * 
-   * Retrieves detailed assignment information by unique identifier.
-   * Includes employee and shift details through JOIN operations.
-   * 
-   * @param assignmentId - Unique assignment identifier
-   * @returns Promise<Assignment | null> - Assignment object or null if not found
-   * 
-   * @example
-   * const assignment = await assignmentService.findById("assignment-123");
-   * if (assignment) {
-   *   console.log(`Assignment: ${assignment.employeeName} -> ${assignment.shiftName}`);
-   * }
-   */
-  async findById(assignmentId: string): Promise<Assignment | null> {
-    const query = `
-      SELECT sa.*, 
-             e.first_name as employee_first_name, 
-             e.last_name as employee_last_name,
-             s.name as shift_name,
-             s.date as shift_date,
-             s.start_time,
-             s.end_time,
-             u.first_name as approved_by_first_name,
-             u.last_name as approved_by_last_name
-      FROM shift_assignments sa
-      JOIN employees e ON sa.employee_id = e.employee_id
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN users u ON sa.approved_by = u.id
-      WHERE sa.id = ?
-    `;
-
-    const results = await database.query(query, [assignmentId]);
-    const rows = results as any[];
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    return this.mapRowToAssignment(rows[0]);
-  }
-
-  /**
-   * Find Assignment by Employee and Shift
-   * 
-   * Retrieves assignment for a specific employee and shift combination.
-   * Used to check for existing assignments and prevent duplicates.
-   * 
-   * @param employeeId - Unique employee identifier
-   * @param shiftId - Unique shift identifier
-   * @returns Promise<Assignment | null> - Assignment object or null if not found
-   * 
-   * @example
-   * const existing = await assignmentService.findByEmployeeAndShift("EMP001", "shift-123");
-   * if (existing) {
-   *   console.log("Employee already assigned to this shift");
-   * }
-   */
-  async findByEmployeeAndShift(employeeId: string, shiftId: string): Promise<Assignment | null> {
-    const query = `
-      SELECT sa.*, 
-             e.first_name as employee_first_name, 
-             e.last_name as employee_last_name,
-             s.name as shift_name,
-             s.date as shift_date,
-             s.start_time,
-             s.end_time,
-             u.first_name as approved_by_first_name,
-             u.last_name as approved_by_last_name
-      FROM shift_assignments sa
-      JOIN employees e ON sa.employee_id = e.employee_id
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN users u ON sa.approved_by = u.id
-      WHERE sa.employee_id = ? AND sa.shift_id = ?
-    `;
-
-    const results = await database.query(query, [employeeId, shiftId]);
-    const rows = results as any[];
-
-    if (rows.length === 0) {
-      return null;
-    }
-
-    return this.mapRowToAssignment(rows[0]);
-  }
-
-  /**
-   * Find Assignments by Employee
-   * 
-   * Retrieves all assignments for a specific employee.
-   * Optionally filters by assignment status.
-   * 
-   * @param employeeId - Unique employee identifier
-   * @param status - Optional status filter
-   * @returns Promise<Assignment[]> - Array of assignment objects
-   * 
-   * @example
-   * const assignments = await assignmentService.findByEmployee("EMP001", "approved");
-   * console.log(`Employee has ${assignments.length} approved assignments`);
-   */
-  async findByEmployee(employeeId: string, status?: string): Promise<Assignment[]> {
-    let query = `
-      SELECT sa.*, 
-             e.first_name as employee_first_name, 
-             e.last_name as employee_last_name,
-             s.name as shift_name,
-             s.date as shift_date,
-             s.start_time,
-             s.end_time,
-             u.first_name as approved_by_first_name,
-             u.last_name as approved_by_last_name
-      FROM shift_assignments sa
-      JOIN employees e ON sa.employee_id = e.employee_id
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN users u ON sa.approved_by = u.id
-      WHERE sa.employee_id = ?
-    `;
-
-    const params = [employeeId];
-
-    if (status) {
-      query += ' AND sa.status = ?';
-      params.push(status);
-    }
-
-    query += ' ORDER BY s.date DESC, s.start_time DESC';
-
-    const results = await database.query(query, params);
-    return (results as any[]).map(row => this.mapRowToAssignment(row));
-  }
-
-  /**
-   * Find Assignments by Shift
-   * 
-   * Retrieves all assignments for a specific shift.
-   * Optionally filters by assignment status.
-   * 
-   * @param shiftId - Unique shift identifier
-   * @param status - Optional status filter
-   * @returns Promise<Assignment[]> - Array of assignment objects
-   * 
-   * @example
-   * const assignments = await assignmentService.findByShift("shift-123", "approved");
-   * console.log(`Shift has ${assignments.length} approved assignments`);
-   */
-  async findByShift(shiftId: string, status?: string): Promise<Assignment[]> {
-    let query = `
-      SELECT sa.*, 
-             e.first_name as employee_first_name, 
-             e.last_name as employee_last_name,
-             s.name as shift_name,
-             s.date as shift_date,
-             s.start_time,
-             s.end_time,
-             u.first_name as approved_by_first_name,
-             u.last_name as approved_by_last_name
-      FROM shift_assignments sa
-      JOIN employees e ON sa.employee_id = e.employee_id
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN users u ON sa.approved_by = u.id
-      WHERE sa.shift_id = ?
-    `;
-
-    const params = [shiftId];
-
-    if (status) {
-      query += ' AND sa.status = ?';
-      params.push(status);
-    }
-
-    query += ' ORDER BY sa.assigned_at ASC';
-
-    const results = await database.query(query, params);
-    return (results as any[]).map(row => this.mapRowToAssignment(row));
-  }
-
-  /**
-   * Get Conflicting Shifts
-   * 
-   * Identifies shifts that conflict with a target shift for a specific employee.
-   * Checks for time overlaps on the same date to prevent double booking.
-   * 
-   * @param employeeId - Unique employee identifier
-   * @param shiftId - Target shift to check conflicts against
-   * @returns Promise<any[]> - Array of conflicting shift assignments
-   * 
-   * @private
-   * @internal
-   * 
-   * @example
-   * const conflicts = await this.getConflictingShifts("EMP001", "shift-123");
-   * if (conflicts.length > 0) {
-   *   throw new Error("Employee has conflicting assignments");
-   * }
-   */
-  private async getConflictingShifts(employeeId: string, shiftId: string): Promise<any[]> {
-    const query = `
-      SELECT sa.*, s.date, s.start_time, s.end_time
-      FROM shift_assignments sa
-      JOIN shifts s ON sa.shift_id = s.id
-      JOIN shifts target_shift ON target_shift.id = ?
-      WHERE sa.employee_id = ? 
-      AND sa.status IN ('pending', 'approved')
-      AND s.date = target_shift.date
-      AND (
-        (s.start_time <= target_shift.start_time AND s.end_time > target_shift.start_time)
-        OR (s.start_time < target_shift.end_time AND s.end_time >= target_shift.end_time)
-        OR (s.start_time >= target_shift.start_time AND s.end_time <= target_shift.end_time)
-      )
-    `;
-
-    const results = await database.query(query, [shiftId, employeeId]);
-    return results as any[];
-  }
-
-  /**
-   * Map Database Row to Assignment Object
-   * 
-   * Transforms raw database row data into properly typed Assignment objects.
-   * Handles complex joins and builds readable names from related entities.
-   * 
-   * @param row - Raw database row data
-   * @returns Assignment - Properly typed and formatted assignment object
-   * 
-   * @private
-   * @internal
-   */
-  private mapRowToAssignment(row: any): Assignment {
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [id]);
+    if (rows.length === 0) return null;
+    
+    const row = rows[0];
     return {
       id: row.id,
-      employeeId: row.employee_id,
-      shiftId: row.shift_id,
-      role: row.role,
+      shiftId: row.shiftId,
+      userId: row.userId,
       status: row.status,
-      assignedAt: row.assigned_at,
-      approvedBy: row.approved_by,
-      approvedAt: row.approved_at,
-      rejectedReason: row.rejected_reason,
-      notes: row.notes
+      notes: row.notes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
     };
   }
-}
 
-/**
- * Assignment Service Singleton Instance
- * 
- * Exports a singleton instance of the AssignmentService class for
- * consistent usage across the application.
- */
-export const assignmentService = new AssignmentService();
+  async createAssignment(assignmentData: CreateAssignmentRequest): Promise<number> {
+    // Check if user is already assigned to this shift
+    const [existingRows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT assignment_id FROM assignments WHERE shift_id = ? AND user_id = ?',
+      [assignmentData.shiftId, assignmentData.userId]
+    );
+    
+    if (existingRows.length > 0) {
+      throw new Error('User is already assigned to this shift');
+    }
+
+    // Check if shift is already full
+    const [shiftRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT s.required_staff, COUNT(a.assignment_id) as current_assignments
+       FROM shifts s
+       LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+       WHERE s.shift_id = ?
+       GROUP BY s.shift_id`,
+      [assignmentData.shiftId]
+    );
+    
+    if (shiftRows.length > 0) {
+      const shift = shiftRows[0];
+      if (shift.current_assignments >= shift.required_staff) {
+        throw new Error('Shift is already fully staffed');
+      }
+    }
+
+    const query = `
+      INSERT INTO assignments (shift_id, user_id, status, notes)
+      VALUES (?, ?, 'scheduled', ?)
+    `;
+    
+    const [result] = await this.pool.execute<ResultSetHeader>(query, [
+      assignmentData.shiftId,
+      assignmentData.userId,
+      assignmentData.notes || null
+    ]);
+    
+    // Update shift status based on staffing level
+    await this.updateShiftStatus(assignmentData.shiftId);
+    
+    return result.insertId;
+  }
+
+  async updateAssignment(id: number, assignmentData: UpdateAssignmentRequest): Promise<boolean> {
+    const updates: string[] = [];
+    const values: any[] = [];
+    
+    if (assignmentData.status !== undefined) {
+      updates.push('status = ?');
+      values.push(assignmentData.status);
+    }
+    if (assignmentData.notes !== undefined) {
+      updates.push('notes = ?');
+      values.push(assignmentData.notes);
+    }
+    
+    if (updates.length === 0) return false;
+    
+    values.push(id);
+    const query = `UPDATE assignments SET ${updates.join(', ')} WHERE assignment_id = ?`;
+    
+    const [result] = await this.pool.execute<ResultSetHeader>(query, values);
+    
+    if (result.affectedRows > 0) {
+      // Get shift ID to update status
+      const [assignmentRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT shift_id FROM assignments WHERE assignment_id = ?',
+        [id]
+      );
+      
+      if (assignmentRows.length > 0) {
+        await this.updateShiftStatus(assignmentRows[0].shift_id);
+      }
+    }
+    
+    return result.affectedRows > 0;
+  }
+
+  async deleteAssignment(id: number): Promise<boolean> {
+    // Get shift ID before deleting
+    const [assignmentRows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT shift_id FROM assignments WHERE assignment_id = ?',
+      [id]
+    );
+    
+    const query = 'DELETE FROM assignments WHERE assignment_id = ?';
+    const [result] = await this.pool.execute<ResultSetHeader>(query, [id]);
+    
+    if (result.affectedRows > 0 && assignmentRows.length > 0) {
+      await this.updateShiftStatus(assignmentRows[0].shift_id);
+    }
+    
+    return result.affectedRows > 0;
+  }
+
+  async getAssignmentsByUser(userId: number): Promise<Assignment[]> {
+    const query = `
+      SELECT 
+        a.assignment_id as id,
+        a.shift_id as shiftId,
+        a.user_id as userId,
+        a.status,
+        a.notes,
+        a.created_at as createdAt,
+        a.updated_at as updatedAt,
+        s.shift_date,
+        s.start_time,
+        s.end_time,
+        d.name as departmentName
+      FROM assignments a
+      LEFT JOIN shifts s ON a.shift_id = s.shift_id
+      LEFT JOIN departments d ON s.department_id = d.department_id
+      WHERE a.user_id = ?
+      ORDER BY s.shift_date, s.start_time
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [userId]);
+    return rows.map(row => ({
+      id: row.id,
+      shiftId: row.shiftId,
+      userId: row.userId,
+      status: row.status,
+      notes: row.notes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async getAssignmentsByShift(shiftId: number): Promise<Assignment[]> {
+    const query = `
+      SELECT 
+        a.assignment_id as id,
+        a.shift_id as shiftId,
+        a.user_id as userId,
+        a.status,
+        a.notes,
+        a.created_at as createdAt,
+        a.updated_at as updatedAt,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.role
+      FROM assignments a
+      LEFT JOIN users u ON a.user_id = u.user_id
+      WHERE a.shift_id = ?
+      ORDER BY u.last_name, u.first_name
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [shiftId]);
+    return rows.map(row => ({
+      id: row.id,
+      shiftId: row.shiftId,
+      userId: row.userId,
+      status: row.status,
+      notes: row.notes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async getAssignmentsByDepartment(departmentId: number, startDate?: string, endDate?: string): Promise<Assignment[]> {
+    let query = `
+      SELECT 
+        a.assignment_id as id,
+        a.shift_id as shiftId,
+        a.user_id as userId,
+        a.status,
+        a.notes,
+        a.created_at as createdAt,
+        a.updated_at as updatedAt,
+        u.first_name,
+        u.last_name,
+        u.email,
+        s.shift_date,
+        s.start_time,
+        s.end_time
+      FROM assignments a
+      LEFT JOIN users u ON a.user_id = u.user_id
+      LEFT JOIN shifts s ON a.shift_id = s.shift_id
+      WHERE s.department_id = ?
+    `;
+    
+    const params: any[] = [departmentId];
+    
+    if (startDate) {
+      query += ' AND s.shift_date >= ?';
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ' AND s.shift_date <= ?';
+      params.push(endDate);
+    }
+    
+    query += ' ORDER BY s.shift_date, s.start_time, u.last_name';
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+    return rows.map(row => ({
+      id: row.id,
+      shiftId: row.shiftId,
+      userId: row.userId,
+      status: row.status,
+      notes: row.notes,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt
+    }));
+  }
+
+  async bulkCreateAssignments(assignments: CreateAssignmentRequest[]): Promise<number[]> {
+    const connection = await this.pool.getConnection();
+    const results: number[] = [];
+    
+    try {
+      await connection.beginTransaction();
+      
+      for (const assignmentData of assignments) {
+        // Check if user is already assigned to this shift
+        const [existingRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT assignment_id FROM assignments WHERE shift_id = ? AND user_id = ?',
+          [assignmentData.shiftId, assignmentData.userId]
+        );
+        
+        if (existingRows.length > 0) {
+          continue; // Skip if already assigned
+        }
+
+        const query = `
+          INSERT INTO assignments (shift_id, user_id, status, notes)
+          VALUES (?, ?, 'scheduled', ?)
+        `;
+        
+        const [result] = await connection.execute<ResultSetHeader>(query, [
+          assignmentData.shiftId,
+          assignmentData.userId,
+          assignmentData.notes || null
+        ]);
+        
+        results.push(result.insertId);
+        
+        // Update shift status
+        await this.updateShiftStatus(assignmentData.shiftId);
+      }
+      
+      await connection.commit();
+      return results;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async confirmAssignment(id: number): Promise<boolean> {
+    return this.updateAssignment(id, { status: 'confirmed' });
+  }
+
+  async declineAssignment(id: number, notes?: string): Promise<boolean> {
+    return this.updateAssignment(id, { status: 'declined', notes });
+  }
+
+  async completeAssignment(id: number): Promise<boolean> {
+    return this.updateAssignment(id, { status: 'completed' });
+  }
+
+  private async updateShiftStatus(shiftId: number): Promise<void> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT s.required_staff, COUNT(a.assignment_id) as current_assignments
+       FROM shifts s
+       LEFT JOIN assignments a ON s.shift_id = a.shift_id AND a.status IN ('scheduled', 'confirmed')
+       WHERE s.shift_id = ?
+       GROUP BY s.shift_id`,
+      [shiftId]
+    );
+    
+    if (rows.length > 0) {
+      const shift = rows[0];
+      let status = 'open';
+      
+      if (shift.current_assignments === shift.required_staff) {
+        status = 'filled';
+      } else if (shift.current_assignments > shift.required_staff) {
+        status = 'overstaffed';
+      }
+      
+      await this.pool.execute(
+        'UPDATE shifts SET status = ? WHERE shift_id = ?',
+        [status, shiftId]
+      );
+    }
+  }
+
+  async getAvailableEmployeesForShift(shiftId: number): Promise<any[]> {
+    const query = `
+      SELECT 
+        u.user_id as id,
+        u.first_name as firstName,
+        u.last_name as lastName,
+        u.email,
+        u.role,
+        e.employee_number as employeeId
+      FROM users u
+      LEFT JOIN employees e ON u.user_id = e.user_id
+      WHERE u.role IN ('employee', 'department_manager', 'manager') 
+      AND u.is_active = 1
+      AND u.user_id NOT IN (
+        SELECT a.user_id 
+        FROM assignments a 
+        WHERE a.shift_id = ?
+      )
+      AND u.user_id NOT IN (
+        -- Check for conflicts with other shifts on the same day
+        SELECT a2.user_id
+        FROM assignments a2
+        INNER JOIN shifts s2 ON a2.shift_id = s2.shift_id
+        INNER JOIN shifts s1 ON s1.shift_id = ?
+        WHERE s2.shift_date = s1.shift_date
+        AND a2.status IN ('scheduled', 'confirmed')
+        AND (
+          (s2.start_time <= s1.start_time AND s2.end_time > s1.start_time) OR
+          (s2.start_time < s1.end_time AND s2.end_time >= s1.end_time) OR
+          (s2.start_time >= s1.start_time AND s2.end_time <= s1.end_time)
+        )
+      )
+      ORDER BY u.last_name, u.first_name
+    `;
+    
+    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [shiftId, shiftId]);
+    return rows;
+  }
+}
