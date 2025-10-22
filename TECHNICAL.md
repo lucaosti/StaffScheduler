@@ -1,1660 +1,3317 @@
-# Staff Scheduler - Complete Technical Documentation
+# TECHNICAL REFERENCE - Staff Scheduler# Staff Scheduler - Complete Technical Documentation
 
-> **Enterprise-Grade Workforce Management System**  
+
+
+> **Complete technical specification for Staff Scheduler platform. This document contains API documentation, database schema, optimization algorithms, deployment procedures, and system architecture details.**> **Enterprise-Grade Workforce Management System**  
+
 > Advanced scheduling optimization with constraint programming and hierarchical organization support
 
----
+**Table of Contents:**
 
-## Table of Contents
+1. [API Reference](#api-reference)---
 
-1. [System Overview](#system-overview)
-2. [Architecture & Technology Stack](#architecture--technology-stack)
-3. [Installation & Setup](#installation--setup)
-4. [Database Schema](#database-schema)
-5. [Backend API Documentation](#backend-api-documentation)
-6. [Frontend Application](#frontend-application)
+2. [Database Schema](#database-schema)
+
+3. [Authentication & Authorization](#authentication--authorization)## Table of Contents
+
+4. [Optimization Engine](#optimization-engine)
+
+5. [System Architecture](#system-architecture)1. [System Overview](#system-overview)
+
+6. [Performance & Scalability](#performance--scalability)2. [Architecture & Technology Stack](#architecture--technology-stack)
+
+7. [Configuration Reference](#configuration-reference)3. [Installation & Setup](#installation--setup)
+
+8. [Deployment Guide](#deployment-guide)4. [Database Schema](#database-schema)
+
+9. [Maintenance & Monitoring](#maintenance--monitoring)5. [Backend API Documentation](#backend-api-documentation)
+
+10. [Troubleshooting](#troubleshooting)6. [Frontend Application](#frontend-application)
+
 7. [Optimization Engine](#optimization-engine)
-8. [Security & Authentication](#security--authentication)
+
+---8. [Security & Authentication](#security--authentication)
+
 9. [Configuration Management](#configuration-management)
-10. [Development Workflow](#development-workflow)
+
+## API REFERENCE10. [Development Workflow](#development-workflow)
+
 11. [Production Deployment](#production-deployment)
-12. [Performance & Scaling](#performance--scaling)
-13. [Troubleshooting & Maintenance](#troubleshooting--maintenance)
+
+### Base URL12. [Performance & Scaling](#performance--scaling)
+
+```13. [Troubleshooting & Maintenance](#troubleshooting--maintenance)
+
+http://localhost:3001/api
+
+```---
+
+
+
+### Authentication## System Overview
+
+All endpoints except `/auth/login` require JWT token:
+
+```Staff Scheduler is a comprehensive workforce management platform designed for enterprise environments that require sophisticated scheduling optimization, multi-level organizational hierarchies, and complex constraint management.
+
+Authorization: Bearer {jwt_token}
+
+```### Core Features
+
+
+
+### Response Format (Standard)**🎯 Advanced Scheduling Optimization**
+
+```json- Constraint programming algorithms for optimal assignments
+
+{- Multi-objective optimization (cost, coverage, fairness, preferences)
+
+  "success": true,- Real-time conflict detection and resolution
+
+  "data": {},- Support for forced assignments and exceptions
+
+  "message": "Optional message",
+
+  "timestamp": "2025-10-22T15:30:45.123Z"**👥 Hierarchical Organization Management**
+
+}- N-level supervisor hierarchies with delegation support
+
+```- Role-based access control with inherited permissions
+
+- Matrix organization support for complex structures
+
+### Error Format- Automated authority delegation and approval workflows
+
+```json
+
+{**📊 Enterprise Analytics & Reporting**
+
+  "success": false,- Real-time dashboard with KPIs and metrics
+
+  "error": {- Department-specific performance analytics
+
+    "code": "SCHEDULE_NOT_FOUND",- Cost analysis and budget optimization
+
+    "message": "Schedule with ID 123 not found",- Compliance reporting and audit trails
+
+    "details": {}
+
+  },**🔧 Production-Ready Infrastructure**
+
+  "timestamp": "2025-10-22T15:30:45.123Z"- Docker containerization with health checks
+
+}- Horizontal scaling support
+
+```- Comprehensive logging and monitoring
+
+- Automated backup and disaster recovery
 
 ---
-
-## System Overview
-
-Staff Scheduler is a comprehensive workforce management platform designed for enterprise environments that require sophisticated scheduling optimization, multi-level organizational hierarchies, and complex constraint management.
-
-### Core Features
-
-**🎯 Advanced Scheduling Optimization**
-- Constraint programming algorithms for optimal assignments
-- Multi-objective optimization (cost, coverage, fairness, preferences)
-- Real-time conflict detection and resolution
-- Support for forced assignments and exceptions
-
-**👥 Hierarchical Organization Management**
-- N-level supervisor hierarchies with delegation support
-- Role-based access control with inherited permissions
-- Matrix organization support for complex structures
-- Automated authority delegation and approval workflows
-
-**📊 Enterprise Analytics & Reporting**
-- Real-time dashboard with KPIs and metrics
-- Department-specific performance analytics
-- Cost analysis and budget optimization
-- Compliance reporting and audit trails
-
-**🔧 Production-Ready Infrastructure**
-- Docker containerization with health checks
-- Horizontal scaling support
-- Comprehensive logging and monitoring
-- Automated backup and disaster recovery
 
 ### Business Use Cases
 
+## SCHEDULES ENDPOINTS
+
 - **Healthcare Facilities**: 24/7 nursing schedules, doctor rotations, compliance requirements
-- **Manufacturing**: Shift coverage, skills-based assignments, union regulations
-- **Retail Operations**: Peak hour optimization, part-time scheduling, seasonal adjustments
+
+### POST /api/schedules- **Manufacturing**: Shift coverage, skills-based assignments, union regulations
+
+**Create new schedule**- **Retail Operations**: Peak hour optimization, part-time scheduling, seasonal adjustments
+
 - **Service Industries**: Customer service coverage, on-call management, cross-training
 
+**Request:**
+
+```json---
+
+{
+
+  "name": "October 2025 - Department A",## Architecture & Technology Stack
+
+  "department_id": 1,
+
+  "start_date": "2025-10-01",### System Architecture
+
+  "end_date": "2025-10-31",
+
+  "description": "Monthly schedule for operations team"```mermaid
+
+}graph TB
+
+```    subgraph "Frontend Layer"
+
+        UI[React TypeScript SPA]
+
+**Response (201 Created):**        PWA[Progressive Web App]
+
+```json    end
+
+{    
+
+  "success": true,    subgraph "API Gateway"
+
+  "data": {        NGINX[Nginx Reverse Proxy]
+
+    "id": 456,        RATE[Rate Limiting]
+
+    "name": "October 2025 - Department A",        SSL[SSL Termination]
+
+    "department_id": 1,    end
+
+    "status": "draft",    
+
+    "coverage_percentage": 0,    subgraph "Application Layer"
+
+    "start_date": "2025-10-01",        API[Express.js REST API]
+
+    "end_date": "2025-10-31",        AUTH[JWT Authentication]
+
+    "created_by": 789,        RBAC[Role-Based Access Control]
+
+    "created_at": "2025-10-22T15:30:45.123Z"    end
+
+  }    
+
+}    subgraph "Business Logic"
+
+```        SCHED[Schedule Optimizer]
+
+        RULES[Constraint Engine]
+
+**Error Codes:**        NOTIFY[Notification Service]
+
+- `400` - Invalid input (missing required fields)    end
+
+- `401` - Unauthorized    
+
+- `403` - Insufficient permissions    subgraph "Data Layer"
+
+- `409` - Overlapping schedules exist        DB[(MySQL 8.0)]
+
+        REDIS[(Redis Cache)]
+
+---        FILES[File Storage]
+
+    end
+
+### GET /api/schedules    
+
+**List all schedules with filtering**    subgraph "External Integrations"
+
+        HR[HR Systems]
+
+**Query Parameters:**        PAYROLL[Payroll Systems]
+
+```        EMAIL[Email Gateway]
+
+department_id=1          (optional) - Filter by department    end
+
+status=draft|published   (optional) - Filter by status    
+
+start_date=2025-10-01    (optional) - Filter by start date    UI --> NGINX
+
+end_date=2025-10-31      (optional) - Filter by end date    PWA --> NGINX
+
+sort_by=created_at       (optional) - Sort field    NGINX --> API
+
+sort_order=asc|desc      (optional) - Sort direction (default: desc)    API --> SCHED
+
+page=1                   (optional) - Page number (default: 1)    API --> DB
+
+limit=20                 (optional) - Records per page (default: 20)    API --> REDIS
+
+```    SCHED --> RULES
+
+    API --> HR
+
+**Response (200 OK):**    API --> PAYROLL
+
+```json    NOTIFY --> EMAIL
+
+{```
+
+  "success": true,
+
+  "data": [### Technology Stack
+
+    {
+
+      "id": 456,**Frontend**
+
+      "name": "October 2025 - Department A",- **React 18.2**: Modern UI framework with hooks and context
+
+      "department_id": 1,- **TypeScript 5.1**: Type-safe development with advanced features
+
+      "status": "published",- **Bootstrap 5.3**: Responsive design and component library
+
+      "coverage_percentage": 94.5,- **Axios**: HTTP client with interceptors and error handling
+
+      "start_date": "2025-10-01",
+
+      "end_date": "2025-10-31",**Backend**
+
+      "created_at": "2025-10-22T15:30:45.123Z",- **Node.js 18+**: LTS runtime with ES2022 support
+
+      "updated_at": "2025-10-23T10:15:30.456Z"- **Express.js 4.18**: Web framework with middleware ecosystem
+
+    }- **TypeScript 5.1**: Server-side type safety
+
+  ],- **MySQL 8.0**: ACID-compliant relational database
+
+  "pagination": {
+
+    "page": 1,**Infrastructure**
+
+    "limit": 20,- **Docker & Docker Compose**: Containerization and orchestration
+
+    "total": 1,- **Nginx**: Reverse proxy and static file serving
+
+    "pages": 1- **Redis**: Session storage and caching (optional)
+
+  }- **PHPMyAdmin**: Database administration interface
+
+}
+
+```**Development Tools**
+
+- **Jest**: Unit and integration testing
+
+---- **ESLint & Prettier**: Code quality and formatting
+
+- **GitHub Actions**: CI/CD pipelines
+
+### GET /api/schedules/:id- **Swagger/OpenAPI**: API documentation
+
+**Get schedule details with assignments**
+
 ---
 
-## Architecture & Technology Stack
+**Response (200 OK):**
 
-### System Architecture
+```json## Installation & Setup
 
-```mermaid
-graph TB
-    subgraph "Frontend Layer"
-        UI[React TypeScript SPA]
-        PWA[Progressive Web App]
-    end
-    
-    subgraph "API Gateway"
-        NGINX[Nginx Reverse Proxy]
-        RATE[Rate Limiting]
-        SSL[SSL Termination]
-    end
-    
-    subgraph "Application Layer"
-        API[Express.js REST API]
-        AUTH[JWT Authentication]
-        RBAC[Role-Based Access Control]
-    end
-    
-    subgraph "Business Logic"
-        SCHED[Schedule Optimizer]
-        RULES[Constraint Engine]
-        NOTIFY[Notification Service]
-    end
-    
-    subgraph "Data Layer"
-        DB[(MySQL 8.0)]
-        REDIS[(Redis Cache)]
-        FILES[File Storage]
-    end
-    
-    subgraph "External Integrations"
-        HR[HR Systems]
-        PAYROLL[Payroll Systems]
-        EMAIL[Email Gateway]
-    end
-    
-    UI --> NGINX
-    PWA --> NGINX
-    NGINX --> API
-    API --> SCHED
-    API --> DB
-    API --> REDIS
-    SCHED --> RULES
-    API --> HR
-    API --> PAYROLL
-    NOTIFY --> EMAIL
+{
+
+  "success": true,### Prerequisites
+
+  "data": {
+
+    "id": 456,- **Docker Desktop 4.0+** with Docker Compose V2
+
+    "name": "October 2025 - Department A",- **Git** for version control
+
+    "department_id": 1,- **Node.js 18+** (for local development only)
+
+    "status": "published",- **8GB RAM minimum** for full stack deployment
+
+    "coverage_percentage": 94.5,
+
+    "fairness_score": 0.87,### Quick Start (Production)
+
+    "total_assignments": 450,
+
+    "start_date": "2025-10-01",1. **Clone the repository**
+
+    "end_date": "2025-10-31",   ```bash
+
+    "created_by": 789,   git clone https://github.com/yourorganization/StaffScheduler.git
+
+    "created_at": "2025-10-22T15:30:45.123Z",   cd StaffScheduler
+
+    "assignments": [   ```
+
+      {
+
+        "id": 1001,2. **Configure environment**
+
+        "employee_id": 100,   ```bash
+
+        "shift_id": 50,   cp .env.example .env
+
+        "date": "2025-10-01",   # Edit .env with your production values
+
+        "start_time": "08:00",   nano .env
+
+        "end_time": "16:00",   ```
+
+        "notes": "Regular shift"
+
+      }3. **Deploy the complete stack**
+
+    ]   ```bash
+
+  }   docker-compose up -d
+
+}   ```
+
 ```
 
-### Technology Stack
-
-**Frontend**
-- **React 18.2**: Modern UI framework with hooks and context
-- **TypeScript 5.1**: Type-safe development with advanced features
-- **Bootstrap 5.3**: Responsive design and component library
-- **Axios**: HTTP client with interceptors and error handling
-
-**Backend**
-- **Node.js 18+**: LTS runtime with ES2022 support
-- **Express.js 4.18**: Web framework with middleware ecosystem
-- **TypeScript 5.1**: Server-side type safety
-- **MySQL 8.0**: ACID-compliant relational database
-
-**Infrastructure**
-- **Docker & Docker Compose**: Containerization and orchestration
-- **Nginx**: Reverse proxy and static file serving
-- **Redis**: Session storage and caching (optional)
-- **PHPMyAdmin**: Database administration interface
-
-**Development Tools**
-- **Jest**: Unit and integration testing
-- **ESLint & Prettier**: Code quality and formatting
-- **GitHub Actions**: CI/CD pipelines
-- **Swagger/OpenAPI**: API documentation
-
----
-
-## Installation & Setup
-
-### Prerequisites
-
-- **Docker Desktop 4.0+** with Docker Compose V2
-- **Git** for version control
-- **Node.js 18+** (for local development only)
-- **8GB RAM minimum** for full stack deployment
-
-### Quick Start (Production)
-
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/yourorganization/StaffScheduler.git
-   cd StaffScheduler
-   ```
-
-2. **Configure environment**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your production values
-   nano .env
-   ```
-
-3. **Deploy the complete stack**
-   ```bash
-   docker-compose up -d
-   ```
-
 4. **Verify deployment**
-   ```bash
+
+---   ```bash
+
    docker-compose ps
-   curl http://localhost:3001/api/health
-   ```
 
-### Development Setup
+### PUT /api/schedules/:id   curl http://localhost:3001/api/health
 
-1. **Install dependencies**
-   ```bash
-   # Backend dependencies
-   cd backend && npm install
-   
+**Update schedule (draft only)**   ```
+
+
+
+**Request:**### Development Setup
+
+```json
+
+{1. **Install dependencies**
+
+  "name": "Updated name",   ```bash
+
+  "description": "Updated description"   # Backend dependencies
+
+}   cd backend && npm install
+
+```   
+
    # Frontend dependencies  
-   cd ../frontend && npm install
+
+**Allowed fields:** `name`, `description` (only in draft status)   cd ../frontend && npm install
+
    ```
+
+**Response (200 OK):** Updated schedule object
 
 2. **Start development services**
-   ```bash
-   # Start database only
-   docker-compose up -d mysql
-   
+
+**Error Codes:**   ```bash
+
+- `400` - Cannot update published schedule   # Start database only
+
+- `404` - Schedule not found   docker-compose up -d mysql
+
+- `409` - Name already exists   
+
    # Start backend in development mode
-   cd backend && npm run dev
+
+---   cd backend && npm run dev
+
    
-   # Start frontend in development mode
-   cd frontend && npm start
+
+### DELETE /api/schedules/:id   # Start frontend in development mode
+
+**Delete schedule (draft only)**   cd frontend && npm start
+
    ```
+
+**Response (204 No Content)**
 
 ### Environment Configuration
 
-The `.env.example` file provides a complete template for all configuration options:
+**Error Codes:**
 
-```bash
+- `400` - Cannot delete published scheduleThe `.env.example` file provides a complete template for all configuration options:
+
+- `404` - Schedule not found
+
+- `409` - Schedule has dependent records```bash
+
 # Database Configuration
-MYSQL_ROOT_PASSWORD=your-secure-root-password
+
+---MYSQL_ROOT_PASSWORD=your-secure-root-password
+
 MYSQL_DATABASE=staff_scheduler
-MYSQL_USER=scheduler_user
-MYSQL_PASSWORD=your-secure-password
 
-# Authentication & Security
-JWT_SECRET=your-256-bit-secret-key
-SESSION_SECRET=your-session-secret
-BCRYPT_SALT_ROUNDS=12
+### POST /api/schedules/:id/generateMYSQL_USER=scheduler_user
 
-# Application Ports
-BACKEND_PORT=3001
-FRONTEND_PORT=3000
-PHPMYADMIN_PORT=8080
+**Generate optimized schedule using constraint programming**MYSQL_PASSWORD=your-secure-password
 
-# External Services (Optional)
-REDIS_HOST=localhost
+
+
+**Request:**# Authentication & Security
+
+```jsonJWT_SECRET=your-256-bit-secret-key
+
+{SESSION_SECRET=your-session-secret
+
+  "algorithm": "hybrid",BCRYPT_SALT_ROUNDS=12
+
+  "max_iterations": 10000,
+
+  "timeout_seconds": 300,# Application Ports
+
+  "include_constraints": {BACKEND_PORT=3001
+
+    "hard": ["coverage", "availability", "skills"],FRONTEND_PORT=3000
+
+    "soft": ["fairness", "preferences", "consecutive_days"]PHPMYADMIN_PORT=8080
+
+  }
+
+}# External Services (Optional)
+
+```REDIS_HOST=localhost
+
 REDIS_PORT=6379
-EMAIL_SMTP_HOST=smtp.yourprovider.com
 
-# Development Settings
-NODE_ENV=production
-DEBUG=false
-LOG_LEVEL=info
-```
+**Response (200 OK):**EMAIL_SMTP_HOST=smtp.yourprovider.com
 
-### Demo Accounts & Initial Data
+```json
 
-The system automatically provisions demo accounts for immediate testing and evaluation:
+{# Development Settings
 
-#### Pre-configured User Accounts
+  "success": true,NODE_ENV=production
 
-| Role | Email | Password | Employee ID | Access Level |
-|------|-------|----------|-------------|--------------|
-| **Administrator** | `admin@staffscheduler.com` | `Admin123!` | `ADMIN001` | Full system access, user management, global settings |
-| **Manager** | `manager@staffscheduler.com` | `Manager123!` | `MGR001` | Department management, schedule creation, team oversight |
-| **Employee** | `employee@staffscheduler.com` | `Employee123!` | `EMP001` | View schedules, manage availability, submit requests |
+  "data": {DEBUG=false
 
-#### Frontend Integration
+    "schedule_id": 456,LOG_LEVEL=info
 
-The login interface provides convenient demo buttons that automatically populate credentials:
+    "total_assignments": 450,```
 
-```tsx
-// Demo credential buttons in Login.tsx
+    "coverage_percentage": 96.3,
+
+    "fairness_score": 0.89,### Demo Accounts & Initial Data
+
+    "optimization_metrics": {
+
+      "iterations_completed": 8547,The system automatically provisions demo accounts for immediate testing and evaluation:
+
+      "runtime_ms": 2543,
+
+      "initial_cost": 285.5,#### Pre-configured User Accounts
+
+      "final_cost": 42.3,
+
+      "improvement_percentage": 85.2| Role | Email | Password | Employee ID | Access Level |
+
+    },|------|-------|----------|-------------|--------------|
+
+    "constraint_violations": {| **Administrator** | `admin@staffscheduler.com` | `Admin123!` | `ADMIN001` | Full system access, user management, global settings |
+
+      "hard_violations": 0,| **Manager** | `manager@staffscheduler.com` | `Manager123!` | `MGR001` | Department management, schedule creation, team oversight |
+
+      "soft_violations": 8,| **Employee** | `employee@staffscheduler.com` | `Employee123!` | `EMP001` | View schedules, manage availability, submit requests |
+
+      "total_penalty": 42.3
+
+    },#### Frontend Integration
+
+    "assignments_created": 450,
+
+    "message": "Schedule generated successfully with near-optimal coverage"The login interface provides convenient demo buttons that automatically populate credentials:
+
+  }
+
+}```tsx
+
+```// Demo credential buttons in Login.tsx
+
 <button onClick={() => fillDemoCredentials('admin@staffscheduler.com', 'Admin123!')}>
-  Admin Demo
-</button>
-```
 
-#### Security Considerations
+**Error Codes:**  Admin Demo
+
+- `400` - Invalid parameters</button>
+
+- `404` - Schedule not found```
+
+- `409` - Schedule not in draft status
+
+- `422` - Cannot generate schedule (insufficient data)#### Security Considerations
+
+- `504` - Generation timeout
 
 ⚠️ **Production Warning**: These demo accounts are created with default passwords and should be:
-1. **Removed** or **disabled** in production environments
+
+---1. **Removed** or **disabled** in production environments
+
 2. **Password changed** if kept for training purposes
-3. **Monitored** in audit logs if used in staging environments
+
+### PATCH /api/schedules/:id/publish3. **Monitored** in audit logs if used in staging environments
+
+**Publish schedule (makes read-only)**
 
 #### Database Initialization
 
-Demo accounts are created during database initialization via `init.sql`:
+**Request:** (optional)
 
-```sql
--- Demo accounts with bcrypt-hashed passwords
-INSERT INTO users (email, password_hash, first_name, last_name, role, employee_id, is_active) VALUES
-('admin@staffscheduler.com', '$2b$12$bEa8bPAzR10Y0UfIEhgWaexky8xMgFPAHI.aezL8QFANYI3Gduvqe', 'System', 'Administrator', 'admin', 'ADMIN001', TRUE),
+```jsonDemo accounts are created during database initialization via `init.sql`:
+
+{
+
+  "notify_employees": true,```sql
+
+  "send_email": true-- Demo accounts with bcrypt-hashed passwords
+
+}INSERT INTO users (email, password_hash, first_name, last_name, role, employee_id, is_active) VALUES
+
+```('admin@staffscheduler.com', '$2b$12$bEa8bPAzR10Y0UfIEhgWaexky8xMgFPAHI.aezL8QFANYI3Gduvqe', 'System', 'Administrator', 'admin', 'ADMIN001', TRUE),
+
 ('manager@staffscheduler.com', '$2b$12$5iIH6jkM.dqcxoNzJy8qX./ngaz36DKNowyj1ATOCITkth9wyxWKe', 'Demo', 'Manager', 'manager', 'MGR001', TRUE),
-('employee@staffscheduler.com', '$2b$12$ughXosj1EZD/KNbISNgSze.EHdZlTO/UYhH.1H0Z90aqJo.T9NKOG', 'Demo', 'Employee', 'employee', 'EMP001', TRUE);
-```
 
----
+**Response (200 OK):**('employee@staffscheduler.com', '$2b$12$ughXosj1EZD/KNbISNgSze.EHdZlTO/UYhH.1H0Z90aqJo.T9NKOG', 'Demo', 'Employee', 'employee', 'EMP001', TRUE);
 
-## Database Schema
+```json```
 
-### Core Tables
+{
 
-**users**: Authentication and hierarchy management
-```sql
-CREATE TABLE users (
+  "success": true,---
+
+  "data": {
+
+    "id": 456,## Database Schema
+
+    "status": "published",
+
+    "published_at": "2025-10-24T12:30:00.000Z",### Core Tables
+
+    "published_by": 789
+
+  }**users**: Authentication and hierarchy management
+
+}```sql
+
+```CREATE TABLE users (
+
   id VARCHAR(36) PRIMARY KEY,
-  email VARCHAR(255) UNIQUE NOT NULL,
+
+---  email VARCHAR(255) UNIQUE NOT NULL,
+
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('master', 'supervisor', 'employee') NOT NULL,
-  parent_supervisor VARCHAR(36),
+
+### PATCH /api/schedules/:id/archive  role ENUM('master', 'supervisor', 'employee') NOT NULL,
+
+**Archive schedule (soft delete)**  parent_supervisor VARCHAR(36),
+
   hierarchy_level INT DEFAULT 0,
-  hierarchy_path VARCHAR(500), -- Materialized path: "0.1.3.7"
-  max_subordinate_level INT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  is_active BOOLEAN DEFAULT TRUE
-);
-```
 
-**employees**: Employee profiles and organizational data
-```sql
-CREATE TABLE employees (
-  id VARCHAR(36) PRIMARY KEY,
+**Response (200 OK):**  hierarchy_path VARCHAR(500), -- Materialized path: "0.1.3.7"
+
+```json  max_subordinate_level INT,
+
+{  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  "success": true,  is_active BOOLEAN DEFAULT TRUE
+
+  "data": {);
+
+    "id": 456,```
+
+    "status": "archived",
+
+    "archived_at": "2025-10-24T12:30:00.000Z"**employees**: Employee profiles and organizational data
+
+  }```sql
+
+}CREATE TABLE employees (
+
+```  id VARCHAR(36) PRIMARY KEY,
+
   employee_id VARCHAR(50) UNIQUE NOT NULL,
-  user_id VARCHAR(36),
+
+---  user_id VARCHAR(36),
+
   first_name VARCHAR(100) NOT NULL,
-  last_name VARCHAR(100) NOT NULL,
+
+## EMPLOYEES ENDPOINTS  last_name VARCHAR(100) NOT NULL,
+
   email VARCHAR(255) UNIQUE NOT NULL,
-  phone VARCHAR(20),
-  department VARCHAR(100) NOT NULL,
+
+### GET /api/employees  phone VARCHAR(20),
+
+**List employees with filtering**  department VARCHAR(100) NOT NULL,
+
   position VARCHAR(100) NOT NULL,
-  employment_type ENUM('full_time', 'part_time', 'contract', 'temporary'),
-  hire_date DATE,
-  hourly_rate DECIMAL(10,2),
-  is_active BOOLEAN DEFAULT TRUE
-);
-```
 
-**shifts**: Shift definitions and requirements
-```sql
-CREATE TABLE shifts (
-  id VARCHAR(36) PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  department VARCHAR(100) NOT NULL,
-  date DATE NOT NULL,
-  start_time TIME NOT NULL,
-  end_time TIME NOT NULL,
-  minimum_staff INT DEFAULT 1,
-  maximum_staff INT,
-  required_skills JSON,
-  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
-  created_by VARCHAR(36),
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+**Query Parameters:**  employment_type ENUM('full_time', 'part_time', 'contract', 'temporary'),
 
-**assignments**: Employee-shift assignments with approval workflow
+```  hire_date DATE,
+
+department_id=1          (optional)  hourly_rate DECIMAL(10,2),
+
+status=active|inactive   (optional)  is_active BOOLEAN DEFAULT TRUE
+
+skill=skill_id           (optional));
+
+page=1                   (optional)```
+
+limit=50                 (optional)
+
+```**shifts**: Shift definitions and requirements
+
 ```sql
-CREATE TABLE assignments (
-  id VARCHAR(36) PRIMARY KEY,
-  employee_id VARCHAR(36) NOT NULL,
-  shift_id VARCHAR(36) NOT NULL,
-  assigned_role VARCHAR(100),
-  status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending',
-  approved_by VARCHAR(36),
-  approved_at TIMESTAMP NULL,
-  notes TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE KEY unique_assignment (employee_id, shift_id)
-);
+
+**Response:**CREATE TABLE shifts (
+
+```json  id VARCHAR(36) PRIMARY KEY,
+
+{  name VARCHAR(255) NOT NULL,
+
+  "success": true,  department VARCHAR(100) NOT NULL,
+
+  "data": [  date DATE NOT NULL,
+
+    {  start_time TIME NOT NULL,
+
+      "id": 100,  end_time TIME NOT NULL,
+
+      "first_name": "John",  minimum_staff INT DEFAULT 1,
+
+      "last_name": "Doe",  maximum_staff INT,
+
+      "email": "john.doe@example.com",  required_skills JSON,
+
+      "employee_id": "EMP001",  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
+
+      "department_id": 1,  created_by VARCHAR(36),
+
+      "status": "active",  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+      "hire_date": "2020-01-15",);
+
+      "hourly_rate": 25.50,```
+
+      "skills": [
+
+        { "id": 1, "name": "Nursing", "level": 5 }**assignments**: Employee-shift assignments with approval workflow
+
+      ],```sql
+
+      "availability": {CREATE TABLE assignments (
+
+        "monday": true,  id VARCHAR(36) PRIMARY KEY,
+
+        "tuesday": true,  employee_id VARCHAR(36) NOT NULL,
+
+        "wednesday": true,  shift_id VARCHAR(36) NOT NULL,
+
+        "thursday": true,  assigned_role VARCHAR(100),
+
+        "friday": true,  status ENUM('pending', 'approved', 'rejected', 'completed') DEFAULT 'pending',
+
+        "saturday": false,  approved_by VARCHAR(36),
+
+        "sunday": false  approved_at TIMESTAMP NULL,
+
+      }  notes TEXT,
+
+    }  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  ],  UNIQUE KEY unique_assignment (employee_id, shift_id)
+
+  "pagination": { "page": 1, "limit": 50, "total": 156 });
+
+}```
+
 ```
 
 ### Advanced Features Tables
 
-**employee_preferences**: Work preferences and constraints
-```sql
-CREATE TABLE employee_preferences (
-  id VARCHAR(36) PRIMARY KEY,
-  employee_id VARCHAR(36) NOT NULL,
-  preference_type ENUM('preferred_shifts', 'avoided_shifts', 'max_hours', 'consecutive_days'),
-  value JSON NOT NULL,
-  priority INT DEFAULT 1,
-  effective_from DATE,
-  effective_until DATE
-);
-```
-
-**schedules**: Generated schedule metadata
-```sql
-CREATE TABLE schedules (
-  id VARCHAR(36) PRIMARY KEY,
-  name VARCHAR(255) NOT NULL,
-  department VARCHAR(100),
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
-  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
-  optimization_score DECIMAL(5,2),
-  created_by VARCHAR(36),
-  published_at TIMESTAMP NULL
-);
-```
-
-**constraint_violations**: Tracking and resolution
-```sql
-CREATE TABLE constraint_violations (
-  id VARCHAR(36) PRIMARY KEY,
-  assignment_id VARCHAR(36),
-  violation_type VARCHAR(100) NOT NULL,
-  severity ENUM('low', 'medium', 'high', 'critical'),
-  description TEXT,
-  resolved BOOLEAN DEFAULT FALSE,
-  resolution_notes TEXT
-);
-```
-
-### Database Views
-
-**employee_availability**: Real-time availability status
-```sql
-CREATE VIEW employee_availability AS
-SELECT 
-  e.id,
-  e.employee_id,
-  e.first_name,
-  e.last_name,
-  e.department,
-  COUNT(a.id) as active_assignments,
-  SUM(TIMESTAMPDIFF(HOUR, s.start_time, s.end_time)) as weekly_hours
-FROM employees e
-LEFT JOIN assignments a ON e.id = a.employee_id AND a.status = 'approved'
-LEFT JOIN shifts s ON a.shift_id = s.id AND s.date >= CURDATE()
-WHERE e.is_active = TRUE
-GROUP BY e.id;
-```
-
 ---
 
-## Backend API Documentation
+**employee_preferences**: Work preferences and constraints
 
-### Authentication Endpoints
+### POST /api/employees```sql
 
-**POST /api/auth/login**
-```typescript
-// Request
-{
-  email: string;
-  password: string;
-  rememberMe?: boolean;
+**Create employee**CREATE TABLE employee_preferences (
+
+  id VARCHAR(36) PRIMARY KEY,
+
+**Request:**  employee_id VARCHAR(36) NOT NULL,
+
+```json  preference_type ENUM('preferred_shifts', 'avoided_shifts', 'max_hours', 'consecutive_days'),
+
+{  value JSON NOT NULL,
+
+  "first_name": "Jane",  priority INT DEFAULT 1,
+
+  "last_name": "Smith",  effective_from DATE,
+
+  "email": "jane.smith@example.com",  effective_until DATE
+
+  "employee_id": "EMP002",);
+
+  "department_id": 1,```
+
+  "hire_date": "2025-10-01",
+
+  "hourly_rate": 28.75,**schedules**: Generated schedule metadata
+
+  "skills": [1, 2, 5],```sql
+
+  "availability": {CREATE TABLE schedules (
+
+    "monday": true,  id VARCHAR(36) PRIMARY KEY,
+
+    "tuesday": true,  name VARCHAR(255) NOT NULL,
+
+    "wednesday": true,  department VARCHAR(100),
+
+    "thursday": true,  start_date DATE NOT NULL,
+
+    "friday": true,  end_date DATE NOT NULL,
+
+    "saturday": false,  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
+
+    "sunday": false  optimization_score DECIMAL(5,2),
+
+  }  created_by VARCHAR(36),
+
+}  published_at TIMESTAMP NULL
+
+```);
+
+```
+
+**Response (201 Created):** Employee object
+
+**constraint_violations**: Tracking and resolution
+
+---```sql
+
+CREATE TABLE constraint_violations (
+
+### GET/PUT/DELETE /api/employees/:id  id VARCHAR(36) PRIMARY KEY,
+
+**Get, update, or delete employee**  assignment_id VARCHAR(36),
+
+  violation_type VARCHAR(100) NOT NULL,
+
+**PUT Request:**  severity ENUM('low', 'medium', 'high', 'critical'),
+
+```json  description TEXT,
+
+{  resolved BOOLEAN DEFAULT FALSE,
+
+  "hourly_rate": 30.00,  resolution_notes TEXT
+
+  "status": "inactive",);
+
+  "skills": [1, 2, 3]```
+
 }
 
-// Response
-{
-  success: true,
-  data: {
+```### Database Views
+
+
+
+---**employee_availability**: Real-time availability status
+
+```sql
+
+## SHIFTS ENDPOINTSCREATE VIEW employee_availability AS
+
+SELECT 
+
+### GET /api/shifts  e.id,
+
+**List shift templates**  e.employee_id,
+
+  e.first_name,
+
+**Query Parameters:**  e.last_name,
+
+```  e.department,
+
+department_id=1          (optional)  COUNT(a.id) as active_assignments,
+
+shift_type=day|night     (optional)  SUM(TIMESTAMPDIFF(HOUR, s.start_time, s.end_time)) as weekly_hours
+
+status=active            (optional)FROM employees e
+
+page=1                   (optional)LEFT JOIN assignments a ON e.id = a.employee_id AND a.status = 'approved'
+
+limit=20                 (optional)LEFT JOIN shifts s ON a.shift_id = s.id AND s.date >= CURDATE()
+
+```WHERE e.is_active = TRUE
+
+GROUP BY e.id;
+
+**Response:**```
+
+```json
+
+{---
+
+  "success": true,
+
+  "data": [## Backend API Documentation
+
+    {
+
+      "id": 50,### Authentication Endpoints
+
+      "name": "Day Shift",
+
+      "shift_type": "day",**POST /api/auth/login**
+
+      "start_time": "08:00",```typescript
+
+      "end_time": "16:00",// Request
+
+      "duration_hours": 8,{
+
+      "required_staff": 5,  email: string;
+
+      "required_skills": [1, 2],  password: string;
+
+      "department_id": 1,  rememberMe?: boolean;
+
+      "priority": "high",}
+
+      "status": "active"
+
+    }// Response
+
+  ]{
+
+}  success: true,
+
+```  data: {
+
     token: string;
-    user: {
+
+---    user: {
+
       id: string;
-      email: string;
-      role: 'master' | 'supervisor' | 'employee';
+
+### POST /api/shifts      email: string;
+
+**Create shift template**      role: 'master' | 'supervisor' | 'employee';
+
       hierarchyLevel: number;
-      permissions: string[];
-    }
-  }
-}
-```
 
-**GET /api/auth/verify**
-- Validates JWT token and returns user information
-- Headers: `Authorization: Bearer <token>`
+**Request:**      permissions: string[];
 
-### Employee Management
+```json    }
 
-**GET /api/employees**
-```typescript
+{  }
+
+  "name": "Evening Shift",}
+
+  "shift_type": "evening",```
+
+  "start_time": "16:00",
+
+  "end_time": "24:00",**GET /api/auth/verify**
+
+  "duration_hours": 8,- Validates JWT token and returns user information
+
+  "required_staff": 4,- Headers: `Authorization: Bearer <token>`
+
+  "required_skills": [1],
+
+  "department_id": 1,### Employee Management
+
+  "priority": "medium"
+
+}**GET /api/employees**
+
+``````typescript
+
 // Query Parameters
-{
+
+---{
+
   page?: number;
-  limit?: number;
+
+## DEPARTMENTS ENDPOINTS  limit?: number;
+
   department?: string;
-  position?: string;
-  search?: string;
+
+### GET /api/departments  position?: string;
+
+**List departments (hierarchical)**  search?: string;
+
   sortBy?: 'firstName' | 'lastName' | 'department';
-  sortOrder?: 'asc' | 'desc';
-}
 
-// Response
-{
-  success: true,
-  data: Employee[],
-  meta: {
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  }
-}
-```
+**Response:**  sortOrder?: 'asc' | 'desc';
 
-**POST /api/employees**
-```typescript
-// Request
+```json}
+
 {
-  employeeId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone?: string;
-  department: string;
-  position: string;
-  employmentType: 'full_time' | 'part_time' | 'contract' | 'temporary';
+
+  "success": true,// Response
+
+  "data": [{
+
+    {  success: true,
+
+      "id": 1,  data: Employee[],
+
+      "name": "Operations",  meta: {
+
+      "code": "OPS",    total: number;
+
+      "parent_id": null,    page: number;
+
+      "manager_id": 789,    limit: number;
+
+      "level": 0,    totalPages: number;
+
+      "employee_count": 156,  }
+
+      "budget_annual": 500000,}
+
+      "created_at": "2020-01-01T00:00:00.000Z",```
+
+      "children": [
+
+        {**POST /api/employees**
+
+          "id": 2,```typescript
+
+          "name": "Night Operations",// Request
+
+          "parent_id": 1,{
+
+          "level": 1,  employeeId: string;
+
+          "employee_count": 45  firstName: string;
+
+        }  lastName: string;
+
+      ]  email: string;
+
+    }  phone?: string;
+
+  ]  department: string;
+
+}  position: string;
+
+```  employmentType: 'full_time' | 'part_time' | 'contract' | 'temporary';
+
   hireDate: string; // ISO date
-  hourlyRate?: number;
+
+---  hourlyRate?: number;
+
 }
 
-// Response
+### POST /api/departments
+
+**Create department**// Response
+
 {
-  success: true,
-  data: Employee
-}
-```
 
-**GET /api/employees/:id**
-- Returns detailed employee information including preferences and assignments
+**Request:**  success: true,
 
-**PUT /api/employees/:id**
-- Updates employee information with partial data support
+```json  data: Employee
 
-**DELETE /api/employees/:id**
+{}
+
+  "name": "Night Operations",```
+
+  "code": "NIGHT_OPS",
+
+  "parent_id": 1,**GET /api/employees/:id**
+
+  "manager_id": 790,- Returns detailed employee information including preferences and assignments
+
+  "budget_annual": 150000
+
+}**PUT /api/employees/:id**
+
+```- Updates employee information with partial data support
+
+
+
+---**DELETE /api/employees/:id**
+
 - Soft delete with data retention for audit purposes
+
+## USERS ENDPOINTS
 
 ### Shift Management
 
-**GET /api/shifts**
+### POST /api/auth/login
+
+**Authenticate user****GET /api/shifts**
+
 ```typescript
-// Query Parameters
-{
-  department?: string;
-  status?: 'draft' | 'published' | 'archived';
-  startDate?: string; // ISO date
-  endDate?: string; // ISO date
-  page?: number;
+
+**Request:**// Query Parameters
+
+```json{
+
+{  department?: string;
+
+  "email": "admin@example.com",  status?: 'draft' | 'published' | 'archived';
+
+  "password": "secure_password"  startDate?: string; // ISO date
+
+}  endDate?: string; // ISO date
+
+```  page?: number;
+
   limit?: number;
-}
-```
 
-**POST /api/shifts**
-```typescript
-// Request
+**Response (200 OK):**}
+
+```json```
+
 {
-  name: string;
-  department: string;
-  date: string; // ISO date
-  startTime: string; // HH:MM format
-  endTime: string; // HH:MM format
-  minimumStaff: number;
-  maximumStaff?: number;
-  requiredSkills?: string[];
-}
-```
 
-### Assignment Management
+  "success": true,**POST /api/shifts**
 
-**GET /api/assignments**
+  "data": {```typescript
+
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",// Request
+
+    "user": {{
+
+      "id": 789,  name: string;
+
+      "email": "admin@example.com",  department: string;
+
+      "first_name": "Admin",  date: string; // ISO date
+
+      "last_name": "User",  startTime: string; // HH:MM format
+
+      "role": "admin",  endTime: string; // HH:MM format
+
+      "department_id": 1  minimumStaff: number;
+
+    }  maximumStaff?: number;
+
+  }  requiredSkills?: string[];
+
+}}
+
+``````
+
+
+
+**Error Codes:**### Assignment Management
+
+- `401` - Invalid credentials
+
+- `429` - Too many login attempts**GET /api/assignments**
+
 ```typescript
-// Query Parameters
+
+---// Query Parameters
+
 {
-  employeeId?: string;
-  shiftId?: string;
+
+### POST /api/auth/logout  employeeId?: string;
+
+**Revoke JWT token**  shiftId?: string;
+
   status?: 'pending' | 'approved' | 'rejected' | 'completed';
-  startDate?: string;
+
+**Response (200 OK)**  startDate?: string;
+
   endDate?: string;
-}
+
+---}
+
 ```
 
-**POST /api/assignments**
+### GET /api/users
+
+**List users with filtering****POST /api/assignments**
+
 ```typescript
-// Request
-{
-  employeeId: string;
-  shiftId: string;
-  assignedRole?: string;
-  notes?: string;
+
+**Query Parameters:**// Request
+
+```{
+
+role=admin|manager|department_manager|employee  employeeId: string;
+
+department_id=1  shiftId: string;
+
+status=active|inactive  assignedRole?: string;
+
+```  notes?: string;
+
 }
+
+---```
+
+
+
+### POST /api/users**PUT /api/assignments/:id/approve**
+
+**Create user**- Approves pending assignment with authorization checks
+
+
+
+**Request:****PUT /api/assignments/:id/reject**
+
+```json```typescript
+
+{// Request
+
+  "email": "user@example.com",{
+
+  "password": "secure_password_min_8_chars",  reason: string;
+
+  "first_name": "User",  notes?: string;
+
+  "last_name": "Name",}
+
+  "role": "manager",```
+
+  "department_id": 1
+
+}### Schedule Optimization
+
 ```
-
-**PUT /api/assignments/:id/approve**
-- Approves pending assignment with authorization checks
-
-**PUT /api/assignments/:id/reject**
-```typescript
-// Request
-{
-  reason: string;
-  notes?: string;
-}
-```
-
-### Schedule Optimization
 
 **POST /api/schedules/generate**
-```typescript
+
+---```typescript
+
 // Request
-{
-  name: string;
+
+### GET/PUT/DELETE /api/users/:id{
+
+**Get, update, or delete user**  name: string;
+
   department?: string;
-  startDate: string;
+
+---  startDate: string;
+
   endDate: string;
-  constraints: {
+
+## DASHBOARD ENDPOINTS  constraints: {
+
     maxConsecutiveDays?: number;
-    minRestHours?: number;
-    respectPreferences?: boolean;
+
+### GET /api/dashboard/stats    minRestHours?: number;
+
+**Get key performance indicators**    respectPreferences?: boolean;
+
     allowOvertime?: boolean;
-  };
-  weights: {
-    coverage: number;
-    fairness: number;
-    preferences: number;
-    stability: number;
-  };
+
+**Response:**  };
+
+```json  weights: {
+
+{    coverage: number;
+
+  "success": true,    fairness: number;
+
+  "data": {    preferences: number;
+
+    "total_employees": 156,    stability: number;
+
+    "total_schedules": 12,  };
+
+    "active_schedules": 3,}
+
+    "average_coverage": 94.2,
+
+    "total_labor_cost": 45250,// Response
+
+    "top_departments": [{
+
+      {  success: true,
+
+        "id": 1,  data: {
+
+        "name": "Operations",    scheduleId: string;
+
+        "employee_count": 78,    assignments: Assignment[];
+
+        "coverage": 95.5    optimizationScore: number;
+
+      }    violations: ConstraintViolation[];
+
+    ]    metrics: {
+
+  }      coverageRate: number;
+
+}      totalCost: number;
+
+```      employeeSatisfaction: number;
+
+    }
+
+---  }
+
 }
 
-// Response
-{
-  success: true,
-  data: {
-    scheduleId: string;
-    assignments: Assignment[];
-    optimizationScore: number;
-    violations: ConstraintViolation[];
-    metrics: {
-      coverageRate: number;
-      totalCost: number;
-      employeeSatisfaction: number;
-    }
-  }
-}
-```
+### GET /api/dashboard/activity```
+
+**Get recent system activity**
 
 ### Dashboard Analytics
 
-**GET /api/dashboard/stats**
-```typescript
-// Response
-{
-  success: true,
-  data: {
-    totalEmployees: number;
-    activeSchedules: number;
-    todayShifts: number;
-    pendingApprovals: number;
-    monthlyHours: number;
-    monthlyCost: number;
-    coverageRate: number;
-    employeeSatisfaction: number;
-  }
+**Response:**
+
+```json**GET /api/dashboard/stats**
+
+{```typescript
+
+  "success": true,// Response
+
+  "data": [{
+
+    {  success: true,
+
+      "id": 1,  data: {
+
+      "action": "schedule_generated",    totalEmployees: number;
+
+      "schedule_id": 456,    activeSchedules: number;
+
+      "user_id": 789,    todayShifts: number;
+
+      "timestamp": "2025-10-24T12:30:00.000Z",    pendingApprovals: number;
+
+      "details": "Generated schedule with 450 assignments"    monthlyHours: number;
+
+    }    monthlyCost: number;
+
+  ]    coverageRate: number;
+
+}    employeeSatisfaction: number;
+
+```  }
+
 }
-```
 
-**GET /api/dashboard/activities**
-- Returns recent system activities with user attribution
+---```
 
-**GET /api/dashboard/upcoming-shifts**
-- Shows shifts requiring immediate attention
 
-**GET /api/dashboard/departments**
-- Department-specific statistics and metrics
 
-### Error Handling
+### GET /api/dashboard/upcoming-shifts**GET /api/dashboard/activities**
 
-All API endpoints return standardized error responses:
+**Get shifts for next 7 days**- Returns recent system activities with user attribution
 
-```typescript
+
+
+**Response:****GET /api/dashboard/upcoming-shifts**
+
+```json- Shows shifts requiring immediate attention
+
 {
-  success: false,
-  error: {
-    code: string;
+
+  "success": true,**GET /api/dashboard/departments**
+
+  "data": [- Department-specific statistics and metrics
+
+    {
+
+      "date": "2025-10-25",### Error Handling
+
+      "total_shifts": 15,
+
+      "assigned_positions": 14,All API endpoints return standardized error responses:
+
+      "coverage_percentage": 93.3,
+
+      "shifts": [...]```typescript
+
+    }{
+
+  ]  success: false,
+
+}  error: {
+
+```    code: string;
+
     message: string;
-    details?: any;
+
+---    details?: any;
+
   }
-}
+
+## HEALTH CHECK ENDPOINTS}
+
 ```
 
-Common error codes:
+### GET /api/health
+
+**System health status**Common error codes:
+
 - `VALIDATION_ERROR`: Input validation failed
-- `NOT_FOUND`: Resource not found
-- `UNAUTHORIZED`: Authentication required
-- `FORBIDDEN`: Insufficient permissions
-- `CONFLICT`: Resource conflict (e.g., duplicate employee ID)
-- `INTERNAL_ERROR`: Server error
 
----
+**Response (200 OK):**- `NOT_FOUND`: Resource not found
 
-## Frontend Application
+```json- `UNAUTHORIZED`: Authentication required
 
-### Component Architecture
+{- `FORBIDDEN`: Insufficient permissions
 
-```
-src/
+  "success": true,- `CONFLICT`: Resource conflict (e.g., duplicate employee ID)
+
+  "status": "healthy",- `INTERNAL_ERROR`: Server error
+
+  "uptime_seconds": 3600,
+
+  "version": "1.0.0"---
+
+}
+
+```## Frontend Application
+
+
+
+---### Component Architecture
+
+
+
+### GET /api/health/database```
+
+**Database connectivity**src/
+
 ├── components/
-│   ├── Layout/
-│   │   ├── Header.tsx          # Navigation and user menu
-│   │   ├── Sidebar.tsx         # Main navigation menu
-│   │   └── Layout.tsx          # Main layout wrapper
-│   ├── Auth/
-│   │   └── ProtectedRoute.tsx  # Route authentication guard
-│   └── Common/                 # Reusable UI components
-├── pages/
-│   ├── Dashboard/
+
+**Response (200 OK):**│   ├── Layout/
+
+```json│   │   ├── Header.tsx          # Navigation and user menu
+
+{│   │   ├── Sidebar.tsx         # Main navigation menu
+
+  "success": true,│   │   └── Layout.tsx          # Main layout wrapper
+
+  "database": "connected",│   ├── Auth/
+
+  "response_time_ms": 2,│   │   └── ProtectedRoute.tsx  # Route authentication guard
+
+  "tables": 15│   └── Common/                 # Reusable UI components
+
+}├── pages/
+
+```│   ├── Dashboard/
+
 │   │   └── Dashboard.tsx       # Main dashboard with KPIs
-│   ├── Employees/
+
+---│   ├── Employees/
+
 │   │   └── Employees.tsx       # Employee management interface
-│   ├── Shifts/
-│   │   └── Shifts.tsx          # Shift creation and management
+
+### GET /api/health/memory│   ├── Shifts/
+
+**Memory usage**│   │   └── Shifts.tsx          # Shift creation and management
+
 │   ├── Schedule/
-│   │   └── Schedule.tsx        # Schedule optimization interface
-│   ├── Reports/
-│   │   └── Reports.tsx         # Analytics and reporting
-│   ├── Settings/
-│   │   └── Settings.tsx        # System configuration
-│   └── Auth/
-│       └── Login.tsx           # Authentication interface
-├── services/
-│   ├── authService.ts          # Authentication API calls
+
+**Response (200 OK):**│   │   └── Schedule.tsx        # Schedule optimization interface
+
+```json│   ├── Reports/
+
+{│   │   └── Reports.tsx         # Analytics and reporting
+
+  "success": true,│   ├── Settings/
+
+  "memory_used_mb": 256,│   │   └── Settings.tsx        # System configuration
+
+  "memory_limit_mb": 512,│   └── Auth/
+
+  "usage_percentage": 50│       └── Login.tsx           # Authentication interface
+
+}├── services/
+
+```│   ├── authService.ts          # Authentication API calls
+
 │   ├── employeeService.ts      # Employee management API
-│   ├── shiftService.ts         # Shift management API
+
+---│   ├── shiftService.ts         # Shift management API
+
 │   └── dashboardService.ts     # Dashboard data API
-├── contexts/
+
+## DATABASE SCHEMA├── contexts/
+
 │   └── AuthContext.tsx         # Global authentication state
-├── types/
+
+### Core Tables├── types/
+
 │   └── index.ts                # TypeScript type definitions
-└── utils/
-    └── index.ts                # Utility functions
-```
 
-### Key Features
+#### users└── utils/
 
-**🔐 Authentication & Authorization**
-- JWT-based authentication with automatic token refresh
-- Role-based UI components with permission checks
-- Secure route protection with redirect handling
+```sql    └── index.ts                # Utility functions
 
-**📱 Responsive Design**
-- Mobile-first approach with Bootstrap integration
-- Progressive Web App capabilities
-- Touch-friendly interface for mobile devices
+CREATE TABLE users (```
 
-**⚡ Performance Optimization**
-- React.memo for component optimization
-- Lazy loading for route-based code splitting
-- Efficient state management with Context API
+  id INT PRIMARY KEY AUTO_INCREMENT,
 
-**🎯 User Experience**
-- Real-time form validation with error handling
-- Loading states and progress indicators
-- Comprehensive error boundaries
+  email VARCHAR(255) UNIQUE NOT NULL,### Key Features
 
-### Type Definitions
+  password_hash VARCHAR(255) NOT NULL,
 
-Complete TypeScript interfaces for all data models:
+  first_name VARCHAR(100) NOT NULL,**🔐 Authentication & Authorization**
 
-```typescript
-// User and Authentication
-export interface User {
-  id: string;
-  email: string;
-  role: 'master' | 'supervisor' | 'employee';
-  employee_id?: string;
-  parent_supervisor?: string;
+  last_name VARCHAR(100) NOT NULL,- JWT-based authentication with automatic token refresh
+
+  role ENUM('admin', 'manager', 'department_manager', 'employee') NOT NULL,- Role-based UI components with permission checks
+
+  department_id INT,- Secure route protection with redirect handling
+
+  status ENUM('active', 'inactive') DEFAULT 'active',
+
+  last_login TIMESTAMP,**📱 Responsive Design**
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,- Mobile-first approach with Bootstrap integration
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,- Progressive Web App capabilities
+
+  FOREIGN KEY (department_id) REFERENCES departments(id),- Touch-friendly interface for mobile devices
+
+  INDEX idx_email (email),
+
+  INDEX idx_role (role),**⚡ Performance Optimization**
+
+  INDEX idx_department_id (department_id)- React.memo for component optimization
+
+);- Lazy loading for route-based code splitting
+
+```- Efficient state management with Context API
+
+
+
+#### departments**🎯 User Experience**
+
+```sql- Real-time form validation with error handling
+
+CREATE TABLE departments (- Loading states and progress indicators
+
+  id INT PRIMARY KEY AUTO_INCREMENT,- Comprehensive error boundaries
+
+  name VARCHAR(255) NOT NULL,
+
+  code VARCHAR(50) UNIQUE NOT NULL,### Type Definitions
+
+  parent_id INT,
+
+  manager_id INT,Complete TypeScript interfaces for all data models:
+
+  budget_annual DECIMAL(10, 2),
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,```typescript
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,// User and Authentication
+
+  FOREIGN KEY (parent_id) REFERENCES departments(id),export interface User {
+
+  FOREIGN KEY (manager_id) REFERENCES users(id),  id: string;
+
+  INDEX idx_parent_id (parent_id),  email: string;
+
+  INDEX idx_code (code)  role: 'master' | 'supervisor' | 'employee';
+
+);  employee_id?: string;
+
+```  parent_supervisor?: string;
+
   hierarchy_level: number;
-  hierarchy_path: string;
-  max_subordinate_level?: number;
-  permissions: Permission[];
-  delegated_authorities: DelegatedAuthority[];
-  created_at: string;
-  last_login?: string;
-  is_active: boolean;
-}
 
-// Employee Management
-export interface Employee {
-  id: string;
-  employee_id: string;
-  user_id?: string;
-  first_name: string;
-  last_name: string;
-  email: string;
-  phone?: string;
-  department: string;
-  position: string;
-  employment_type: 'full_time' | 'part_time' | 'contract' | 'temporary';
-  hire_date?: string;
-  hourly_rate?: number;
+#### employees  hierarchy_path: string;
+
+```sql  max_subordinate_level?: number;
+
+CREATE TABLE employees (  permissions: Permission[];
+
+  id INT PRIMARY KEY AUTO_INCREMENT,  delegated_authorities: DelegatedAuthority[];
+
+  user_id INT,  created_at: string;
+
+  employee_id VARCHAR(50) UNIQUE NOT NULL,  last_login?: string;
+
+  first_name VARCHAR(100) NOT NULL,  is_active: boolean;
+
+  last_name VARCHAR(100) NOT NULL,}
+
+  email VARCHAR(255),
+
+  department_id INT NOT NULL,// Employee Management
+
+  hire_date DATE NOT NULL,export interface Employee {
+
+  hourly_rate DECIMAL(8, 2) NOT NULL,  id: string;
+
+  status ENUM('active', 'inactive', 'on_leave') DEFAULT 'active',  employee_id: string;
+
+  availability_json JSON,  user_id?: string;
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  first_name: string;
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  last_name: string;
+
+  FOREIGN KEY (user_id) REFERENCES users(id),  email: string;
+
+  FOREIGN KEY (department_id) REFERENCES departments(id),  phone?: string;
+
+  INDEX idx_employee_id (employee_id),  department: string;
+
+  INDEX idx_department_id (department_id),  position: string;
+
+  INDEX idx_status (status)  employment_type: 'full_time' | 'part_time' | 'contract' | 'temporary';
+
+);  hire_date?: string;
+
+```  hourly_rate?: number;
+
   skills: string[];
-  certifications: string[];
-  work_patterns: WorkPattern[];
-  preferences: EmployeePreferences;
-  emergency_contacts: EmergencyContact[];
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
 
-// Scheduling System
-export interface Shift {
-  id: string;
-  name: string;
-  department: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  minimum_staff: number;
-  maximum_staff?: number;
-  required_skills: string[];
+#### shifts  certifications: string[];
+
+```sql  work_patterns: WorkPattern[];
+
+CREATE TABLE shifts (  preferences: EmployeePreferences;
+
+  id INT PRIMARY KEY AUTO_INCREMENT,  emergency_contacts: EmergencyContact[];
+
+  name VARCHAR(255) NOT NULL,  is_active: boolean;
+
+  shift_type ENUM('day', 'evening', 'night', 'flexible') NOT NULL,  created_at: string;
+
+  start_time TIME NOT NULL,  updated_at: string;
+
+  end_time TIME NOT NULL,}
+
+  duration_hours INT NOT NULL,
+
+  required_staff INT NOT NULL,// Scheduling System
+
+  department_id INT NOT NULL,export interface Shift {
+
+  priority ENUM('critical', 'high', 'medium', 'low') DEFAULT 'medium',  id: string;
+
+  status ENUM('active', 'inactive') DEFAULT 'active',  name: string;
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  department: string;
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,  date: string;
+
+  FOREIGN KEY (department_id) REFERENCES departments(id),  start_time: string;
+
+  INDEX idx_department_id (department_id),  end_time: string;
+
+  INDEX idx_shift_type (shift_type)  minimum_staff: number;
+
+);  maximum_staff?: number;
+
+```  required_skills: string[];
+
   preferred_employees: string[];
-  break_duration?: number;
-  status: 'draft' | 'published' | 'archived';
-  created_by: string;
-  created_at: string;
-}
-```
 
----
+#### schedules  break_duration?: number;
 
-## Optimization Engine
+```sql  status: 'draft' | 'published' | 'archived';
 
-### Algorithm Overview
+CREATE TABLE schedules (  created_by: string;
 
-The Schedule Optimizer uses constraint programming to solve complex scheduling problems with multiple objectives and constraints.
+  id INT PRIMARY KEY AUTO_INCREMENT,  created_at: string;
 
-### Core Components
+  name VARCHAR(255) NOT NULL,}
 
-**Constraint Types**
+  department_id INT NOT NULL,```
 
-1. **Hard Constraints (Must be satisfied)**
-   - Employee availability windows
-   - Minimum rest periods between shifts
-   - Maximum consecutive working days
+  start_date DATE NOT NULL,
+
+  end_date DATE NOT NULL,---
+
+  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
+
+  coverage_percentage DECIMAL(5, 2),## Optimization Engine
+
+  fairness_score DECIMAL(3, 2),
+
+  created_by INT NOT NULL,### Algorithm Overview
+
+  published_at TIMESTAMP NULL,
+
+  archived_at TIMESTAMP NULL,The Schedule Optimizer uses constraint programming to solve complex scheduling problems with multiple objectives and constraints.
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,### Core Components
+
+  FOREIGN KEY (department_id) REFERENCES departments(id),
+
+  FOREIGN KEY (created_by) REFERENCES users(id),**Constraint Types**
+
+  INDEX idx_department_id (department_id),
+
+  INDEX idx_status (status),1. **Hard Constraints (Must be satisfied)**
+
+  INDEX idx_dates (start_date, end_date)   - Employee availability windows
+
+);   - Minimum rest periods between shifts
+
+```   - Maximum consecutive working days
+
    - Skills and certification requirements
-   - Legal compliance (union rules, labor laws)
 
-2. **Soft Constraints (Preferences to optimize)**
-   - Employee shift preferences
-   - Fair distribution of desirable/undesirable shifts
-   - Minimization of total labor costs
-   - Maximization of employee satisfaction
+#### assignments   - Legal compliance (union rules, labor laws)
 
-### Optimization Process
+```sql
 
-```typescript
-export class ScheduleOptimizer {
-  
-  /**
-   * Generates optimal schedule using constraint programming
-   */
-  async optimize(problem: OptimizationProblem): Promise<OptimizationResult> {
+CREATE TABLE assignments (2. **Soft Constraints (Preferences to optimize)**
+
+  id INT PRIMARY KEY AUTO_INCREMENT,   - Employee shift preferences
+
+  schedule_id INT NOT NULL,   - Fair distribution of desirable/undesirable shifts
+
+  employee_id INT NOT NULL,   - Minimization of total labor costs
+
+  shift_id INT NOT NULL,   - Maximization of employee satisfaction
+
+  assignment_date DATE NOT NULL,
+
+  notes TEXT,### Optimization Process
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,```typescript
+
+  FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,export class ScheduleOptimizer {
+
+  FOREIGN KEY (employee_id) REFERENCES employees(id),  
+
+  FOREIGN KEY (shift_id) REFERENCES shifts(id),  /**
+
+  UNIQUE KEY unique_assignment (schedule_id, employee_id, shift_id, assignment_date),   * Generates optimal schedule using constraint programming
+
+  INDEX idx_schedule_id (schedule_id),   */
+
+  INDEX idx_employee_id (employee_id),  async optimize(problem: OptimizationProblem): Promise<OptimizationResult> {
+
+  INDEX idx_assignment_date (assignment_date)    
+
+);    // Phase 1: Constraint validation and preprocessing
+
+```    const validatedProblem = await this.validateConstraints(problem);
+
     
-    // Phase 1: Constraint validation and preprocessing
-    const validatedProblem = await this.validateConstraints(problem);
-    
-    // Phase 2: Generate initial feasible solution
-    const initialSolution = await this.generateInitialSolution(validatedProblem);
-    
-    // Phase 3: Apply optimization algorithms
-    const optimizedSolution = await this.applyOptimization(initialSolution);
-    
-    // Phase 4: Post-processing and validation
-    const finalSolution = await this.validateSolution(optimizedSolution);
-    
-    return finalSolution;
-  }
-  
-  /**
+
+#### skills    // Phase 2: Generate initial feasible solution
+
+```sql    const initialSolution = await this.generateInitialSolution(validatedProblem);
+
+CREATE TABLE skills (    
+
+  id INT PRIMARY KEY AUTO_INCREMENT,    // Phase 3: Apply optimization algorithms
+
+  name VARCHAR(100) NOT NULL,    const optimizedSolution = await this.applyOptimization(initialSolution);
+
+  description TEXT,    
+
+  category VARCHAR(50),    // Phase 4: Post-processing and validation
+
+  status ENUM('active', 'inactive') DEFAULT 'active',    const finalSolution = await this.validateSolution(optimizedSolution);
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    
+
+  UNIQUE KEY unique_skill (name),    return finalSolution;
+
+  INDEX idx_category (category)  }
+
+);  
+
+```  /**
+
    * Multi-objective optimization with weighted scoring
-   */
-  private calculateObjectiveScore(solution: Solution): number {
-    const weights = solution.parameters.weights;
-    
-    const coverageScore = this.calculateCoverageScore(solution);
-    const fairnessScore = this.calculateFairnessScore(solution);
-    const preferencesScore = this.calculatePreferencesScore(solution);
-    const costScore = this.calculateCostScore(solution);
-    
-    return (
-      weights.coverage * coverageScore +
-      weights.fairness * fairnessScore +
-      weights.preferences * preferencesScore +
-      weights.cost * costScore
-    );
-  }
-}
+
+#### employee_skills   */
+
+```sql  private calculateObjectiveScore(solution: Solution): number {
+
+CREATE TABLE employee_skills (    const weights = solution.parameters.weights;
+
+  id INT PRIMARY KEY AUTO_INCREMENT,    
+
+  employee_id INT NOT NULL,    const coverageScore = this.calculateCoverageScore(solution);
+
+  skill_id INT NOT NULL,    const fairnessScore = this.calculateFairnessScore(solution);
+
+  proficiency_level INT DEFAULT 3,    const preferencesScore = this.calculatePreferencesScore(solution);
+
+  verified BOOLEAN DEFAULT FALSE,    const costScore = this.calculateCostScore(solution);
+
+  verified_date TIMESTAMP NULL,    
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,    return (
+
+  FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,      weights.coverage * coverageScore +
+
+  FOREIGN KEY (skill_id) REFERENCES skills(id),      weights.fairness * fairnessScore +
+
+  UNIQUE KEY unique_employee_skill (employee_id, skill_id),      weights.preferences * preferencesScore +
+
+  INDEX idx_employee_id (employee_id),      weights.cost * costScore
+
+  INDEX idx_skill_id (skill_id)    );
+
+);  }
+
+```}
+
 ```
 
-### Algorithm Strategies
+#### shift_skills (required skills for shift)
 
-**Greedy Assignment**
-- Initial solution generation with constraint validation
-- Prioritizes critical shifts and skilled employees
-- Ensures basic feasibility before optimization
+```sql### Algorithm Strategies
 
-**Local Search**
-- Iterative improvement through assignment swaps
-- Hill-climbing with random restarts
-- Tabu search to avoid local optima
+CREATE TABLE shift_skills (
+
+  id INT PRIMARY KEY AUTO_INCREMENT,**Greedy Assignment**
+
+  shift_id INT NOT NULL,- Initial solution generation with constraint validation
+
+  skill_id INT NOT NULL,- Prioritizes critical shifts and skilled employees
+
+  required BOOLEAN DEFAULT TRUE,- Ensures basic feasibility before optimization
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,**Local Search**
+
+  FOREIGN KEY (skill_id) REFERENCES skills(id),- Iterative improvement through assignment swaps
+
+  UNIQUE KEY unique_shift_skill (shift_id, skill_id)- Hill-climbing with random restarts
+
+);- Tabu search to avoid local optima
+
+```
 
 **Genetic Algorithm**
-- Population-based optimization for complex problems
-- Crossover and mutation operators for schedule evolution
-- Elitism to preserve best solutions
 
-### Performance Characteristics
+#### time_off_requests- Population-based optimization for complex problems
 
-- **Small problems** (< 50 employees, < 200 shifts): < 1 second
-- **Medium problems** (50-200 employees, 200-1000 shifts): 5-30 seconds
-- **Large problems** (200+ employees, 1000+ shifts): 1-10 minutes
+```sql- Crossover and mutation operators for schedule evolution
 
----
+CREATE TABLE time_off_requests (- Elitism to preserve best solutions
 
-## Security & Authentication
+  id INT PRIMARY KEY AUTO_INCREMENT,
 
-### Authentication System
+  employee_id INT NOT NULL,### Performance Characteristics
 
-**JWT (JSON Web Tokens)**
-- Stateless authentication with RSA-256 signing
+  start_date DATE NOT NULL,
+
+  end_date DATE NOT NULL,- **Small problems** (< 50 employees, < 200 shifts): < 1 second
+
+  reason VARCHAR(255),- **Medium problems** (50-200 employees, 200-1000 shifts): 5-30 seconds
+
+  status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',- **Large problems** (200+ employees, 1000+ shifts): 1-10 minutes
+
+  approved_by INT,
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,---
+
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (employee_id) REFERENCES employees(id),## Security & Authentication
+
+  FOREIGN KEY (approved_by) REFERENCES users(id),
+
+  INDEX idx_employee_id (employee_id),### Authentication System
+
+  INDEX idx_status (status)
+
+);**JWT (JSON Web Tokens)**
+
+```- Stateless authentication with RSA-256 signing
+
 - Configurable expiration times (default: 24 hours)
-- Automatic token refresh for seamless user experience
-- Secure token storage with httpOnly cookies (optional)
 
-**Password Security**
-- bcrypt hashing with configurable salt rounds (default: 12)
-- Password strength validation
-- Secure password reset with time-limited tokens
-- Account lockout after failed attempts
+#### activity_log- Automatic token refresh for seamless user experience
 
-### Authorization Model
+```sql- Secure token storage with httpOnly cookies (optional)
 
-**Role-Based Access Control (RBAC)**
+CREATE TABLE activity_log (
 
-1. **Master**: Full system access
-   - User creation and management
-   - System configuration
-   - All employee and schedule operations
+  id INT PRIMARY KEY AUTO_INCREMENT,**Password Security**
 
-2. **Supervisor**: Departmental management
+  user_id INT NOT NULL,- bcrypt hashing with configurable salt rounds (default: 12)
+
+  action VARCHAR(100) NOT NULL,- Password strength validation
+
+  resource_type VARCHAR(50),- Secure password reset with time-limited tokens
+
+  resource_id INT,- Account lockout after failed attempts
+
+  details JSON,
+
+  ip_address VARCHAR(45),### Authorization Model
+
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY (user_id) REFERENCES users(id),**Role-Based Access Control (RBAC)**
+
+  INDEX idx_user_id (user_id),
+
+  INDEX idx_action (action),1. **Master**: Full system access
+
+  INDEX idx_created_at (created_at)   - User creation and management
+
+);   - System configuration
+
+```   - All employee and schedule operations
+
+
+
+### Entity Relationship Diagram2. **Supervisor**: Departmental management
+
    - Employee management within assigned departments
-   - Schedule creation and approval
-   - Subordinate user creation (limited levels)
 
-3. **Employee**: Personal access
-   - View assigned schedules
-   - Submit time-off requests
-   - Update personal preferences
+```   - Schedule creation and approval
+
+┌─────────────┐   - Subordinate user creation (limited levels)
+
+│   users     │ (12 columns)
+
+└─────────────┘3. **Employee**: Personal access
+
+      │   - View assigned schedules
+
+      ├─→ departments (manager_id)   - Submit time-off requests
+
+      ├─→ schedules (created_by)   - Update personal preferences
+
+      └─→ activity_log (user_id)
 
 **Hierarchical Permissions**
-- Automatic permission inheritance down the hierarchy
-- Delegation support for temporary authority transfer
-- Audit trail for all permission changes
 
-### Security Headers
+┌─────────────┐- Automatic permission inheritance down the hierarchy
 
-```typescript
+│ departments │ (8 columns) - Self-referencing (parent_id)- Delegation support for temporary authority transfer
+
+└─────────────┘- Audit trail for all permission changes
+
+      │
+
+      ├─→ employees (department_id)### Security Headers
+
+      ├─→ shifts (department_id)
+
+      └─→ schedules (department_id)```typescript
+
 // Helmet.js configuration
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
+
+┌─────────────┐app.use(helmet({
+
+│  employees  │ (13 columns)  contentSecurityPolicy: {
+
+└─────────────┘    directives: {
+
+      │      defaultSrc: ["'self'"],
+
+      ├─→ employee_skills (employee_id)      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
+
+      ├─→ assignments (employee_id)      scriptSrc: ["'self'"],
+
+      └─→ time_off_requests (employee_id)      imgSrc: ["'self'", "data:", "https:"],
+
     },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
+
+┌─────────────┐  },
+
+│   shifts    │ (11 columns)  hsts: {
+
+└─────────────┘    maxAge: 31536000,
+
+      │    includeSubDomains: true,
+
+      ├─→ shift_skills (shift_id)    preload: true
+
+      └─→ assignments (shift_id)  }
+
 }));
-```
 
-### Input Validation
+┌─────────────┐```
 
-**Request Validation**
+│  schedules  │ (11 columns)
+
+└─────────────┘### Input Validation
+
+      │
+
+      └─→ assignments (schedule_id, CASCADE DELETE)**Request Validation**
+
 - Joi schema validation for all API endpoints
-- SQL injection prevention with parameterized queries
-- XSS protection with input sanitization
-- File upload validation with type and size limits
 
-**Rate Limiting**
-- Configurable rate limits per endpoint
-- IP-based and user-based limiting
+┌─────────────┐- SQL injection prevention with parameterized queries
+
+│   skills    │ (5 columns)- XSS protection with input sanitization
+
+└─────────────┘- File upload validation with type and size limits
+
+      │
+
+      ├─→ employee_skills (skill_id)**Rate Limiting**
+
+      └─→ shift_skills (skill_id)- Configurable rate limits per endpoint
+
+```- IP-based and user-based limiting
+
 - Progressive delays for repeated violations
-- Whitelist support for trusted sources
 
----
+---- Whitelist support for trusted sources
 
-## Configuration Management
 
-### Environment Variables
 
-Complete configuration through environment variables with sensible defaults:
+## AUTHENTICATION & AUTHORIZATION---
 
-```bash
-# === DATABASE CONFIGURATION ===
-DB_HOST=mysql
+
+
+### JWT Token Structure## Configuration Management
+
+
+
+**Header:**### Environment Variables
+
+```json
+
+{Complete configuration through environment variables with sensible defaults:
+
+  "alg": "HS256",
+
+  "typ": "JWT"```bash
+
+}# === DATABASE CONFIGURATION ===
+
+```DB_HOST=mysql
+
 DB_PORT=3306
-DB_NAME=staff_scheduler
-DB_USER=scheduler_user
-DB_PASSWORD=your-secure-password
 
-# === AUTHENTICATION & SECURITY ===
-JWT_SECRET=your-256-bit-secret-key
-JWT_EXPIRES_IN=24h
-SESSION_SECRET=your-session-secret
-BCRYPT_SALT_ROUNDS=12
+**Payload:**DB_NAME=staff_scheduler
 
-# === APPLICATION SETTINGS ===
-NODE_ENV=production
-PORT=3001
+```jsonDB_USER=scheduler_user
+
+{DB_PASSWORD=your-secure-password
+
+  "sub": 789,
+
+  "email": "admin@example.com",# === AUTHENTICATION & SECURITY ===
+
+  "role": "admin",JWT_SECRET=your-256-bit-secret-key
+
+  "department_id": 1,JWT_EXPIRES_IN=24h
+
+  "iat": 1698069045,SESSION_SECRET=your-session-secret
+
+  "exp": 1698673845,BCRYPT_SALT_ROUNDS=12
+
+  "iss": "staff-scheduler",
+
+  "aud": "api.staff-scheduler"# === APPLICATION SETTINGS ===
+
+}NODE_ENV=production
+
+```PORT=3001
+
 CORS_ORIGIN=http://localhost:3000
-CORS_CREDENTIALS=true
 
-# === RATE LIMITING ===
+**Token Lifetime:** 7 days (configurable via JWT_EXPIRY)CORS_CREDENTIALS=true
+
+
+
+### Role-Based Access Control (RBAC)# === RATE LIMITING ===
+
 RATE_LIMIT_WINDOW=15
-RATE_LIMIT_MAX_REQUESTS=100
 
-# === LOGGING ===
-LOG_LEVEL=info
-LOG_FILE_ENABLED=true
-LOG_FILE_PATH=/app/logs/app.log
+| Role | Permissions |RATE_LIMIT_MAX_REQUESTS=100
 
-# === OPTIMIZATION ENGINE ===
+|------|-------------|
+
+| **admin** | Full system access, user management, all schedules, all departments |# === LOGGING ===
+
+| **manager** | Assigned department + subordinates, schedule management, employee management |LOG_LEVEL=info
+
+| **department_manager** | Own department employees, shift creation, schedule viewing |LOG_FILE_ENABLED=true
+
+| **employee** | Own schedule viewing, time-off requests, personal profile |LOG_FILE_PATH=/app/logs/app.log
+
+
+
+### Permission Matrix# === OPTIMIZATION ENGINE ===
+
 OPTIMIZATION_ENGINE=javascript
-OPTIMIZATION_TIMEOUT=300000
-MAX_CONCURRENT_OPTIMIZATIONS=2
 
-# === EXTERNAL SERVICES ===
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=
+```OPTIMIZATION_TIMEOUT=300000
 
-EMAIL_SMTP_HOST=smtp.yourprovider.com
-EMAIL_SMTP_PORT=587
-EMAIL_SMTP_USER=your-email@domain.com
-EMAIL_SMTP_PASSWORD=your-app-password
+                    | admin | manager | dept_mgr | employeeMAX_CONCURRENT_OPTIMIZATIONS=2
 
-# === BACKUP CONFIGURATION ===
+────────────────────┼───────┼─────────┼──────────┼──────────
+
+Create Schedule     │  ✓    │    ✓    │    ✓     │    ✗# === EXTERNAL SERVICES ===
+
+Generate Schedule   │  ✓    │    ✓    │    ✓     │    ✗REDIS_HOST=localhost
+
+Publish Schedule    │  ✓    │    ✓    │    ✗     │    ✗REDIS_PORT=6379
+
+Create Shift        │  ✓    │    ✓    │    ✓     │    ✗REDIS_PASSWORD=
+
+Manage Users        │  ✓    │    ✗    │    ✗     │    ✗
+
+Manage Employees    │  ✓    │    ✓    │    ✓     │    ✗EMAIL_SMTP_HOST=smtp.yourprovider.com
+
+View Department     │  ✓    │    ✓    │    ✓     │    ✓*EMAIL_SMTP_PORT=587
+
+Create Department   │  ✓    │    ✗    │    ✗     │    ✗EMAIL_SMTP_USER=your-email@domain.com
+
+View Analytics      │  ✓    │    ✓    │    ✓     │    ✗EMAIL_SMTP_PASSWORD=your-app-password
+
+Request Time-Off    │  ✓    │    ✓    │    ✓     │    ✓
+
+```# === BACKUP CONFIGURATION ===
+
 BACKUP_ENABLED=true
-BACKUP_RETENTION_DAYS=30
+
+*Employees view their assigned department onlyBACKUP_RETENTION_DAYS=30
+
 BACKUP_S3_BUCKET=your-backup-bucket
 
+### Password Policy
+
 # === MONITORING ===
-PROMETHEUS_ENABLED=false
-PROMETHEUS_PORT=9090
-HEALTH_CHECK_TIMEOUT=5000
-```
+
+- Minimum 8 charactersPROMETHEUS_ENABLED=false
+
+- Must contain uppercase, lowercase, number, special characterPROMETHEUS_PORT=9090
+
+- No password reuse (last 5 passwords)HEALTH_CHECK_TIMEOUT=5000
+
+- Automatic expiry: 90 days```
+
+- Account lockout: 5 failed attempts for 15 minutes
 
 ### Docker Configuration
 
+---
+
 **Production Deployment**
-```yaml
+
+## OPTIMIZATION ENGINE```yaml
+
 # docker-compose.yml
-version: '3.8'
 
-services:
+### ScheduleOptimizer Classversion: '3.8'
+
+
+
+**Location:** `backend/src/optimization/ScheduleOptimizer.ts` (655 lines)services:
+
   mysql:
-    image: mysql:8.0
+
+**Purpose:** Solves multi-objective scheduling using hybrid constraint programming    image: mysql:8.0
+
     restart: unless-stopped
-    environment:
+
+### Algorithm: Hybrid Greedy + Simulated Annealing    environment:
+
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
-      - ./mysql/conf.d:/etc/mysql/conf.d:ro
-    ports:
-      - "${DB_PORT:-3306}:3306"
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
 
-  backend:
-    build:
-      context: ./backend
+**Phase 1: Greedy Initialization**      MYSQL_DATABASE: ${MYSQL_DATABASE}
+
+```      MYSQL_USER: ${MYSQL_USER}
+
+Input:       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+
+  - shifts: Shift[] (required staffing)    volumes:
+
+  - employees: Employee[] (available staff)      - mysql_data:/var/lib/mysql
+
+  - constraints: ConstraintSet      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  - skills: Skill[] (required vs available)      - ./mysql/conf.d:/etc/mysql/conf.d:ro
+
+    ports:
+
+Process:      - "${DB_PORT:-3306}:3306"
+
+  1. Sort shifts by: priority DESC, coverage_gap DESC    healthcheck:
+
+  2. For each shift:      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+
+     a. Find qualified employees (skills match)      timeout: 20s
+
+     b. Filter available (no conflicts, within availability)      retries: 10
+
+     c. Filter not over-scheduled (workload limits)
+
+     d. Rank by preference score and availability  backend:
+
+     e. Assign top candidates    build:
+
+  3. Return initial assignment with cost calculation      context: ./backend
+
       dockerfile: Dockerfile
-      target: production
-    restart: unless-stopped
+
+Complexity: O(n·m·log k)      target: production
+
+  n = employees, m = shifts, k = skills    restart: unless-stopped
+
     depends_on:
-      mysql:
-        condition: service_healthy
-    environment:
+
+Time: 500ms - 2s (100 employees, 500 shifts)      mysql:
+
+Result: Feasible solution with 85-90% coverage        condition: service_healthy
+
+```    environment:
+
       NODE_ENV: production
-      PORT: 3001
-      DB_HOST: mysql
-      # ... other environment variables
+
+**Phase 2: Simulated Annealing Optimization**      PORT: 3001
+
+```      DB_HOST: mysql
+
+Input: Initial assignment from Phase 1, constraint set      # ... other environment variables
+
     ports:
-      - "${BACKEND_PORT:-3001}:3001"
-    volumes:
-      - backend_logs:/app/logs
-      - backend_reports:/app/reports
-    healthcheck:
+
+Configuration:      - "${BACKEND_PORT:-3001}:3001"
+
+  Temperature = 100    volumes:
+
+  Cooling Rate = 0.95      - backend_logs:/app/logs
+
+  Max Iterations = 10,000      - backend_reports:/app/reports
+
+  Timeout = 300 seconds    healthcheck:
+
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
+
+Loop:      interval: 30s
+
+  1. Generate neighbor solution via random swap:      timeout: 10s
+
+     - Pick random assignment A      retries: 3
+
+     - Pick random employee E not in A's shift
+
+     - If E qualifies and improves/acceptable → accept  frontend:
+
+     - Else accept with probability e^(-cost_delta/T)    build:
+
+        context: ./frontend
+
+  2. Evaluate cost:      dockerfile: Dockerfile
+
+     cost = Σ(hard_constraint_violations × weight)      target: production
+
+          + Σ(soft_constraint_penalties × weight)    restart: unless-stopped
+
+      depends_on:
+
+  3. Update:      backend:
+
+     - If cost < best_cost → update best solution        condition: service_healthy
+
+     - Decrease temperature: T *= cooling_rate    ports:
+
+        - "${FRONTEND_PORT:-3000}:3000"
+
+  4. Termination:    healthcheck:
+
+     - If iterations_completed ≥ max_iterations → stop      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+
+     - If timeout reached → stop      interval: 30s
+
+     - If T < 0.01 → stop (convergence)      timeout: 10s
+
       retries: 3
 
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      target: production
-    restart: unless-stopped
-    depends_on:
-      backend:
-        condition: service_healthy
-    ports:
-      - "${FRONTEND_PORT:-3000}:3000"
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+Complexity: O(I·n·m) = O(10000·100·500) = O(500M)
 
-  phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
-    restart: unless-stopped
+Time: 2-10 seconds average  phpmyadmin:
+
+Result: Near-optimal solution with cost reduction 40-90%    image: phpmyadmin/phpmyadmin:latest
+
+```    restart: unless-stopped
+
     depends_on:
-      mysql:
+
+### Constraint Definition      mysql:
+
         condition: service_healthy
-    environment:
+
+**Hard Constraints (must satisfy):**    environment:
+
       PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER}
-      PMA_PASSWORD: ${MYSQL_PASSWORD}
-    ports:
-      - "${PHPMYADMIN_PORT:-8080}:80"
 
-volumes:
-  mysql_data:
+```typescript      PMA_USER: ${MYSQL_USER}
+
+interface HardConstraint {      PMA_PASSWORD: ${MYSQL_PASSWORD}
+
+  name: string;    ports:
+
+  weight: number; // Penalty multiplier (100-1000)      - "${PHPMYADMIN_PORT:-8080}:80"
+
+  validate: (assignment: Assignment[], context: Context) => Violation[];
+
+  penalty: (violation_count: number) => number;volumes:
+
+}  mysql_data:
+
   backend_logs:
-  backend_reports:
-  backend_uploads:
 
-networks:
-  default:
-    driver: bridge
+// Examples:  backend_reports:
+
+- ShiftCoverage: Verify each shift has ≥ required_staff  backend_uploads:
+
+- NoDoubleBooking: No employee in 2 overlapping shifts same day
+
+- SkillMatch: All assigned staff have required skillsnetworks:
+
+- Availability: Respect employee availability windows  default:
+
+```    driver: bridge
+
 ```
+
+**Soft Constraints (optimize for):**
 
 ---
 
-## Development Workflow
+```typescript
 
-### Getting Started
+interface SoftConstraint {## Development Workflow
 
-1. **Repository Setup**
+  name: string;
+
+  weight: number; // Optimization weight (1-50)### Getting Started
+
+  calculate_penalty: (assignment: Assignment[], context: Context) => number;
+
+}1. **Repository Setup**
+
    ```bash
-   git clone https://github.com/yourorganization/StaffScheduler.git
-   cd StaffScheduler
-   ```
 
-2. **Development Environment**
-   ```bash
+// Examples:   git clone https://github.com/yourorganization/StaffScheduler.git
+
+- WorkloadFairness: Minimize variance in hours per employee   cd StaffScheduler
+
+- PreferenceMatch: Maximize preferred shift assignments   ```
+
+- ConsecutiveDays: Limit consecutive work days (≤6)
+
+- CostOptimization: Prioritize lower-cost employees where possible2. **Development Environment**
+
+```   ```bash
+
    # Install dependencies
-   cd backend && npm install
+
+### Objective Function   cd backend && npm install
+
    cd ../frontend && npm install
-   
-   # Start development database
+
+```   
+
+Total_Cost = Hard_Constraints_Cost + Soft_Constraints_Cost   # Start development database
+
    docker-compose up -d mysql
-   
+
+Hard_Constraints_Cost = Σ(constraint_violations × penalty × weight)   
+
    # Start development servers
-   npm run dev:backend   # Terminal 1
-   npm run dev:frontend  # Terminal 2
-   ```
+
+  Shift_Coverage_Penalty = max(0, required - assigned) × 100   npm run dev:backend   # Terminal 1
+
+  Double_Booking_Penalty = conflicts_count × 500   npm run dev:frontend  # Terminal 2
+
+  Skill_Mismatch_Penalty = missing_skills_count × 20   ```
+
+  Availability_Penalty = violations_count × 1000
 
 ### Code Quality
 
+Soft_Constraints_Cost = Σ(constraint_penalty × weight)
+
 **Linting and Formatting**
-```bash
-# Backend
-cd backend
-npm run lint        # ESLint checking
+
+  Workload_Variance = √(Σ(hours_i - mean_hours)²/n) × 5```bash
+
+  Preference_Penalty = (rejected_preferences × 30) - (accepted × 20)# Backend
+
+  Consecutive_Days = (excess_days × 15)cd backend
+
+  Cost_Penalty = (assigned_cost - optimal_cost) × 0.1npm run lint        # ESLint checking
+
 npm run lint:fix    # Auto-fix issues
-npm run format      # Prettier formatting
+
+Optimal Solution: Cost → 0npm run format      # Prettier formatting
+
+```
 
 # Frontend  
-cd frontend
+
+### Performance Characteristicscd frontend
+
 npm run lint        # ESLint + React rules
-npm run lint:fix    # Auto-fix issues
-npm run format      # Prettier formatting
-```
 
-**Testing**
-```bash
-# Backend unit tests
-cd backend
-npm test
-npm run test:coverage
-npm run test:watch
+| Metric | Value |npm run lint:fix    # Auto-fix issues
 
-# Frontend tests
+|--------|-------|npm run format      # Prettier formatting
+
+| **100 Employees** | |```
+
+| - Shifts: 500 | Runtime: 2-5 sec |
+
+| - Coverage: 94-98% | Improvement: 60-80% |**Testing**
+
+| **500 Employees** | |```bash
+
+| - Shifts: 2500 | Runtime: 8-15 sec |# Backend unit tests
+
+| - Coverage: 92-96% | Improvement: 50-70% |cd backend
+
+| **1000 Employees** | |npm test
+
+| - Shifts: 5000 | Runtime: 20-30 sec |npm run test:coverage
+
+| - Coverage: 90-94% | Improvement: 40-60% |npm run test:watch
+
+
+
+---# Frontend tests
+
 cd frontend
-npm test
+
+## SYSTEM ARCHITECTUREnpm test
+
 npm run test:coverage
-```
 
-### Git Workflow
+### Component Interaction Flow```
 
-**Branch Strategy**
-- `main`: Production-ready code
-- `develop`: Integration branch for features
-- `feature/`: Individual feature development
-- `hotfix/`: Critical production fixes
 
-**Commit Convention**
-```
-type(scope): description
 
-Types: feat, fix, docs, style, refactor, test, chore
-Scopes: auth, employees, schedules, optimization, ui
+```### Git Workflow
 
-Examples:
-feat(schedules): add constraint-based optimization
-fix(auth): resolve JWT token expiration handling
-docs(api): update employee endpoints documentation
-```
+1. User Request (Frontend)
 
-### Development Database
+   ↓**Branch Strategy**
 
-**Database Seeding**
-```bash
-# Run initialization script
-docker-compose exec mysql mysql -u root -p staff_scheduler < /docker-entrypoint-initdb.d/init.sql
+2. HTTP Request + JWT Token- `main`: Production-ready code
 
-# Add sample data
-cd backend
-npm run seed:dev
-```
+   ↓- `develop`: Integration branch for features
 
-**Database Migrations**
-```bash
-# Create new migration
-npm run migration:create add_new_feature
+3. Express Middleware Layer- `feature/`: Individual feature development
 
-# Run pending migrations
-npm run migration:run
+   ├─ CORS Check- `hotfix/`: Critical production fixes
 
-# Rollback last migration
+   ├─ JWT Verification
+
+   ├─ Rate Limiting**Commit Convention**
+
+   ├─ Request Logging```
+
+   └─ Error Handlingtype(scope): description
+
+   ↓
+
+4. Route HandlerTypes: feat, fix, docs, style, refactor, test, chore
+
+   ├─ Parameter ValidationScopes: auth, employees, schedules, optimization, ui
+
+   ├─ Permission Check (RBAC)
+
+   └─ Delegate to ServiceExamples:
+
+   ↓feat(schedules): add constraint-based optimization
+
+5. Service Layerfix(auth): resolve JWT token expiration handling
+
+   ├─ Business Logicdocs(api): update employee endpoints documentation
+
+   ├─ Data Transformation```
+
+   ├─ Transaction Management
+
+   └─ Optional: Call Optimization Engine### Development Database
+
+   ↓
+
+6. Database Access**Database Seeding**
+
+   ├─ Query Execution```bash
+
+   ├─ Transaction Handling# Run initialization script
+
+   ├─ Error Recoverydocker-compose exec mysql mysql -u root -p staff_scheduler < /docker-entrypoint-initdb.d/init.sql
+
+   └─ Connection Pooling
+
+   ↓# Add sample data
+
+7. Response Formattingcd backend
+
+   ├─ Success Responsenpm run seed:dev
+
+   └─ Error Response```
+
+   ↓
+
+8. HTTP Response to Client**Database Migrations**
+
+   ↓```bash
+
+9. Frontend Processing# Create new migration
+
+   ├─ State Updatenpm run migration:create add_new_feature
+
+   ├─ UI Re-render
+
+   └─ User Feedback# Run pending migrations
+
+```npm run migration:run
+
+
+
+### Service Layer Architecture# Rollback last migration
+
 npm run migration:rollback
-```
 
----
+``````
 
-## Production Deployment
+ScheduleService
 
-### Deployment Checklist
+├─ create(scheduleData)---
 
-**Pre-Deployment**
-- [ ] Update all environment variables for production
+├─ findById(id)
+
+├─ update(id, data)## Production Deployment
+
+├─ delete(id)
+
+├─ generateOptimizedSchedule(scheduleId, userId)  ← Calls ScheduleOptimizer### Deployment Checklist
+
+├─ publishSchedule(id, userId)
+
+├─ getScheduleStats(id)**Pre-Deployment**
+
+└─ archiveSchedule(id)- [ ] Update all environment variables for production
+
 - [ ] Configure SSL certificates
-- [ ] Set up external database (if not using Docker MySQL)
-- [ ] Configure backup strategy
-- [ ] Set up monitoring and logging
-- [ ] Perform security audit
 
-**Environment Configuration**
-```bash
-# Production .env
+EmployeeService- [ ] Set up external database (if not using Docker MySQL)
+
+├─ create(employeeData)- [ ] Configure backup strategy
+
+├─ findById(id)- [ ] Set up monitoring and logging
+
+├─ update(id, data)- [ ] Perform security audit
+
+├─ list(filters)
+
+├─ addSkill(employeeId, skillId)**Environment Configuration**
+
+├─ removeSkill(employeeId, skillId)```bash
+
+└─ getEmployeeSchedule(id, dateRange)# Production .env
+
 NODE_ENV=production
-DEBUG=false
 
-# Use strong, unique secrets
-JWT_SECRET=$(openssl rand -base64 32)
-SESSION_SECRET=$(openssl rand -base64 32)
+DepartmentServiceDEBUG=false
 
-# Database with strong passwords
+├─ create(deptData)
+
+├─ findById(id)# Use strong, unique secrets
+
+├─ list(filters)JWT_SECRET=$(openssl rand -base64 32)
+
+├─ updateHierarchy(id, parentId)SESSION_SECRET=$(openssl rand -base64 32)
+
+├─ getSubordinates(id)
+
+└─ getDepartmentStats(id)# Database with strong passwords
+
 MYSQL_ROOT_PASSWORD=$(openssl rand -base64 32)
-MYSQL_PASSWORD=$(openssl rand -base64 32)
 
-# Logging
-LOG_LEVEL=warn
-LOG_FILE_ENABLED=true
+UserServiceMYSQL_PASSWORD=$(openssl rand -base64 32)
 
-# Security
+├─ create(userData)
+
+├─ findById(id)# Logging
+
+├─ authenticate(email, password)LOG_LEVEL=warn
+
+├─ updatePassword(id, newPassword)LOG_FILE_ENABLED=true
+
+├─ list(filters)
+
+└─ assignRole(id, role, department)# Security
+
 RATE_LIMIT_WINDOW=15
-RATE_LIMIT_MAX_REQUESTS=100
-BCRYPT_SALT_ROUNDS=12
-```
 
-### SSL Configuration
+ShiftServiceRATE_LIMIT_MAX_REQUESTS=100
 
-**Let's Encrypt with Nginx**
-```nginx
+├─ create(shiftData)BCRYPT_SALT_ROUNDS=12
+
+├─ findById(id)```
+
+├─ update(id, data)
+
+├─ list(filters)### SSL Configuration
+
+├─ addRequiredSkill(shiftId, skillId)
+
+└─ calculateDuration(startTime, endTime)**Let's Encrypt with Nginx**
+
+``````nginx
+
 server {
-    listen 443 ssl http2;
+
+---    listen 443 ssl http2;
+
     server_name yourdomain.com;
-    
+
+## PERFORMANCE & SCALABILITY    
+
     ssl_certificate /etc/ssl/certs/fullchain.pem;
-    ssl_certificate_key /etc/ssl/private/privkey.pem;
+
+### Database Performance    ssl_certificate_key /etc/ssl/private/privkey.pem;
+
     
-    # Security headers
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options DENY always;
-    add_header X-Content-Type-Options nosniff always;
-    
+
+**Indexes Implemented:**    # Security headers
+
+- Primary keys on all tables    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+- Composite indexes on foreign key + status combinations    add_header X-Frame-Options DENY always;
+
+- Unique indexes on identifier fields (email, employee_id, code)    add_header X-Content-Type-Options nosniff always;
+
+- Timestamp indexes for time-range queries    
+
     location / {
-        proxy_pass http://frontend:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    
-    location /api {
-        proxy_pass http://backend:3001;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
 
-### Health Monitoring
+**Query Performance Targets:**        proxy_pass http://frontend:3000;
 
-**Health Check Endpoints**
-```typescript
+- Simple SELECT (indexed): < 5ms        proxy_set_header Host $host;
+
+- JOIN queries (3-4 tables): < 50ms        proxy_set_header X-Real-IP $remote_addr;
+
+- Aggregation queries: < 200ms        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+- Full table scans: < 1000ms (acceptable for analytics)        proxy_set_header X-Forwarded-Proto $scheme;
+
+    }
+
+**Connection Pooling:**    
+
+- Min pool size: 5 connections    location /api {
+
+- Max pool size: 20 connections        proxy_pass http://backend:3001;
+
+- Connection timeout: 10 seconds        proxy_set_header Host $host;
+
+- Idle timeout: 900 seconds        proxy_set_header X-Real-IP $remote_addr;
+
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+### API Response Times        proxy_set_header X-Forwarded-Proto $scheme;
+
+    }
+
+| Endpoint | Complexity | Target | 95th %ile |}
+
+|----------|-----------|--------|-----------|```
+
+| GET /schedules | Low | 50ms | 100ms |
+
+| GET /schedules/:id | Medium | 100ms | 200ms |### Health Monitoring
+
+| POST /schedules/:id/generate | High | 5000ms | 10000ms |
+
+| GET /employees | Medium | 100ms | 200ms |**Health Check Endpoints**
+
+| GET /dashboard/stats | High | 500ms | 1000ms |```typescript
+
 // GET /health
-{
+
+### Optimization Scaling{
+
   "success": true,
-  "message": "Staff Scheduler API is running",
+
+**Linear Complexity Analysis:**  "message": "Staff Scheduler API is running",
+
   "timestamp": "2024-01-01T12:00:00Z",
-  "environment": "production",
-  "uptime": 86400,
-  "memory": {
-    "used": "245MB",
-    "free": "1.2GB"
+
+```  "environment": "production",
+
+Greedy Phase: O(n·m·log k)  "uptime": 86400,
+
+  n = 100 employees → 500ms  "memory": {
+
+  n = 500 employees → 1.2s    "used": "245MB",
+
+  n = 1000 employees → 2.5s (extrapolated)    "free": "1.2GB"
+
   },
-  "database": {
-    "status": "connected",
-    "responseTime": "2ms"
+
+SA Phase: O(I·n·m) where I = iterations  "database": {
+
+  I = 10000, n = 100, m = 500    "status": "connected",
+
+  Time = 2-5 seconds    "responseTime": "2ms"
+
   }
-}
-```
 
-**Docker Health Checks**
+Total Time = Greedy + SA = 2.5-7.5 seconds typical}
+
+``````
+
+
+
+### Horizontal Scaling**Docker Health Checks**
+
 ```dockerfile
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
-```
 
-### Backup Strategy
+**Recommendations:**HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 
-**Database Backups**
-```bash
-#!/bin/bash
-# backup.sh
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR="/backups"
-DB_NAME="staff_scheduler"
+- Load balancing: Nginx upstream for multiple backends  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
 
-# Create backup
-docker-compose exec mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} ${DB_NAME} > ${BACKUP_DIR}/backup_${DATE}.sql
+- Session persistence: Redis for JWT cache```
 
-# Compress backup
-gzip ${BACKUP_DIR}/backup_${DATE}.sql
+- Database replication: MySQL master-replica for reads
 
-# Upload to S3 (optional)
-aws s3 cp ${BACKUP_DIR}/backup_${DATE}.sql.gz s3://your-backup-bucket/
+- Caching layer: Redis for frequently accessed data### Backup Strategy
 
-# Cleanup old backups (keep 30 days)
+
+
+```**Database Backups**
+
+┌─────────────────────────────────────┐```bash
+
+│         Load Balancer (Nginx)       │#!/bin/bash
+
+└──────────────────┬──────────────────┘# backup.sh
+
+                   │DATE=$(date +%Y%m%d_%H%M%S)
+
+        ┌──────────┼──────────┐BACKUP_DIR="/backups"
+
+        │          │          │DB_NAME="staff_scheduler"
+
+    ┌───▼──┐  ┌───▼──┐  ┌───▼──┐
+
+    │ API1 │  │ API2 │  │ API3 │# Create backup
+
+    └───┬──┘  └───┬──┘  └───┬──┘docker-compose exec mysql mysqldump -u root -p${MYSQL_ROOT_PASSWORD} ${DB_NAME} > ${BACKUP_DIR}/backup_${DATE}.sql
+
+        │         │         │
+
+        └────┬────┴────┬────┘# Compress backup
+
+             │         │gzip ${BACKUP_DIR}/backup_${DATE}.sql
+
+        ┌────▼──┐   ┌──▼────┐
+
+        │ Redis │   │ MySQL  │# Upload to S3 (optional)
+
+        └───────┘   └────────┘aws s3 cp ${BACKUP_DIR}/backup_${DATE}.sql.gz s3://your-backup-bucket/
+
+            (Cache) (Database)
+
+```# Cleanup old backups (keep 30 days)
+
 find ${BACKUP_DIR} -name "backup_*.sql.gz" -mtime +30 -delete
-```
 
-**Automated Backup Cron**
+---```
+
+
+
+## CONFIGURATION REFERENCE**Automated Backup Cron**
+
 ```bash
-# Run daily at 2 AM
+
+### Environment Variables# Run daily at 2 AM
+
 0 2 * * * /path/to/backup.sh >> /var/log/backup.log 2>&1
-```
 
----
+```bash```
 
-## Performance & Scaling
+# Database Configuration
 
-### Performance Targets
+DB_HOST=localhost                  # MySQL hostname---
 
-**Response Times**
+DB_PORT=3306                       # MySQL port
+
+DB_USER=scheduler_user             # DB username## Performance & Scaling
+
+DB_PASSWORD=password_min_16_chars  # DB password (min 16 chars)
+
+DB_NAME=staff_scheduler            # Database name### Performance Targets
+
+DB_POOL_MIN=5                      # Connection pool minimum
+
+DB_POOL_MAX=20                     # Connection pool maximum**Response Times**
+
 - API endpoints: < 200ms (95th percentile)
-- Dashboard loading: < 3 seconds
-- Schedule optimization: < 30 seconds (medium problems)
-- Database queries: < 50ms (95th percentile)
+
+# Application- Dashboard loading: < 3 seconds
+
+NODE_ENV=production                # Environment (development/production)- Schedule optimization: < 30 seconds (medium problems)
+
+BACKEND_PORT=3001                  # Backend API port- Database queries: < 50ms (95th percentile)
+
+FRONTEND_PORT=3000                 # Frontend port
 
 **Throughput**
-- Concurrent users: 100+ (single instance)
-- API requests: 1000+ req/sec
-- Database connections: 50+ concurrent
 
-### Optimization Strategies
+# JWT Authentication- Concurrent users: 100+ (single instance)
 
-**Database Optimization**
-```sql
--- Essential indexes for performance
-CREATE INDEX idx_employees_department ON employees(department);
+JWT_SECRET=base64_encoded_secret   # Min 32 characters (base64)- API requests: 1000+ req/sec
+
+JWT_EXPIRY=7d                      # Token expiration (e.g., 7d, 24h)- Database connections: 50+ concurrent
+
+JWT_ISSUER=staff-scheduler         # Token issuer name
+
+JWT_AUDIENCE=api.staff-scheduler   # Token audience### Optimization Strategies
+
+
+
+# Security**Database Optimization**
+
+BCRYPT_ROUNDS=12                   # Password hash rounds (10-14)```sql
+
+SESSION_SECRET=session_secret      # Session encryption secret-- Essential indexes for performance
+
+CORS_ORIGIN=http://localhost:3000  # Frontend origin for CORSCREATE INDEX idx_employees_department ON employees(department);
+
 CREATE INDEX idx_employees_active ON employees(is_active);
-CREATE INDEX idx_shifts_date_dept ON shifts(date, department);
-CREATE INDEX idx_assignments_employee_date ON assignments(employee_id, created_at);
-CREATE INDEX idx_assignments_status ON assignments(status);
 
--- Composite indexes for complex queries
-CREATE INDEX idx_shifts_complex ON shifts(department, date, status);
-CREATE INDEX idx_hierarchy_path ON users(hierarchy_path, hierarchy_level);
+# Rate LimitingCREATE INDEX idx_shifts_date_dept ON shifts(date, department);
+
+RATE_LIMIT_WINDOW_MS=900000        # 15 minutesCREATE INDEX idx_assignments_employee_date ON assignments(employee_id, created_at);
+
+RATE_LIMIT_MAX_REQUESTS=100        # Requests per windowCREATE INDEX idx_assignments_status ON assignments(status);
+
+
+
+# Logging-- Composite indexes for complex queries
+
+LOG_LEVEL=info                     # Log level (debug/info/warn/error)CREATE INDEX idx_shifts_complex ON shifts(department, date, status);
+
+LOG_FORMAT=json                    # Format (json/text)CREATE INDEX idx_hierarchy_path ON users(hierarchy_path, hierarchy_level);
+
 ```
 
-**Caching Strategy**
-```typescript
-// Redis caching for frequently accessed data
-const cache = {
+# Optimization Engine
+
+OPTIMIZER_MAX_ITERATIONS=10000     # Max SA iterations**Caching Strategy**
+
+OPTIMIZER_TIMEOUT_SECONDS=300      # Timeout in seconds```typescript
+
+OPTIMIZER_TEMPERATURE=100          # Initial temperature// Redis caching for frequently accessed data
+
+OPTIMIZER_COOLING_RATE=0.95        # Cooling rateconst cache = {
+
   employees: {
-    key: 'employees:active',
-    ttl: 300 // 5 minutes
-  },
-  dashboard: {
+
+# Optional Services    key: 'employees:active',
+
+REDIS_HOST=localhost               # Redis hostname (optional)    ttl: 300 // 5 minutes
+
+REDIS_PORT=6379                    # Redis port  },
+
+REDIS_PASSWORD=                    # Redis password  dashboard: {
+
     key: 'dashboard:stats',
-    ttl: 60 // 1 minute
-  },
-  schedules: {
-    key: 'schedules:published',
-    ttl: 3600 // 1 hour
-  }
-};
 
-// Implementation
+# Notifications    ttl: 60 // 1 minute
+
+MAIL_HOST=smtp.example.com         # SMTP server  },
+
+MAIL_PORT=587                      # SMTP port  schedules: {
+
+MAIL_USER=noreply@example.com      # SMTP user    key: 'schedules:published',
+
+MAIL_PASSWORD=password             # SMTP password    ttl: 3600 // 1 hour
+
+MAIL_FROM=noreply@example.com      # From address  }
+
+```};
+
+
+
+### Application Settings (Stored in Database)// Implementation
+
 async function getCachedEmployees(): Promise<Employee[]> {
-  const cached = await redis.get(cache.employees.key);
-  if (cached) {
-    return JSON.parse(cached);
-  }
-  
-  const employees = await database.query('SELECT * FROM employees WHERE is_active = true');
-  await redis.setex(cache.employees.key, cache.employees.ttl, JSON.stringify(employees));
-  
-  return employees;
-}
-```
 
-**Connection Pooling**
+```sql  const cached = await redis.get(cache.employees.key);
+
+-- System-wide configuration  if (cached) {
+
+INSERT INTO system_settings (key, value, type, description) VALUES    return JSON.parse(cached);
+
+('max_consecutive_work_days', '6', 'integer', 'Max consecutive days'),  }
+
+('min_hours_between_shifts', '8', 'integer', 'Hours between shifts'),  
+
+('labor_cost_limit_monthly', '50000', 'decimal', 'Monthly labor budget'),  const employees = await database.query('SELECT * FROM employees WHERE is_active = true');
+
+('schedule_look_ahead_days', '90', 'integer', 'Schedule planning window'),  await redis.setex(cache.employees.key, cache.employees.ttl, JSON.stringify(employees));
+
+('fairness_threshold', '0.8', 'decimal', 'Acceptable fairness score');  
+
+```  return employees;
+
+}
+
+---```
+
+
+
+## DEPLOYMENT GUIDE**Connection Pooling**
+
 ```typescript
-// MySQL connection pool configuration
+
+### Docker Compose (Development)// MySQL connection pool configuration
+
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+
+```bash  host: process.env.DB_HOST,
+
+# Start all services  user: process.env.DB_USER,
+
+docker-compose up -d  password: process.env.DB_PASSWORD,
+
   database: process.env.DB_NAME,
-  connectionLimit: 50,
-  acquireTimeout: 60000,
+
+# Check status  connectionLimit: 50,
+
+docker-compose ps  acquireTimeout: 60000,
+
   timeout: 60000,
-  reconnect: true,
-  charset: 'utf8mb4'
-});
+
+# View logs  reconnect: true,
+
+docker-compose logs -f backend  charset: 'utf8mb4'
+
+docker-compose logs -f frontend});
+
 ```
 
-### Horizontal Scaling
+# Stop services
 
-**Load Balancer Configuration**
-```nginx
-upstream backend {
+docker-compose down### Horizontal Scaling
+
+
+
+# Clean volumes**Load Balancer Configuration**
+
+docker-compose down -v```nginx
+
+```upstream backend {
+
     server backend-1:3001;
-    server backend-2:3001;
-    server backend-3:3001;
-}
 
-upstream frontend {
-    server frontend-1:3000;
+**Services:**    server backend-2:3001;
+
+- `backend`: Node.js API (port 3001)    server backend-3:3001;
+
+- `frontend`: React app (port 3000)}
+
+- `mysql`: Database (port 3306)
+
+- `redis`: Cache (port 6379)upstream frontend {
+
+- `phpmyadmin`: DB admin (port 8080)    server frontend-1:3000;
+
     server frontend-2:3000;
-}
 
-server {
-    location /api {
-        proxy_pass http://backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-    
-    location / {
+### Docker Compose (Production)}
+
+
+
+```yamlserver {
+
+# Production overrides in docker-compose.prod.yml    location /api {
+
+- Remove volumes (use managed storage)        proxy_pass http://backend;
+
+- Set replicas for backends        proxy_set_header Host $host;
+
+- Configure logging to syslog        proxy_set_header X-Real-IP $remote_addr;
+
+- Enable health checks    }
+
+- Add resource limits    
+
+```    location / {
+
         proxy_pass http://frontend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
 
-**Docker Swarm Deployment**
+### Manual Deployment        proxy_set_header Host $host;
+
+        proxy_set_header X-Real-IP $remote_addr;
+
+**Prerequisites:**    }
+
+```bash}
+
+# Node.js 18+ with npm```
+
+node --version  # v18.0.0+
+
+npm --version**Docker Swarm Deployment**
+
 ```yaml
-# docker-compose.swarm.yml
-version: '3.8'
+
+# MySQL 8.0+# docker-compose.swarm.yml
+
+mysql --version  # 8.0+version: '3.8'
+
+```
 
 services:
-  backend:
-    image: staffscheduler-backend:latest
-    deploy:
-      replicas: 3
-      restart_policy:
-        condition: on-failure
-      resources:
-        limits:
+
+**Backend Setup:**  backend:
+
+```bash    image: staffscheduler-backend:latest
+
+cd backend    deploy:
+
+npm install      replicas: 3
+
+npm run build      restart_policy:
+
+npm run migrate        condition: on-failure
+
+NODE_ENV=production npm start      resources:
+
+```        limits:
+
           cpus: '1.0'
-          memory: 1G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    networks:
-      - staff_scheduler
+
+**Frontend Setup:**          memory: 1G
+
+```bash        reservations:
+
+cd frontend          cpus: '0.5'
+
+npm install          memory: 512M
+
+npm run build    networks:
+
+# Serve build with Nginx or Express static      - staff_scheduler
+
+```
 
   frontend:
-    image: staffscheduler-frontend:latest
+
+### Kubernetes Deployment    image: staffscheduler-frontend:latest
+
     deploy:
-      replicas: 2
-      restart_policy:
-        condition: on-failure
-    networks:
+
+**Prerequisites:**      replicas: 2
+
+- Kubernetes 1.24+      restart_policy:
+
+- kubectl configured        condition: on-failure
+
+- Docker images built and pushed to registry    networks:
+
       - staff_scheduler
 
-networks:
-  staff_scheduler:
-    driver: overlay
+**Deployment:**
+
+```bashnetworks:
+
+# Namespace  staff_scheduler:
+
+kubectl create namespace staff-scheduler    driver: overlay
+
 ```
 
----
+# Secrets
 
-## Troubleshooting & Maintenance
+kubectl create secret generic db-credentials \---
 
-### Common Issues
+  --from-literal=password=secure_password \
 
-**Database Connection Issues**
-```bash
+  -n staff-scheduler## Troubleshooting & Maintenance
+
+
+
+# ConfigMap### Common Issues
+
+kubectl create configmap backend-config \
+
+  --from-file=.env.production \**Database Connection Issues**
+
+  -n staff-scheduler```bash
+
 # Check database status
-docker-compose logs mysql
+
+# Deploydocker-compose logs mysql
+
+kubectl apply -f k8s/ -n staff-scheduler
 
 # Test connection manually
-docker-compose exec mysql mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE}
 
-# Restart database
-docker-compose restart mysql
+# Verifydocker-compose exec mysql mysql -u ${MYSQL_USER} -p${MYSQL_PASSWORD} ${MYSQL_DATABASE}
+
+kubectl get pods -n staff-scheduler
+
+kubectl logs deployment/backend -n staff-scheduler# Restart database
+
+```docker-compose restart mysql
+
 ```
 
-**Application Errors**
-```bash
-# Check application logs
-docker-compose logs backend
-docker-compose logs frontend
+**Manifest Files (k8s/):**
 
-# Access running container
-docker-compose exec backend bash
-docker-compose exec frontend sh
+```**Application Errors**
 
-# Check health status
-curl http://localhost:3001/health
-curl http://localhost:3000/health
-```
+k8s/```bash
 
-**Performance Issues**
-```bash
-# Monitor resource usage
-docker stats
+├── namespace.yaml# Check application logs
 
-# Database performance
-docker-compose exec mysql mysql -u root -p -e "SHOW PROCESSLIST;"
-docker-compose exec mysql mysql -u root -p -e "SHOW STATUS LIKE 'Threads%';"
+├── configmap.yamldocker-compose logs backend
 
-# Application metrics
-curl http://localhost:3001/metrics
-```
+├── secret.yamldocker-compose logs frontend
 
-### Maintenance Tasks
+├── mysql-deployment.yaml
 
-**Daily Maintenance**
-```bash
-#!/bin/bash
-# daily-maintenance.sh
+├── backend-deployment.yaml# Access running container
 
-# Check system health
-curl -f http://localhost:3001/health || exit 1
+├── backend-service.yamldocker-compose exec backend bash
 
-# Backup database
-./backup.sh
+├── frontend-deployment.yamldocker-compose exec frontend sh
 
-# Clean up old logs
-find /var/log -name "*.log" -mtime +7 -delete
+├── frontend-service.yaml
 
-# Update system statistics
-docker-compose exec mysql mysql -u root -p -e "ANALYZE TABLE employees, shifts, assignments;"
-```
+├── ingress.yaml# Check health status
 
-**Weekly Maintenance**
-```bash
-#!/bin/bash
-# weekly-maintenance.sh
+└── hpa.yaml (Horizontal Pod Autoscaler)curl http://localhost:3001/health
 
-# Optimize database tables
-docker-compose exec mysql mysql -u root -p -e "OPTIMIZE TABLE employees, shifts, assignments, schedules;"
+```curl http://localhost:3000/health
 
-# Clean up old audit logs
-docker-compose exec mysql mysql -u root -p -e "DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY);"
-
-# Update Docker images
-docker-compose pull
-docker system prune -f
-```
-
-**Monthly Maintenance**
-```bash
-#!/bin/bash
-# monthly-maintenance.sh
-
-# Full database backup
-./full-backup.sh
-
-# Security updates
-docker-compose build --no-cache --pull
-docker-compose up -d
-
-# Performance analysis
-./performance-report.sh
-
-# Cleanup old backups
-find /backups -name "*.sql.gz" -mtime +90 -delete
-```
-
-### Monitoring & Alerting
-
-**System Metrics**
-```typescript
-// Performance monitoring endpoint
-app.get('/metrics', (req, res) => {
-  const metrics = {
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    cpu: process.cpuUsage(),
-    activeConnections: getActiveConnections(),
-    databaseStatus: await checkDatabaseHealth(),
-    cacheStatus: await checkCacheHealth()
-  };
-  
-  res.json(metrics);
-});
-```
-
-**Alert Conditions**
-- API response time > 1 second
-- Database connection failures
-- Memory usage > 85%
-- Disk space < 10%
-- Failed health checks for > 3 minutes
-
-**Log Analysis**
-```bash
-# Error tracking
-grep -i error /var/log/staff-scheduler/app.log | tail -100
-
-# Performance monitoring
-grep "slow query" /var/log/mysql/slow-query.log
-
-# Security monitoring
-grep "authentication failed" /var/log/staff-scheduler/app.log
 ```
 
 ---
 
-## Appendix
+**Performance Issues**
 
-### API Response Codes
+## MAINTENANCE & MONITORING```bash
+
+# Monitor resource usage
+
+### Health Monitoringdocker stats
+
+
+
+**Endpoints:**# Database performance
+
+```bashdocker-compose exec mysql mysql -u root -p -e "SHOW PROCESSLIST;"
+
+# System healthdocker-compose exec mysql mysql -u root -p -e "SHOW STATUS LIKE 'Threads%';"
+
+curl http://localhost:3001/api/health
+
+# Application metrics
+
+# Databasecurl http://localhost:3001/metrics
+
+curl http://localhost:3001/api/health/database```
+
+
+
+# Memory### Maintenance Tasks
+
+curl http://localhost:3001/api/health/memory
+
+```**Daily Maintenance**
+
+```bash
+
+**Metrics:**#!/bin/bash
+
+- Response time: < 100ms (alert: > 500ms)# daily-maintenance.sh
+
+- Error rate: < 0.1% (alert: > 1%)
+
+- CPU usage: < 70% (alert: > 85%)# Check system health
+
+- Memory usage: < 80% (alert: > 90%)curl -f http://localhost:3001/health || exit 1
+
+- Database connections: < 15/20 (alert: > 18)
+
+# Backup database
+
+### Backup & Recovery./backup.sh
+
+
+
+**Database Backup:**# Clean up old logs
+
+```bashfind /var/log -name "*.log" -mtime +7 -delete
+
+# Full backup
+
+mysqldump -u scheduler_user -p staff_scheduler > backup.sql# Update system statistics
+
+docker-compose exec mysql mysql -u root -p -e "ANALYZE TABLE employees, shifts, assignments;"
+
+# Restore```
+
+mysql -u scheduler_user -p staff_scheduler < backup.sql
+
+**Weekly Maintenance**
+
+# Automated: Cron job```bash
+
+0 2 * * * mysqldump -u root -p${MYSQL_ROOT_PASSWORD} staff_scheduler | gzip > /backups/backup_$(date +\%Y\%m\%d).sql.gz#!/bin/bash
+
+```# weekly-maintenance.sh
+
+
+
+**Retention Policy:**# Optimize database tables
+
+- Daily backups: Keep 7 daysdocker-compose exec mysql mysql -u root -p -e "OPTIMIZE TABLE employees, shifts, assignments, schedules;"
+
+- Weekly backups: Keep 4 weeks
+
+- Monthly backups: Keep 12 months# Clean up old audit logs
+
+docker-compose exec mysql mysql -u root -p -e "DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY);"
+
+### Database Maintenance
+
+# Update Docker images
+
+```bashdocker-compose pull
+
+# Optimize tablesdocker system prune -f
+
+OPTIMIZE TABLE schedules, assignments, employees;```
+
+
+
+# Analyze tables**Monthly Maintenance**
+
+ANALYZE TABLE schedules, assignments, employees;```bash
+
+#!/bin/bash
+
+# Check integrity# monthly-maintenance.sh
+
+CHECK TABLE schedules, assignments, employees;
+
+# Full database backup
+
+# Rebuild indexes./full-backup.sh
+
+REPAIR TABLE schedules, assignments;
+
+```# Security updates
+
+docker-compose build --no-cache --pull
+
+### Log Managementdocker-compose up -d
+
+
+
+**Rotation:**# Performance analysis
+
+- Max size: 100MB per file./performance-report.sh
+
+- Retention: 30 days
+
+- Compression: gzip# Cleanup old backups
+
+find /backups -name "*.sql.gz" -mtime +90 -delete
+
+**Aggregation (optional):**```
+
+- ELK Stack (Elasticsearch, Logstash, Kibana)
+
+- Splunk### Monitoring & Alerting
+
+- CloudWatch (AWS)
+
+**System Metrics**
+
+---```typescript
+
+// Performance monitoring endpoint
+
+## TROUBLESHOOTINGapp.get('/metrics', (req, res) => {
+
+  const metrics = {
+
+### Common Issues & Solutions    uptime: process.uptime(),
+
+    memory: process.memoryUsage(),
+
+| Issue | Cause | Solution |    cpu: process.cpuUsage(),
+
+|-------|-------|----------|    activeConnections: getActiveConnections(),
+
+| "Port already in use" | Another service on port | `lsof -i :3001` then kill process |    databaseStatus: await checkDatabaseHealth(),
+
+| "Cannot connect to database" | MySQL not running | `docker-compose up mysql` |    cacheStatus: await checkCacheHealth()
+
+| "Schedule generation timeout" | Large dataset, slow hardware | Reduce scope or increase timeout |  };
+
+| "Type mismatch errors" | Frontend-backend version mismatch | Ensure matching TypeScript types |  
+
+| "Memory exceeded" | Large schedules (1000+ employees) | Increase container memory limit |  res.json(metrics);
+
+| "Rate limit exceeded" | Too many requests | Wait 15 minutes or adjust RATE_LIMIT_MAX |});
+
+```
+
+### Debug Mode
+
+**Alert Conditions**
+
+```bash- API response time > 1 second
+
+# Backend- Database connection failures
+
+NODE_ENV=development LOG_LEVEL=debug npm start- Memory usage > 85%
+
+- Disk space < 10%
+
+# Frontend- Failed health checks for > 3 minutes
+
+REACT_APP_DEBUG=true npm start
+
+**Log Analysis**
+
+# Database queries```bash
+
+SET @@global.general_log = 'ON';# Error tracking
+
+SHOW VARIABLES LIKE 'general_log%';grep -i error /var/log/staff-scheduler/app.log | tail -100
+
+```
+
+# Performance monitoring
+
+### Performance Profilinggrep "slow query" /var/log/mysql/slow-query.log
+
+
+
+**Node.js Profiling:**# Security monitoring
+
+```bashgrep "authentication failed" /var/log/staff-scheduler/app.log
+
+# CPU profile```
+
+node --prof backend/src/index.ts
+
+node --prof-process isolate-*.log > profile.txt---
+
+
+
+# Memory profile## Appendix
+
+node --inspect backend/src/index.ts
+
+# Open chrome://inspect### API Response Codes
+
+```
 
 | Code | Description | Usage |
-|------|-------------|-------|
+
+---|------|-------------|-------|
+
 | 200 | OK | Successful GET, PUT requests |
-| 201 | Created | Successful POST requests |
-| 204 | No Content | Successful DELETE requests |
-| 400 | Bad Request | Invalid input data |
+
+**Version:** 1.0.0  | 201 | Created | Successful POST requests |
+
+**Last Updated:** October 24, 2025  | 204 | No Content | Successful DELETE requests |
+
+**Maintainer:** Luca Ostinelli| 400 | Bad Request | Invalid input data |
+
 | 401 | Unauthorized | Authentication required |
 | 403 | Forbidden | Insufficient permissions |
 | 404 | Not Found | Resource not found |
@@ -1831,14 +3488,16 @@ $$\sum_{i \in \text{descendants}(u)} x_{i,t} \leq B_C \quad \forall t \in T_C$$
 
 unless exemption $E_{i,t,C}$ is approved.
 
-#### 5. Coverage Requirements
+#### 5. Coverage Requirements (Standard Formula)
 For each coverage interval $f$ and role $r$:
 
-$$\text{min}_{f,r} \leq \sum_{t \in \text{overlap}(f)} \sum_{i \in E_r} \phi_{i,t,r} \leq \text{max}_{f,r}$$
+$$\min_{f,r} \leq \sum_{t \in T_f} \sum_{i \in E_r} x_{i,t} \leq \max_{f,r}$$
 
 Where:
-- **Strict mode**: $\phi_{i,t,r} = x_{i,t}$ if $\text{role}(i) = r$
-- **Flexible mode**: $\phi_{i,t,r} = y_{i,t,r}$
+- $T_f$: Set of shifts within coverage interval $f$
+- $E_r$: Set of employees who can cover role $r$
+- $x_{i,t}$: Decision variable = 1 if employee $i$ assigned to shift $t$
+- $\min_{f,r}$, $\max_{f,r}$: Coverage requirements
 
 #### 6. Role Assignment Consistency (Flexible Mode)
 
@@ -4341,30 +6000,41 @@ Default limit: 20, Maximum limit: 100
 ## 7. Backend Implementation Details
 
 ### Large-Scale Performance Targets
-- **100+ employees**: < 30 seconds for monthly optimization
-- **500+ employees**: < 2 minutes with progress updates
-- **1000+ shifts/month**: Efficient constraint handling
-- **Memory usage**: < 2GB for largest instances
-- **Incremental solving**: < 5 seconds for minor changes
+- **100+ employees**: Supported with current architecture
+- **500+ employees**: Requires optimization solver implementation
+- **1000+ shifts/month**: Database indexing strategy implemented
+- **Memory usage**: < 500MB baseline for core operations
+- **Incremental solving**: Foundation for modular optimization
 
-### Optimization Strategies
+### Project Implementation Status
 
-#### Constraint Preprocessing
-- **Redundant constraint removal**: Detect and eliminate redundant constraints
-- **Variable fixing**: Fix obvious assignments early in the process
-- **Constraint tightening**: Add valid inequalities to strengthen formulation
+**Fully Implemented:**
+- User authentication with JWT tokens
+- Database schema with complete indexes
+- Basic CRUD operations for employees, shifts, assignments
+- Configuration management system
+- Logging and error handling
+- API middleware (CORS, compression, rate limiting)
+- TypeScript type definitions
 
-#### Problem Decomposition
-- **Temporal decomposition**: Split monthly problems into weekly subproblems
-- **Departmental decomposition**: Solve departments independently when possible
-- **Hierarchical decomposition**: Optimize by organizational levels
+**In Development:**
+- Advanced schedule optimization algorithms
+- Hierarchical constraint system
+- Permission delegation framework
+- Real-time collaboration features
+
+**Future Enhancements:**
+- Integration with third-party constraint solvers (OR-Tools, CPLEX)
+- Advanced analytics and reporting
+- Multi-language support
+- Mobile application
 
 #### Algorithm Selection
 ```typescript
 interface SolverConfig {
-  engine: 'ortools' | 'cplex' | 'gurobi' | 'custom';
-  timeout: number; // seconds
-  threads?: number;
+  engine: 'javascript' | 'or-tools' | 'cplex' | 'gurobi'; // JavaScript is current implementation
+  timeout: number; // seconds - default 300
+  threads?: number; // For parallel solvers
   memoryLimit?: number; // MB
   heuristics?: 'fast' | 'balanced' | 'thorough';
   preprocessingLevel: 'minimal' | 'standard' | 'aggressive';
@@ -4380,6 +6050,8 @@ interface OptimizationProgress {
 }
 ```
 
+**Note**: The current JavaScript implementation provides a foundation for schedule optimization. Production deployments may integrate advanced constraint solvers like OR-Tools or CPLEX for enhanced performance with large datasets.
+
 #### Database Optimization
 - **Materialized paths**: Efficient hierarchy queries O(1)
 - **Indexes**: Strategic indexing for common query patterns
@@ -4394,38 +6066,55 @@ interface OptimizationProgress {
 
 ### Service Layer Architecture
 
-```typescript
-// UserService - Complete implementation
-export class UserService {
-  private readonly saltRounds = 12;
+The backend is organized with a clear separation of concerns:
 
-  async createUser(userData: CreateUserRequest): Promise<User> {
-    // Hash password with bcrypt
-    const passwordHash = await bcrypt.hash(userData.password, this.saltRounds);
-    
-    // Validate hierarchy constraints
-    await this.validateHierarchyLevel(userData.parentSupervisor, userData.role);
-    
-    // Generate hierarchy path
-    const hierarchyPath = await this.generateHierarchyPath(userData.parentSupervisor);
-    
-    const query = `
-      INSERT INTO users (
-        username, email, password_hash, first_name, last_name, role,
-        parent_supervisor, hierarchy_level, hierarchy_path, max_subordinate_level,
-        is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true, NOW(), NOW())
-    `;
+**User Service** - Authentication and user management
+- User creation with role-based access control
+- Login with JWT token generation
+- Password hashing with bcrypt
+- User permissions management
+- Hierarchy validation
 
-    const result = await database.query(query, [
-      userData.username, userData.email, passwordHash,
-      userData.firstName, userData.lastName, userData.role,
-      userData.parentSupervisor, userData.hierarchyLevel,
-      hierarchyPath, userData.maxSubordinateLevel
-    ]);
+**Employee Service** - Employee lifecycle management
+- CRUD operations with complete validation
+- Skills management with proficiency levels
+- Department and supervisor assignment
+- Availability tracking
+- Contract period management
 
-    return this.findById((result as any).insertId);
-  }
+**Shift Service** - Shift management and templates
+- Shift template management for recurring patterns
+- Shift creation with role requirements
+- Skill requirements management
+- Shift publication workflow
+- Status tracking (draft, published, archived)
+
+**Assignment Service** - Employee-shift assignments
+- Assignment creation and validation
+- Approval workflow
+- Conflict detection
+- Status management
+- Bulk operations support
+
+**Schedule Service** - Schedule generation and management
+- Schedule creation and storage
+- Integration with optimization engine
+- Result persistence
+- Version tracking
+- Status lifecycle
+
+**System Settings Service** - Configuration management
+- Configurable system parameters
+- Currency and time period settings
+- Reporting configuration
+- Notification preferences
+
+All services follow these patterns:
+- Constructor injection of database pool
+- Async/await for database operations
+- Type-safe return values
+- Comprehensive error handling
+- Parameterized queries to prevent SQL injection
 
   async login(credentials: LoginRequest): Promise<LoginResponse> {
     const user = credentials.username 
@@ -4835,61 +6524,36 @@ export class ScheduleService {
 
 ### Middleware Implementation
 
-```typescript
-// Authentication middleware with complete hierarchy support
-export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Missing or invalid authorization header'
-        }
-      });
-    }
+The application uses a middleware stack for cross-cutting concerns:
 
-    const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, config.jwt.secret) as any;
+**Security Middleware**
+- Helmet.js for security headers
+- CORS configuration with origin validation
+- Rate limiting with express-rate-limit
+- Request compression with gzip
 
-    // Load complete user with permissions
-    const user = await userService.findById(decoded.userId);
-    if (!user || !user.isActive) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'User not found or inactive'
-        }
-      });
-    }
+**Authentication & Authorization**
+- JWT token validation
+- Role-based access control
+- Permission checking
+- Request user context injection
 
-    // Attach user to request
-    req.user = user;
-    req.hierarchyContext = await userService.buildHierarchyContext(user);
-    
-    next();
-  } catch (error) {
-    if (error instanceof jwt.TokenExpiredError) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'TOKEN_EXPIRED',
-          message: 'Token has expired'
-        }
-      });
-    }
+**Data Processing**
+- Request body parsing (JSON/URL-encoded)
+- File upload handling with multer
+- Input validation with express-validator
 
-    return res.status(401).json({
-      success: false,
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'Invalid token'
-      }
-    });
-  }
-};
+**Logging & Monitoring**
+- Morgan for request logging
+- Winston for application logging
+- Error tracking and reporting
+- Performance metrics
+
+**Error Handling**
+- Global error handler with consistent error response format
+- 404 handler for undefined routes
+- Request validation error responses
+- Stack traces in development mode only
 
 // Authorization middleware with hierarchy validation
 export const authorize = (requiredPermission: Permission) => {
