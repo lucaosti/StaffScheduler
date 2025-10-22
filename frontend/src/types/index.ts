@@ -27,7 +27,7 @@ export interface User {
   lastName: string;
   passwordHash: string; // bcrypt with salt
   salt?: string;
-  role: 'admin' | 'manager' | 'employee';
+  role: 'admin' | 'manager' | 'department_manager' | 'employee';
   employeeId?: string; // Link to Employee if applicable
   parentSupervisor?: string; // Parent in hierarchy tree
   hierarchyLevel: number; // 0 = master, 1 = top supervisor, etc.

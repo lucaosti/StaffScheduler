@@ -1,3 +1,23 @@
+/**
+ * Staff Scheduler - Backend API Server
+ *
+ * Main application entry point that configures and starts the Express server.
+ * Sets up all middleware, database connections, routes, and error handling.
+ *
+ * Features:
+ * - Security middleware (Helmet, CORS, rate limiting)
+ * - Request logging with Morgan
+ * - Database connection pooling
+ * - Comprehensive error handling
+ * - Health check endpoints
+ *
+ * Environment:
+ * - Requires NODE_ENV, DATABASE_, JWT_SECRET, CORS_ORIGIN
+ * - See config/index.ts for configuration details
+ *
+ * @author Luca Ostinelli
+ */
+
 import express from 'express';
 import cors from 'cors';
 import compression from 'compression';
@@ -5,10 +25,10 @@ import morgan from 'morgan';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { createPool } from 'mysql2/promise';
-import config from './config';
-import logger from './config/logger';
+import { config } from './config';
+import { logger } from './config/logger';
 
-// Import routes
+// Import route handlers
 import { createAuthRouter } from './routes/auth';
 import { createUsersRouter } from './routes/users';
 import dashboardRoutes from './routes/dashboard';

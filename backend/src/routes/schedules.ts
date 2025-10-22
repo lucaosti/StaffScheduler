@@ -325,6 +325,51 @@ router.post('/:id/duplicate', authenticate, requireRole(['admin', 'manager']), a
   }
 });
 
+// Generate optimized schedule
+router.post('/:id/generate', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: { message: 'Invalid schedule ID' }
+      });
+    }
+
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({ 
+        success: false, 
+        error: { message: 'User not authenticated' }
+      });
+    }
+
+    // Get schedule with details
+    const schedule = await scheduleService.getScheduleById(id);
+    if (!schedule) {
+      return res.status(404).json({ 
+        success: false, 
+        error: { message: 'Schedule not found' }
+      });
+    }
+
+    // Generate optimized assignments
+    const result = await scheduleService.generateOptimizedSchedule(id, user.id);
+    
+    res.json({ 
+      success: true,
+      data: result,
+      message: 'Schedule generated successfully'
+    });
+  } catch (error) {
+    console.error('Error generating schedule:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: { message: 'Failed to generate schedule' }
+    });
+  }
+});
+
   return router;
 };
 

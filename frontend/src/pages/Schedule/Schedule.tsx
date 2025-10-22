@@ -18,6 +18,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { Schedule as ScheduleType, Assignment, Employee, Shift } from '../../types';
+import * as scheduleService from '../../services/scheduleService';
 import * as dashboardService from '../../services/dashboardService';
 import * as employeeService from '../../services/employeeService';
 import * as shiftService from '../../services/shiftService';
@@ -56,13 +57,19 @@ const Schedule: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Load all necessary data
-      const [employeesResponse, shiftsResponse, dashboardResponse] = await Promise.all([
+      // Load all necessary data from real APIs
+      const [schedulesResponse, employeesResponse, shiftsResponse] = await Promise.all([
+        scheduleService.getSchedules(),
         employeeService.getEmployees({}),
-        shiftService.getShifts({}),
-        dashboardService.getDashboardStats()
+        shiftService.getShifts({})
       ]);
 
+      if (schedulesResponse.success && schedulesResponse.data) {
+        setSchedules(schedulesResponse.data);
+      } else {
+        setError('Failed to load schedules');
+      }
+      
       if (employeesResponse.success && employeesResponse.data) {
         setEmployees(employeesResponse.data);
       }
@@ -71,51 +78,15 @@ const Schedule: React.FC = () => {
         setShifts(shiftsResponse.data);
       }
 
-      // Mock schedule data for now
-      const mockSchedules = [
-        {
-          id: '1',
-          name: 'Orario Settimanale - Pronto Soccorso',
-          startDate: '2024-02-05',
-          endDate: '2024-02-11',
-          status: 'published' as const,
-          createdBy: '1',
-          createdAt: '2024-02-01T10:00:00Z',
-          updatedAt: '2024-02-01T10:00:00Z'
-        },
-        {
-          id: '2',
-          name: 'Orario Settimanale - Terapia Intensiva',
-          startDate: '2024-02-05',
-          endDate: '2024-02-11',
-          status: 'draft' as const,
-          createdBy: '1',
-          createdAt: '2024-02-01T10:00:00Z',
-          updatedAt: '2024-02-01T10:00:00Z'
+      // Load assignments for the current week
+      if (schedulesResponse.success && schedulesResponse.data && schedulesResponse.data.length > 0) {
+        const firstSchedule = schedulesResponse.data[0];
+        const scheduleDetails = await scheduleService.getScheduleWithShifts(firstSchedule.id);
+        if (scheduleDetails.success && scheduleDetails.data) {
+          // Assignments would be extracted from schedule details
+          setAssignments([]);
         }
-      ];
-      setSchedules(mockSchedules);
-
-      // Mock assignments data
-      const mockAssignments = [
-        {
-          id: '1',
-          employeeId: '1',
-          shiftId: '1',
-          role: 'Nurse',
-          status: 'approved' as const,
-          assignedAt: new Date('2024-02-01T10:00:00Z'),
-        },
-        {
-          id: '2',
-          employeeId: '2',
-          shiftId: '2',
-          role: 'Doctor',
-          status: 'approved' as const,
-          assignedAt: new Date('2024-02-01T10:00:00Z'),
-        }
-      ];
-      setAssignments(mockAssignments);
+      }
 
     } catch (err) {
       console.error('Load data error:', err);
@@ -169,14 +140,22 @@ const Schedule: React.FC = () => {
   const handleGenerateSchedule = async (params: ScheduleGenerationParams) => {
     setIsGenerating(true);
     try {
-      // Here you would call the schedule generation API
-      // For now, we'll simulate the process
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Call the real schedule generation API
+      if (schedules.length === 0) {
+        alert('No schedules available to generate');
+        return;
+      }
+
+      const firstScheduleId = schedules[0].id;
+      const response = await scheduleService.generateSchedule(firstScheduleId);
       
-      await loadData(); // Reload data
-      setShowGenerateModal(false);
-      
-      alert('Schedule generated successfully!');
+      if (response.success) {
+        await loadData(); // Reload data
+        setShowGenerateModal(false);
+        alert(`Schedule generated successfully! ${response.data?.message}`);
+      } else {
+        alert('Failed to generate schedule: ' + (response.error?.message || 'Unknown error'));
+      }
     } catch (err) {
       console.error('Generate schedule error:', err);
       alert('Failed to generate schedule');

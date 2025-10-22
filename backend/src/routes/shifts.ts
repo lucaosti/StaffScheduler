@@ -1,3 +1,18 @@
+/**
+ * Shift Management Routes
+ *
+ * Handles all shift-related operations including:
+ * - Shift template CRUD operations
+ * - Individual shift management
+ * - Schedule-based shift retrieval
+ * - Department-specific shift filtering
+ *
+ * Authentication: Required on all endpoints
+ * Authorization: Manager/Admin roles required for creation/modification
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
