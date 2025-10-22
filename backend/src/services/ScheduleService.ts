@@ -432,4 +432,114 @@ export class ScheduleService {
       connection.release();
     }
   }
+
+  /**
+   * Generate optimized schedule assignments using constraint satisfaction algorithm
+   */
+  async generateOptimizedSchedule(scheduleId: number, userId: number) {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Get schedule with shifts
+      const schedule = await this.getScheduleWithShifts(scheduleId);
+      if (!schedule) {
+        throw new Error('Schedule not found');
+      }
+
+      // Get all employees for this department
+      const [employees] = await connection.execute<RowDataPacket[]>(
+        `SELECT e.employee_id, e.first_name, e.last_name, e.skills, e.max_hours_per_week, e.min_hours_per_week
+         FROM employees e
+         WHERE e.department_id = ? AND e.status = 'active'`,
+        [schedule.departmentId]
+      );
+
+      if (employees.length === 0) {
+        throw new Error('No active employees found in department');
+      }
+
+      // Convert to optimizer format
+      const { ScheduleOptimizer } = await import('../optimization/ScheduleOptimizer');
+      const optimizer = new ScheduleOptimizer({
+        startDate: new Date(schedule.startDate),
+        endDate: new Date(schedule.endDate),
+        maxIterations: 10000,
+        temperature: 100,
+        coolingRate: 0.95,
+        timeoutMs: 300000
+      });
+
+      // Build shifts requirements
+      const shiftsRequirements = (schedule.shifts || []).map((shift: any) => ({
+        shiftId: shift.id,
+        date: new Date(shift.date),
+        requiredStaff: shift.requiredStaff,
+        minSkillLevel: 1,
+        allowedSkills: shift.requiredSkills || [],
+        department: (schedule.departmentId || 0).toString(),
+        priority: 'normal' as const
+      }));
+
+      // Build employee profiles
+      const employeeProfiles = employees.map((emp: RowDataPacket) => ({
+        id: emp.employee_id,
+        maxHoursPerWeek: emp.max_hours_per_week || 40,
+        minHoursPerWeek: emp.min_hours_per_week || 20,
+        skills: (emp.skills || '').split(',').map((s: string) => s.trim()),
+        availableDays: [true, true, true, true, true, true, true], // All days available by default
+        preferences: {
+          preferredShifts: [],
+          avoidShifts: [],
+          maxConsecutiveDays: 6,
+          minDaysBetweenShifts: 1
+        },
+        restrictions: {
+          unavailableDates: [],
+          maxOvertimePerMonth: 20,
+          certifications: []
+        }
+      }));
+
+      // Run optimization
+      const optimizedAssignments = optimizer.optimize(employeeProfiles, shiftsRequirements);
+
+      // Get schedule stats
+      const stats = optimizer.getScheduleStats(optimizedAssignments);
+
+      // Store assignments in database
+      let assignmentsStored = 0;
+      for (const assignment of optimizedAssignments) {
+        await connection.execute(
+          `INSERT INTO assignments (
+            schedule_id, employee_id, shift_id, status, assigned_by, assigned_at
+          ) VALUES (?, ?, ?, 'assigned', ?, NOW())`,
+          [scheduleId, assignment.employeeId, assignment.shiftId, userId]
+        );
+        assignmentsStored++;
+      }
+
+      // Update schedule status
+      await connection.execute(
+        'UPDATE schedules SET status = ?, updated_at = NOW() WHERE schedule_id = ?',
+        ['generated', scheduleId]
+      );
+
+      await connection.commit();
+
+      return {
+        scheduleId,
+        totalAssignments: assignmentsStored,
+        coverage: stats.coverageRate.toFixed(2) + '%',
+        fairnessScore: stats.fairnessScore.toFixed(2),
+        message: `Successfully generated ${assignmentsStored} assignments with ${stats.coverageRate.toFixed(1)}% coverage`
+      };
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
 }
