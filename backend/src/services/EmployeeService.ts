@@ -1,319 +1,279 @@
-import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
-import { Employee, CreateEmployeeRequest, UpdateEmployeeRequest } from '../types';
+/**
+ * Employee Service
+ * 
+ * Specialized service for managing employee users. This service provides
+ * employee-specific methods that wrap UserService functionality with
+ * role filtering for employees only.
+ * 
+ * @module services/EmployeeService
+ * @author Staff Scheduler Team
+ */
 
+import { Pool } from 'mysql2/promise';
+import { UserService } from './UserService';
+import { User } from '../types';
+import { logger } from '../config/logger';
+
+/**
+ * EmployeeService Class
+ * 
+ * Provides employee-specific operations by filtering UserService results
+ * to only include users with the 'employee' role.
+ */
 export class EmployeeService {
-  constructor(private pool: Pool) {}
+  private userService: UserService;
 
-  async getAllEmployees(): Promise<Employee[]> {
-    const query = `
-      SELECT 
-        u.user_id as id,
-        u.username,
-        u.email,
-        u.first_name as firstName,
-        u.last_name as lastName,
-        u.role,
-        u.phone,
-        u.is_active as isActive,
-        u.created_at as createdAt,
-        u.updated_at as updatedAt,
-        e.employee_number as employeeId,
-        e.department_id,
-        e.hire_date,
-        e.salary,
-        e.status,
-        e.position,
-        e.address,
-        e.emergency_contact,
-        e.notes,
-        d.name as department_name
-      FROM users u
-      LEFT JOIN employees e ON u.user_id = e.user_id
-      LEFT JOIN departments d ON e.department_id = d.department_id
-      WHERE u.role IN ('employee', 'department_manager', 'manager') 
-      AND u.is_active = 1
-      ORDER BY u.last_name, u.first_name
-    `;
-    
-    const [rows] = await this.pool.execute<RowDataPacket[]>(query);
-    return rows.map(row => ({
-      id: row.id,
-      email: row.email,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      role: row.role,
-      employeeId: row.employeeId,
-      phone: row.phone,
-      isActive: row.isActive === 1,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt
-    }));
+  /**
+   * Creates a new EmployeeService instance
+   * 
+   * @param pool - MySQL connection pool for database operations
+   */
+  constructor(private pool: Pool) {
+    this.userService = new UserService(pool);
   }
 
-  async getEmployeeById(id: number): Promise<Employee | null> {
-    const query = `
-      SELECT 
-        u.user_id as id,
-        u.username,
-        u.email,
-        u.first_name as firstName,
-        u.last_name as lastName,
-        u.role,
-        u.phone,
-        u.is_active as isActive,
-        u.created_at as createdAt,
-        u.updated_at as updatedAt,
-        e.employee_number as employeeId,
-        e.department_id,
-        e.hire_date,
-        e.salary,
-        e.status,
-        e.position,
-        e.address,
-        e.emergency_contact,
-        e.notes,
-        d.name as department_name
-      FROM users u
-      LEFT JOIN employees e ON u.user_id = e.user_id
-      LEFT JOIN departments d ON e.department_id = d.department_id
-      WHERE u.user_id = ?
-    `;
-    
-    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [id]);
-    if (rows.length === 0) return null;
-    
-    const row = rows[0];
-    return {
-      id: row.id,
-      email: row.email,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      role: row.role,
-      employeeId: row.employeeId,
-      phone: row.phone,
-      isActive: row.isActive === 1,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt
-    };
-  }
-
-  async createEmployee(employeeData: CreateEmployeeRequest): Promise<number> {
-    const connection = await this.pool.getConnection();
-    
+  /**
+   * Gets all employees (users with role 'employee')
+   * 
+   * @param filters - Optional filters (department, active status)
+   * @returns Promise resolving to array of employee users
+   */
+  async getAllEmployees(filters?: {
+    departmentId?: number;
+    isActive?: boolean;
+    search?: string;
+  }): Promise<User[]> {
     try {
-      await connection.beginTransaction();
-
-      // First create the user
-      const userQuery = `
-        INSERT INTO users (email, password_hash, first_name, last_name, role, phone, is_active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-      `;
-      
-      const [userResult] = await connection.execute<ResultSetHeader>(userQuery, [
-        employeeData.email,
-        '$2b$10$defaulthash', // Should be hashed password
-        employeeData.firstName,
-        employeeData.lastName,
-        employeeData.role,
-        employeeData.phone || null
-      ]);
-
-      const userId = userResult.insertId;
-
-      // Create employee record if needed
-      if (employeeData.employeeId || employeeData.departmentIds?.length) {
-        // Get the next employee number if not provided
-        let employeeNumber = employeeData.employeeId;
-        if (!employeeNumber) {
-          const [numberRows] = await connection.execute<RowDataPacket[]>(
-            'SELECT COALESCE(MAX(CAST(employee_number AS UNSIGNED)), 0) + 1 as next_number FROM employees'
-          );
-          employeeNumber = numberRows[0].next_number.toString().padStart(6, '0');
-        }
-
-        const empQuery = `
-          INSERT INTO employees (user_id, employee_number, department_id, hire_date, status)
-          VALUES (?, ?, ?, ?, 'active')
-        `;
-        
-        await connection.execute(empQuery, [
-          userId,
-          employeeNumber,
-          employeeData.departmentIds?.[0] || null,
-          new Date()
-        ]);
-      }
-
-      // Add department assignments
-      if (employeeData.departmentIds?.length) {
-        for (const deptId of employeeData.departmentIds) {
-          const deptQuery = `
-            INSERT INTO user_departments (user_id, department_id, is_manager)
-            VALUES (?, ?, ?)
-          `;
-          await connection.execute(deptQuery, [
-            userId, 
-            deptId, 
-            employeeData.role === 'department_manager' ? 1 : 0
-          ]);
-        }
-      }
-
-      await connection.commit();
-      return userId;
+      return await this.userService.getAllUsers({
+        ...filters,
+        role: 'employee'
+      });
     } catch (error) {
-      await connection.rollback();
+      logger.error('Error getting all employees:', error);
       throw error;
-    } finally {
-      connection.release();
     }
   }
 
-  async updateEmployee(id: number, employeeData: UpdateEmployeeRequest): Promise<boolean> {
-    const connection = await this.pool.getConnection();
-    
+  /**
+   * Gets an employee by ID
+   * 
+   * Validates that the user is an employee before returning.
+   * 
+   * @param id - Employee ID
+   * @returns Promise resolving to employee user or null
+   */
+  async getEmployeeById(id: number): Promise<User | null> {
     try {
-      await connection.beginTransaction();
-
-      // Update user table
-      const userUpdates: string[] = [];
-      const userValues: any[] = [];
-      
-      if (employeeData.email !== undefined) {
-        userUpdates.push('email = ?');
-        userValues.push(employeeData.email);
+      const user = await this.userService.getUserById(id);
+      if (user && user.role !== 'employee') {
+        return null;
       }
-      if (employeeData.firstName !== undefined) {
-        userUpdates.push('first_name = ?');
-        userValues.push(employeeData.firstName);
-      }
-      if (employeeData.lastName !== undefined) {
-        userUpdates.push('last_name = ?');
-        userValues.push(employeeData.lastName);
-      }
-      if (employeeData.role !== undefined) {
-        userUpdates.push('role = ?');
-        userValues.push(employeeData.role);
-      }
-      if (employeeData.phone !== undefined) {
-        userUpdates.push('phone = ?');
-        userValues.push(employeeData.phone);
-      }
-      if (employeeData.isActive !== undefined) {
-        userUpdates.push('is_active = ?');
-        userValues.push(employeeData.isActive ? 1 : 0);
-      }
-      
-      if (userUpdates.length > 0) {
-        userValues.push(id);
-        const userQuery = `UPDATE users SET ${userUpdates.join(', ')} WHERE user_id = ?`;
-        await connection.execute(userQuery, userValues);
-      }
-
-      // Update department assignments if provided
-      if (employeeData.departmentIds !== undefined) {
-        // Remove existing assignments
-        await connection.execute('DELETE FROM user_departments WHERE user_id = ?', [id]);
-        
-        // Add new assignments
-        for (const deptId of employeeData.departmentIds) {
-          const deptQuery = `
-            INSERT INTO user_departments (user_id, department_id, is_manager)
-            VALUES (?, ?, ?)
-          `;
-          await connection.execute(deptQuery, [
-            id, 
-            deptId, 
-            employeeData.role === 'department_manager' ? 1 : 0
-          ]);
-        }
-      }
-
-      await connection.commit();
-      return true;
+      return user;
     } catch (error) {
-      await connection.rollback();
+      logger.error('Error getting employee by ID:', error);
       throw error;
-    } finally {
-      connection.release();
     }
   }
 
+  /**
+   * Gets employees by department
+   * 
+   * @param departmentId - Department ID
+   * @returns Promise resolving to array of employees
+   */
+  async getEmployeesByDepartment(departmentId: number): Promise<User[]> {
+    try {
+      return await this.userService.getUsersByDepartment(departmentId);
+    } catch (error) {
+      logger.error('Error getting employees by department:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Gets employee statistics
+   * 
+   * @returns Promise resolving to employee statistics
+   */
+  async getEmployeeStatistics(): Promise<{
+    total: number;
+    active: number;
+    inactive: number;
+  }> {
+    try {
+      const stats = await this.userService.getUserStatistics();
+      const employeeCount = stats.byRole.find(r => r.role === 'employee')?.count || 0;
+      
+      // Calculate active/inactive employees only
+      const employees = await this.getAllEmployees();
+      const activeCount = employees.filter(e => e.isActive).length;
+      
+      return {
+        total: employeeCount,
+        active: activeCount,
+        inactive: employeeCount - activeCount
+      };
+    } catch (error) {
+      logger.error('Error getting employee statistics:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Gets available employees for a shift
+   * 
+   * Returns employees who are not assigned to any shift that conflicts
+   * with the given time range.
+   * 
+   * @param departmentId - Department ID
+   * @param date - Shift date
+   * @param startTime - Shift start time
+   * @param endTime - Shift end time
+   * @returns Promise resolving to array of available employees
+   */
+  async getAvailableEmployees(
+    departmentId: number,
+    date: string,
+    startTime: string,
+    endTime: string
+  ): Promise<User[]> {
+    try {
+      // This is a simplified version. In a real implementation, you would
+      // check against assignments, availability preferences, and time-off requests
+      return await this.getAllEmployees({ 
+        departmentId, 
+        isActive: true 
+      });
+    } catch (error) {
+      logger.error('Error getting available employees:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Creates a new employee user
+   * 
+   * @param userData - Employee creation data
+   * @returns Promise resolving to the created employee
+   */
+  async createEmployee(userData: any): Promise<User> {
+    try {
+      return await this.userService.createUser({
+        ...userData,
+        role: 'employee'
+      });
+    } catch (error) {
+      logger.error('Error creating employee:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Updates an employee user
+   * 
+   * @param id - Employee ID
+   * @param userData - Employee update data
+   * @returns Promise resolving to the updated employee
+   */
+  async updateEmployee(id: number, userData: any): Promise<User> {
+    try {
+      const employee = await this.getEmployeeById(id);
+      if (!employee) {
+        throw new Error('Employee not found');
+      }
+      return await this.userService.updateUser(id, userData);
+    } catch (error) {
+      logger.error('Error updating employee:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Deletes (soft deletes) an employee user
+   * 
+   * @param id - Employee ID
+   * @returns Promise resolving to success boolean
+   */
   async deleteEmployee(id: number): Promise<boolean> {
-    // Soft delete - set user as inactive
-    const query = 'UPDATE users SET is_active = 0 WHERE user_id = ?';
-    const [result] = await this.pool.execute<ResultSetHeader>(query, [id]);
-    return result.affectedRows > 0;
+    try {
+      const employee = await this.getEmployeeById(id);
+      if (!employee) {
+        throw new Error('Employee not found');
+      }
+      return await this.userService.deleteUser(id);
+    } catch (error) {
+      logger.error('Error deleting employee:', error);
+      throw error;
+    }
   }
 
-  async getEmployeesByDepartment(departmentId: number): Promise<Employee[]> {
-    const query = `
-      SELECT 
-        u.user_id as id,
-        u.username,
-        u.email,
-        u.first_name as firstName,
-        u.last_name as lastName,
-        u.role,
-        u.phone,
-        u.is_active as isActive,
-        u.created_at as createdAt,
-        u.updated_at as updatedAt,
-        e.employee_number as employeeId
-      FROM users u
-      LEFT JOIN employees e ON u.user_id = e.user_id
-      INNER JOIN user_departments ud ON u.user_id = ud.user_id
-      WHERE ud.department_id = ? AND u.is_active = 1
-      ORDER BY u.last_name, u.first_name
-    `;
-    
-    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [departmentId]);
-    return rows.map(row => ({
-      id: row.id,
-      email: row.email,
-      firstName: row.firstName,
-      lastName: row.lastName,
-      role: row.role,
-      employeeId: row.employeeId,
-      phone: row.phone,
-      isActive: row.isActive === 1,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt
-    }));
-  }
-
+  /**
+   * Gets skills for an employee
+   * 
+   * @param employeeId - Employee ID
+   * @returns Promise resolving to array of skills
+   */
   async getEmployeeSkills(employeeId: number): Promise<any[]> {
-    const query = `
-      SELECT 
-        us.skill_id as skillId,
-        us.proficiency_level as proficiencyLevel,
-        s.name as skillName,
-        s.description,
-        s.category
-      FROM user_skills us
-      LEFT JOIN skills s ON us.skill_id = s.skill_id
-      WHERE us.user_id = ? AND s.is_active = 1
-      ORDER BY s.category, s.name
-    `;
-    
-    const [rows] = await this.pool.execute<RowDataPacket[]>(query, [employeeId]);
-    return rows;
+    try {
+      const [rows] = await this.pool.execute<any[]>(
+        `SELECT 
+          s.id,
+          s.name,
+          s.description,
+          us.proficiency_level AS proficiencyLevel
+        FROM user_skills us
+        INNER JOIN skills s ON us.skill_id = s.id
+        WHERE us.user_id = ?
+        ORDER BY s.name`,
+        [employeeId]
+      );
+      return rows;
+    } catch (error) {
+      logger.error('Error getting employee skills:', error);
+      throw error;
+    }
   }
 
-  async addEmployeeSkill(employeeId: number, skillId: number, proficiencyLevel: number): Promise<boolean> {
-    const query = `
-      INSERT INTO user_skills (user_id, skill_id, proficiency_level)
-      VALUES (?, ?, ?)
-      ON DUPLICATE KEY UPDATE proficiency_level = VALUES(proficiency_level)
-    `;
-    
-    const [result] = await this.pool.execute<ResultSetHeader>(query, [employeeId, skillId, proficiencyLevel]);
-    return result.affectedRows > 0;
+  /**
+   * Adds a skill to an employee
+   * 
+   * @param employeeId - Employee ID
+   * @param skillId - Skill ID
+   * @param proficiencyLevel - Proficiency level (1-5)
+   * @returns Promise resolving when complete
+   */
+  async addEmployeeSkill(employeeId: number, skillId: number, proficiencyLevel?: number): Promise<void> {
+    try {
+      await this.pool.execute(
+        `INSERT INTO user_skills (user_id, skill_id, proficiency_level)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE proficiency_level = VALUES(proficiency_level)`,
+        [employeeId, skillId, proficiencyLevel || 1]
+      );
+      logger.info(`Skill ${skillId} added to employee ${employeeId}`);
+    } catch (error) {
+      logger.error('Error adding employee skill:', error);
+      throw error;
+    }
   }
 
-  async removeEmployeeSkill(employeeId: number, skillId: number): Promise<boolean> {
-    const query = 'DELETE FROM user_skills WHERE user_id = ? AND skill_id = ?';
-    const [result] = await this.pool.execute<ResultSetHeader>(query, [employeeId, skillId]);
-    return result.affectedRows > 0;
+  /**
+   * Removes a skill from an employee
+   * 
+   * @param employeeId - Employee ID
+   * @param skillId - Skill ID
+   * @returns Promise resolving when complete
+   */
+  async removeEmployeeSkill(employeeId: number, skillId: number): Promise<void> {
+    try {
+      await this.pool.execute(
+        'DELETE FROM user_skills WHERE user_id = ? AND skill_id = ?',
+        [employeeId, skillId]
+      );
+      logger.info(`Skill ${skillId} removed from employee ${employeeId}`);
+    } catch (error) {
+      logger.error('Error removing employee skill:', error);
+      throw error;
+    }
   }
 }

@@ -19,7 +19,7 @@ export const createUsersRouter = (pool: Pool) => {
         // Admin sees all users
         users = await userService.getAllUsers({
           search: search as string,
-          department: department as string,
+          departmentId: department ? parseInt(department as string) : undefined,
           role: role as string
         });
       } else {
@@ -67,7 +67,7 @@ export const createUsersRouter = (pool: Pool) => {
       const user = (req as any).user;
       
       // Check permissions - only admin and managers can create users
-      if (!['admin', 'manager', 'department_manager'].includes(user.role)) {
+      if (!['admin', 'manager'].includes(user.role)) {
         return res.status(403).json({
           success: false,
           error: { message: 'Insufficient permissions' }
@@ -231,7 +231,7 @@ export const createUsersRouter = (pool: Pool) => {
       }
 
       // Check permissions - only admin and managers can delete users
-      if (!['admin', 'manager', 'department_manager'].includes(user.role)) {
+      if (!['admin', 'manager'].includes(user.role)) {
         return res.status(403).json({
           success: false,
           error: { message: 'Insufficient permissions' }

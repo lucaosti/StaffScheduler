@@ -90,8 +90,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
       });
     }
 
-    const scheduleId = await scheduleService.createSchedule(req.body, user.id);
-    const schedule = await scheduleService.getScheduleById(scheduleId);
+    const schedule = await scheduleService.createSchedule(req.body);
     
     res.status(201).json({ 
       success: true, 
@@ -308,8 +307,7 @@ router.post('/:id/duplicate', authenticate, requireRole(['admin', 'manager']), a
       });
     }
 
-    const newScheduleId = await scheduleService.duplicateSchedule(id, name, startDate, endDate, user.id);
-    const newSchedule = await scheduleService.getScheduleById(newScheduleId);
+    const newSchedule = await scheduleService.duplicateSchedule(id, name, startDate, endDate);
     
     res.status(201).json({ 
       success: true, 

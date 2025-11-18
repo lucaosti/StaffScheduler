@@ -53,8 +53,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 // Create new assignment
 router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const assignmentId = await assignmentService.createAssignment(req.body);
-    const assignment = await assignmentService.getAssignmentById(assignmentId);
+    const assignment = await assignmentService.createAssignment(req.body);
     
     res.status(201).json({ 
       success: true, 
@@ -192,11 +191,10 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
       });
     }
 
-    const { startDate, endDate } = req.query;
+    const { status } = req.query;
     const assignments = await assignmentService.getAssignmentsByDepartment(
-      departmentId, 
-      startDate as string, 
-      endDate as string
+      departmentId,
+      status as string
     );
     res.json({ success: true, data: assignments });
   } catch (error) {
@@ -278,17 +276,11 @@ router.patch('/:id/decline', authenticate, async (req: Request, res: Response) =
       });
     }
 
-    const { notes } = req.body;
-    const success = await assignmentService.declineAssignment(id, notes);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Assignment not found' }
-      });
-    }
+    const assignment = await assignmentService.declineAssignment(id);
 
     res.json({ 
       success: true, 
+      data: assignment,
       message: 'Assignment declined successfully'
     });
   } catch (error) {

@@ -201,8 +201,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 // Create new shift
 router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const shiftId = await shiftService.createShift(req.body);
-    const shift = await shiftService.getShiftById(shiftId);
+    const shift = await shiftService.createShift(req.body);
     
     res.status(201).json({ 
       success: true, 
@@ -317,12 +316,7 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
       });
     }
 
-    const { startDate, endDate } = req.query;
-    const shifts = await shiftService.getShiftsByDepartment(
-      departmentId, 
-      startDate as string, 
-      endDate as string
-    );
+    const shifts = await shiftService.getShiftsByDepartment(departmentId);
     res.json({ success: true, data: shifts });
   } catch (error) {
     console.error('Error fetching shifts by department:', error);
