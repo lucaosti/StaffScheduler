@@ -44,74 +44,13 @@ const Shifts: React.FC = () => {
       if (response.success && response.data) {
         setShifts(response.data);
       } else {
-        // Mock data for hospital shifts
-        const mockShifts = [
-          {
-            id: '1',
-            name: 'Turno Mattina',
-            startTime: '06:00',
-            endTime: '14:00',
-            date: '2024-02-05',
-            department: 'Emergency Medicine',
-            position: 'Nurse',
-            requiredSkills: ['Emergency Care', 'Patient Care'],
-            minimumStaff: 3,
-            maximumStaff: 5,
-            type: 'regular' as const,
-            priority: 1,
-            description: 'Turno mattutino per pronto soccorso',
-            status: 'published' as const,
-            rolesRequired: { nurse: 3, doctor: 1 },
-            createdBy: '1',
-            createdAt: '2024-01-15T10:00:00Z',
-            updatedAt: '2024-01-15T10:00:00Z'
-          },
-          {
-            id: '2',
-            name: 'Turno Pomeriggio',
-            startTime: '14:00',
-            endTime: '22:00',
-            date: '2024-02-05',
-            department: 'Emergency Medicine',
-            position: 'Nurse',
-            requiredSkills: ['Emergency Care'],
-            minimumStaff: 2,
-            maximumStaff: 4,
-            type: 'regular' as const,
-            priority: 1,
-            description: 'Turno pomeridiano per pronto soccorso',
-            status: 'published' as const,
-            rolesRequired: { nurse: 2, doctor: 1 },
-            createdBy: '1',
-            createdAt: '2024-01-15T10:00:00Z',
-            updatedAt: '2024-01-15T10:00:00Z'
-          },
-          {
-            id: '3',
-            name: 'Turno Notte',
-            startTime: '22:00',
-            endTime: '06:00',
-            date: '2024-02-05',
-            department: 'Emergency Medicine',
-            position: 'Nurse',
-            requiredSkills: ['Emergency Care', 'Night Shift'],
-            minimumStaff: 2,
-            maximumStaff: 3,
-            type: 'regular' as const,
-            priority: 2,
-            description: 'Turno notturno per pronto soccorso',
-            status: 'published' as const,
-            rolesRequired: { nurse: 2, doctor: 1 },
-            createdBy: '1',
-            createdAt: '2024-01-15T10:00:00Z',
-            updatedAt: '2024-01-15T10:00:00Z'
-          }
-        ];
-        setShifts(mockShifts);
+        setError('Failed to load shifts. Please ensure the backend is running and database is populated.');
+        setShifts([]);
       }
     } catch (err) {
       console.error('Load shifts error:', err);
-      setError('Failed to load shifts');
+      setError('Failed to load shifts. Please check your connection and try again.');
+      setShifts([]);
     } finally {
       setLoading(false);
     }

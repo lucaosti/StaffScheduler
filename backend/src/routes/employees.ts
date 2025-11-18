@@ -53,8 +53,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 // Create new employee
 router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
-    const employeeId = await employeeService.createEmployee(req.body);
-    const employee = await employeeService.getEmployeeById(employeeId);
+    const employee = await employeeService.createEmployee(req.body);
     
     res.status(201).json({ 
       success: true, 
@@ -193,13 +192,7 @@ router.post('/:id/skills', authenticate, requireRole(['admin', 'manager']), asyn
       });
     }
 
-    const success = await employeeService.addEmployeeSkill(id, skillId, proficiencyLevel);
-    if (!success) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Failed to add skill to employee' }
-      });
-    }
+    await employeeService.addEmployeeSkill(id, skillId, proficiencyLevel);
 
     res.json({ 
       success: true, 
@@ -227,13 +220,7 @@ router.delete('/:id/skills/:skillId', authenticate, requireRole(['admin', 'manag
       });
     }
 
-    const success = await employeeService.removeEmployeeSkill(id, skillId);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Skill not found for employee' }
-      });
-    }
+    await employeeService.removeEmployeeSkill(id, skillId);
 
     res.json({ 
       success: true, 

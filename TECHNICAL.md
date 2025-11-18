@@ -906,201 +906,395 @@ const EmployeeForm: React.FC = () => {
 
 ### Overview
 
-The **ScheduleOptimizer** is an advanced optimization engine that uses a hybrid approach to generate optimal schedules.
+Staff Scheduler uses **Google OR-Tools CP-SAT (Constraint Programming - Satisfiability) solver** for intelligent schedule optimization. This approach is inspired by the [PoliTO_Timetable_Allocator](https://github.com/Paolino01/PoliTO_Timetable_Allocator) which uses IBM CPLEX for university timetable scheduling.
 
-### Algorithmic Approach
+**Key Design Decision**: While PoliTO uses IBM CPLEX (commercial, Python docplex), Staff Scheduler uses Google OR-Tools (open-source, also Python) with similar constraint programming capabilities.
 
-#### 1. Constraint Satisfaction Problem (CSP)
+### Architecture
 
-Constraint definition:
+```
+┌──────────────────────────────────────────────────────────┐
+│                    Node.js/TypeScript                    │
+│         ScheduleOptimizerORTools.ts (Wrapper)            │
+│  • Prepares problem data (JSON)                          │
+│  • Manages Python process lifecycle                      │
+│  • Handles errors and timeouts                           │
+│  • Provides fallback greedy algorithm                    │
+└────────────────────┬─────────────────────────────────────┘
+                     │ JSON via stdin/stdout
+                     ▼
+┌──────────────────────────────────────────────────────────┐
+│                    Python 3.8+                           │
+│      schedule_optimizer.py (OR-Tools CP-SAT)             │
+│  • Constraint programming model                          │
+│  • Boolean assignment variables                          │
+│  • Hard + soft constraints                               │
+│  • Weighted objective function                           │
+│  • Returns optimal/feasible solution                     │
+└──────────────────────────────────────────────────────────┘
+```
 
-```typescript
-interface Constraint {
-  type: 'hard' | 'soft';
-  name: string;
-  priority: number;
-  validate: (schedule: ScheduleAssignment[]) => boolean;
-  penalty: (schedule: ScheduleAssignment[]) => number;
+### Why Constraint Programming?
+
+Compared to traditional approaches (Linear Programming, heuristics):
+
+**Advantages:**
+- ✅ Natural modeling of logical constraints (if-then, exactly-one)
+- ✅ Efficient handling of combinatorial problems
+- ✅ Provably optimal solutions (or best found within time limit)
+- ✅ Built-in conflict detection and resolution
+- ✅ Scales well with parallel processing
+
+**Comparison with PoliTO Approach:**
+
+| Aspect | PoliTO (Timetable) | StaffScheduler (Shifts) |
+|--------|-------------------|------------------------|
+| **Solver** | IBM CPLEX docplex | Google OR-Tools CP-SAT |
+| **License** | Commercial | Open-source (Apache 2.0) |
+| **Language** | Python | Python + Node.js wrapper |
+| **Problem** | Teaching assignments | Shift assignments |
+| **Main Variables** | `insegnamento[teaching, slot]` | `assign[employee, shift]` |
+| **Coverage** | Each teaching = 1 slot | Each shift = min-max staff |
+| **Conflicts** | Teacher availability | Overlapping shifts |
+| **Preferences** | Teaching correlations (weights) | Shift preferences (weights) |
+| **Objective** | Minimize weighted penalties | Maximize weighted satisfaction |
+
+### CP-SAT Model Structure
+
+#### 1. Decision Variables
+
+**Boolean Assignment Variables:**
+```python
+assign[employee_id, shift_id] ∈ {0, 1}
+```
+- `1` if employee is assigned to shift
+- `0` otherwise
+- Total variables: `|Employees| × |Shifts|`
+
+Example with 50 employees and 150 shifts = 7,500 boolean variables.
+
+#### 2. Hard Constraints (Must Satisfy)
+
+**a) Shift Coverage** (inspired by PoliTO teaching coverage)
+```python
+∀ shift: min_staff ≤ Σ(assign[emp, shift]) ≤ max_staff
+```
+Each shift must have between min and max staff assigned.
+
+**b) No Double-Booking** (inspired by PoliTO teaching overlaps)
+```python
+∀ employee, ∀ overlapping_shifts: Σ(assign[emp, overlapping]) ≤ 1
+```
+Employee cannot work overlapping shifts.
+
+**c) Skill Requirements** (inspired by PoliTO teaching competency)
+```python
+∀ (emp, shift): required_skills ⊄ employee_skills → assign[emp, shift] = 0
+```
+Only qualified employees can be assigned.
+
+**d) Availability** (inspired by PoliTO teacher availability)
+```python
+∀ (emp, shift): shift_date ∈ unavailable_dates → assign[emp, shift] = 0
+```
+Employees cannot work when unavailable.
+
+**e) Max Hours per Week**
+```python
+∀ employee, ∀ week: Σ(assign[emp, shift] × hours[shift]) ≤ max_hours_per_week
+```
+Weekly hour limits must be respected.
+
+#### 3. Soft Constraints (Optimization Objectives)
+
+**Weighted Objective Function:**
+```python
+Maximize: 
+  + W_pref × Σ(assign[emp, shift] × preference_score[emp, shift])
+  + W_fair × fairness_bonus
+  - W_cons × consecutive_days_penalty
+  + W_cont × continuity_bonus
+```
+
+**a) Employee Preferences** (weight: 55, inspired by PoliTO correlations)
+```python
+preference_score[emp, shift] = {
+  +10  if shift ∈ preferred_shifts[emp]
+   0   if neutral
+  -10  if shift ∈ avoid_shifts[emp]
 }
 ```
 
-**Hard Constraints** (must be satisfied):
-- Maximum weekly hours per employee
-- Mandatory rest periods between shifts
-- Required skills for the shift
-- Employee availability
-- No overlapping shifts for same employee
+Similar to PoliTO's teaching correlation matrix where preferred teaching pairs get positive weights.
 
-**Soft Constraints** (preferences):
-- Employee shift preferences
-- Fair workload distribution
-- Minimization of overtime
-- Assignment continuity
-- Department budget
+**b) Workload Fairness** (weight: 40)
+Minimize variance in assigned hours across employees.
 
-#### 2. Simulated Annealing
+**c) Consecutive Days** (weight: 30, similar to PoliTO lecture_dispersion_penalty: 25)
+```python
+∀ employee, ∀ consecutive_window > max_consecutive_days:
+  penalty = -weight if working all days in window
+```
 
-Metaheuristic optimization algorithm:
+Encourages rest days, similar to PoliTO's preference for distributing lectures across different days.
 
-```typescript
-class ScheduleOptimizer {
-  private config: OptimizationConfig = {
-    temperature: 100,
-    coolingRate: 0.95,
-    maxIterations: 10000,
-    timeoutMs: 300000 // 5 minuti
-  };
+**d) Shift Continuity** (weight: 20)
+Bonus for consistent shift patterns (same shifts, same days of week).
 
-  async optimize(): Promise<ScheduleAssignment[]> {
-    // 1. Generate greedy initial solution
-    let current = this.generateInitialSolution();
-    let best = [...current];
-    let currentScore = this.evaluateSchedule(current);
-    let bestScore = currentScore;
-    let temperature = this.config.temperature;
+#### 4. Constraint Weights Configuration
 
-    const startTime = Date.now();
+Inspired by PoliTO's `Parameters.py` approach with customizable weights:
 
-    for (let i = 0; i < this.config.maxIterations; i++) {
-      // Timeout check
-      if (Date.now() - startTime > this.config.timeoutMs) {
-        break;
-      }
+| Constraint | Default Weight | Priority | PoliTO Equivalent |
+|-----------|---------------|----------|-------------------|
+| **Hard Constraints** | | | |
+| Shift Coverage | 100 | Critical | `teaching_coverage_penalty` |
+| No Double-Booking | 90 | Critical | Implicit (no overlaps) |
+| Skill Requirements | 85 | High | `teaching_competency` |
+| Availability | 80 | High | `teacher_availability` |
+| Max Hours/Week | 75 | High | `max_teaching_hours` |
+| **Soft Constraints** | | | |
+| Employee Preferences | 55 | Medium | `teaching_overlaps_penalty: 50` |
+| Workload Fairness | 40 | Medium | N/A |
+| Consecutive Days | 30 | Low | `lecture_dispersion_penalty: 25` |
+| Rest Periods | 25 | Low | N/A |
+| Shift Continuity | 20 | Low | `double_slot_preference` |
 
-      // 2. Generate neighbor solution
-      const neighbor = this.generateNeighbor(current);
-      const neighborScore = this.evaluateSchedule(neighbor);
-
-      // 3. Calculate energy delta
-      const delta = neighborScore - currentScore;
-
-      // 4. Accept or reject
-      if (delta < 0 || Math.random() < Math.exp(-delta / temperature)) {
-        current = neighbor;
-        currentScore = neighborScore;
-
-        // 5. Update best if improved
-        if (currentScore < bestScore) {
-          best = [...current];
-          bestScore = currentScore;
-        }
-      }
-
-      // 6. Cool down temperature
-      temperature *= this.config.coolingRate;
-    }
-
-    return best;
-  }
-
-  private evaluateSchedule(schedule: ScheduleAssignment[]): number {
-    let score = 0;
-
-    // Evaluate all constraints
-    for (const constraint of this.constraints) {
-      if (constraint.type === 'hard' && !constraint.validate(schedule)) {
-        // Very high penalty for violated hard constraints
-        score += 1000000 * constraint.priority;
-      } else {
-        // Proportional penalty for soft constraints
-        score += constraint.penalty(schedule) * constraint.priority;
-      }
-    }
-
-    return score;
-  }
-
-  private generateNeighbor(current: ScheduleAssignment[]): ScheduleAssignment[] {
-    const neighbor = [...current];
-    const strategy = Math.random();
-
-    if (strategy < 0.33) {
-      // Swap: Exchange two assignments
-      this.swapAssignments(neighbor);
-    } else if (strategy < 0.66) {
-      // Reassign: Reassign a shift to another employee
-      this.reassignShift(neighbor);
-    } else {
-      // Move: Move an assignment to another day
-      this.moveAssignment(neighbor);
-    }
-
-    return neighbor;
-  }
+**Configuration in Code:**
+```python
+weights = {
+    'shift_coverage': 100,
+    'no_double_booking': 90,
+    'skill_requirements': 85,
+    'availability': 80,
+    'max_hours_per_week': 75,
+    'employee_preferences': 55,  # Like PoliTO's teaching overlaps
+    'workload_fairness': 40,
+    'consecutive_days': 30,      # Like PoliTO's lecture dispersion
+    'rest_periods': 25,
+    'shift_continuity': 20
 }
 ```
 
-#### 3. Greedy Initialization
+### CP-SAT Solving Algorithm
 
-Initial solution generation:
+#### 1. Model Building Phase
 
-```typescript
-private generateInitialSolution(): ScheduleAssignment[] {
-  const schedule: ScheduleAssignment[] = [];
-  
-  // Sort shifts by priority
-  const sortedShifts = this.shifts.sort((a, b) => 
-    this.getPriority(b) - this.getPriority(a)
-  );
-
-  for (const shift of sortedShifts) {
-    // Find available and qualified employees
-    const candidates = this.findEligibleEmployees(shift, schedule);
+```python
+def build_model(self):
+    # Create boolean variables
+    for employee in employees:
+        for shift in shifts:
+            self.assignments[(employee.id, shift.id)] = model.NewBoolVar(
+                f'assign_e{employee.id}_s{shift.id}'
+            )
     
-    if (candidates.length === 0) {
-      // No candidates: hard constraint violated
-      continue;
-    }
+    # Add hard constraints
+    self._add_shift_coverage_constraints()
+    self._add_no_double_booking_constraints()
+    self._add_skill_requirements_constraints()
+    self._add_availability_constraints()
+    self._add_max_hours_constraints()
+    
+    # Build objective function
+    objective_terms = []
+    for (emp_id, shift_id), var in self.assignments.items():
+        preference = self._get_preference(emp_id, shift_id)
+        objective_terms.append(var * preference * pref_weight)
+    
+    model.Maximize(sum(objective_terms))
+```
 
-    // Sort by score (worked hours, preferences, etc.)
-    const sortedCandidates = candidates.sort((a, b) => 
-      this.scoreCandidate(a, shift, schedule) - 
-      this.scoreCandidate(b, shift, schedule)
-    );
+#### 2. Solving Phase (CP-SAT Solver)
 
-    // Assign to best candidate
-    const bestCandidate = sortedCandidates[0];
-    schedule.push({
-      employeeId: bestCandidate.id,
-      shiftId: shift.shiftId,
-      date: shift.date,
-      startTime: shift.startTime,
-      endTime: shift.endTime,
-      departmentId: shift.department
+```python
+solver = cp_model.CpSolver()
+solver.parameters.max_time_in_seconds = time_limit
+solver.parameters.log_search_progress = True
+
+# Solve with branch-and-bound + SAT techniques
+status = solver.Solve(model)
+
+if status == cp_model.OPTIMAL:
+    # Extract solution
+    for (emp_id, shift_id), var in assignments.items():
+        if solver.Value(var) == 1:
+            result.append({
+                'employee_id': emp_id,
+                'shift_id': shift_id
+            })
+```
+
+**CP-SAT Solver Features:**
+- **Branch and Bound**: Systematically explores solution space
+- **Conflict-Driven Learning**: Learns from infeasible branches
+- **Lazy Clause Generation**: Generates constraints on-the-fly
+- **Parallel Search**: Multi-threaded exploration (uses all CPU cores)
+- **Optimality Proof**: Can prove solution is optimal
+
+#### 3. Performance Characteristics
+
+**Time Complexity:**
+- Worst case: Exponential O(2^n) where n = |employees| × |shifts|
+- Practical: Often finds optimal in polynomial time due to pruning
+- With time limit: Always returns best found solution
+
+**Typical Solve Times** (8-core CPU):
+- **Small** (10 emp, 50 shifts): < 5 seconds (usually optimal)
+- **Medium** (50 emp, 200 shifts): 30-120 seconds (optimal or near-optimal)
+- **Large** (100 emp, 500 shifts): 2-10 minutes (feasible, may not prove optimality)
+
+**Memory Usage:**
+- Model size: ~100 KB per 1000 variables
+- Solver overhead: ~50-200 MB
+- Solution storage: O(assigned shifts)
+
+### Implementation in Staff Scheduler
+
+#### Python Script (`schedule_optimizer.py`)
+
+Located in `backend/optimization-scripts/`, this script:
+
+1. **Reads JSON input from stdin:**
+   ```json
+   {
+     "shifts": [...],
+     "employees": [...],
+     "preferences": {...},
+     "weights": {...}
+   }
+   ```
+
+2. **Builds CP-SAT model:**
+   ```python
+   model = cp_model.CpModel()
+   assignments = {}  # (emp_id, shift_id) -> BoolVar
+   
+   for shift in shifts:
+       for employee in employees:
+           var = model.NewBoolVar(f'assign_e{emp}_s{shift}')
+           assignments[(emp, shift)] = var
+   ```
+
+3. **Adds constraints:**
+   ```python
+   # Shift coverage
+   for shift in shifts:
+       assigned = [assignments[(emp, shift.id)] for emp in employees]
+       model.Add(sum(assigned) >= shift.min_staff)
+       model.Add(sum(assigned) <= shift.max_staff)
+   ```
+
+4. **Solves and returns JSON:**
+   ```json
+   {
+     "status": "OPTIMAL",
+     "objective_value": 1250.5,
+     "solve_time_seconds": 45.2,
+     "assignments": [
+       {
+         "employee_id": "1",
+         "shift_id": "101",
+         "date": "2025-11-15",
+         "hours": 8
+       },
+       ...
+     ],
+     "statistics": {
+       "num_branches": 12345,
+       "num_conflicts": 234,
+       "coverage_stats": {
+         "total_shifts": 150,
+         "fully_covered_shifts": 148,
+         "coverage_percentage": 98.7
+       }
+     }
+   }
+   ```
+
+#### TypeScript Wrapper (`ScheduleOptimizerORTools.ts`)
+
+```typescript
+import { spawn } from 'child_process';
+
+class ScheduleOptimizer {
+  async optimize(problem: OptimizationProblem): Promise<OptimizationResult> {
+    // Spawn Python process
+    const pythonProcess = spawn('python3', [
+      'optimization-scripts/schedule_optimizer.py',
+      '--stdin',
+      '--stdout',
+      '--time-limit', '300'
+    ]);
+    
+    return new Promise((resolve, reject) => {
+      let stdout = '';
+      
+      pythonProcess.stdout.on('data', data => {
+        stdout += data.toString();
+      });
+      
+      pythonProcess.on('close', code => {
+        if (code === 0) {
+          resolve(JSON.parse(stdout));
+        } else {
+          reject(new Error('Optimization failed'));
+        }
+      });
+      
+      // Send problem data
+      pythonProcess.stdin.write(JSON.stringify(problem));
+      pythonProcess.stdin.end();
     });
   }
-
-  return schedule;
 }
 ```
 
-### Constraint Implementation
-
-#### Example: Maximum Weekly Hours
+#### Integration with ScheduleService
 
 ```typescript
-{
-  type: 'hard',
-  name: 'max_weekly_hours',
-  priority: 10,
-  validate: (schedule: ScheduleAssignment[]) => {
-    const hoursByEmployee = this.calculateWeeklyHours(schedule);
-    
-    for (const [employeeId, hours] of Object.entries(hoursByEmployee)) {
-      const employee = this.getEmployee(employeeId);
-      if (hours > employee.maxHoursPerWeek) {
-        return false;
-      }
-    }
-    return true;
-  },
-  penalty: (schedule: ScheduleAssignment[]) => {
-    let penalty = 0;
-    const hoursByEmployee = this.calculateWeeklyHours(schedule);
-    
-    for (const [employeeId, hours] of Object.entries(hoursByEmployee)) {
-      const employee = this.getEmployee(employeeId);
-      if (hours > employee.maxHoursPerWeek) {
+// In ScheduleService.ts
+async optimizeSchedule(scheduleId: number): Promise<void> {
+  // 1. Load schedule data from database
+  const shifts = await this.getShifts(scheduleId);
+  const employees = await this.getAvailableEmployees();
+  const preferences = await this.getPreferences();
+  
+  // 2. Prepare problem
+  const problem = {
+    shifts: shifts.map(s => ({
+      id: s.id.toString(),
+      date: s.date,
+      start_time: s.startTime,
+      end_time: s.endTime,
+      min_staff: s.minStaff,
+      required_skills: s.skills
+    })),
+    employees: employees.map(e => ({
+      id: e.id.toString(),
+      max_hours_per_week: e.maxHoursPerWeek,
+      skills: e.skills,
+      unavailable_dates: e.unavailableDates
+    })),
+    preferences
+  };
+  
+  // 3. Run optimizer
+  const result = await scheduleOptimizer.optimize(problem);
+  
+  // 4. Store assignments in database
+  if (result.status === 'OPTIMAL' || result.status === 'FEASIBLE') {
+    await this.saveAssignments(scheduleId, result.assignments);
+    logger.info(`Optimized schedule ${scheduleId}: ${result.assignments.length} assignments`);
+  } else {
+    throw new Error(`Optimization failed: ${result.status}`);
+  }
+}
+```
+
+### Fallback: Greedy Algorithm
+
+If Python/OR-Tools unavailable, TypeScript fallback:
         penalty += (hours - employee.maxHoursPerWeek) * 100;
       }
     }

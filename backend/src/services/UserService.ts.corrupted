@@ -1,0 +1,1207 @@
+/**import { Pool, RowDataPacket } from 'mysql2/promise';
+
+ * User Serviceimport bcrypt from 'bcrypt';
+
+ * import { User, CreateUserRequest, UpdateUserRequest } from '../types';
+
+ * Handles all user-related business logic including CRUD operations,
+
+ * authentication, department assignments, skill management, and preferences.export class UserService {
+
+ * Implements proper transaction handling and data validation.  constructor(private pool: Pool) {}
+
+ * 
+
+ * @module services/UserService  async createUser(userData: CreateUserRequest): Promise<User> {
+
+ * @author Staff Scheduler Team    const connection = await this.pool.getConnection();
+
+ */    
+
+    try {
+
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';      await connection.beginTransaction();
+
+import bcrypt from 'bcrypt';
+
+import {       // Hash password
+
+  User,       const passwordHash = await bcrypt.hash(userData.password, 12);
+
+  CreateUserRequest, 
+
+  UpdateUserRequest,      // Create user
+
+  UserPreferences,      const [result] = await connection.execute(`
+
+  UserDepartment,        INSERT INTO users (
+
+  Skill          email, password_hash, first_name, last_name, role, phone, employee_id, salt
+
+} from '../types';        )
+
+import { logger } from '../config/logger';        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+
+      `, [
+
+/**        userData.email,
+
+ * UserService Class        passwordHash,
+
+ *         userData.firstName,
+
+ * Provides comprehensive user management functionality including:        userData.lastName,
+
+ * - User CRUD operations with proper validation        userData.role,
+
+ * - Password hashing and verification        userData.phone || null,
+
+ * - Department and skill associations        userData.employeeId || null,
+
+ * - User preferences management        'defaultsalt' // TODO: generate random salt
+
+ * - Search and filtering capabilities      ]);
+
+ */
+
+export class UserService {      const userId = (result as any).insertId;
+
+  /**
+
+   * Creates a new UserService instance      // Insert department assignments
+
+   *       if (userData.departmentIds && userData.departmentIds.length > 0) {
+
+   * @param pool - MySQL connection pool for database operations        for (const departmentId of userData.departmentIds) {
+
+   */          await connection.execute(
+
+  constructor(private pool: Pool) {}            'INSERT INTO user_departments (userId, departmentId, isManager) VALUES (?, ?, ?)',
+
+            [userId, departmentId, false]
+
+  /**          );
+
+   * Creates a new user with associated departments and skills        }
+
+   *       }
+
+   * Performs the following operations in a transaction:
+
+   * 1. Validates email uniqueness      // Insert skill assignments
+
+   * 2. Hashes password securely      if (userData.skillIds && userData.skillIds.length > 0) {
+
+   * 3. Creates user record        for (const skillId of userData.skillIds) {
+
+   * 4. Assigns departments if provided          await connection.execute(
+
+   * 5. Assigns skills if provided            'INSERT INTO user_skills (userId, skillId, proficiencyLevel) VALUES (?, ?, ?)',
+
+   * 6. Creates default preferences            [userId, skillId, 1]
+
+   *           );
+
+   * @param userData - User creation data including password        }
+
+   * @returns Promise resolving to the created user (without password)      }
+
+   * @throws Error if email already exists or transaction fails
+
+   */      await connection.commit();
+
+  async createUser(userData: CreateUserRequest): Promise<User> {
+
+    const connection = await this.pool.getConnection();      const newUser = await this.getUserById(userId);
+
+          if (!newUser) {
+
+    try {        throw new Error('Failed to retrieve created user');
+
+      await connection.beginTransaction();      }
+
+
+
+      // Check if email already exists      return newUser;
+
+      const [existingUsers] = await connection.execute<RowDataPacket[]>(    } catch (error) {
+
+        'SELECT id FROM users WHERE email = ? LIMIT 1',      await connection.rollback();
+
+        [userData.email]      throw error;
+
+      );    } finally {
+
+      connection.release();
+
+      if (existingUsers.length > 0) {    }
+
+        throw new Error('Email already exists');  }
+
+      }
+
+  async getUserById(id: number): Promise<User | null> {
+
+      // Hash password with bcrypt    const [rows] = await this.pool.execute<RowDataPacket[]>(
+
+      const passwordHash = await bcrypt.hash(userData.password, 12);      `SELECT 
+
+        u.id,
+
+      // Insert user record        u.email,
+
+      const [result] = await connection.execute<ResultSetHeader>(        u.first_name,
+
+        `INSERT INTO users (        u.last_name,
+
+          email, password_hash, first_name, last_name, role, phone, employee_id, is_active        u.role,
+
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,        u.employee_id,
+
+        [        u.phone,
+
+          userData.email,        u.is_active,
+
+          passwordHash,        u.created_at,
+
+          userData.firstName,        u.updated_at
+
+          userData.lastName,      FROM users u
+
+          userData.role,      WHERE u.id = ? AND u.is_active = 1`,
+
+          userData.phone || null,      [id]
+
+          userData.employeeId || null,    );
+
+          true
+
+        ]    if (rows.length === 0) return null;
+
+      );
+
+    const user = rows[0];
+
+      const userId = result.insertId;
+
+    // Get user departments
+
+      // Assign departments if provided    const [deptRows] = await this.pool.execute<RowDataPacket[]>(
+
+      if (userData.departmentIds && userData.departmentIds.length > 0) {      `SELECT 
+
+        for (const departmentId of userData.departmentIds) {        d.id as departmentId,
+
+          await connection.execute(        d.name as departmentName,
+
+            'INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)',        ud.is_manager as isManager
+
+            [userId, departmentId]      FROM user_departments ud
+
+          );      JOIN departments d ON ud.department_id = d.id
+
+        }      WHERE ud.user_id = ? AND d.is_active = 1`,
+
+      }      [id]
+
+    );
+
+      // Assign skills if provided
+
+      if (userData.skillIds && userData.skillIds.length > 0) {    // Get user skills
+
+        for (const skillId of userData.skillIds) {    const [skillRows] = await this.pool.execute<RowDataPacket[]>(
+
+          await connection.execute(      `SELECT 
+
+            'INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)',        s.id as skillId,
+
+            [userId, skillId]        s.name as skillName,
+
+          );        us.proficiencyLevel
+
+        }      FROM user_skills us
+
+      }      JOIN skills s ON us.skillId = s.id
+
+      WHERE us.userId = ? AND s.isActive = 1`,
+
+      // Create default preferences      [id]
+
+      await connection.execute(    );
+
+        `INSERT INTO user_preferences (
+
+          user_id, max_hours_per_week, min_hours_per_week, max_consecutive_days,    return {
+
+          preferred_shifts, avoid_shifts      id: user.id,
+
+        ) VALUES (?, ?, ?, ?, ?, ?)`,      email: user.email,
+
+        [userId, 40, 0, 5, JSON.stringify([]), JSON.stringify([])]      firstName: user.first_name,
+
+      );      lastName: user.last_name,
+
+      role: user.role,
+
+      await connection.commit();      employeeId: user.employee_id,
+
+      phone: user.phone,
+
+      logger.info(`User created successfully: ${userData.email}`, { userId });      isActive: Boolean(user.is_active),
+
+      departments: deptRows.map(row => ({
+
+      // Retrieve and return the complete user object        departmentId: row.departmentId,
+
+      const newUser = await this.getUserById(userId);        departmentName: row.departmentName,
+
+      if (!newUser) {        isManager: Boolean(row.isManager)
+
+        throw new Error('Failed to retrieve created user');      })),
+
+      }      skills: skillRows.map(row => ({
+
+        skillId: row.skillId,
+
+      return newUser;        skillName: row.skillName,
+
+    } catch (error) {        proficiencyLevel: row.proficiencyLevel
+
+      await connection.rollback();      })),
+
+      logger.error('Failed to create user:', error);      createdAt: user.created_at,
+
+      throw error;      updatedAt: user.updated_at
+
+    } finally {    };
+
+      connection.release();  }
+
+    }
+
+  }  async getUserByEmail(email: string): Promise<User | null> {
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+
+  /**      `SELECT 
+
+   * Retrieves a user by their unique identifier        u.id,
+
+   *         u.email,
+
+   * Loads complete user information including:        u.password_hash,
+
+   * - Basic user details        u.first_name,
+
+   * - Associated departments        u.last_name,
+
+   * - Skills        u.role,
+
+   * - Preferences        u.employee_id,
+
+   *         u.phone,
+
+   * @param id - User ID        u.is_active,
+
+   * @returns Promise resolving to User object or null if not found        u.created_at,
+
+   */        u.updated_at
+
+  async getUserById(id: number): Promise<User | null> {      FROM users u
+
+    try {      WHERE u.email = ? AND u.is_active = 1`,
+
+      // Get basic user information      [email]
+
+      const [userRows] = await this.pool.execute<RowDataPacket[]>(    );
+
+        `SELECT 
+
+          id, email, first_name, last_name, role, employee_id, phone,    if (rows.length === 0) return null;
+
+          is_active, last_login, created_at, updated_at
+
+        FROM users    const user = rows[0];
+
+        WHERE id = ? AND is_active = 1`,
+
+        [id]    return {
+
+      );      id: user.id,
+
+      email: user.email,
+
+      if (userRows.length === 0) {      firstName: user.first_name,
+
+        return null;      lastName: user.last_name,
+
+      }      role: user.role,
+
+      employeeId: user.employee_id,
+
+      const userRow = userRows[0];      phone: user.phone,
+
+      isActive: Boolean(user.is_active),
+
+      // Get user departments      createdAt: user.created_at,
+
+      const [deptRows] = await this.pool.execute<RowDataPacket[]>(      updatedAt: user.updated_at
+
+        `SELECT d.id, d.name    };
+
+        FROM user_departments ud  }
+
+        JOIN departments d ON ud.department_id = d.id
+
+        WHERE ud.user_id = ? AND d.is_active = 1`,  async updateUser(id: number, userData: UpdateUserRequest): Promise<User> {
+
+        [id]    const connection = await this.pool.getConnection();
+
+      );    
+
+    try {
+
+      const departments: UserDepartment[] = deptRows.map(row => ({      await connection.beginTransaction();
+
+        id: row.id,
+
+        name: row.name      // Update basic user info
+
+      }));      const updateFields: string[] = [];
+
+      const updateValues: any[] = [];
+
+      // Get user skills
+
+      const [skillRows] = await this.pool.execute<RowDataPacket[]>(      if (userData.email !== undefined) {
+
+        `SELECT s.id, s.name, s.description, s.is_active, s.created_at        updateFields.push('email = ?');
+
+        FROM user_skills us        updateValues.push(userData.email);
+
+        JOIN skills s ON us.skill_id = s.id      }
+
+        WHERE us.user_id = ? AND s.is_active = 1`,      if (userData.firstName !== undefined) {
+
+        [id]        updateFields.push('firstName = ?');
+
+      );        updateValues.push(userData.firstName);
+
+      }
+
+      const skills: Skill[] = skillRows.map(row => ({      if (userData.lastName !== undefined) {
+
+        id: row.id,        updateFields.push('lastName = ?');
+
+        name: row.name,        updateValues.push(userData.lastName);
+
+        description: row.description,      }
+
+        isActive: Boolean(row.is_active),      if (userData.role !== undefined) {
+
+        createdAt: row.created_at        updateFields.push('role = ?');
+
+      }));        updateValues.push(userData.role);
+
+      }
+
+      // Get user preferences      if (userData.employeeId !== undefined) {
+
+      const [prefRows] = await this.pool.execute<RowDataPacket[]>(        updateFields.push('employeeId = ?');
+
+        `SELECT max_hours_per_week, min_hours_per_week, max_consecutive_days,        updateValues.push(userData.employeeId);
+
+         preferred_shifts, avoid_shifts      }
+
+        FROM user_preferences      if (userData.phone !== undefined) {
+
+        WHERE user_id = ?`,        updateFields.push('phone = ?');
+
+        [id]        updateValues.push(userData.phone);
+
+      );      }
+
+      if (userData.isActive !== undefined) {
+
+      let preferences: UserPreferences | undefined;        updateFields.push('isActive = ?');
+
+      if (prefRows.length > 0) {        updateValues.push(userData.isActive);
+
+        const pref = prefRows[0];      }
+
+        preferences = {
+
+          maxHoursPerWeek: pref.max_hours_per_week,      if (updateFields.length > 0) {
+
+          minHoursPerWeek: pref.min_hours_per_week,        updateFields.push('updatedAt = CURRENT_TIMESTAMP');
+
+          maxConsecutiveDays: pref.max_consecutive_days,        updateValues.push(id);
+
+          preferredShifts: JSON.parse(pref.preferred_shifts || '[]'),
+
+          avoidShifts: JSON.parse(pref.avoid_shifts || '[]')        await connection.execute(
+
+        };          `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`,
+
+      }          updateValues
+
+        );
+
+      // Construct and return user object      }
+
+      const user: User = {
+
+        id: userRow.id,      // Update department assignments if provided
+
+        email: userRow.email,      if (userData.departmentIds !== undefined) {
+
+        firstName: userRow.first_name,        // Remove existing department assignments
+
+        lastName: userRow.last_name,        await connection.execute(
+
+        role: userRow.role,          'DELETE FROM user_departments WHERE userId = ?',
+
+        employeeId: userRow.employee_id,          [id]
+
+        phone: userRow.phone,        );
+
+        isActive: Boolean(userRow.is_active),
+
+        lastLogin: userRow.last_login,        // Add new department assignments
+
+        departments,        if (userData.departmentIds.length > 0) {
+
+        skills,          for (const departmentId of userData.departmentIds) {
+
+        preferences,            await connection.execute(
+
+        createdAt: userRow.created_at,              'INSERT INTO user_departments (userId, departmentId, isManager) VALUES (?, ?, ?)',
+
+        updatedAt: userRow.updated_at              [id, departmentId, false]
+
+      };            );
+
+          }
+
+      return user;        }
+
+    } catch (error) {      }
+
+      logger.error('Failed to get user by ID:', error);
+
+      throw error;      // Update skill assignments if provided
+
+    }      if (userData.skillIds !== undefined) {
+
+  }        // Remove existing skill assignments
+
+        await connection.execute(
+
+  /**          'DELETE FROM user_skills WHERE userId = ?',
+
+   * Retrieves a user by email address          [id]
+
+   *         );
+
+   * Used primarily for authentication. Returns basic user information
+
+   * without loading all associations.        // Add new skill assignments
+
+   *         if (userData.skillIds.length > 0) {
+
+   * @param email - User email address          for (const skillId of userData.skillIds) {
+
+   * @returns Promise resolving to User object or null if not found            await connection.execute(
+
+   */              'INSERT INTO user_skills (userId, skillId, proficiencyLevel) VALUES (?, ?, ?)',
+
+  async getUserByEmail(email: string): Promise<User | null> {              [id, skillId, 1]
+
+    try {            );
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(          }
+
+        `SELECT         }
+
+          id, email, password_hash, first_name, last_name, role,       }
+
+          employee_id, phone, is_active, last_login, created_at, updated_at
+
+        FROM users      await connection.commit();
+
+        WHERE email = ? AND is_active = 1`,
+
+        [email]      const updatedUser = await this.getUserById(id);
+
+      );      if (!updatedUser) {
+
+        throw new Error('Failed to retrieve updated user');
+
+      if (rows.length === 0) {      }
+
+        return null;
+
+      }      return updatedUser;
+
+    } catch (error) {
+
+      const row = rows[0];      await connection.rollback();
+
+      throw error;
+
+      // Return user with basic information    } finally {
+
+      return {      connection.release();
+
+        id: row.id,    }
+
+        email: row.email,  }
+
+        firstName: row.first_name,
+
+        lastName: row.last_name,  async deleteUser(id: number): Promise<void> {
+
+        role: row.role,    await this.pool.execute(
+
+        employeeId: row.employee_id,      'UPDATE users SET isActive = 0, updatedAt = CURRENT_TIMESTAMP WHERE id = ?',
+
+        phone: row.phone,      [id]
+
+        isActive: Boolean(row.is_active),    );
+
+        lastLogin: row.last_login,  }
+
+        createdAt: row.created_at,
+
+        updatedAt: row.updated_at  async getAllUsers(filters?: { search?: string; department?: string; role?: string }): Promise<User[]> {
+
+      };    let query = `
+
+    } catch (error) {      SELECT DISTINCT
+
+      logger.error('Failed to get user by email:', error);        u.id,
+
+      throw error;        u.email,
+
+    }        u.firstName,
+
+  }        u.lastName,
+
+        u.role,
+
+  /**        u.employeeId,
+
+   * Retrieves password hash for authentication        u.phone,
+
+   *         u.isActive,
+
+   * Separate method to avoid loading password hash unnecessarily        u.createdAt,
+
+   * in normal user retrieval operations.        u.updatedAt
+
+   *       FROM users u
+
+   * @param userId - User ID      LEFT JOIN user_departments ud ON u.id = ud.userId
+
+   * @returns Promise resolving to password hash or null      LEFT JOIN departments d ON ud.departmentId = d.id
+
+   */      WHERE u.isActive = 1
+
+  async getUserPasswordHash(userId: number): Promise<string | null> {    `;
+
+    try {    
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(    const params: any[] = [];
+
+        'SELECT password_hash FROM users WHERE id = ? AND is_active = 1',
+
+        [userId]    if (filters?.search) {
+
+      );      query += ` AND (u.firstName LIKE ? OR u.lastName LIKE ? OR u.email LIKE ? OR u.employeeId LIKE ?)`;
+
+      const searchTerm = `%${filters.search}%`;
+
+      if (rows.length === 0) {      params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+
+        return null;    }
+
+      }
+
+    if (filters?.department) {
+
+      return rows[0].password_hash;      query += ` AND d.id = ?`;
+
+    } catch (error) {      params.push(parseInt(filters.department));
+
+      logger.error('Failed to get user password hash:', error);    }
+
+      throw error;
+
+    }    if (filters?.role) {
+
+  }      query += ` AND u.role = ?`;
+
+      params.push(filters.role);
+
+  /**    }
+
+   * Retrieves all users with optional filtering
+
+   *     query += ` ORDER BY u.lastName, u.firstName`;
+
+   * Supports filtering by:
+
+   * - Role    const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+
+   * - Department
+
+   * - Active status    // Get users with their departments and skills
+
+   * - Search term (name or email)    const users: User[] = [];
+
+   *     for (const row of rows) {
+
+   * @param filters - Optional filters to apply      const user = await this.getUserById(row.id);
+
+   * @returns Promise resolving to array of users      if (user) {
+
+   */        users.push(user);
+
+  async getAllUsers(filters?: {      }
+
+    role?: string;    }
+
+    departmentId?: number;
+
+    isActive?: boolean;    return users;
+
+    search?: string;  }
+
+  }): Promise<User[]> {
+
+    try {  async getUsersForManager(managerId: number, managerRole: string): Promise<User[]> {
+
+      let query = `    if (managerRole === 'admin') {
+
+        SELECT DISTINCT      return this.getAllUsers();
+
+          u.id, u.email, u.first_name, u.last_name, u.role,     }
+
+          u.employee_id, u.phone, u.is_active, u.last_login,
+
+          u.created_at, u.updated_at    // Get departments managed by this manager
+
+        FROM users u    const [deptRows] = await this.pool.execute<RowDataPacket[]>(
+
+      `;      `SELECT departmentId FROM user_departments WHERE userId = ? AND isManager = 1`,
+
+      [managerId]
+
+      const conditions: string[] = [];    );
+
+      const params: any[] = [];
+
+    if (deptRows.length === 0) {
+
+      if (filters?.departmentId) {      return [];
+
+        query += ' JOIN user_departments ud ON u.id = ud.user_id';    }
+
+        conditions.push('ud.department_id = ?');
+
+        params.push(filters.departmentId);    const managedDeptIds = deptRows.map(row => row.departmentId);
+
+      }    const placeholders = managedDeptIds.map(() => '?').join(',');
+
+
+
+      if (filters?.role) {    const [userRows] = await this.pool.execute<RowDataPacket[]>(
+
+        conditions.push('u.role = ?');      `SELECT DISTINCT u.id
+
+        params.push(filters.role);       FROM users u
+
+      }       JOIN user_departments ud ON u.id = ud.userId
+
+       WHERE ud.departmentId IN (${placeholders}) AND u.isActive = 1`,
+
+      if (filters?.isActive !== undefined) {      managedDeptIds
+
+        conditions.push('u.is_active = ?');    );
+
+        params.push(filters.isActive ? 1 : 0);
+
+      }    const users: User[] = [];
+
+    for (const row of userRows) {
+
+      if (filters?.search) {      const user = await this.getUserById(row.id);
+
+        conditions.push(      if (user) {
+
+          '(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.employee_id LIKE ?)'        users.push(user);
+
+        );      }
+
+        const searchTerm = `%${filters.search}%`;    }
+
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+
+      }    return users;
+
+  }
+
+      if (conditions.length > 0) {
+
+        query += ' WHERE ' + conditions.join(' AND ');  async validatePassword(email: string, password: string): Promise<User | null> {
+
+      }    const [rows] = await this.pool.execute<RowDataPacket[]>(
+
+      'SELECT id, email, password_hash, first_name, last_name, role FROM users WHERE email = ? AND is_active = 1',
+
+      query += ' ORDER BY u.created_at DESC';      [email]
+
+    );
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+
+    if (rows.length === 0) return null;
+
+      // Map rows to User objects
+
+      const users: User[] = rows.map(row => ({    const user = rows[0];
+
+        id: row.id,    const isValid = await bcrypt.compare(password, user.password_hash);
+
+        email: row.email,
+
+        firstName: row.first_name,    if (!isValid) return null;
+
+        lastName: row.last_name,
+
+        role: row.role,    return {
+
+        employeeId: row.employee_id,      id: user.id,
+
+        phone: row.phone,      email: user.email,
+
+        isActive: Boolean(row.is_active),      firstName: user.first_name,
+
+        lastLogin: row.last_login,      lastName: user.last_name,
+
+        createdAt: row.created_at,      role: user.role,
+
+        updatedAt: row.updated_at      isActive: true,
+
+      }));      createdAt: new Date(),
+
+      updatedAt: new Date()
+
+      return users;    };
+
+    } catch (error) {  }
+
+      logger.error('Failed to get all users:', error);}
+
+      throw error;
+    }
+  }
+
+  /**
+   * Updates an existing user
+   * 
+   * Allows partial updates of user information. Only provided fields
+   * are updated. Password changes are hashed before storage.
+   * 
+   * @param id - User ID
+   * @param userData - Partial user data to update
+   * @returns Promise resolving to updated user
+   * @throws Error if user not found
+   */
+  async updateUser(id: number, userData: UpdateUserRequest): Promise<User> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Build dynamic update query
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      if (userData.email !== undefined) {
+        // Check email uniqueness if changing
+        const [existing] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1',
+          [userData.email, id]
+        );
+        if (existing.length > 0) {
+          throw new Error('Email already in use');
+        }
+        updates.push('email = ?');
+        values.push(userData.email);
+      }
+
+      if (userData.firstName !== undefined) {
+        updates.push('first_name = ?');
+        values.push(userData.firstName);
+      }
+
+      if (userData.lastName !== undefined) {
+        updates.push('last_name = ?');
+        values.push(userData.lastName);
+      }
+
+      if (userData.role !== undefined) {
+        updates.push('role = ?');
+        values.push(userData.role);
+      }
+
+      if (userData.phone !== undefined) {
+        updates.push('phone = ?');
+        values.push(userData.phone);
+      }
+
+      if (userData.employeeId !== undefined) {
+        updates.push('employee_id = ?');
+        values.push(userData.employeeId);
+      }
+
+      if (userData.isActive !== undefined) {
+        updates.push('is_active = ?');
+        values.push(userData.isActive ? 1 : 0);
+      }
+
+      if (userData.password !== undefined) {
+        const passwordHash = await bcrypt.hash(userData.password, 12);
+        updates.push('password_hash = ?');
+        values.push(passwordHash);
+      }
+
+      // Execute update if there are changes
+      if (updates.length > 0) {
+        values.push(id);
+        await connection.execute(
+          `UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          values
+        );
+      }
+
+      await connection.commit();
+
+      logger.info(`User updated successfully: ${id}`);
+
+      // Retrieve and return updated user
+      const updatedUser = await this.getUserById(id);
+      if (!updatedUser) {
+        throw new Error('User not found after update');
+      }
+
+      return updatedUser;
+    } catch (error) {
+      await connection.rollback();
+      logger.error('Failed to update user:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Soft deletes a user by setting is_active to false
+   * 
+   * Does not permanently delete the user record, allowing for
+   * data retention and potential restoration.
+   * 
+   * @param id - User ID to delete
+   * @returns Promise resolving to true if successful
+   */
+  async deleteUser(id: number): Promise<boolean> {
+    try {
+      const [result] = await this.pool.execute<ResultSetHeader>(
+        'UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [id]
+      );
+
+      if (result.affectedRows === 0) {
+        throw new Error('User not found');
+      }
+
+      logger.info(`User deleted successfully: ${id}`);
+      return true;
+    } catch (error) {
+      logger.error('Failed to delete user:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Updates user department assignments
+   * 
+   * Replaces all existing department assignments with the provided list.
+   * 
+   * @param userId - User ID
+   * @param departmentIds - Array of department IDs to assign
+   * @returns Promise resolving when complete
+   */
+  async updateUserDepartments(userId: number, departmentIds: number[]): Promise<void> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Remove existing department assignments
+      await connection.execute(
+        'DELETE FROM user_departments WHERE user_id = ?',
+        [userId]
+      );
+
+      // Add new department assignments
+      if (departmentIds.length > 0) {
+        for (const departmentId of departmentIds) {
+          await connection.execute(
+            'INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)',
+            [userId, departmentId]
+          );
+        }
+      }
+
+      await connection.commit();
+      logger.info(`User departments updated: ${userId}`, { departmentIds });
+    } catch (error) {
+      await connection.rollback();
+      logger.error('Failed to update user departments:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Updates user skill assignments
+   * 
+   * Replaces all existing skill assignments with the provided list.
+   * 
+   * @param userId - User ID
+   * @param skillIds - Array of skill IDs to assign
+   * @returns Promise resolving when complete
+   */
+  async updateUserSkills(userId: number, skillIds: number[]): Promise<void> {
+    const connection = await this.pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      // Remove existing skill assignments
+      await connection.execute(
+        'DELETE FROM user_skills WHERE user_id = ?',
+        [userId]
+      );
+
+      // Add new skill assignments
+      if (skillIds.length > 0) {
+        for (const skillId of skillIds) {
+          await connection.execute(
+            'INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)',
+            [userId, skillId]
+          );
+        }
+      }
+
+      await connection.commit();
+      logger.info(`User skills updated: ${userId}`, { skillIds });
+    } catch (error) {
+      await connection.rollback();
+      logger.error('Failed to update user skills:', error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  /**
+   * Updates user scheduling preferences
+   * 
+   * @param userId - User ID
+   * @param preferences - User preferences to update
+   * @returns Promise resolving when complete
+   */
+  async updateUserPreferences(userId: number, preferences: Partial<UserPreferences>): Promise<void> {
+    try {
+      const updates: string[] = [];
+      const values: any[] = [];
+
+      if (preferences.maxHoursPerWeek !== undefined) {
+        updates.push('max_hours_per_week = ?');
+        values.push(preferences.maxHoursPerWeek);
+      }
+
+      if (preferences.minHoursPerWeek !== undefined) {
+        updates.push('min_hours_per_week = ?');
+        values.push(preferences.minHoursPerWeek);
+      }
+
+      if (preferences.maxConsecutiveDays !== undefined) {
+        updates.push('max_consecutive_days = ?');
+        values.push(preferences.maxConsecutiveDays);
+      }
+
+      if (preferences.preferredShifts !== undefined) {
+        updates.push('preferred_shifts = ?');
+        values.push(JSON.stringify(preferences.preferredShifts));
+      }
+
+      if (preferences.avoidShifts !== undefined) {
+        updates.push('avoid_shifts = ?');
+        values.push(JSON.stringify(preferences.avoidShifts));
+      }
+
+      if (updates.length > 0) {
+        values.push(userId);
+        await this.pool.execute(
+          `UPDATE user_preferences SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?`,
+          values
+        );
+      }
+
+      logger.info(`User preferences updated: ${userId}`);
+    } catch (error) {
+      logger.error('Failed to update user preferences:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Updates user's last login timestamp
+   * 
+   * Called during authentication to track user activity.
+   * 
+   * @param userId - User ID
+   * @returns Promise resolving when complete
+   */
+  async updateLastLogin(userId: number): Promise<void> {
+    try {
+      await this.pool.execute(
+        'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
+        [userId]
+      );
+    } catch (error) {
+      logger.error('Failed to update last login:', error);
+      // Non-critical error, don't throw
+    }
+  }
+
+  /**
+   * Verifies user password
+   * 
+   * @param userId - User ID
+   * @param password - Plain text password to verify
+   * @returns Promise resolving to true if password matches
+   */
+  async verifyPassword(userId: number, password: string): Promise<boolean> {
+    try {
+      const hash = await this.getUserPasswordHash(userId);
+      if (!hash) {
+        return false;
+      }
+
+      return await bcrypt.compare(password, hash);
+    } catch (error) {
+      logger.error('Failed to verify password:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Validates user credentials and returns user if valid
+   * 
+   * Used for login authentication. Checks email and password combination.
+   * 
+   * @param email - User email
+   * @param password - Plain text password
+   * @returns Promise resolving to User object if credentials are valid, null otherwise
+   */
+  async validatePassword(email: string, password: string): Promise<User | null> {
+    try {
+      // Get user by email
+      const user = await this.getUserByEmail(email);
+      if (!user || !user.isActive) {
+        return null;
+      }
+
+      // Verify password
+      const isValid = await this.verifyPassword(user.id, password);
+      if (!isValid) {
+        return null;
+      }
+
+      // Update last login timestamp
+      await this.pool.execute(
+        'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
+        [user.id]
+      );
+
+      logger.info(`User logged in successfully: ${email}`);
+      return user;
+    } catch (error) {
+      logger.error('Failed to validate password:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Gets users by department
+   * 
+   * @param departmentId - Department ID
+   * @returns Promise resolving to array of users in the department
+   */
+  async getUsersByDepartment(departmentId: number): Promise<User[]> {
+    return this.getAllUsers({ departmentId, isActive: true });
+  }
+
+  /**
+   * Gets users by role
+   * 
+   * @param role - User role
+   * @returns Promise resolving to array of users with the role
+   */
+  async getUsersByRole(role: string): Promise<User[]> {
+    return this.getAllUsers({ role, isActive: true });
+  }
+
+  /**
+   * Gets user statistics
+   * 
+   * @returns Promise resolving to statistics object
+   */
+  async getUserStatistics(): Promise<{
+    total: number;
+    active: number;
+    inactive: number;
+    byRole: { role: string; count: number }[];
+  }> {
+    try {
+      const [totalRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM users'
+      );
+
+      const [activeRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM users WHERE is_active = 1'
+      );
+
+      const [roleRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT role, COUNT(*) as count FROM users WHERE is_active = 1 GROUP BY role'
+      );
+
+      return {
+        total: totalRows[0].count,
+        active: activeRows[0].count,
+        inactive: totalRows[0].count - activeRows[0].count,
+        byRole: roleRows.map(row => ({ role: row.role, count: row.count }))
+      };
+    } catch (error) {
+      logger.error('Failed to get user statistics:', error);
+      throw error;
+    }
+  }
+}

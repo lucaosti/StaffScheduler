@@ -46,7 +46,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       // Check permissions
       if (user.role !== 'admin') {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
+        const hasAccess = userDepartments.some(d => d.id === departmentId);
         
         if (!hasAccess) {
           return res.status(403).json({
@@ -110,7 +110,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
           });
         }
 
-        if (!['admin', 'manager'].includes(manager.role)) {
+        if (!['manager', 'department_manager'].includes(manager.role)) {
           return res.status(400).json({
             success: false,
             error: { message: 'Specified user cannot be a department manager' }
@@ -146,7 +146,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       } else if (user.role === 'manager') {
         // Managers can update departments they manage
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some(d => d.id === departmentId && d.isManager);
         
         if (!canManage) {
           return res.status(403).json({
@@ -171,7 +171,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
           });
         }
 
-        if (!['admin', 'manager'].includes(manager.role)) {
+        if (!['manager', 'department_manager'].includes(manager.role)) {
           return res.status(400).json({
             success: false,
             error: { message: 'Specified user cannot be a department manager' }
@@ -241,10 +241,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
       // Check permissions
       if (user.role === 'admin') {
         // Admin can add users to any department
-      } else if (['admin', 'manager'].includes(user.role)) {
+      } else if (['manager', 'department_manager'].includes(user.role)) {
         // Managers can add users to departments they manage
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some(d => d.id === departmentId && d.isManager);
         
         if (!canManage) {
           return res.status(403).json({
@@ -277,7 +277,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
-      await departmentService.addUserToDepartment(departmentId, userId);
+      await departmentService.addUserToDepartment(userId, departmentId, isManager);
 
       res.json({
         success: true,
@@ -302,10 +302,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
       // Check permissions
       if (user.role === 'admin') {
         // Admin can remove users from any department
-      } else if (['admin', 'manager'].includes(user.role)) {
+      } else if (['manager', 'department_manager'].includes(user.role)) {
         // Managers can remove users from departments they manage
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some(d => d.id === departmentId && d.isManager);
         
         if (!canManage) {
           return res.status(403).json({
@@ -344,7 +344,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       // Check permissions
       if (user.role !== 'admin') {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
+        const hasAccess = userDepartments.some(d => d.id === departmentId);
         
         if (!hasAccess) {
           return res.status(403).json({
@@ -354,7 +354,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         }
       }
 
-      const stats = await departmentService.getDepartmentStats();
+      const stats = await departmentService.getDepartmentStats(departmentId);
 
       res.json({
         success: true,

@@ -28,7 +28,7 @@ declare module 'express-serve-static-core' {
 interface JWTPayload {
   userId: string;
   email: string;
-  role: 'admin' | 'manager' | 'department_manager' | 'employee';
+  role: 'admin' | 'manager' | 'employee';
   iat?: number;
   exp?: number;
 }
@@ -113,7 +113,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
  * @param roles - Array of allowed roles
  * @returns Express middleware function
  */
-export const requireRole = (roles: Array<'admin' | 'manager' | 'department_manager' | 'employee'>) => {
+export const requireRole = (roles: Array<'admin' | 'manager' | 'employee'>) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.user;
     
@@ -152,10 +152,10 @@ export const requireAdmin = requireRole(['admin']);
 /**
  * Manager and Above Middleware
  * 
- * Allows access to admin, manager, and department_manager roles.
+ * Allows access to admin and manager roles.
  * Used for management functions.
  */
-export const requireManager = requireRole(['admin', 'manager', 'department_manager']);
+export const requireManager = requireRole(['admin', 'manager']);
 
 /**
  * Check Resource Permission

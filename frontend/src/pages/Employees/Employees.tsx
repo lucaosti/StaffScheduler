@@ -55,87 +55,13 @@ const Employees: React.FC = () => {
       if (response.success && response.data) {
         setEmployees(response.data);
       } else {
-        // Use mock data for now since backend is not fully connected
-        const mockEmployees = [
-          {
-            id: 1,
-            employeeId: 'EMP001',
-            firstName: 'John',
-            lastName: 'Doe',
-            email: 'john.doe@company.com',
-            phone: '+1-555-0123',
-            department: 'Nursing',
-            position: 'Registered Nurse',
-            employeeType: 'full-time',
-            hourlyRate: 35.00,
-            maxHoursPerWeek: 40,
-            skills: ['Patient Care', 'IV Therapy', 'Emergency Response'],
-            isActive: true,
-            createdAt: '2024-01-15T10:00:00Z',
-            updatedAt: '2024-01-15T10:00:00Z'
-          },
-          {
-            id: 2,
-            employeeId: 'EMP002',
-            firstName: 'Sarah',
-            lastName: 'Johnson',
-            email: 'sarah.johnson@company.com',
-            phone: '+1-555-0124',
-            department: 'Administration',
-            position: 'HR Manager',
-            employeeType: 'full-time',
-            hourlyRate: 45.00,
-            maxHoursPerWeek: 40,
-            skills: ['HR Management', 'Recruitment', 'Employee Relations'],
-            isActive: true,
-            createdAt: '2024-01-10T09:30:00Z',
-            updatedAt: '2024-01-10T09:30:00Z'
-          },
-          {
-            id: 3,
-            employeeId: 'EMP003',
-            firstName: 'Mike',
-            lastName: 'Wilson',
-            email: 'mike.wilson@company.com',
-            phone: '+1-555-0125',
-            department: 'Security',
-            position: 'Security Guard',
-            employeeType: 'part-time',
-            hourlyRate: 18.00,
-            maxHoursPerWeek: 25,
-            skills: ['Security Protocols', 'Emergency Response', 'Patrol'],
-            isActive: true,
-            createdAt: '2024-01-05T14:15:00Z',
-            updatedAt: '2024-01-05T14:15:00Z'
-          }
-        ];
-        setEmployees(mockEmployees as EmployeeWithOptionals[]);
+        setError('Failed to load employees. Please ensure the backend is running and database is populated.');
+        setEmployees([]);
       }
     } catch (err) {
-      setError('Failed to load employees');
+      setError('Failed to load employees. Please check your connection and try again.');
       console.error('Employees error:', err);
-      
-      // Use mock data as fallback
-      const mockEmployees = [
-        {
-          id: 1,
-          employeeId: 'EMP001',
-          firstName: 'John',
-          lastName: 'Doe',
-          email: 'john.doe@company.com',
-          phone: '+1-555-0123',
-          department: 'Nursing',
-          position: 'Registered Nurse',
-          employeeType: 'full-time',
-          hourlyRate: 35.00,
-          maxHoursPerWeek: 40,
-          skills: ['Patient Care', 'IV Therapy', 'Emergency Response'],
-          isActive: true,
-          createdAt: '2024-01-15T10:00:00Z',
-          updatedAt: '2024-01-15T10:00:00Z'
-        }
-      ];
-      setEmployees(mockEmployees as EmployeeWithOptionals[]);
+      setEmployees([]);
     } finally {
       setLoading(false);
     }
