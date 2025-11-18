@@ -52,21 +52,81 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
     `;
     const pendingApprovals = await database.queryOne<{ count: number }>(pendingApprovalsQuery);
 
-    // Calculate monthly hours and cost (mock data for now)
-    const monthlyHours = 3248;
-    const monthlyCost = 48720;
-    const coverageRate = 92.5;
-    const employeeSatisfaction = 87.2;
+    // Calculate monthly hours from assignments
+    const monthlyHoursQuery = `
+      SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, 
+        CONCAT(s.shift_date, ' ', s.start_time),
+        CONCAT(s.shift_date, ' ', s.end_time)
+      )), 0) as total_hours
+      FROM shift_assignments sa
+      JOIN shifts s ON sa.shift_id = s.id
+      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
+        AND YEAR(s.shift_date) = YEAR(CURDATE())
+        AND sa.status = 'confirmed'
+    `;
+    const monthlyHoursResult = await database.queryOne<{ total_hours: number }>(monthlyHoursQuery);
+    const monthlyHours = monthlyHoursResult?.total_hours || 0;
+
+    // Calculate monthly cost from employee hourly rates
+    const monthlyCostQuery = `
+      SELECT COALESCE(SUM(
+        TIMESTAMPDIFF(HOUR, 
+          CONCAT(s.shift_date, ' ', s.start_time),
+          CONCAT(s.shift_date, ' ', s.end_time)
+        ) * e.hourly_rate
+      ), 0) as total_cost
+      FROM shift_assignments sa
+      JOIN shifts s ON sa.shift_id = s.id
+      JOIN employees e ON sa.employee_id = e.id
+      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
+        AND YEAR(s.shift_date) = YEAR(CURDATE())
+        AND sa.status = 'confirmed'
+    `;
+    const monthlyCostResult = await database.queryOne<{ total_cost: number }>(monthlyCostQuery);
+    const monthlyCost = monthlyCostResult?.total_cost || 0;
+
+    // Calculate coverage rate (percentage of shifts that are filled)
+    const coverageQuery = `
+      SELECT 
+        COUNT(DISTINCT s.id) as total_shifts,
+        COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
+      FROM shifts s
+      LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status = 'confirmed'
+      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
+        AND YEAR(s.shift_date) = YEAR(CURDATE())
+    `;
+    const coverageResult = await database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery);
+    const coverageRate = coverageResult && coverageResult.total_shifts > 0
+      ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
+      : 0;
+
+    // Calculate employee satisfaction (based on preference matches)
+    const satisfactionQuery = `
+      SELECT 
+        COUNT(*) as total_assignments,
+        SUM(CASE WHEN ep.preference_type = 'preferred' THEN 1 ELSE 0 END) as preferred_matches
+      FROM shift_assignments sa
+      JOIN shifts s ON sa.shift_id = s.id
+      LEFT JOIN employee_preferences ep ON sa.employee_id = ep.employee_id 
+        AND s.shift_type = ep.shift_type
+      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
+        AND YEAR(s.shift_date) = YEAR(CURDATE())
+        AND sa.status = 'confirmed'
+    `;
+    const satisfactionResult = await database.queryOne<{ total_assignments: number; preferred_matches: number }>(satisfactionQuery);
+    const employeeSatisfaction = satisfactionResult && satisfactionResult.total_assignments > 0
+      ? (satisfactionResult.preferred_matches / satisfactionResult.total_assignments) * 100
+      : 0;
 
     const stats = {
       totalEmployees: totalEmployees?.count || 0,
       activeSchedules: activeSchedules?.count || 0,
       todayShifts: todayShifts?.count || 0,
       pendingApprovals: pendingApprovals?.count || 0,
-      monthlyHours,
-      monthlyCost,
-      coverageRate,
-      employeeSatisfaction
+      monthlyHours: Math.round(monthlyHours),
+      monthlyCost: Math.round(monthlyCost * 100) / 100,
+      coverageRate: Math.round(coverageRate * 10) / 10,
+      employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10
     };
 
     res.json({
@@ -76,18 +136,11 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Dashboard stats error:', error);
     
-    // Fallback to mock data if database queries fail
-    res.json({
-      success: true,
-      data: {
-        totalEmployees: 142,
-        activeSchedules: 8,
-        todayShifts: 24,
-        pendingApprovals: 6,
-        monthlyHours: 3248,
-        monthlyCost: 48720,
-        coverageRate: 92.5,
-        employeeSatisfaction: 87.2
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Failed to fetch dashboard statistics',
+        details: error instanceof Error ? error.message : 'Unknown error'
       }
     });
   }
@@ -96,41 +149,40 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
 // Get recent activities
 router.get('/activities', authenticate, async (req: Request, res: Response) => {
   try {
-    // Mock data for now - in a real implementation, this would come from an audit log
-    const activities = [
-      {
-        id: '1',
-        type: 'shift_created',
-        message: 'New morning shift created for Nursing department',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-        user: 'Laura Bianchi'
-      },
-      {
-        id: '2',
-        type: 'employee_added',
-        message: 'New employee added: Marco Rossi',
-        timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-        user: 'Giuseppe Verdi'
-      },
-      {
-        id: '3',
-        type: 'schedule_published',
-        message: 'Weekly schedule published for next week',
-        timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-        user: 'Admin'
-      },
-      {
-        id: '4',
-        type: 'approval_requested',
-        message: 'Overtime approval requested for Emergency department',
-        timestamp: new Date(Date.now() - 1000 * 60 * 240).toISOString(),
-        user: 'Francesco Lombardi'
-      }
-    ];
+    // Fetch real activities from audit_logs table
+    const activitiesQuery = `
+      SELECT 
+        al.id,
+        al.action as type,
+        al.description as message,
+        al.created_at as timestamp,
+        CONCAT(u.first_name, ' ', u.last_name) as user
+      FROM audit_logs al
+      LEFT JOIN users u ON al.user_id = u.id
+      ORDER BY al.created_at DESC
+      LIMIT 10
+    `;
+    
+    const activities = await database.query<{
+      id: number;
+      type: string;
+      message: string;
+      timestamp: Date;
+      user: string | null;
+    }>(activitiesQuery);
+
+    // Format activities for response
+    const formattedActivities = activities.map(activity => ({
+      id: activity.id.toString(),
+      type: activity.type,
+      message: activity.message,
+      timestamp: activity.timestamp.toISOString(),
+      user: activity.user || 'System'
+    }));
 
     res.json({
       success: true,
-      data: activities
+      data: formattedActivities
     });
   } catch (error) {
     logger.error('Dashboard activities error:', error);
@@ -138,7 +190,8 @@ router.get('/activities', authenticate, async (req: Request, res: Response) => {
       success: false,
       error: {
         code: 'INTERNAL_ERROR',
-        message: 'Failed to load recent activities'
+        message: 'Failed to load recent activities',
+        details: error instanceof Error ? error.message : 'Unknown error'
       }
     });
   }
@@ -147,28 +200,38 @@ router.get('/activities', authenticate, async (req: Request, res: Response) => {
 // Get upcoming shifts
 router.get('/upcoming-shifts', authenticate, async (req: Request, res: Response) => {
   try {
+    // Query upcoming shifts with assignment information (using correct schema)
     const query = `
       SELECT 
         s.id,
-        s.name,
-        s.department,
+        CONCAT(d.name, ' - ', DATE_FORMAT(s.date, '%Y-%m-%d')) as name,
+        d.name as department,
         s.start_time,
         s.end_time,
-        s.minimum_staff as required_employees,
-        COUNT(a.id) as assigned_employees
+        s.min_staff as required_employees,
+        COUNT(sa.id) as assigned_employees
       FROM shifts s
-      LEFT JOIN assignments a ON s.id = a.shift_id AND a.status = 'approved'
+      JOIN departments d ON s.department_id = d.id
+      LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
       WHERE s.date >= CURDATE() AND s.date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
-      AND s.status = 'published'
-      GROUP BY s.id
+        AND s.status IN ('open', 'assigned', 'confirmed')
+      GROUP BY s.id, d.name, s.date, s.start_time, s.end_time, s.min_staff
       ORDER BY s.date, s.start_time
       LIMIT 10
     `;
 
-    const rows = await database.query<any>(query);
+    const rows = await database.query<{
+      id: number;
+      name: string;
+      department: string;
+      start_time: string;
+      end_time: string;
+      required_employees: number;
+      assigned_employees: number;
+    }>(query);
     
-    const upcomingShifts = rows.map((row: any) => ({
-      id: row.id,
+    const upcomingShifts = rows.map(row => ({
+      id: row.id.toString(),
       name: row.name,
       department: row.department,
       startTime: row.start_time,
@@ -186,41 +249,13 @@ router.get('/upcoming-shifts', authenticate, async (req: Request, res: Response)
   } catch (error) {
     logger.error('Dashboard upcoming shifts error:', error);
     
-    // Fallback to mock data
-    res.json({
-      success: true,
-      data: [
-        {
-          id: '1',
-          name: 'Morning Shift',
-          department: 'Nursing',
-          startTime: '08:00',
-          endTime: '16:00',
-          assignedEmployees: 8,
-          requiredEmployees: 10,
-          status: 'understaffed'
-        },
-        {
-          id: '2',
-          name: 'Afternoon Shift',
-          department: 'Emergency',
-          startTime: '16:00',
-          endTime: '24:00',
-          assignedEmployees: 6,
-          requiredEmployees: 6,
-          status: 'adequate'
-        },
-        {
-          id: '3',
-          name: 'Night Shift',
-          department: 'ICU',
-          startTime: '00:00',
-          endTime: '08:00',
-          assignedEmployees: 5,
-          requiredEmployees: 4,
-          status: 'overstaffed'
-        }
-      ]
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to load upcoming shifts',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }
     });
   }
 });
@@ -228,20 +263,29 @@ router.get('/upcoming-shifts', authenticate, async (req: Request, res: Response)
 // Get department overview
 router.get('/departments', authenticate, async (req: Request, res: Response) => {
   try {
+    // Query department statistics using correct schema (departments + users + user_departments)
     const query = `
       SELECT 
-        e.department,
-        COUNT(e.id) as total_employees,
-        COUNT(CASE WHEN e.is_active = 1 THEN 1 END) as active_employees,
-        COUNT(CASE WHEN e.employee_type = 'full-time' THEN 1 END) as full_time,
-        COUNT(CASE WHEN e.employee_type = 'part-time' THEN 1 END) as part_time
-      FROM employees e
-      WHERE e.department IS NOT NULL
-      GROUP BY e.department
+        d.name as department,
+        COUNT(DISTINCT u.id) as total_employees,
+        COUNT(DISTINCT CASE WHEN u.is_active = TRUE THEN u.id END) as active_employees,
+        COUNT(DISTINCT CASE WHEN u.role = 'employee' THEN u.id END) as employee_count,
+        COUNT(DISTINCT CASE WHEN u.role = 'manager' THEN u.id END) as manager_count
+      FROM departments d
+      LEFT JOIN user_departments ud ON d.id = ud.department_id
+      LEFT JOIN users u ON ud.user_id = u.id
+      WHERE d.is_active = TRUE
+      GROUP BY d.id, d.name
       ORDER BY total_employees DESC
     `;
 
-    const departments = await database.query<any>(query);
+    const departments = await database.query<{
+      department: string;
+      total_employees: number;
+      active_employees: number;
+      employee_count: number;
+      manager_count: number;
+    }>(query);
     
     res.json({
       success: true,
@@ -250,32 +294,13 @@ router.get('/departments', authenticate, async (req: Request, res: Response) => 
   } catch (error) {
     logger.error('Dashboard departments error:', error);
     
-    // Fallback to mock data
-    res.json({
-      success: true,
-      data: [
-        {
-          department: 'Nursing',
-          total_employees: 45,
-          active_employees: 42,
-          full_time: 38,
-          part_time: 7
-        },
-        {
-          department: 'Emergency',
-          total_employees: 28,
-          active_employees: 26,
-          full_time: 24,
-          part_time: 4
-        },
-        {
-          department: 'ICU',
-          total_employees: 22,
-          active_employees: 21,
-          full_time: 20,
-          part_time: 2
-        }
-      ]
+    res.status(500).json({
+      success: false,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Failed to load department overview',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }
     });
   }
 });
