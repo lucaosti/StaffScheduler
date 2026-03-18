@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS user_skills (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
     skill_id INT NOT NULL,
+    proficiency_level INT DEFAULT 1,
     
     UNIQUE KEY unique_user_skill (user_id, skill_id),
     INDEX idx_user (user_id),
@@ -138,19 +139,23 @@ CREATE TABLE IF NOT EXISTS schedules (
     id INT PRIMARY KEY AUTO_INCREMENT,
     name VARCHAR(100) NOT NULL,
     description TEXT,
+    department_id INT NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
     created_by INT NOT NULL,
     published_by INT NULL,
     published_at TIMESTAMP NULL,
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     INDEX idx_dates (start_date, end_date),
     INDEX idx_status (status),
     INDEX idx_created_by (created_by),
+    INDEX idx_department (department_id),
     
+    FOREIGN KEY (department_id) REFERENCES departments(id),
     FOREIGN KEY (created_by) REFERENCES users(id),
     FOREIGN KEY (published_by) REFERENCES users(id)
 );
@@ -207,10 +212,13 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
     id INT PRIMARY KEY AUTO_INCREMENT,
     shift_id INT NOT NULL,
     user_id INT NOT NULL,
-    status ENUM('pending', 'confirmed', 'cancelled') DEFAULT 'pending',
+    status ENUM('pending', 'confirmed', 'completed', 'cancelled') DEFAULT 'pending',
     assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by INT NULL,
     confirmed_at TIMESTAMP NULL,
     notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     UNIQUE KEY unique_shift_user (shift_id, user_id),
     INDEX idx_shift (shift_id),
@@ -218,7 +226,8 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
     INDEX idx_status (status),
     
     FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================

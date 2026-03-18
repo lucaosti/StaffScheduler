@@ -496,26 +496,10 @@ export class AssignmentService {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT id FROM user_unavailability
-        WHERE user_id = ?
-        AND (
-          (date = ? AND (
-            (start_time IS NULL AND end_time IS NULL)
-            OR (start_time <= ? AND end_time >= ?)
-            OR (start_time IS NULL AND end_time >= ?)
-            OR (start_time <= ? AND end_time IS NULL)
-          ))
-          OR (date IS NULL AND day_of_week = DAYOFWEEK(?) - 1 AND (
-            (start_time <= ? AND end_time >= ?)
-            OR (start_time IS NULL AND end_time >= ?)
-            OR (start_time <= ? AND end_time IS NULL)
-          ))
-        )
-        LIMIT 1`,
-        [
-          userId,
-          date, startTime, startTime, startTime, endTime,
-          date, startTime, startTime, startTime, endTime
-        ]
+         WHERE user_id = ?
+           AND ? BETWEEN start_date AND end_date
+         LIMIT 1`,
+        [userId, date]
       );
 
       return rows.length === 0;
@@ -597,29 +581,10 @@ export class AssignmentService {
   }
 
   /**
-   * Bulk creates assignments for a shift
-   * 
-   * @param shiftId - Shift ID
-   * @param userIds - Array of user IDs to assign
-   * @returns Promise resolving to array of created assignments
+   * Bulk creates assignments from an array of assignment requests.
+   * Also supports creating multiple assignments for a single shift via
+   * `shiftId` + `userIds` for backward/alternate callers.
    */
-  /**
-   * Bulk creates assignments from an array of assignment requests
-   * 
-   * @param assignments - Array of assignment creation requests
-   * @returns Promise resolving to array of created assignments
-   */
-  async bulkCreateAssignments(assignments: CreateAssignmentRequest[]): Promise<ShiftAssignment[]>;
-  
-  /**
-   * Bulk creates assignments for multiple users on the same shift
-   * 
-   * @param shiftId - Shift ID
-   * @param userIds - Array of user IDs
-   * @returns Promise resolving to array of created assignments
-   */
-  async bulkCreateAssignments(shiftId: number, userIds: number[]): Promise<ShiftAssignment[]>;
-  
   async bulkCreateAssignments(
     assignmentsOrShiftId: CreateAssignmentRequest[] | number, 
     userIds?: number[]

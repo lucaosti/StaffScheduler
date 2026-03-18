@@ -1,532 +1,71 @@
-#!/usr/bin/env ts-node#!/usr/bin/env ts-nodeimport { database } from '../src/config/database';
-
-/**
-
- * Database Initialization Scriptimport { logger } from '../src/config/logger';
-
- * 
-
- * Initializes the Staff Scheduler database with the complete schema/**
-
- * and creates default admin user and basic data.
-
- *  * Database Initialization Scriptconst SCHEMA_SQL = `
-
- * Usage:
-
- *   npm run db:init * -- Users table (authentication and basic user info)
-
- *   or
-
- *   npx ts-node scripts/init-database.ts * Initializes the Staff Scheduler database with the complete schemaCREATE TABLE IF NOT EXISTS users (
-
- * 
-
- * @author Staff Scheduler Team * and creates default admin user and basic data.  id INT AUTO_INCREMENT PRIMARY KEY,
-
- */
-
- *   email VARCHAR(255) UNIQUE NOT NULL,
-
-import mysql from 'mysql2/promise';
-
-import bcrypt from 'bcrypt'; * Usage:  password_hash VARCHAR(255) NOT NULL,
-
-import * as fs from 'fs';
-
-import * as path from 'path'; *   npm run db:init  role ENUM('admin', 'manager', 'employee') NOT NULL DEFAULT 'employee',
+#!/usr/bin/env ts-node
 
 import dotenv from 'dotenv';
+import * as fs from 'fs';
+import mysql from 'mysql2/promise';
+import * as path from 'path';
+import { logger } from '../src/config/logger';
 
- *   or  is_active BOOLEAN DEFAULT TRUE,
+dotenv.config();
 
-// Load environment variables
-
-dotenv.config(); *   npx ts-node scripts/init-database.ts  last_login TIMESTAMP NULL,
-
-
-
-const DB_CONFIG = { *   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-  host: process.env.DB_HOST || 'localhost',
-
-  port: parseInt(process.env.DB_PORT || '3306'), * @author Staff Scheduler Team  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-
-  user: process.env.DB_USER || 'root',
-
-  password: process.env.DB_PASSWORD || '', */);
-
-  database: process.env.DB_NAME || 'staff_scheduler',
-
-  multipleStatements: true
-
+type DbConfig = {
+  host: string;
+  port: number;
+  user: string;
+  password: string;
+  database: string;
 };
 
-import mysql from 'mysql2/promise';-- Employees table (extended employee information)
-
-async function initializeDatabase() {
-
-  let connection: mysql.Connection | null = null;import bcrypt from 'bcrypt';CREATE TABLE IF NOT EXISTS employees (
-
-
-
-  try {import * as fs from 'fs';  id INT AUTO_INCREMENT PRIMARY KEY,
-
-    console.log('\n🚀 Starting database initialization...\n');
-
-import * as path from 'path';  employee_id VARCHAR(50) UNIQUE NOT NULL,
-
-    // Connect without database selection first
-
-    connection = await mysql.createConnection({  user_id INT,
-
-      host: DB_CONFIG.host,
-
-      port: DB_CONFIG.port,// Load environment variables  first_name VARCHAR(100) NOT NULL,
-
-      user: DB_CONFIG.user,
-
-      password: DB_CONFIG.passwordimport dotenv from 'dotenv';  last_name VARCHAR(100) NOT NULL,
-
-    });
-
-dotenv.config();  email VARCHAR(255) UNIQUE NOT NULL,
-
-    console.log('✅ Connected to MySQL server');
-
-  phone VARCHAR(20),
-
-    // Create database if it doesn't exist
-
-    await connection.query(`CREATE DATABASE IF NOT EXISTS ${DB_CONFIG.database}`);interface Config {  address TEXT,
-
-    console.log(`✅ Database '${DB_CONFIG.database}' ensured`);
-
-  host: string;  department VARCHAR(100),
-
-    // Switch to the database
-
-    await connection.query(`USE ${DB_CONFIG.database}`);  port: number;  position VARCHAR(100),
-
-
-
-    // Read and execute schema SQL  user: string;  hire_date DATE,
-
-    const schemaPath = path.join(__dirname, '../database/init.sql');
-
-    const schemaSql = fs.readFileSync(schemaPath, 'utf-8');  password: string;  employee_type ENUM('full-time', 'part-time', 'contractor') DEFAULT 'full-time',
-
-    
-
-    console.log('📄 Executing schema SQL...');  database: string;  hourly_rate DECIMAL(10,2),
-
-    await connection.query(schemaSql);
-
-    console.log('✅ Database schema created successfully');}  max_hours_per_week INT DEFAULT 40,
-
-
-
-    // Check if admin user already exists  skills JSON,
-
-    const [existingAdmins] = await connection.query<any[]>(
-
-      'SELECT id FROM users WHERE role = ? LIMIT 1',const config: Config = {  certifications JSON,
-
-      ['admin']
-
-    );  host: process.env.DB_HOST || 'localhost',  availability_pattern JSON,
-
-
-
-    if (existingAdmins.length === 0) {  port: parseInt(process.env.DB_PORT || '3306'),  preferences JSON,
-
-      // Create default admin user
-
-      const adminPassword = 'admin123'; // Change this in production!  user: process.env.DB_USER || 'root',  notes TEXT,
-
-      const passwordHash = await bcrypt.hash(adminPassword, 12);
-
-  password: process.env.DB_PASSWORD || '',  is_active BOOLEAN DEFAULT TRUE,
-
-      await connection.query(
-
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, is_active)  database: process.env.DB_NAME || 'staff_scheduler'  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-         VALUES (?, ?, ?, ?, ?, ?)`,
-
-        ['admin@staffscheduler.com', passwordHash, 'Admin', 'User', 'admin', true]};  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-      );
-
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-
-      console.log('✅ Default admin user created');
-
-      console.log('   Email: admin@staffscheduler.com');async function initializeDatabase(): Promise<void> {);
-
-      console.log('   Password: admin123');
-
-      console.log('   ⚠️  CHANGE THIS PASSWORD IN PRODUCTION!');  let connection: mysql.Connection | null = null;
-
-    } else {
-
-      console.log('ℹ️  Admin user already exists, skipping creation');-- Shifts table
-
-    }
-
-  try {CREATE TABLE IF NOT EXISTS shifts (
-
-    // Check if departments exist
-
-    const [existingDepts] = await connection.query<any[]>(    console.log('🔧 Starting database initialization...');  id VARCHAR(36) PRIMARY KEY,
-
-      'SELECT id FROM departments LIMIT 1'
-
-    );    console.log(`📍 Connecting to ${config.host}:${config.port}`);  name VARCHAR(255) NOT NULL,
-
-
-
-    if (existingDepts.length === 0) {  description TEXT,
-
-      // Create default departments
-
-      await connection.query(    // Connect without database first to create it  start_date DATE NOT NULL,
-
-        `INSERT INTO departments (name, description, is_active)
-
-         VALUES     connection = await mysql.createConnection({  end_date DATE NOT NULL,
-
-         ('General', 'General department for all employees', TRUE),
-
-         ('Operations', 'Operations department', TRUE),      host: config.host,  start_time TIME NOT NULL,
-
-         ('Customer Service', 'Customer service department', TRUE)`
-
-      );      port: config.port,  end_time TIME NOT NULL,
-
-
-
-      console.log('✅ Default departments created');      user: config.user,  department VARCHAR(100),
-
-    } else {
-
-      console.log('ℹ️  Departments already exist, skipping creation');      password: config.password,  location VARCHAR(255),
-
-    }
-
-      multipleStatements: true  roles_required JSON,
-
-    console.log('\n🎉 Database initialization completed successfully!');
-
-    console.log('\n📊 Summary:');    });  min_staff INT DEFAULT 1,
-
-    console.log('   - Database schema created');
-
-    console.log('   - Default admin user ready');  max_staff INT,
-
-    console.log('   - Default departments created');
-
-    console.log('\n💡 Next steps:');    console.log('✅ Connected to MySQL server');  status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
-
-    console.log('   1. Run: npm run demo:install (to add demo data)');
-
-    console.log('   2. Start backend: npm run dev');  created_by INT,
-
-    console.log('   3. Access: http://localhost:3001');
-
-    // Create database if not exists  published_at TIMESTAMP NULL,
-
-  } catch (error) {
-
-    console.error('❌ Database initialization failed:');    await connection.query(`CREATE DATABASE IF NOT EXISTS ${config.database} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);  notes TEXT,
-
-    console.error(error);
-
-    process.exit(1);    console.log(`✅ Database '${config.database}' ready`);  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-  } finally {
-
-    if (connection) {  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-      await connection.end();
-
-    }    // Switch to the database  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-
-  }
-
-}    await connection.query(`USE ${config.database}`););
-
-
-
-// Run if this is the main module
-
-if (require.main === module) {
-
-  initializeDatabase()    // Read and execute the schema SQL file-- Shift assignments table
-
-    .then(() => {
-
-      process.exit(0);    const schemaPath = path.join(__dirname, '../database/init.sql');CREATE TABLE IF NOT EXISTS shift_assignments (
-
-    })
-
-    .catch((error) => {    const schemaSql = fs.readFileSync(schemaPath, 'utf8');  id VARCHAR(36) PRIMARY KEY,
-
-      console.error('Fatal error:', error);
-
-      process.exit(1);      employee_id VARCHAR(50) NOT NULL,
-
-    });
-
-}    console.log('📄 Executing schema from init.sql...');  shift_id VARCHAR(36) NOT NULL,
-
-
-
-export { initializeDatabase };    await connection.query(schemaSql);  role VARCHAR(100) NOT NULL,
-
-
-    console.log('✅ Database schema created successfully');  status ENUM('pending', 'approved', 'rejected', 'cancelled') DEFAULT 'pending',
-
-  assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    // Check if admin user already exists  assigned_by INT,
-
-    const [adminRows] = await connection.query(  approved_at TIMESTAMP NULL,
-
-      'SELECT id FROM users WHERE email = ? LIMIT 1',  approved_by INT NULL,
-
-      ['admin@staffscheduler.com']  rejected_at TIMESTAMP NULL,
-
-    );  rejected_by INT NULL,
-
-  rejection_reason TEXT,
-
-    if (!Array.isArray(adminRows) || adminRows.length === 0) {  notes TEXT,
-
-      // Create default admin user  FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE,
-
-      console.log('👤 Creating default admin user...');  FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
-
-      const hashedPassword = await bcrypt.hash('Admin123!', 12);  FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL,
-
-        FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
-
-      await connection.query(  FOREIGN KEY (rejected_by) REFERENCES users(id) ON DELETE SET NULL,
-
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, employee_id, is_active)   UNIQUE KEY unique_employee_shift (employee_id, shift_id)
-
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,);
-
-        ['admin@staffscheduler.com', hashedPassword, 'Admin', 'User', 'admin', 'ADMIN001', true]
-
-      );-- Time tracking table
-
-      CREATE TABLE IF NOT EXISTS time_tracking (
-
-      console.log('✅ Default admin user created');  id INT AUTO_INCREMENT PRIMARY KEY,
-
-      console.log('   Email: admin@staffscheduler.com');  assignment_id VARCHAR(36) NOT NULL,
-
-      console.log('   Password: Admin123!');  clock_in TIMESTAMP,
-
-      console.log('   ⚠️  CHANGE THIS PASSWORD IN PRODUCTION!');  clock_out TIMESTAMP,
-
-    } else {  break_start TIMESTAMP NULL,
-
-      console.log('ℹ️  Admin user already exists, skipping creation');  break_end TIMESTAMP NULL,
-
-    }  total_hours DECIMAL(4,2),
-
-  overtime_hours DECIMAL(4,2) DEFAULT 0,
-
-    // Check if departments exist  status ENUM('clocked_in', 'on_break', 'clocked_out') DEFAULT 'clocked_out',
-
-    const [deptRows] = await connection.query('SELECT COUNT(*) as count FROM departments');  notes TEXT,
-
-    const deptCount = Array.isArray(deptRows) && deptRows.length > 0 ? (deptRows[0] as any).count : 0;  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    if (deptCount === 0) {  FOREIGN KEY (assignment_id) REFERENCES shift_assignments(id) ON DELETE CASCADE
-
-      console.log('🏢 Creating default departments...'););
-
-      await connection.query(`
-
-        INSERT INTO departments (name, description, is_active) VALUES-- Schedule templates table
-
-        ('General', 'General staff department', TRUE),CREATE TABLE IF NOT EXISTS schedule_templates (
-
-        ('Operations', 'Daily operations and logistics', TRUE),  id VARCHAR(36) PRIMARY KEY,
-
-        ('Administration', 'Administrative functions', TRUE)  name VARCHAR(255) NOT NULL,
-
-      `);  description TEXT,
-
-      console.log('✅ Default departments created');  department VARCHAR(100),
-
-    }  template_data JSON NOT NULL,
-
-  is_active BOOLEAN DEFAULT TRUE,
-
-    console.log('\n🎉 Database initialization completed successfully!');  created_by INT,
-
-    console.log('\n📊 Summary:');  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    console.log('   - Database schema created');  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    console.log('   - Default admin user ready');  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
-
-    console.log('   - Default departments created'););
-
-    console.log('   - Default skills loaded');
-
-    console.log('\n💡 Next steps:');-- Employee availability table
-
-    console.log('   1. Run: npm run demo:install (to add demo data)');CREATE TABLE IF NOT EXISTS employee_availability (
-
-    console.log('   2. Start backend: npm run dev');  id INT AUTO_INCREMENT PRIMARY KEY,
-
-    console.log('   3. Access: http://localhost:3001');  employee_id VARCHAR(50) NOT NULL,
-
-  day_of_week ENUM('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday') NOT NULL,
-
-  } catch (error) {  start_time TIME NOT NULL,
-
-    console.error('❌ Database initialization failed:');  end_time TIME NOT NULL,
-
-    console.error(error);  is_available BOOLEAN DEFAULT TRUE,
-
-    process.exit(1);  effective_from DATE,
-
-  } finally {  effective_to DATE,
-
-    if (connection) {  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-      await connection.end();  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-
-    }  FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE
-
-  });
-
+const DB_CONFIG: DbConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT || 3306),
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASSWORD || '',
+  database: process.env.DB_NAME || 'staff_scheduler',
+};
+
+async function ensureDatabase(connection: mysql.Connection, dbName: string) {
+  await connection.query(
+    `CREATE DATABASE IF NOT EXISTS \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+  );
+  await connection.query(`USE \`${dbName}\``);
 }
 
--- Employee time off requests table
-
-// Run if called directlyCREATE TABLE IF NOT EXISTS time_off_requests (
-
-if (require.main === module) {  id VARCHAR(36) PRIMARY KEY,
-
-  initializeDatabase()  employee_id VARCHAR(50) NOT NULL,
-
-    .then(() => {  request_type ENUM('vacation', 'sick', 'personal', 'holiday') NOT NULL,
-
-      process.exit(0);  start_date DATE NOT NULL,
-
-    })  end_date DATE NOT NULL,
-
-    .catch((error) => {  status ENUM('pending', 'approved', 'rejected') DEFAULT 'pending',
-
-      console.error('Fatal error:', error);  reason TEXT,
-
-      process.exit(1);  requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    });  reviewed_at TIMESTAMP NULL,
-
-}  reviewed_by INT NULL,
-
-  notes TEXT,
-
-export { initializeDatabase };  FOREIGN KEY (employee_id) REFERENCES employees(employee_id) ON DELETE CASCADE,
-
-  FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
-);
-
--- Audit log table
-CREATE TABLE IF NOT EXISTS audit_logs (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  user_id INT,
-  action VARCHAR(100) NOT NULL,
-  resource_type VARCHAR(50) NOT NULL,
-  resource_id VARCHAR(100),
-  old_values JSON,
-  new_values JSON,
-  ip_address VARCHAR(45),
-  user_agent TEXT,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-);
-
--- Indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);
-CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(is_active);
-CREATE INDEX IF NOT EXISTS idx_shifts_date_range ON shifts(start_date, end_date);
-CREATE INDEX IF NOT EXISTS idx_shifts_department ON shifts(department);
-CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status);
-CREATE INDEX IF NOT EXISTS idx_assignments_employee ON shift_assignments(employee_id);
-CREATE INDEX IF NOT EXISTS idx_assignments_shift ON shift_assignments(shift_id);
-CREATE INDEX IF NOT EXISTS idx_assignments_status ON shift_assignments(status);
-CREATE INDEX IF NOT EXISTS idx_time_tracking_assignment ON time_tracking(assignment_id);
-CREATE INDEX IF NOT EXISTS idx_availability_employee ON employee_availability(employee_id);
-CREATE INDEX IF NOT EXISTS idx_time_off_employee ON time_off_requests(employee_id);
-CREATE INDEX IF NOT EXISTS idx_time_off_dates ON time_off_requests(start_date, end_date);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
-`;
+async function runSchemaSql(connection: mysql.Connection) {
+  const schemaPath = path.join(__dirname, '../database/init.sql');
+  const schemaSql = fs.readFileSync(schemaPath, 'utf8');
+  await connection.query(schemaSql);
+}
 
 export async function initializeDatabase(): Promise<void> {
+  let connection: mysql.Connection | null = null;
+
   try {
     logger.info('Starting database initialization...');
 
-    // Test database connection
-    await database.testConnection();
-    logger.info('Database connection verified');
+    connection = await mysql.createConnection({
+      host: DB_CONFIG.host,
+      port: DB_CONFIG.port,
+      user: DB_CONFIG.user,
+      password: DB_CONFIG.password,
+      multipleStatements: true,
+    });
 
-    // Execute schema creation
-    const statements = SCHEMA_SQL.split(';').filter(stmt => stmt.trim());
-    
-    for (const statement of statements) {
-      if (statement.trim()) {
-        await database.query(statement);
-      }
-    }
-
-    logger.info('Database schema created successfully');
-
-    // Create default admin user if it doesn't exist
-    const adminExists = await database.query(
-      'SELECT id FROM users WHERE email = ? LIMIT 1',
-      ['admin@staffscheduler.com']
-    );
-
-    if (!adminExists || adminExists.length === 0) {
-      const bcrypt = require('bcrypt');
-      const hashedPassword = await bcrypt.hash('admin123', 10);
-      
-      await database.query(
-        'INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)',
-        ['admin@staffscheduler.com', hashedPassword, 'admin']
-      );
-      
-      logger.info('Default admin user created: admin@staffscheduler.com / admin123');
-    }
+    await ensureDatabase(connection, DB_CONFIG.database);
+    await runSchemaSql(connection);
 
     logger.info('Database initialization completed successfully');
   } catch (error) {
     logger.error('Database initialization failed:', error);
     throw error;
+  } finally {
+    if (connection) await connection.end();
   }
 }
 
-// Run if called directly
 if (require.main === module) {
   initializeDatabase()
-    .then(() => {
-      logger.info('Database initialization script completed');
-      process.exit(0);
-    })
-    .catch((error) => {
-      logger.error('Database initialization script failed:', error);
-      process.exit(1);
-    });
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
 }
+

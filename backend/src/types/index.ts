@@ -203,6 +203,7 @@ export interface CreateScheduleRequest {
   startDate: string;
   endDate: string;
   departmentId: number;
+  createdBy?: number;
   templateIds?: number[];
   notes?: string;
 }

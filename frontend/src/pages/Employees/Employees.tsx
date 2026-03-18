@@ -22,7 +22,7 @@ import * as employeeService from '../../services/employeeService';
 
 // Type assertion for Employee interface to include optional properties
 type EmployeeWithOptionals = Employee & {
-  id?: number;
+  id?: number | string;
   employeeType?: string;
   hourlyRate?: number;
   maxHoursPerWeek?: number;
@@ -71,13 +71,13 @@ const Employees: React.FC = () => {
     loadEmployees();
   }, [loadEmployees]);
 
-  const handleDeleteEmployee = async (employeeId: string) => {
+  const handleDeleteEmployee = async (id: number | string) => {
     if (!window.confirm('Are you sure you want to delete this employee?')) {
       return;
     }
 
     try {
-      await employeeService.deleteEmployee(employeeId);
+      await employeeService.deleteEmployee(id);
       await loadEmployees(); // Reload the list
     } catch (err) {
       console.error('Delete error:', err);
@@ -89,7 +89,7 @@ const Employees: React.FC = () => {
     const matchesSearch = !searchTerm || 
       `${employee.firstName} ${employee.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
       employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.employeeId.toLowerCase().includes(searchTerm.toLowerCase());
+      (employee.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesDepartment = !selectedDepartment || employee.department === selectedDepartment;
     
@@ -252,7 +252,7 @@ const Employees: React.FC = () => {
                         </button>
                         <button
                           className="btn btn-outline-danger"
-                          onClick={() => handleDeleteEmployee(employee.employeeId)}
+                            onClick={() => employee.id !== undefined && handleDeleteEmployee(employee.id)}
                           title="Delete Employee"
                         >
                           <i className="bi bi-trash"></i>

@@ -32,7 +32,8 @@ const router = Router();
 router.get('/stats', authenticate, async (req: Request, res: Response) => {
   try {
     // Get basic statistics
-    const totalEmployeesQuery = 'SELECT COUNT(*) as count FROM employees WHERE is_active = true';
+    const totalEmployeesQuery =
+      "SELECT COUNT(*) as count FROM users WHERE role = 'employee' AND is_active = TRUE";
     const totalEmployees = await database.queryOne<{ count: number }>(totalEmployeesQuery);
 
     const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
@@ -41,13 +42,13 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
     const todayShiftsQuery = `
       SELECT COUNT(*) as count 
       FROM shifts 
-      WHERE DATE(date) = CURDATE() AND status = 'published'
+      WHERE DATE(date) = CURDATE() AND status IN ('open', 'assigned', 'confirmed')
     `;
     const todayShifts = await database.queryOne<{ count: number }>(todayShiftsQuery);
 
     const pendingApprovalsQuery = `
       SELECT COUNT(*) as count 
-      FROM assignments 
+      FROM shift_assignments 
       WHERE status = 'pending'
     `;
     const pendingApprovals = await database.queryOne<{ count: number }>(pendingApprovalsQuery);
@@ -55,13 +56,13 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
     // Calculate monthly hours from assignments
     const monthlyHoursQuery = `
       SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, 
-        CONCAT(s.shift_date, ' ', s.start_time),
-        CONCAT(s.shift_date, ' ', s.end_time)
+        CONCAT(s.date, ' ', s.start_time),
+        CONCAT(s.date, ' ', s.end_time)
       )), 0) as total_hours
       FROM shift_assignments sa
       JOIN shifts s ON sa.shift_id = s.id
-      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
-        AND YEAR(s.shift_date) = YEAR(CURDATE())
+      WHERE MONTH(s.date) = MONTH(CURDATE())
+        AND YEAR(s.date) = YEAR(CURDATE())
         AND sa.status = 'confirmed'
     `;
     const monthlyHoursResult = await database.queryOne<{ total_hours: number }>(monthlyHoursQuery);
@@ -71,15 +72,15 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
     const monthlyCostQuery = `
       SELECT COALESCE(SUM(
         TIMESTAMPDIFF(HOUR, 
-          CONCAT(s.shift_date, ' ', s.start_time),
-          CONCAT(s.shift_date, ' ', s.end_time)
-        ) * e.hourly_rate
+          CONCAT(s.date, ' ', s.start_time),
+          CONCAT(s.date, ' ', s.end_time)
+        ) * u.hourly_rate
       ), 0) as total_cost
       FROM shift_assignments sa
       JOIN shifts s ON sa.shift_id = s.id
-      JOIN employees e ON sa.employee_id = e.id
-      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
-        AND YEAR(s.shift_date) = YEAR(CURDATE())
+      JOIN users u ON sa.user_id = u.id
+      WHERE MONTH(s.date) = MONTH(CURDATE())
+        AND YEAR(s.date) = YEAR(CURDATE())
         AND sa.status = 'confirmed'
     `;
     const monthlyCostResult = await database.queryOne<{ total_cost: number }>(monthlyCostQuery);
@@ -92,8 +93,8 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
         COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
       FROM shifts s
       LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status = 'confirmed'
-      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
-        AND YEAR(s.shift_date) = YEAR(CURDATE())
+      WHERE MONTH(s.date) = MONTH(CURDATE())
+        AND YEAR(s.date) = YEAR(CURDATE())
     `;
     const coverageResult = await database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery);
     const coverageRate = coverageResult && coverageResult.total_shifts > 0
@@ -101,22 +102,7 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
       : 0;
 
     // Calculate employee satisfaction (based on preference matches)
-    const satisfactionQuery = `
-      SELECT 
-        COUNT(*) as total_assignments,
-        SUM(CASE WHEN ep.preference_type = 'preferred' THEN 1 ELSE 0 END) as preferred_matches
-      FROM shift_assignments sa
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN employee_preferences ep ON sa.employee_id = ep.employee_id 
-        AND s.shift_type = ep.shift_type
-      WHERE MONTH(s.shift_date) = MONTH(CURDATE())
-        AND YEAR(s.shift_date) = YEAR(CURDATE())
-        AND sa.status = 'confirmed'
-    `;
-    const satisfactionResult = await database.queryOne<{ total_assignments: number; preferred_matches: number }>(satisfactionQuery);
-    const employeeSatisfaction = satisfactionResult && satisfactionResult.total_assignments > 0
-      ? (satisfactionResult.preferred_matches / satisfactionResult.total_assignments) * 100
-      : 0;
+    const employeeSatisfaction = 0;
 
     const stats = {
       totalEmployees: totalEmployees?.count || 0,

@@ -179,8 +179,8 @@ export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiRe
  * console.log(`Employee: ${employee.data.firstName} ${employee.data.lastName}`);
  * ```
  */
-export const getEmployee = async (employeeId: string): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${employeeId}`, {
+export const getEmployee = async (id: number | string): Promise<ApiResponse<Employee>> => {
+  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'GET',
     headers: getAuthHeaders(),
   });
@@ -231,8 +231,8 @@ export const createEmployee = async (employeeData: CreateEmployeeData): Promise<
  * });
  * ```
  */
-export const updateEmployee = async (employeeId: string, employeeData: UpdateEmployeeData): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${employeeId}`, {
+export const updateEmployee = async (id: number | string, employeeData: UpdateEmployeeData): Promise<ApiResponse<Employee>> => {
+  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'PUT',
     headers: getAuthHeaders(),
     body: JSON.stringify(employeeData),
@@ -253,8 +253,8 @@ export const updateEmployee = async (employeeId: string, employeeData: UpdateEmp
  * console.log('Employee deleted successfully');
  * ```
  */
-export const deleteEmployee = async (employeeId: string): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${employeeId}`, {
+export const deleteEmployee = async (id: number | string): Promise<ApiResponse<void>> => {
+  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });

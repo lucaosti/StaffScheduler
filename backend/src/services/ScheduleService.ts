@@ -45,6 +45,9 @@ export class ScheduleService {
     
     try {
       await connection.beginTransaction();
+      if (!scheduleData.createdBy) {
+        throw new Error('createdBy is required');
+      }
 
       // Validate dates
       const startDate = new Date(scheduleData.startDate);
@@ -90,14 +93,16 @@ export class ScheduleService {
       // Insert schedule record
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO schedules (
-          name, department_id, start_date, end_date, status, notes
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+          name, description, department_id, start_date, end_date, status, created_by, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           scheduleData.name,
+          null,
           scheduleData.departmentId,
           scheduleData.startDate,
           scheduleData.endDate,
           'draft',
+          scheduleData.createdBy,
           scheduleData.notes || null
         ]
       );
@@ -678,13 +683,15 @@ export class ScheduleService {
 
       // Create new schedule
       const [scheduleResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO schedules (name, department_id, start_date, end_date, status, notes)
-        VALUES (?, ?, ?, ?, 'draft', ?)`,
+        `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes)
+        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`,
         [
           newName,
+          null,
           sourceSchedule.department_id,
           newStartDate,
           newEndDate,
+          sourceSchedule.created_by,
           `Cloned from ${sourceSchedule.name}`
         ]
       );

@@ -15,34 +15,38 @@
  * @author Luca Ostinelli
  */
 
-// Types for StaffScheduler Frontend
-export {};
+// Types for StaffScheduler Frontend (aligned with backend schema)
+
+export type ID = number | string;
 
 // User Authentication (with N-level hierarchy)
 export interface User {
-  id: string;
-  username: string;
-  email: string; // Used as username
+  id: ID;
+  email: string;
   firstName: string;
   lastName: string;
-  passwordHash: string; // bcrypt with salt
+  role: 'admin' | 'manager' | 'employee';
+  employeeId?: string;
+  phone?: string;
+  isActive: boolean;
+  lastLogin?: string | Date;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+
+  // Legacy / UI-only fields (optional)
+  username?: string;
+  passwordHash?: string;
   salt?: string;
-  role: 'admin' | 'manager' | 'department_manager' | 'employee';
-  employeeId?: string; // Link to Employee if applicable
-  parentSupervisor?: string; // Parent in hierarchy tree
-  hierarchyLevel: number; // 0 = master, 1 = top supervisor, etc.
-  hierarchyPath: string; // Materialized path: "0.1.3.7"
-  permissions: Permission[];
-  delegatedAuthorities?: DelegatedAuthority[]; // Specific assignments
-  createdAt: string;
-  updatedAt: string;
-  createdBy?: string; // Who created this user
-  lastLogin?: Date;
+  parentSupervisor?: ID;
+  hierarchyLevel?: number;
+  hierarchyPath?: string;
+  permissions?: Permission[];
+  delegatedAuthorities?: DelegatedAuthority[];
+  createdBy?: ID;
   resetToken?: string;
   resetTokenExpiry?: Date;
-  notificationToken?: string; // FCM token for push notifications
-  maxSubordinateLevel?: number; // How deep can they create users
-  isActive: boolean;
+  notificationToken?: string;
+  maxSubordinateLevel?: number;
 }
 
 export interface CreateUserRequest {
@@ -88,14 +92,14 @@ export interface DelegatedAuthority {
 
 // Employee (with matrix organization support)
 export interface Employee {
-  id?: number; // Optional database ID for mock data compatibility
-  employeeId: string;
+  id?: ID; // backend user.id
+  employeeId?: string;
   firstName: string;
   lastName: string;
   email: string;
-  phone: string;
-  position: string;
-  department: string;
+  phone?: string;
+  position?: string;
+  department?: string;
   employeeType?: string; // full-time, part-time, contract
   hourlyRate?: number; // Hourly wage rate
   maxHoursPerWeek?: number; // Maximum weekly hours
@@ -115,8 +119,8 @@ export interface Employee {
   targetHours?: Record<string, number>; // per horizon type
   roles?: string[]; // Can cover multiple roles, no seniority
   isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string | Date;
+  updatedAt: string | Date;
   supervisorName?: string | null;
 }
 
@@ -217,26 +221,36 @@ export interface Notification {
 
 // Shift (including special shifts)
 export interface Shift {
-  id: string;
-  name: string;
+  id: ID;
+  name?: string;
   startTime: string;  // Time format HH:MM
   endTime: string;    // Time format HH:MM
-  date: string;       // ISO date YYYY-MM-DD
-  department: string;
-  position: string;
-  requiredSkills: string[];
-  minimumStaff: number;
-  maximumStaff: number;
-  type: 'regular' | 'special';
+  date: string | Date;       // ISO date YYYY-MM-DD
+  scheduleId?: ID;
+  departmentId?: ID;
+  departmentName?: string;
+  templateId?: ID;
+  minStaff?: number;
+  maxStaff?: number;
+  assignedStaff?: number;
+  notes?: string | null;
+  status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
+
+  // Legacy fields (optional)
+  department?: string;
+  position?: string;
+  requiredSkills?: string[];
+  minimumStaff?: number;
+  maximumStaff?: number;
+  type?: 'regular' | 'special';
   specialType?: 'on_call' | 'overtime' | 'emergency' | 'holiday';
-  priority: number;
+  priority?: number;
   location?: string;
   description?: string;
-  status: 'draft' | 'published' | 'archived';
-  rolesRequired: Record<string, number>;  // role -> minimum count
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
+  rolesRequired?: Record<string, number>;  // role -> minimum count
+  createdBy?: ID;
+  createdAt?: string | Date;
+  updatedAt?: string | Date;
   createdByName?: string | null;
 }
 
@@ -274,7 +288,7 @@ export interface UpdateShiftRequest {
   location?: string;
   description?: string;
   rolesRequired?: Record<string, number>;
-  status?: 'draft' | 'published' | 'archived';
+  status?: 'open' | 'assigned' | 'confirmed' | 'cancelled' | 'draft' | 'published' | 'archived';
 }
 
 export interface ShiftFilters {
@@ -282,36 +296,52 @@ export interface ShiftFilters {
   endDate?: string;
   department?: string;
   type?: 'regular' | 'special';
-  status?: 'draft' | 'published' | 'archived';
+  status?: 'open' | 'assigned' | 'confirmed' | 'cancelled' | 'draft' | 'published' | 'archived';
   position?: string;
 }
 
 export interface Assignment {
-  id: string;
-  employeeId: string;
-  shiftId: string;
-  role: string;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
-  assignedAt: Date;
-  approvedBy?: string;
-  approvedAt?: Date;
+  id: ID;
+  shiftId: ID;
+  userId?: ID;
+  userName?: string;
+  userEmail?: string;
+  shiftDate?: string | Date;
+  startTime?: string;
+  endTime?: string;
+  departmentId?: ID;
+  departmentName?: string;
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  assignedAt?: string | Date;
+  confirmedAt?: string | Date | null;
+  notes?: string | null;
+
+  // Legacy fields (optional)
+  employeeId?: ID;
+  role?: string;
+  approvedBy?: ID;
+  approvedAt?: string | Date;
   rejectedReason?: string;
-  notes?: string;
 }
 
 // Schedule management types
 export interface Schedule {
-  id: string;
+  id: ID;
   name: string;
   description?: string;
-  startDate: string;
-  endDate: string;
+  startDate: string | Date;
+  endDate: string | Date;
   status: 'draft' | 'published' | 'archived';
-  createdBy: string;
-  createdAt: string;
-  updatedAt: string;
-  publishedAt?: string;
-  publishedBy?: string;
+  departmentId?: ID;
+  departmentName?: string;
+  createdBy?: ID;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+  publishedAt?: string | Date;
+  publishedBy?: ID;
+  notes?: string | null;
+  totalShifts?: number;
+  totalAssignments?: number;
 }
 
 export interface CreateScheduleRequest {
@@ -319,6 +349,8 @@ export interface CreateScheduleRequest {
   description?: string;
   startDate: string;
   endDate: string;
+  departmentId?: ID;
+  notes?: string;
 }
 
 export interface UpdateScheduleRequest {

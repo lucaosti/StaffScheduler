@@ -84,11 +84,8 @@ npm install
 cp .env.example .env
 # Edit .env with your MySQL credentials
 
-# Initialize database
+# Initialize database (schema only; no demo data)
 npm run db:init
-
-# Optional: Install demo data
-npm run demo:install
 
 # Start backend server
 npm run dev
@@ -110,19 +107,13 @@ npm start
 
 Frontend will be running at: http://localhost:3000
 
-### Default Credentials
+### First user / admin bootstrap
 
-After running `npm run db:init`, you can login with:
+`npm run db:init` creates **only the database schema** (no demo/mock data, no default users).
 
-**Admin Account:**
-- Email: `admin@staffscheduler.com`
-- Password: `admin123`
+Create your first admin user via the API (`/api/users`) or by temporarily enabling an admin-creation flow in your deployment process.
 
-**Demo Users** (after `npm run demo:install`):
-- Manager: `sarah.johnson@demo.staffscheduler.com` / `demo123`
-- Employee: Any demo user email / `demo123`
-
-⚠️ **Important**: Change these passwords in production!
+No demo/mock accounts are created automatically.
 
 ## 🧠 Schedule Optimization with OR-Tools
 
@@ -227,7 +218,6 @@ StaffScheduler/
 │   │   └── init.sql            # Complete database schema
 │   ├── scripts/
 │   │   ├── init-database.ts    # Database initialization
-│   │   └── demo-data.ts        # Demo data management
 │   ├── .env                     # Environment configuration
 │   └── package.json
 │
@@ -263,10 +253,7 @@ npm run build              # Build TypeScript to JavaScript
 npm run start              # Start production server
 
 # Database Management
-npm run db:init            # Initialize database with schema and admin user
-npm run demo:install       # Install demo data (50 users, 5 departments, 150+ shifts)
-npm run demo:remove        # Remove all demo data
-npm run demo:report        # Show demo data statistics
+npm run db:init            # Initialize database schema (no demo/mock data)
 
 # Testing and Quality
 npm test                   # Run test suite
@@ -561,7 +548,6 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines including:
 ### Current Limitations
 - Frontend is under development (React components need implementation)
 - Optimization algorithm needs constraint weighting enhancements
-- Demo data script is basic (needs expansion)
 - Test coverage can be improved
 
 ### Roadmap
