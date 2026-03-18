@@ -19,7 +19,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Schedule as ScheduleType, Assignment, Employee, Shift } from '../../types';
 import * as scheduleService from '../../services/scheduleService';
-import * as dashboardService from '../../services/dashboardService';
 import * as employeeService from '../../services/employeeService';
 import * as shiftService from '../../services/shiftService';
 
@@ -121,20 +120,21 @@ const Schedule: React.FC = () => {
     });
   };
 
-  const getAssignmentsForDateAndShift = (date: Date, shiftId: string) => {
+  const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number) => {
     const dateStr = date.toISOString().split('T')[0];
     return assignments.filter(a => {
-      const assignedDate = new Date(a.assignedAt).toISOString().split('T')[0];
-      return assignedDate === dateStr && a.shiftId === shiftId;
+      const assignmentDateSource = a.shiftDate || a.assignedAt;
+      if (!assignmentDateSource) return false;
+      const assignedDate = new Date(assignmentDateSource).toISOString().split('T')[0];
+      return assignedDate === dateStr && String(a.shiftId) === String(shiftId);
     });
   };
 
-  const getEmployeeById = (employeeId: string) => {
-    return employees.find(e => e.employeeId === employeeId);
-  };
-
-  const getShiftById = (shiftId: string) => {
-    return shifts.find(s => s.id === shiftId);
+  const getEmployeeById = (employeeId: string | number) => {
+    return (
+      employees.find(e => String(e.id) === String(employeeId)) ||
+      employees.find(e => e.employeeId && String(e.employeeId) === String(employeeId))
+    );
   };
 
   const handleGenerateSchedule = async (params: ScheduleGenerationParams) => {
@@ -305,9 +305,7 @@ const Schedule: React.FC = () => {
                         <div>
                           <strong>{shift.name}</strong>
                           <br />
-                          <small className="text-muted">
-                            {shift.startTime} - {shift.endTime}
-                          </small>
+                          <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
                           <br />
                           <span className="badge bg-primary">{shift.department}</span>
                         </div>
@@ -319,7 +317,7 @@ const Schedule: React.FC = () => {
                             {dayAssignments.length > 0 ? (
                               <div className="d-flex flex-column gap-1">
                                 {dayAssignments.map(assignment => {
-                                  const employee = getEmployeeById(assignment.employeeId);
+                                  const employee = getEmployeeById(assignment.userId ?? assignment.employeeId ?? '');
                                   return (
                                     <div 
                                       key={assignment.id} 
@@ -330,9 +328,9 @@ const Schedule: React.FC = () => {
                                     </div>
                                   );
                                 })}
-                                {dayAssignments.length < shift.minimumStaff && (
+                                {dayAssignments.length < (shift.minStaff ?? shift.minimumStaff ?? 0) && (
                                   <small className="text-danger">
-                                    Need {shift.minimumStaff - dayAssignments.length} more
+                                    Need {(shift.minStaff ?? shift.minimumStaff ?? 0) - dayAssignments.length} more
                                   </small>
                                 )}
                               </div>
@@ -386,7 +384,7 @@ const Schedule: React.FC = () => {
                     </div>
                     <p className="card-text">
                       <small className="text-muted">
-                        {schedule.startDate} to {schedule.endDate}
+                        {`${String(schedule.startDate)} to ${String(schedule.endDate)}`}
                       </small>
                       <br />
                       {schedule.description && (

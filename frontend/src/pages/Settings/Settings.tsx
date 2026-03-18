@@ -16,7 +16,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface HospitalHierarchy {
@@ -284,24 +284,11 @@ const Settings: React.FC = () => {
     }
   };
 
-  const getUserHierarchyLevel = () => {
-    if (!user) return 999;
-    const roleKey = user.role?.toLowerCase().replace(' ', '-');
-    return hierarchySettings[roleKey]?.level || 999;
-  };
-
   const canManageRole = (targetRole: string) => {
     if (!user) return false;
     const userRoleKey = user.role?.toLowerCase().replace(' ', '-');
     const userHierarchy = hierarchySettings[userRoleKey];
     return userHierarchy?.canManageRoles.includes(targetRole) || false;
-  };
-
-  const getManageableRoles = () => {
-    if (!user) return [];
-    const userRoleKey = user.role?.toLowerCase().replace(' ', '-');
-    const userHierarchy = hierarchySettings[userRoleKey];
-    return userHierarchy?.canManageRoles || [];
   };
 
   return (

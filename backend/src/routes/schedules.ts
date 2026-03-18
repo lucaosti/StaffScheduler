@@ -90,7 +90,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
       });
     }
 
-    const schedule = await scheduleService.createSchedule(req.body);
+    const schedule = await scheduleService.createSchedule({ ...req.body, createdBy: user.id });
     
     res.status(201).json({ 
       success: true, 

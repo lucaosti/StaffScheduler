@@ -54,13 +54,13 @@ const Shifts: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedDepartment]);
+  }, [selectedDepartment]);
 
   useEffect(() => {
     loadShifts();
   }, [loadShifts]);
 
-  const handleDeleteShift = async (shiftId: string) => {
+  const handleDeleteShift = async (shiftId: string | number) => {
     if (!window.confirm('Are you sure you want to delete this shift? This action cannot be undone.')) {
       return;
     }
@@ -96,8 +96,8 @@ const Shifts: React.FC = () => {
 
   const filteredShifts = shifts.filter(shift => {
     const matchesSearch = !searchTerm || 
-      shift.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      shift.department.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (shift.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (shift.department || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (shift.description && shift.description.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesDepartment = !selectedDepartment || shift.department === selectedDepartment;
@@ -251,8 +251,8 @@ const Shifts: React.FC = () => {
                   <div className="mb-3">
                     <div className="d-flex justify-content-between align-items-center mb-2">
                       <span className="badge bg-primary">{shift.department}</span>
-                      <span className={`badge ${shift.status === 'published' ? 'bg-success' : 'bg-secondary'}`}>
-                        {shift.status === 'published' ? 'Active' : shift.status}
+                      <span className={`badge ${shift.status === 'confirmed' ? 'bg-success' : 'bg-secondary'}`}>
+                        {shift.status === 'confirmed' ? 'Active' : shift.status}
                       </span>
                     </div>
                     
@@ -418,7 +418,7 @@ const Shifts: React.FC = () => {
                           type="checkbox"
                           id="isActive"
                           name="isActive"
-                          defaultChecked={editingShift?.status === 'published'}
+                          defaultChecked={editingShift?.status === 'confirmed'}
                         />
                         <label className="form-check-label" htmlFor="isActive">
                           Active Shift
