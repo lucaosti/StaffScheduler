@@ -496,26 +496,10 @@ export class AssignmentService {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT id FROM user_unavailability
-        WHERE user_id = ?
-        AND (
-          (date = ? AND (
-            (start_time IS NULL AND end_time IS NULL)
-            OR (start_time <= ? AND end_time >= ?)
-            OR (start_time IS NULL AND end_time >= ?)
-            OR (start_time <= ? AND end_time IS NULL)
-          ))
-          OR (date IS NULL AND day_of_week = DAYOFWEEK(?) - 1 AND (
-            (start_time <= ? AND end_time >= ?)
-            OR (start_time IS NULL AND end_time >= ?)
-            OR (start_time <= ? AND end_time IS NULL)
-          ))
-        )
-        LIMIT 1`,
-        [
-          userId,
-          date, startTime, startTime, startTime, endTime,
-          date, startTime, startTime, startTime, endTime
-        ]
+         WHERE user_id = ?
+           AND ? BETWEEN start_date AND end_date
+         LIMIT 1`,
+        [userId, date]
       );
 
       return rows.length === 0;

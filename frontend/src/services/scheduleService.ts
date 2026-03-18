@@ -46,7 +46,7 @@ export interface GenerateScheduleResponse {
 export const getSchedules = async (params?: Record<string, any>) => {
   try {
     const query = new URLSearchParams(params || {});
-    const response = await fetch(`${API_BASE_URL}/api/schedules?${query}`, {
+    const response = await fetch(`${API_BASE_URL}/schedules?${query}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -73,9 +73,9 @@ export const getSchedules = async (params?: Record<string, any>) => {
 /**
  * Get schedule by ID
  */
-export const getScheduleById = async (id: string) => {
+export const getScheduleById = async (id: string | number) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -101,9 +101,9 @@ export const getScheduleById = async (id: string) => {
 /**
  * Get schedule with all shifts
  */
-export const getScheduleWithShifts = async (id: string) => {
+export const getScheduleWithShifts = async (id: string | number) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}/shifts`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}/shifts`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -131,7 +131,7 @@ export const getScheduleWithShifts = async (id: string) => {
  */
 export const createSchedule = async (params: CreateScheduleParams) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules`, {
+    const response = await fetch(`${API_BASE_URL}/schedules`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -158,9 +158,9 @@ export const createSchedule = async (params: CreateScheduleParams) => {
 /**
  * Update schedule
  */
-export const updateSchedule = async (id: string, params: Partial<CreateScheduleParams>) => {
+export const updateSchedule = async (id: string | number, params: Partial<CreateScheduleParams>) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -187,9 +187,9 @@ export const updateSchedule = async (id: string, params: Partial<CreateScheduleP
 /**
  * Delete schedule
  */
-export const deleteSchedule = async (id: string) => {
+export const deleteSchedule = async (id: string | number) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',
@@ -215,9 +215,9 @@ export const deleteSchedule = async (id: string) => {
 /**
  * Generate optimized schedule
  */
-export const generateSchedule = async (id: string): Promise<{ success: boolean; data?: GenerateScheduleResponse; error?: any }> => {
+export const generateSchedule = async (id: string | number): Promise<{ success: boolean; data?: GenerateScheduleResponse; error?: any }> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}/generate`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -243,9 +243,9 @@ export const generateSchedule = async (id: string): Promise<{ success: boolean; 
 /**
  * Publish schedule
  */
-export const publishSchedule = async (id: string) => {
+export const publishSchedule = async (id: string | number) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}/publish`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}/publish`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -271,9 +271,9 @@ export const publishSchedule = async (id: string) => {
 /**
  * Archive schedule
  */
-export const archiveSchedule = async (id: string) => {
+export const archiveSchedule = async (id: string | number) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}/archive`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}/archive`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
@@ -299,9 +299,9 @@ export const archiveSchedule = async (id: string) => {
 /**
  * Duplicate schedule
  */
-export const duplicateSchedule = async (id: string, params: CreateScheduleParams) => {
+export const duplicateSchedule = async (id: string | number, params: CreateScheduleParams) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/${id}/duplicate`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/${id}/duplicate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -330,7 +330,7 @@ export const duplicateSchedule = async (id: string, params: CreateScheduleParams
  */
 export const getSchedulesByDepartment = async (departmentId: string) => {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/schedules/department/${departmentId}`, {
+    const response = await fetch(`${API_BASE_URL}/schedules/department/${departmentId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -354,7 +354,7 @@ export const getSchedulesByDepartment = async (departmentId: string) => {
   }
 };
 
-export default {
+const scheduleService = {
   getSchedules,
   getScheduleById,
   getScheduleWithShifts,
@@ -367,3 +367,5 @@ export default {
   duplicateSchedule,
   getSchedulesByDepartment,
 };
+
+export default scheduleService;

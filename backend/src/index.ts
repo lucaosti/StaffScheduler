@@ -38,6 +38,7 @@ import { createSchedulesRouter } from './routes/schedules';
 import { createAssignmentsRouter } from './routes/assignments';
 import { createSystemSettingsRouter } from './routes/settings';
 import healthRoutes from './routes/health';
+import { createDepartmentsRouter } from './routes/departments';
 
 async function createApp() {
   const app = express();
@@ -117,6 +118,7 @@ async function createApp() {
   app.use('/api/users', createUsersRouter(pool));
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/employees', createEmployeesRouter(pool));
+  app.use('/api/departments', createDepartmentsRouter(pool));
   app.use('/api/shifts', createShiftsRouter(pool));
   app.use('/api/schedules', createSchedulesRouter(pool));
   app.use('/api/assignments', createAssignmentsRouter(pool));

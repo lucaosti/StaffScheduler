@@ -26,7 +26,7 @@ export class UserService {
       }
       const passwordHash = await bcrypt.hash(userData.password, 12);
       const [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO users (email, password, first_name, last_name, role, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (email, password_hash, first_name, last_name, role, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [userData.email, passwordHash, userData.firstName, userData.lastName, userData.role, userData.phone || null, userData.employeeId || null]
       );
       const userId = result.insertId;
@@ -161,7 +161,7 @@ export class UserService {
       }
       if (userData.password !== undefined) {
         const passwordHash = await bcrypt.hash(userData.password, 12);
-        updates.push('password = ?');
+        updates.push('password_hash = ?');
         values.push(passwordHash);
       }
       if (userData.firstName !== undefined) {
@@ -265,8 +265,11 @@ export class UserService {
 
   private async getUserPasswordHash(userId: number): Promise<string | null> {
     try {
-      const [rows] = await this.pool.execute<RowDataPacket[]>('SELECT password FROM users WHERE id = ? LIMIT 1', [userId]);
-      return rows.length > 0 ? rows[0].password : null;
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT password_hash FROM users WHERE id = ? LIMIT 1',
+        [userId]
+      );
+      return rows.length > 0 ? (rows[0] as any).password_hash : null;
     } catch (error) {
       logger.error('Failed to get password hash:', error);
       return null;

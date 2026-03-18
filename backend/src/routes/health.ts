@@ -21,7 +21,7 @@ const router = Router();
  * @route GET /api/health
  * @returns {Object} System health status and metrics
  */
-router.get('/health', async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const healthCheck = {
       status: 'healthy',

@@ -216,16 +216,19 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // TODO: In production, implement proper token refresh logic
-    // This would involve generating a new token with extended expiry
-    // and potentially invalidating the old token
     const { password_hash, salt, ...userWithoutPassword } = user as any;
+
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, role: user.role },
+      config.jwt.secret,
+      { expiresIn: '7d' }
+    );
     
     res.json({
       success: true,
       data: {
         user: userWithoutPassword,
-        token: req.headers.authorization?.split(' ')[1] || ''
+        token
       }
     });
   } catch (error) {

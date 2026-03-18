@@ -42,7 +42,7 @@ Authenticate a user and receive a JWT token.
 
 ```json
 {
-  "email": "admin@staffscheduler.com",
+  "email": "admin@example.com",
   "password": "admin123"
 }
 ```
@@ -56,7 +56,7 @@ Authenticate a user and receive a JWT token.
     "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
     "user": {
       "id": 1,
-      "email": "admin@staffscheduler.com",
+      "email": "admin@example.com",
       "firstName": "Admin",
       "lastName": "User",
       "role": "admin",
@@ -97,7 +97,7 @@ Get current authenticated user information.
   "success": true,
   "data": {
     "id": 1,
-    "email": "admin@staffscheduler.com",
+    "email": "admin@example.com",
     "firstName": "Admin",
     "lastName": "User",
     "role": "admin",
@@ -137,7 +137,7 @@ Get all users (with role-based filtering).
   "data": [
     {
       "id": 1,
-      "email": "admin@staffscheduler.com",
+      "email": "admin@example.com",
       "firstName": "Admin",
       "lastName": "User",
       "role": "admin",
@@ -173,7 +173,7 @@ Get a specific user by ID.
   "success": true,
   "data": {
     "id": 1,
-    "email": "admin@staffscheduler.com",
+    "email": "admin@example.com",
     "firstName": "Admin",
     "lastName": "User",
     "role": "admin",

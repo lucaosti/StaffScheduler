@@ -51,15 +51,10 @@ const Dashboard: React.FC = () => {
       
       // Import dashboard service to get real data
       const { getDashboardStats } = await import('../../services/dashboardService');
-      const { getEmployees } = await import('../../services/employeeService');
-      const { getShifts } = await import('../../services/shiftService');
+      // (Optional) If you later want cross-checks, re-add employee/shift calls here.
       
       // Load data from multiple sources
-      const [dashboardResponse, employeesResponse, shiftsResponse] = await Promise.all([
-        getDashboardStats(),
-        getEmployees({}),
-        getShifts({})
-      ]);
+      const [dashboardResponse] = await Promise.all([getDashboardStats()]);
       
       if (dashboardResponse.success && dashboardResponse.data) {
         setStats(dashboardResponse.data);

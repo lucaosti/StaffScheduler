@@ -19,9 +19,6 @@
     "db:init": "npx ts-node scripts/init-database.ts",
     "db:migrate": "node scripts/migrate.js",
     "db:seed": "node scripts/seed.js",
-    "demo:install": "npx ts-node scripts/demo-data.ts install",
-    "demo:remove": "npx ts-node scripts/demo-data.ts remove",
-    "demo:report": "npx ts-node scripts/demo-data.ts report",
     "clean": "rm -rf dist"
   },
   "dependencies": {

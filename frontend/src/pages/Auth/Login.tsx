@@ -70,10 +70,6 @@ const Login: React.FC = () => {
     }));
   };
 
-  const fillDemoCredentials = (email: string, password: string) => {
-    setCredentials({ email, password });
-  };
-
   return (
     <div className="min-vh-100 d-flex align-items-center justify-content-center bg-light">
       <div className="container">
@@ -140,45 +136,6 @@ const Login: React.FC = () => {
                     )}
                   </button>
                 </form>
-
-                <div className="mt-4 text-center">
-                  <small className="text-muted mb-2 d-block">Quick Demo Access:</small>
-                  <div className="d-grid gap-1">
-                    <button
-                      type="button"
-                      className="btn btn-outline-primary btn-sm"
-                      onClick={() => fillDemoCredentials('admin@staffscheduler.com', 'Admin123!')}
-                    >
-                      <i className="bi bi-shield-check me-1"></i>
-                      Admin Demo
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-secondary btn-sm"
-                      onClick={() => fillDemoCredentials('manager@staffscheduler.com', 'Manager123!')}
-                    >
-                      <i className="bi bi-person-badge me-1"></i>
-                      Manager Demo
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-outline-info btn-sm"
-                      onClick={() => fillDemoCredentials('employee@staffscheduler.com', 'Employee123!')}
-                    >
-                      <i className="bi bi-person me-1"></i>
-                      Employee Demo
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 text-center">
-                  <small className="text-muted">
-                    Demo Credentials:<br />
-                    Admin: admin@staffscheduler.com / Admin123!<br />
-                    Manager: manager@staffscheduler.com / Manager123!<br />
-                    Employee: employee@staffscheduler.com / Employee123!
-                  </small>
-                </div>
               </div>
             </div>
           </div>
