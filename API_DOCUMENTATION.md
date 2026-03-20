@@ -1,4 +1,4 @@
-# 📚 Staff Scheduler - API Documentation
+# Staff Scheduler - API Documentation
 
 > **Complete REST API Reference for Staff Scheduler Backend**
 
@@ -8,7 +8,7 @@ Authentication: JWT Bearer Token
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Authentication](#authentication)
 2. [Users](#users)
@@ -19,14 +19,15 @@ Authentication: JWT Bearer Token
 7. [Assignments](#assignments)
 8. [Dashboard](#dashboard)
 9. [System Settings](#system-settings)
-10. [Error Handling](#error-handling)
-11. [Response Format](#response-format)
+10. [Health](#health)
+11. [Error Handling](#error-handling)
+12. [Response Format](#response-format)
 
 ---
 
-## 🔐 Authentication
+## Authentication
 
-All API endpoints (except login and registration) require authentication via JWT token.
+All API endpoints (except login) require authentication via JWT token.
 
 ### Authentication Header
 
@@ -43,7 +44,7 @@ Authenticate a user and receive a JWT token.
 ```json
 {
   "email": "admin@example.com",
-  "password": "admin123"
+  "password": "YourPassword123!"
 }
 ```
 
@@ -59,9 +60,7 @@ Authenticate a user and receive a JWT token.
       "email": "admin@example.com",
       "firstName": "Admin",
       "lastName": "User",
-      "role": "admin",
-      "employeeId": "EMP001",
-      "isActive": true
+      "role": "admin"
     }
   }
 }
@@ -71,24 +70,12 @@ Authenticate a user and receive a JWT token.
 
 - `400 Bad Request` - Missing email or password
 - `401 Unauthorized` - Invalid credentials
-- `403 Forbidden` - Account inactive
 
-### POST /api/auth/logout
+### GET /api/auth/verify
 
-Logout the current user (invalidate token).
+Verify JWT token validity and get current authenticated user information.
 
-**Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "message": "Logged out successfully"
-}
-```
-
-### GET /api/auth/me
-
-Get current authenticated user information.
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -102,32 +89,89 @@ Get current authenticated user information.
     "lastName": "User",
     "role": "admin",
     "employeeId": "EMP001",
-    "departments": [
-      {
-        "departmentId": 1,
-        "departmentName": "IT Department",
-        "isManager": true
-      }
-    ]
+    "phone": "+1234567890",
+    "isActive": true,
+    "lastLogin": "2025-10-29T10:30:00Z",
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-10-29T10:30:00Z"
   }
+}
+```
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or expired token
+
+### POST /api/auth/refresh
+
+Refresh the JWT token to extend the session.
+
+**Headers:** `Authorization: Bearer <token>` (required)
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": 1,
+      "email": "admin@example.com",
+      "firstName": "Admin",
+      "lastName": "User",
+      "role": "admin"
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+- `401 Unauthorized` - Invalid or expired token
+
+### POST /api/auth/logout
+
+Logout the current user. In JWT-based authentication, logout is primarily handled client-side by removing the stored token.
+
+**Headers:** `Authorization: Bearer <token>` (required)
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Logged out successfully"
 }
 ```
 
 ---
 
-## 👥 Users
+## Users
 
-Manage system users with role-based permissions.
+Manage system users with role-based permissions. Users are the central entity; employees are users with `role: "employee"`.
+
+### Roles
+
+The system supports three roles:
+
+| Role | Description |
+|------|-------------|
+| `admin` | Full system access |
+| `manager` | Manage departments, schedules, shifts, assignments |
+| `employee` | View own data, confirm/decline assignments |
 
 ### GET /api/users
 
 Get all users (with role-based filtering).
 
+**Headers:** `Authorization: Bearer <token>` (required)
+
 **Query Parameters:**
 
 - `search` (string, optional) - Search by name, email, or employee ID
 - `department` (number, optional) - Filter by department ID
-- `role` (string, optional) - Filter by role (`admin`, `manager`, `department_manager`, `employee`)
+- `role` (string, optional) - Filter by role (`admin`, `manager`, `employee`)
 
 **Response:** `200 OK`
 
@@ -148,9 +192,8 @@ Get all users (with role-based filtering).
       "createdAt": "2025-01-01T00:00:00Z",
       "departments": [
         {
-          "departmentId": 1,
-          "departmentName": "IT Department",
-          "isManager": true
+          "id": 1,
+          "name": "Engineering"
         }
       ]
     }
@@ -158,9 +201,13 @@ Get all users (with role-based filtering).
 }
 ```
 
+> **Note:** Admins see all users. Managers see only users in their departments, with client-side filtering applied.
+
 ### GET /api/users/:id
 
 Get a specific user by ID.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **URL Parameters:**
 
@@ -180,20 +227,26 @@ Get a specific user by ID.
     "employeeId": "EMP001",
     "phone": "+1234567890",
     "isActive": true,
-    "departments": [...]
+    "departments": [
+      {
+        "id": 1,
+        "name": "Engineering"
+      }
+    ]
   }
 }
 ```
 
 **Error Responses:**
 
+- `403 Forbidden` - Employees can only view their own profile
 - `404 Not Found` - User not found
 
 ### POST /api/users
 
 Create a new user.
 
-**Required Roles:** `admin`, `manager`, `department_manager`
+**Required Roles:** `admin`, `manager`
 
 **Request Body:**
 
@@ -206,7 +259,8 @@ Create a new user.
   "role": "employee",
   "employeeId": "EMP123",
   "phone": "+1234567890",
-  "departmentIds": [1, 2]
+  "departmentIds": [1, 2],
+  "skillIds": [1, 3]
 }
 ```
 
@@ -228,15 +282,14 @@ Create a new user.
 
 **Error Responses:**
 
-- `400 Bad Request` - Missing required fields or validation errors
+- `400 Bad Request` - Missing required fields (email, password, firstName, lastName, role) or duplicate email/employeeId
 - `403 Forbidden` - Insufficient permissions
-- `409 Conflict` - Email or employee ID already exists
 
 ### PUT /api/users/:id
 
 Update an existing user.
 
-**Required Roles:** `admin`, `manager` (or own profile)
+**Required Roles:** `admin`, `manager` (or own profile for employees with limited fields)
 
 **URL Parameters:**
 
@@ -249,10 +302,11 @@ Update an existing user.
   "firstName": "John",
   "lastName": "Smith",
   "phone": "+0987654321",
-  "isActive": true,
-  "departmentIds": [1, 3]
+  "isActive": true
 }
 ```
+
+> **Note:** Employees can only update `firstName`, `lastName`, and `phone` on their own profile.
 
 **Response:** `200 OK`
 
@@ -265,16 +319,21 @@ Update an existing user.
     "firstName": "John",
     "lastName": "Smith",
     "phone": "+0987654321"
-  },
-  "message": "User updated successfully"
+  }
 }
 ```
 
+**Error Responses:**
+
+- `400 Bad Request` - Duplicate email or employee ID
+- `403 Forbidden` - Insufficient permissions or restricted fields
+- `404 Not Found` - User not found
+
 ### DELETE /api/users/:id
 
-Delete a user (soft delete - sets isActive to false).
+Delete a user (soft delete - sets `isActive` to false).
 
-**Required Roles:** `admin`
+**Required Roles:** `admin`, `manager`
 
 **URL Parameters:**
 
@@ -289,21 +348,23 @@ Delete a user (soft delete - sets isActive to false).
 }
 ```
 
+**Error Responses:**
+
+- `400 Bad Request` - Cannot delete yourself
+- `403 Forbidden` - Insufficient permissions
+- `404 Not Found` - User not found
+
 ---
 
-## 👨‍💼 Employees
+## Employees
 
-Manage employee profiles and information.
+Manage employee-specific data. Employees are users with `role: "employee"` in the `users` table. The employee endpoints provide employee-focused views and operations.
 
 ### GET /api/employees
 
 Get all employees.
 
-**Query Parameters:**
-
-- `department` (number, optional) - Filter by department ID
-- `status` (string, optional) - Filter by status (`active`, `inactive`)
-- `search` (string, optional) - Search by name or employee ID
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -313,24 +374,19 @@ Get all employees.
   "data": [
     {
       "id": 1,
-      "userId": 2,
-      "departmentId": 1,
+      "email": "john.doe@example.com",
       "firstName": "John",
       "lastName": "Doe",
-      "email": "john.doe@example.com",
+      "role": "employee",
       "employeeId": "EMP001",
-      "hireDate": "2023-01-15",
-      "contractType": "full_time",
-      "maxHoursPerWeek": 40,
-      "minHoursPerWeek": 20,
-      "salary": 50000,
+      "phone": "+1234567890",
       "position": "Senior Developer",
+      "hourlyRate": 25.00,
       "isActive": true,
-      "skills": [
+      "departments": [
         {
-          "skillId": 1,
-          "skillName": "JavaScript",
-          "proficiencyLevel": 5
+          "id": 1,
+          "name": "Engineering"
         }
       ]
     }
@@ -344,7 +400,7 @@ Get a specific employee by ID.
 
 **URL Parameters:**
 
-- `id` (number) - Employee ID
+- `id` (number) - User ID of the employee
 
 **Response:** `200 OK`
 
@@ -353,32 +409,21 @@ Get a specific employee by ID.
   "success": true,
   "data": {
     "id": 1,
-    "userId": 2,
-    "departmentId": 1,
+    "email": "john.doe@example.com",
     "firstName": "John",
     "lastName": "Doe",
+    "role": "employee",
     "employeeId": "EMP001",
-    "hireDate": "2023-01-15",
-    "contractType": "full_time",
-    "maxHoursPerWeek": 40,
-    "minHoursPerWeek": 20,
-    "department": {
-      "id": 1,
-      "name": "Engineering"
-    },
-    "skills": [...],
-    "availability": {
-      "monday": true,
-      "tuesday": true,
-      "wednesday": true,
-      "thursday": true,
-      "friday": true,
-      "saturday": false,
-      "sunday": false
-    }
+    "position": "Senior Developer",
+    "hourlyRate": 25.00,
+    "isActive": true
   }
 }
 ```
+
+**Error Responses:**
+
+- `404 Not Found` - Employee not found
 
 ### POST /api/employees
 
@@ -390,20 +435,14 @@ Create a new employee.
 
 ```json
 {
-  "userId": 5,
-  "departmentId": 1,
-  "hireDate": "2025-10-29",
-  "contractType": "full_time",
-  "maxHoursPerWeek": 40,
-  "minHoursPerWeek": 20,
-  "salary": 55000,
+  "email": "newemployee@example.com",
+  "password": "SecurePass123!",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "role": "employee",
+  "employeeId": "EMP010",
   "position": "Developer",
-  "skills": [
-    {
-      "skillId": 1,
-      "proficiencyLevel": 4
-    }
-  ]
+  "phone": "+1234567890"
 }
 ```
 
@@ -414,10 +453,10 @@ Create a new employee.
   "success": true,
   "data": {
     "id": 10,
-    "userId": 5,
-    "departmentId": 1,
-    "hireDate": "2025-10-29",
-    "contractType": "full_time"
+    "email": "newemployee@example.com",
+    "firstName": "Jane",
+    "lastName": "Doe",
+    "employeeId": "EMP010"
   },
   "message": "Employee created successfully"
 }
@@ -431,16 +470,14 @@ Update an existing employee.
 
 **URL Parameters:**
 
-- `id` (number) - Employee ID
+- `id` (number) - User ID of the employee
 
 **Request Body:**
 
 ```json
 {
-  "departmentId": 2,
-  "maxHoursPerWeek": 35,
   "position": "Senior Developer",
-  "salary": 60000
+  "phone": "+0987654321"
 }
 ```
 
@@ -451,9 +488,8 @@ Update an existing employee.
   "success": true,
   "data": {
     "id": 10,
-    "departmentId": 2,
-    "maxHoursPerWeek": 35,
-    "position": "Senior Developer"
+    "position": "Senior Developer",
+    "phone": "+0987654321"
   },
   "message": "Employee updated successfully"
 }
@@ -461,13 +497,13 @@ Update an existing employee.
 
 ### DELETE /api/employees/:id
 
-Delete an employee.
+Delete an employee (soft delete).
 
 **Required Roles:** `admin`, `manager`
 
 **URL Parameters:**
 
-- `id` (number) - Employee ID
+- `id` (number) - User ID of the employee
 
 **Response:** `200 OK`
 
@@ -478,47 +514,113 @@ Delete an employee.
 }
 ```
 
-### GET /api/employees/:id/availability
+### GET /api/employees/department/:departmentId
 
-Get employee availability for scheduling.
+Get all employees in a specific department.
 
 **URL Parameters:**
 
-- `id` (number) - Employee ID
+- `departmentId` (number) - Department ID
 
 **Response:** `200 OK`
 
 ```json
 {
   "success": true,
-  "data": {
-    "employeeId": 1,
-    "weeklyAvailability": {
-      "monday": { "available": true, "startTime": "09:00", "endTime": "17:00" },
-      "tuesday": { "available": true, "startTime": "09:00", "endTime": "17:00" },
-      "wednesday": { "available": true, "startTime": "09:00", "endTime": "17:00" },
-      "thursday": { "available": true, "startTime": "09:00", "endTime": "17:00" },
-      "friday": { "available": true, "startTime": "09:00", "endTime": "17:00" },
-      "saturday": { "available": false },
-      "sunday": { "available": false }
-    },
-    "unavailableDates": [
-      "2025-12-25",
-      "2025-12-26"
-    ]
-  }
+  "data": [
+    {
+      "id": 1,
+      "firstName": "John",
+      "lastName": "Doe",
+      "employeeId": "EMP001",
+      "email": "john.doe@example.com"
+    }
+  ]
+}
+```
+
+### GET /api/employees/:id/skills
+
+Get all skills for a specific employee.
+
+**URL Parameters:**
+
+- `id` (number) - User ID of the employee
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "name": "JavaScript",
+      "proficiencyLevel": 5
+    }
+  ]
+}
+```
+
+### POST /api/employees/:id/skills
+
+Add a skill to an employee.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - User ID of the employee
+
+**Request Body:**
+
+```json
+{
+  "skillId": 1,
+  "proficiencyLevel": 4
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Skill added to employee successfully"
+}
+```
+
+### DELETE /api/employees/:id/skills/:skillId
+
+Remove a skill from an employee.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - User ID of the employee
+- `skillId` (number) - Skill ID to remove
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Skill removed from employee successfully"
 }
 ```
 
 ---
 
-## 🏢 Departments
+## Departments
 
 Manage organizational departments.
 
 ### GET /api/departments
 
 Get all departments.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -530,17 +632,18 @@ Get all departments.
       "id": 1,
       "name": "Engineering",
       "description": "Software development team",
-      "parentId": null,
       "managerId": 2,
       "managerName": "Jane Smith",
-      "budget": 500000,
       "isActive": true,
       "employeeCount": 15,
-      "createdAt": "2025-01-01T00:00:00Z"
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-06-15T08:00:00Z"
     }
   ]
 }
 ```
+
+> **Note:** Admins see all departments. Non-admin users see only departments they belong to.
 
 ### GET /api/departments/:id
 
@@ -559,22 +662,19 @@ Get a specific department by ID.
     "id": 1,
     "name": "Engineering",
     "description": "Software development team",
-    "parentId": null,
     "managerId": 2,
     "managerName": "Jane Smith",
-    "budget": 500000,
     "isActive": true,
-    "employees": [
-      {
-        "id": 1,
-        "name": "John Doe",
-        "position": "Senior Developer"
-      }
-    ],
-    "subDepartments": []
+    "createdAt": "2025-01-01T00:00:00Z",
+    "updatedAt": "2025-06-15T08:00:00Z"
   }
 }
 ```
+
+**Error Responses:**
+
+- `403 Forbidden` - Non-admin users can only access departments they belong to
+- `404 Not Found` - Department not found
 
 ### POST /api/departments
 
@@ -588,11 +688,11 @@ Create a new department.
 {
   "name": "Marketing",
   "description": "Marketing and communications team",
-  "parentId": null,
-  "managerId": 5,
-  "budget": 300000
+  "managerId": 5
 }
 ```
+
+> **Note:** If `managerId` is specified, the referenced user must exist and have role `admin` or `manager`.
 
 **Response:** `201 Created`
 
@@ -603,17 +703,20 @@ Create a new department.
     "id": 5,
     "name": "Marketing",
     "description": "Marketing and communications team",
-    "managerId": 5,
-    "budget": 300000
+    "managerId": 5
   }
 }
 ```
+
+**Error Responses:**
+
+- `400 Bad Request` - Department name is required, or specified manager not found/invalid role
 
 ### PUT /api/departments/:id
 
 Update an existing department.
 
-**Required Roles:** `admin`, `manager`
+**Required Roles:** `admin`, or `manager` (only for departments they manage)
 
 **URL Parameters:**
 
@@ -624,7 +727,7 @@ Update an existing department.
 ```json
 {
   "name": "Marketing & Communications",
-  "budget": 350000,
+  "description": "Updated description",
   "managerId": 6
 }
 ```
@@ -637,9 +740,8 @@ Update an existing department.
   "data": {
     "id": 5,
     "name": "Marketing & Communications",
-    "budget": 350000
-  },
-  "message": "Department updated successfully"
+    "managerId": 6
+  }
 }
 ```
 
@@ -658,13 +760,78 @@ Delete a department.
 ```json
 {
   "success": true,
-  "message": "Department deleted successfully"
+  "data": {
+    "message": "Department deleted successfully"
+  }
 }
 ```
 
-### GET /api/departments/:id/employees
+**Error Responses:**
 
-Get all employees in a department.
+- `400 Bad Request` - Cannot delete department with active users
+- `403 Forbidden` - Only administrators can delete departments
+
+### POST /api/departments/:id/users
+
+Add a user to a department.
+
+**Required Roles:** `admin`, or `manager` (only for departments they manage)
+
+**URL Parameters:**
+
+- `id` (number) - Department ID
+
+**Request Body:**
+
+```json
+{
+  "userId": 5
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "User added to department successfully"
+  }
+}
+```
+
+**Error Responses:**
+
+- `400 Bad Request` - User not found
+- `404 Not Found` - Department not found
+
+### DELETE /api/departments/:id/users/:userId
+
+Remove a user from a department.
+
+**Required Roles:** `admin`, or `manager` (only for departments they manage)
+
+**URL Parameters:**
+
+- `id` (number) - Department ID
+- `userId` (number) - User ID to remove
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "User removed from department successfully"
+  }
+}
+```
+
+### GET /api/departments/:id/stats
+
+Get statistics for a department.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **URL Parameters:**
 
@@ -675,30 +842,34 @@ Get all employees in a department.
 ```json
 {
   "success": true,
-  "data": [
-    {
-      "id": 1,
-      "firstName": "John",
-      "lastName": "Doe",
-      "position": "Senior Developer",
-      "employeeId": "EMP001",
-      "email": "john.doe@example.com"
-    }
-  ]
+  "data": {
+    "totalEmployees": 15,
+    "activeEmployees": 14,
+    "totalShifts": 120,
+    "coverage": 92.5
+  }
 }
 ```
 
+**Error Responses:**
+
+- `403 Forbidden` - Non-admin users can only access stats for departments they belong to
+
 ---
 
-## 🕐 Shifts
+## Shifts
 
 Manage shift templates and shift instances.
 
 ### Shift Templates
 
-### GET /api/shifts/templates
+Reusable shift definitions that can be used to create shift instances.
+
+#### GET /api/shifts/templates
 
 Get all shift templates.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -709,21 +880,22 @@ Get all shift templates.
     {
       "id": 1,
       "name": "Morning Shift",
-      "startTime": "08:00:00",
-      "endTime": "16:00:00",
+      "description": "Regular morning shift",
       "departmentId": 1,
       "departmentName": "Engineering",
-      "requiredStaff": 5,
-      "color": "#4CAF50",
-      "description": "Regular morning shift",
-      "breakDuration": 60,
-      "isActive": true
+      "startTime": "08:00:00",
+      "endTime": "16:00:00",
+      "minStaff": 3,
+      "maxStaff": 8,
+      "isActive": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-06-15T08:00:00Z"
     }
   ]
 }
 ```
 
-### GET /api/shifts/templates/:id
+#### GET /api/shifts/templates/:id
 
 Get a specific shift template.
 
@@ -739,18 +911,22 @@ Get a specific shift template.
   "data": {
     "id": 1,
     "name": "Morning Shift",
+    "description": "Regular morning shift",
+    "departmentId": 1,
     "startTime": "08:00:00",
     "endTime": "16:00:00",
-    "departmentId": 1,
-    "requiredStaff": 5,
-    "color": "#4CAF50",
-    "description": "Regular morning shift",
-    "breakDuration": 60
+    "minStaff": 3,
+    "maxStaff": 8,
+    "isActive": true
   }
 }
 ```
 
-### POST /api/shifts/templates
+**Error Responses:**
+
+- `404 Not Found` - Shift template not found
+
+#### POST /api/shifts/templates
 
 Create a new shift template.
 
@@ -761,13 +937,12 @@ Create a new shift template.
 ```json
 {
   "name": "Night Shift",
+  "description": "Overnight shift",
+  "departmentId": 1,
   "startTime": "22:00:00",
   "endTime": "06:00:00",
-  "departmentId": 1,
-  "requiredStaff": 3,
-  "color": "#2196F3",
-  "description": "Overnight shift",
-  "breakDuration": 30
+  "minStaff": 2,
+  "maxStaff": 5
 }
 ```
 
@@ -781,13 +956,14 @@ Create a new shift template.
     "name": "Night Shift",
     "startTime": "22:00:00",
     "endTime": "06:00:00",
-    "requiredStaff": 3
+    "minStaff": 2,
+    "maxStaff": 5
   },
   "message": "Shift template created successfully"
 }
 ```
 
-### PUT /api/shifts/templates/:id
+#### PUT /api/shifts/templates/:id
 
 Update a shift template.
 
@@ -802,8 +978,8 @@ Update a shift template.
 ```json
 {
   "name": "Night Shift - Updated",
-  "requiredStaff": 4,
-  "color": "#1976D2"
+  "minStaff": 3,
+  "maxStaff": 6
 }
 ```
 
@@ -815,13 +991,14 @@ Update a shift template.
   "data": {
     "id": 5,
     "name": "Night Shift - Updated",
-    "requiredStaff": 4
+    "minStaff": 3,
+    "maxStaff": 6
   },
   "message": "Shift template updated successfully"
 }
 ```
 
-### DELETE /api/shifts/templates/:id
+#### DELETE /api/shifts/templates/:id
 
 Delete a shift template.
 
@@ -842,16 +1019,13 @@ Delete a shift template.
 
 ### Shift Instances
 
-### GET /api/shifts
+Individual shift occurrences linked to schedules.
+
+#### GET /api/shifts
 
 Get all shift instances.
 
-**Query Parameters:**
-
-- `scheduleId` (number, optional) - Filter by schedule ID
-- `departmentId` (number, optional) - Filter by department ID
-- `startDate` (string, optional) - Filter by start date (YYYY-MM-DD)
-- `endDate` (string, optional) - Filter by end date (YYYY-MM-DD)
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -862,21 +1036,26 @@ Get all shift instances.
     {
       "id": 1,
       "scheduleId": 1,
+      "departmentId": 1,
+      "departmentName": "Engineering",
       "templateId": 1,
-      "date": "2025-10-29",
+      "date": "2025-11-01",
       "startTime": "08:00:00",
       "endTime": "16:00:00",
-      "requiredStaff": 5,
+      "minStaff": 3,
+      "maxStaff": 8,
       "assignedStaff": 5,
-      "status": "published",
-      "departmentId": 1,
-      "departmentName": "Engineering"
+      "status": "open",
+      "notes": null,
+      "createdAt": "2025-10-15T10:00:00Z"
     }
   ]
 }
 ```
 
-### GET /api/shifts/:id
+> **Shift status values:** `open`, `assigned`, `confirmed`, `cancelled`
+
+#### GET /api/shifts/:id
 
 Get a specific shift instance.
 
@@ -892,25 +1071,28 @@ Get a specific shift instance.
   "data": {
     "id": 1,
     "scheduleId": 1,
+    "departmentId": 1,
     "templateId": 1,
-    "date": "2025-10-29",
+    "date": "2025-11-01",
     "startTime": "08:00:00",
     "endTime": "16:00:00",
-    "requiredStaff": 5,
+    "minStaff": 3,
+    "maxStaff": 8,
     "assignedStaff": 5,
-    "status": "published",
+    "status": "assigned",
     "assignments": [
       {
-        "assignmentId": 1,
-        "employeeId": 1,
-        "employeeName": "John Doe"
+        "id": 1,
+        "userId": 3,
+        "userName": "John Doe",
+        "status": "confirmed"
       }
     ]
   }
 }
 ```
 
-### POST /api/shifts
+#### POST /api/shifts
 
 Create a new shift instance.
 
@@ -921,11 +1103,14 @@ Create a new shift instance.
 ```json
 {
   "scheduleId": 1,
+  "departmentId": 1,
   "templateId": 1,
   "date": "2025-11-01",
   "startTime": "08:00:00",
   "endTime": "16:00:00",
-  "requiredStaff": 5
+  "minStaff": 3,
+  "maxStaff": 8,
+  "notes": "Extra coverage needed"
 }
 ```
 
@@ -937,27 +1122,131 @@ Create a new shift instance.
   "data": {
     "id": 15,
     "scheduleId": 1,
-    "templateId": 1,
+    "departmentId": 1,
     "date": "2025-11-01"
   },
   "message": "Shift created successfully"
 }
 ```
 
+#### PUT /api/shifts/:id
+
+Update an existing shift.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - Shift ID
+
+**Request Body:**
+
+```json
+{
+  "minStaff": 4,
+  "maxStaff": 10,
+  "status": "confirmed",
+  "notes": "Updated requirements"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 15,
+    "minStaff": 4,
+    "maxStaff": 10,
+    "status": "confirmed"
+  },
+  "message": "Shift updated successfully"
+}
+```
+
+#### DELETE /api/shifts/:id
+
+Delete a shift.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - Shift ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Shift deleted successfully"
+}
+```
+
+#### GET /api/shifts/schedule/:scheduleId
+
+Get all shifts for a specific schedule.
+
+**URL Parameters:**
+
+- `scheduleId` (number) - Schedule ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "scheduleId": 1,
+      "date": "2025-11-01",
+      "startTime": "08:00:00",
+      "endTime": "16:00:00",
+      "status": "assigned"
+    }
+  ]
+}
+```
+
+#### GET /api/shifts/department/:departmentId
+
+Get all shifts for a specific department.
+
+**URL Parameters:**
+
+- `departmentId` (number) - Department ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "departmentId": 1,
+      "date": "2025-11-01",
+      "startTime": "08:00:00",
+      "endTime": "16:00:00",
+      "status": "open"
+    }
+  ]
+}
+```
+
 ---
 
-## 📅 Schedules
+## Schedules
 
-Manage work schedules.
+Manage work schedules. Schedules are time-bound containers that group shifts for a department.
 
 ### GET /api/schedules
 
 Get all schedules.
 
-**Query Parameters:**
-
-- `status` (string, optional) - Filter by status (`draft`, `published`, `archived`)
-- `departmentId` (number, optional) - Filter by department ID
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -968,20 +1257,23 @@ Get all schedules.
     {
       "id": 1,
       "name": "November 2025 Schedule",
-      "startDate": "2025-11-01",
-      "endDate": "2025-11-30",
+      "description": "Standard monthly schedule",
       "departmentId": 1,
       "departmentName": "Engineering",
+      "startDate": "2025-11-01",
+      "endDate": "2025-11-30",
       "status": "published",
       "createdBy": 1,
       "createdByName": "Admin User",
-      "totalShifts": 150,
-      "assignedShifts": 145,
-      "createdAt": "2025-10-15T10:00:00Z"
+      "notes": "Standard monthly schedule",
+      "createdAt": "2025-10-15T10:00:00Z",
+      "updatedAt": "2025-10-20T14:00:00Z"
     }
   ]
 }
 ```
+
+> **Schedule status values:** `draft`, `published`, `archived`
 
 ### GET /api/schedules/:id
 
@@ -999,14 +1291,12 @@ Get a specific schedule.
   "data": {
     "id": 1,
     "name": "November 2025 Schedule",
+    "description": "Standard monthly schedule",
+    "departmentId": 1,
     "startDate": "2025-11-01",
     "endDate": "2025-11-30",
-    "departmentId": 1,
-    "departmentName": "Engineering",
     "status": "published",
     "createdBy": 1,
-    "totalShifts": 150,
-    "assignedShifts": 145,
     "notes": "Standard monthly schedule"
   }
 }
@@ -1014,7 +1304,7 @@ Get a specific schedule.
 
 ### GET /api/schedules/:id/shifts
 
-Get schedule with all shifts.
+Get a schedule with all its shifts.
 
 **URL Parameters:**
 
@@ -1037,9 +1327,17 @@ Get schedule with all shifts.
         "date": "2025-11-01",
         "startTime": "08:00:00",
         "endTime": "16:00:00",
-        "templateName": "Morning Shift",
-        "requiredStaff": 5,
-        "assignments": [...]
+        "minStaff": 3,
+        "maxStaff": 8,
+        "status": "assigned",
+        "assignments": [
+          {
+            "id": 1,
+            "userId": 3,
+            "userName": "John Doe",
+            "status": "confirmed"
+          }
+        ]
       }
     ]
   }
@@ -1063,6 +1361,8 @@ Create a new schedule.
   "notes": "Holiday season schedule"
 }
 ```
+
+> **Note:** The `createdBy` field is automatically set from the authenticated user.
 
 **Response:** `201 Created`
 
@@ -1112,29 +1412,6 @@ Update a schedule.
 }
 ```
 
-### PUT /api/schedules/:id/publish
-
-Publish a schedule (change status from draft to published).
-
-**Required Roles:** `admin`, `manager`
-
-**URL Parameters:**
-
-- `id` (number) - Schedule ID
-
-**Response:** `200 OK`
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": 2,
-    "status": "published"
-  },
-  "message": "Schedule published successfully"
-}
-```
-
 ### DELETE /api/schedules/:id
 
 Delete a schedule.
@@ -1154,9 +1431,9 @@ Delete a schedule.
 }
 ```
 
-### POST /api/schedules/:id/optimize
+### PATCH /api/schedules/:id/publish
 
-Optimize schedule assignments using AI algorithm.
+Publish a schedule (change status from `draft` to `published`).
 
 **Required Roles:** `admin`, `manager`
 
@@ -1164,16 +1441,83 @@ Optimize schedule assignments using AI algorithm.
 
 - `id` (number) - Schedule ID
 
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Schedule published successfully"
+}
+```
+
+### PATCH /api/schedules/:id/archive
+
+Archive a schedule (change status to `archived`).
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - Schedule ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Schedule archived successfully"
+}
+```
+
+### POST /api/schedules/:id/duplicate
+
+Duplicate an existing schedule with new dates.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - Source schedule ID
+
 **Request Body:**
 
 ```json
 {
-  "algorithm": "simulated_annealing",
-  "maxIterations": 10000,
-  "temperature": 100,
-  "coolingRate": 0.95
+  "name": "January 2026 Schedule",
+  "startDate": "2026-01-01",
+  "endDate": "2026-01-31"
 }
 ```
+
+**Response:** `201 Created`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 3,
+    "name": "January 2026 Schedule",
+    "startDate": "2026-01-01",
+    "endDate": "2026-01-31",
+    "status": "draft"
+  },
+  "message": "Schedule duplicated successfully"
+}
+```
+
+**Error Responses:**
+
+- `400 Bad Request` - Name, start date, and end date are required
+
+### POST /api/schedules/:id/generate
+
+Generate optimized schedule assignments using the scheduling algorithm.
+
+**Required Roles:** `admin`, `manager`
+
+**URL Parameters:**
+
+- `id` (number) - Schedule ID
 
 **Response:** `200 OK`
 
@@ -1182,33 +1526,25 @@ Optimize schedule assignments using AI algorithm.
   "success": true,
   "data": {
     "scheduleId": 2,
-    "optimizationScore": 87.5,
-    "constraintsViolated": 0,
-    "assignmentsMade": 145,
+    "assignmentsCreated": 145,
     "unassignedShifts": 5,
-    "executionTime": 12.5
+    "coverageRate": 96.7
   },
-  "message": "Schedule optimized successfully"
+  "message": "Schedule generated successfully"
 }
 ```
 
----
+**Error Responses:**
 
-## 📌 Assignments
+- `404 Not Found` - Schedule not found
 
-Manage shift assignments to employees.
+### GET /api/schedules/department/:departmentId
 
-### GET /api/assignments
+Get all schedules for a specific department.
 
-Get all assignments.
+**URL Parameters:**
 
-**Query Parameters:**
-
-- `scheduleId` (number, optional) - Filter by schedule ID
-- `employeeId` (number, optional) - Filter by employee ID
-- `startDate` (string, optional) - Filter by start date (YYYY-MM-DD)
-- `endDate` (string, optional) - Filter by end date (YYYY-MM-DD)
-- `status` (string, optional) - Filter by status (`scheduled`, `completed`, `cancelled`)
+- `departmentId` (number) - Department ID
 
 **Response:** `200 OK`
 
@@ -1218,17 +1554,83 @@ Get all assignments.
   "data": [
     {
       "id": 1,
-      "scheduleId": 1,
+      "name": "November 2025 Schedule",
+      "departmentId": 1,
+      "startDate": "2025-11-01",
+      "endDate": "2025-11-30",
+      "status": "published"
+    }
+  ]
+}
+```
+
+### GET /api/schedules/user/:userId
+
+Get all schedules associated with a specific user.
+
+**URL Parameters:**
+
+- `userId` (number) - User ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "name": "November 2025 Schedule",
+      "startDate": "2025-11-01",
+      "endDate": "2025-11-30",
+      "status": "published"
+    }
+  ]
+}
+```
+
+---
+
+## Assignments
+
+Manage shift assignments to employees. Assignments link users to specific shift instances.
+
+### Assignment Status Values
+
+| Status | Description |
+|--------|-------------|
+| `pending` | Assignment created, awaiting confirmation |
+| `confirmed` | Employee confirmed the assignment |
+| `completed` | Shift was completed |
+| `cancelled` | Assignment was cancelled |
+
+### GET /api/assignments
+
+Get all assignments.
+
+**Headers:** `Authorization: Bearer <token>` (required)
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
       "shiftId": 1,
-      "employeeId": 1,
-      "employeeName": "John Doe",
-      "employeeNumber": "EMP001",
-      "assignmentDate": "2025-11-01",
+      "userId": 3,
+      "userName": "John Doe",
+      "userEmail": "john.doe@example.com",
+      "shiftDate": "2025-11-01",
       "startTime": "08:00:00",
       "endTime": "16:00:00",
-      "status": "scheduled",
-      "notes": null,
-      "createdAt": "2025-10-25T14:30:00Z"
+      "departmentId": 1,
+      "departmentName": "Engineering",
+      "status": "confirmed",
+      "assignedAt": "2025-10-25T14:30:00Z",
+      "confirmedAt": "2025-10-26T09:00:00Z",
+      "notes": null
     }
   ]
 }
@@ -1249,16 +1651,13 @@ Get a specific assignment.
   "success": true,
   "data": {
     "id": 1,
-    "scheduleId": 1,
-    "scheduleName": "November 2025 Schedule",
     "shiftId": 1,
-    "shiftName": "Morning Shift",
-    "employeeId": 1,
-    "employeeName": "John Doe",
-    "assignmentDate": "2025-11-01",
+    "userId": 3,
+    "userName": "John Doe",
+    "shiftDate": "2025-11-01",
     "startTime": "08:00:00",
     "endTime": "16:00:00",
-    "status": "scheduled",
+    "status": "confirmed",
     "notes": null
   }
 }
@@ -1274,10 +1673,8 @@ Create a new assignment.
 
 ```json
 {
-  "scheduleId": 1,
   "shiftId": 1,
-  "employeeId": 5,
-  "assignmentDate": "2025-11-01",
+  "userId": 5,
   "notes": "Covering for sick leave"
 }
 ```
@@ -1289,11 +1686,9 @@ Create a new assignment.
   "success": true,
   "data": {
     "id": 50,
-    "scheduleId": 1,
     "shiftId": 1,
-    "employeeId": 5,
-    "assignmentDate": "2025-11-01",
-    "status": "scheduled"
+    "userId": 5,
+    "status": "pending"
   },
   "message": "Assignment created successfully"
 }
@@ -1311,16 +1706,14 @@ Create multiple assignments at once.
 {
   "assignments": [
     {
-      "scheduleId": 1,
       "shiftId": 1,
-      "employeeId": 1,
-      "assignmentDate": "2025-11-01"
+      "userId": 3,
+      "notes": null
     },
     {
-      "scheduleId": 1,
       "shiftId": 1,
-      "employeeId": 2,
-      "assignmentDate": "2025-11-01"
+      "userId": 4,
+      "notes": null
     }
   ]
 }
@@ -1332,13 +1725,16 @@ Create multiple assignments at once.
 {
   "success": true,
   "data": {
-    "created": 2,
-    "failed": 0,
-    "assignments": [51, 52]
+    "assignmentIds": [51, 52],
+    "count": 2
   },
   "message": "2 assignments created successfully"
 }
 ```
+
+**Error Responses:**
+
+- `400 Bad Request` - Assignments must be an array
 
 ### PUT /api/assignments/:id
 
@@ -1354,9 +1750,8 @@ Update an assignment.
 
 ```json
 {
-  "employeeId": 3,
-  "status": "completed",
-  "notes": "Successfully completed"
+  "status": "confirmed",
+  "notes": "Reassigned and confirmed"
 }
 ```
 
@@ -1367,8 +1762,7 @@ Update an assignment.
   "success": true,
   "data": {
     "id": 50,
-    "employeeId": 3,
-    "status": "completed"
+    "status": "confirmed"
   },
   "message": "Assignment updated successfully"
 }
@@ -1393,18 +1787,74 @@ Delete an assignment.
 }
 ```
 
-### GET /api/assignments/employee/:employeeId
+### PATCH /api/assignments/:id/confirm
 
-Get all assignments for a specific employee.
+Confirm an assignment.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **URL Parameters:**
 
-- `employeeId` (number) - Employee ID
+- `id` (number) - Assignment ID
 
-**Query Parameters:**
+**Response:** `200 OK`
 
-- `startDate` (string, optional) - Start date (YYYY-MM-DD)
-- `endDate` (string, optional) - End date (YYYY-MM-DD)
+```json
+{
+  "success": true,
+  "message": "Assignment confirmed successfully"
+}
+```
+
+### PATCH /api/assignments/:id/decline
+
+Decline an assignment.
+
+**Headers:** `Authorization: Bearer <token>` (required)
+
+**URL Parameters:**
+
+- `id` (number) - Assignment ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "id": 50,
+    "status": "cancelled"
+  },
+  "message": "Assignment declined successfully"
+}
+```
+
+### PATCH /api/assignments/:id/complete
+
+Mark an assignment as completed.
+
+**Headers:** `Authorization: Bearer <token>` (required)
+
+**URL Parameters:**
+
+- `id` (number) - Assignment ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Assignment completed successfully"
+}
+```
+
+### GET /api/assignments/user/:userId
+
+Get all assignments for a specific user.
+
+**URL Parameters:**
+
+- `userId` (number) - User ID
 
 **Response:** `200 OK`
 
@@ -1414,73 +1864,107 @@ Get all assignments for a specific employee.
   "data": [
     {
       "id": 1,
-      "assignmentDate": "2025-11-01",
+      "shiftId": 1,
+      "shiftDate": "2025-11-01",
       "startTime": "08:00:00",
       "endTime": "16:00:00",
-      "shiftName": "Morning Shift",
       "departmentName": "Engineering",
-      "status": "scheduled"
+      "status": "confirmed"
     }
   ]
 }
 ```
 
-### GET /api/assignments/conflicts
+### GET /api/assignments/shift/:shiftId
 
-Check for scheduling conflicts.
+Get all assignments for a specific shift.
 
-**Query Parameters:**
+**URL Parameters:**
 
-- `scheduleId` (number, required) - Schedule ID to check
+- `shiftId` (number) - Shift ID
 
 **Response:** `200 OK`
 
 ```json
 {
   "success": true,
-  "data": {
-    "hasConflicts": true,
-    "conflicts": [
-      {
-        "type": "double_booking",
-        "employeeId": 1,
-        "employeeName": "John Doe",
-        "date": "2025-11-05",
-        "assignments": [
-          {
-            "id": 10,
-            "shiftName": "Morning Shift",
-            "time": "08:00-16:00"
-          },
-          {
-            "id": 11,
-            "shiftName": "Afternoon Shift",
-            "time": "14:00-22:00"
-          }
-        ]
-      },
-      {
-        "type": "max_hours_exceeded",
-        "employeeId": 2,
-        "employeeName": "Jane Smith",
-        "weekOf": "2025-11-03",
-        "totalHours": 45,
-        "maxHours": 40
-      }
-    ]
-  }
+  "data": [
+    {
+      "id": 1,
+      "userId": 3,
+      "userName": "John Doe",
+      "status": "confirmed",
+      "assignedAt": "2025-10-25T14:30:00Z"
+    }
+  ]
+}
+```
+
+### GET /api/assignments/department/:departmentId
+
+Get all assignments for a specific department.
+
+**URL Parameters:**
+
+- `departmentId` (number) - Department ID
+
+**Query Parameters:**
+
+- `status` (string, optional) - Filter by status (`pending`, `confirmed`, `completed`, `cancelled`)
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "shiftId": 1,
+      "userId": 3,
+      "userName": "John Doe",
+      "status": "confirmed"
+    }
+  ]
+}
+```
+
+### GET /api/assignments/shift/:shiftId/available-employees
+
+Get employees available for a specific shift (not already assigned and not unavailable).
+
+**URL Parameters:**
+
+- `shiftId` (number) - Shift ID
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 5,
+      "firstName": "Jane",
+      "lastName": "Smith",
+      "employeeId": "EMP005",
+      "email": "jane.smith@example.com"
+    }
+  ]
 }
 ```
 
 ---
 
-## 📊 Dashboard
+## Dashboard
 
 Get dashboard statistics and analytics.
 
 ### GET /api/dashboard/stats
 
-Get overall system statistics.
+Get overall system statistics and KPIs.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -1493,20 +1977,28 @@ Get overall system statistics.
     "todayShifts": 24,
     "pendingApprovals": 6,
     "monthlyHours": 3248,
-    "monthlyCost": 48720,
+    "monthlyCost": 48720.50,
     "coverageRate": 92.5,
-    "employeeSatisfaction": 87.2
+    "employeeSatisfaction": 0
   }
 }
 ```
 
+> **Field details:**
+> - `totalEmployees` - Count of active users with role `employee`
+> - `activeSchedules` - Count of schedules with status `published`
+> - `todayShifts` - Count of today's shifts with status `open`, `assigned`, or `confirmed`
+> - `pendingApprovals` - Count of shift assignments with status `pending`
+> - `monthlyHours` - Total hours from confirmed assignments in the current month
+> - `monthlyCost` - Total cost based on confirmed hours multiplied by employee hourly rates
+> - `coverageRate` - Percentage of current month's shifts that have at least one confirmed assignment
+> - `employeeSatisfaction` - Placeholder (currently returns 0)
+
 ### GET /api/dashboard/activities
 
-Get recent system activities.
+Get recent system activities from the audit log.
 
-**Query Parameters:**
-
-- `limit` (number, optional) - Limit number of activities (default: 10)
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -1515,103 +2007,97 @@ Get recent system activities.
   "success": true,
   "data": [
     {
-      "id": 1,
+      "id": "1",
       "type": "schedule_published",
-      "description": "Schedule 'November 2025' published",
-      "userId": 1,
-      "userName": "Admin User",
-      "timestamp": "2025-10-29T10:30:00Z"
+      "message": "Schedule 'November 2025' published",
+      "timestamp": "2025-10-29T10:30:00.000Z",
+      "user": "Admin User"
     },
     {
-      "id": 2,
+      "id": "2",
       "type": "employee_created",
-      "description": "New employee 'John Doe' added",
-      "userId": 1,
-      "userName": "Admin User",
-      "timestamp": "2025-10-28T14:15:00Z"
+      "message": "New employee 'John Doe' added",
+      "timestamp": "2025-10-28T14:15:00.000Z",
+      "user": "Admin User"
     }
   ]
 }
 ```
 
-### GET /api/dashboard/metrics
+> **Note:** Returns the 10 most recent entries from the `audit_logs` table. If no audit logs exist, returns an empty array.
 
-Get detailed performance metrics.
+### GET /api/dashboard/upcoming-shifts
 
-**Query Parameters:**
+Get upcoming shifts for the next 3 days with staffing information.
 
-- `period` (string, optional) - Period for metrics (`day`, `week`, `month`, `year`)
-- `departmentId` (number, optional) - Filter by department
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
 ```json
 {
   "success": true,
-  "data": {
-    "period": "month",
-    "metrics": {
-      "totalHours": 3248,
-      "overtime": 124,
-      "absences": 18,
-      "coverage": {
-        "scheduled": 92.5,
-        "actual": 89.3
-      },
-      "costAnalysis": {
-        "regularHours": 38500,
-        "overtime": 6720,
-        "total": 45220
-      },
-      "employeeMetrics": {
-        "averageHoursPerEmployee": 22.8,
-        "utilizationRate": 85.7
-      }
+  "data": [
+    {
+      "id": "1",
+      "name": "Engineering - 2025-11-01",
+      "department": "Engineering",
+      "startTime": "08:00:00",
+      "endTime": "16:00:00",
+      "assignedEmployees": 4,
+      "requiredEmployees": 5,
+      "status": "understaffed"
+    },
+    {
+      "id": "2",
+      "name": "Marketing - 2025-11-01",
+      "department": "Marketing",
+      "startTime": "09:00:00",
+      "endTime": "17:00:00",
+      "assignedEmployees": 3,
+      "requiredEmployees": 3,
+      "status": "adequate"
     }
-  }
+  ]
 }
 ```
 
-### GET /api/dashboard/charts/coverage
+> **Staffing status:** `understaffed` (assigned < required), `adequate` (assigned = required), `overstaffed` (assigned > required)
 
-Get shift coverage data for charts.
+### GET /api/dashboard/departments
 
-**Query Parameters:**
+Get department overview with employee counts.
 
-- `startDate` (string, required) - Start date (YYYY-MM-DD)
-- `endDate` (string, required) - End date (YYYY-MM-DD)
-- `departmentId` (number, optional) - Filter by department
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
 ```json
 {
   "success": true,
-  "data": {
-    "labels": ["Nov 1", "Nov 2", "Nov 3", "Nov 4", "Nov 5"],
-    "datasets": [
-      {
-        "label": "Required Staff",
-        "data": [20, 22, 21, 23, 20]
-      },
-      {
-        "label": "Assigned Staff",
-        "data": [19, 22, 20, 23, 18]
-      }
-    ]
-  }
+  "data": [
+    {
+      "department": "Engineering",
+      "total_employees": 15,
+      "active_employees": 14,
+      "employee_count": 12,
+      "manager_count": 2
+    }
+  ]
 }
 ```
 
 ---
 
-## ⚙️ System Settings
+## System Settings
 
 Manage system-wide configuration settings.
 
 ### GET /api/settings
 
 Get all system settings.
+
+**Headers:** `Authorization: Bearer <token>` (required)
 
 **Response:** `200 OK`
 
@@ -1622,34 +2108,50 @@ Get all system settings.
     {
       "id": 1,
       "category": "general",
-      "settingKey": "app_name",
-      "settingValue": "Staff Scheduler",
-      "dataType": "string",
-      "description": "Application name"
+      "key": "currency",
+      "value": "EUR",
+      "type": "string",
+      "defaultValue": "EUR",
+      "description": "Default currency for the application (EUR or USD)",
+      "isEditable": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
     },
     {
       "id": 2,
-      "category": "scheduling",
-      "settingKey": "default_shift_duration",
-      "settingValue": "8",
-      "dataType": "number",
-      "description": "Default shift duration in hours"
+      "category": "general",
+      "key": "time_period",
+      "value": "monthly",
+      "type": "string",
+      "defaultValue": "monthly",
+      "description": "Default time period for scheduling (monthly, weekly, daily)",
+      "isEditable": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
     },
     {
       "id": 3,
-      "category": "display",
-      "settingKey": "currency",
-      "settingValue": "EUR",
-      "dataType": "string",
-      "description": "Currency symbol (EUR or USD)"
+      "category": "scheduling",
+      "key": "max_shifts_per_week",
+      "value": "5",
+      "type": "number",
+      "defaultValue": "5",
+      "description": "Maximum number of shifts an employee can work per week",
+      "isEditable": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
     },
     {
       "id": 4,
-      "category": "display",
-      "settingKey": "time_period",
-      "settingValue": "Monthly",
-      "dataType": "string",
-      "description": "Default time period view"
+      "category": "scheduling",
+      "key": "min_hours_between_shifts",
+      "value": "8",
+      "type": "number",
+      "defaultValue": "8",
+      "description": "Minimum hours required between shifts for the same employee",
+      "isEditable": true,
+      "createdAt": "2025-01-01T00:00:00Z",
+      "updatedAt": "2025-01-01T00:00:00Z"
     }
   ]
 }
@@ -1661,7 +2163,7 @@ Get settings by category.
 
 **URL Parameters:**
 
-- `category` (string) - Category name (`general`, `scheduling`, `display`, `notifications`, etc.)
+- `category` (string) - Category name (`general`, `scheduling`, etc.)
 
 **Response:** `200 OK`
 
@@ -1670,18 +2172,18 @@ Get settings by category.
   "success": true,
   "data": [
     {
-      "id": 3,
-      "category": "display",
-      "settingKey": "currency",
-      "settingValue": "EUR",
-      "dataType": "string"
+      "id": 1,
+      "category": "general",
+      "key": "currency",
+      "value": "EUR",
+      "type": "string"
     },
     {
-      "id": 4,
-      "category": "display",
-      "settingKey": "time_period",
-      "settingValue": "Monthly",
-      "dataType": "string"
+      "id": 2,
+      "category": "general",
+      "key": "time_period",
+      "value": "monthly",
+      "type": "string"
     }
   ]
 }
@@ -1702,12 +2204,16 @@ Get a specific setting value.
 {
   "success": true,
   "data": {
-    "category": "display",
+    "category": "general",
     "key": "currency",
     "value": "EUR"
   }
 }
 ```
+
+**Error Responses:**
+
+- `404 Not Found` - Setting not found
 
 ### PUT /api/settings/:category/:key
 
@@ -1734,7 +2240,7 @@ Update a setting value.
 {
   "success": true,
   "data": {
-    "category": "display",
+    "category": "general",
     "key": "currency",
     "value": "USD"
   },
@@ -1742,9 +2248,56 @@ Update a setting value.
 }
 ```
 
-### POST /api/settings/bulk
+**Error Responses:**
 
-Update multiple settings at once.
+- `400 Bad Request` - Invalid value (e.g., currency must be EUR or USD)
+- `403 Forbidden` - Only administrators can modify settings, or setting is not editable
+- `404 Not Found` - Setting not found
+
+### POST /api/settings/:category/:key/reset
+
+Reset a setting to its default value.
+
+**Required Roles:** `admin`
+
+**URL Parameters:**
+
+- `category` (string) - Category name
+- `key` (string) - Setting key
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "Setting reset to default value successfully"
+}
+```
+
+**Error Responses:**
+
+- `404 Not Found` - Setting not found
+
+### Convenience Endpoints
+
+#### GET /api/settings/currency
+
+Get the current currency setting.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "currency": "EUR"
+  }
+}
+```
+
+#### PUT /api/settings/currency
+
+Update the currency setting.
 
 **Required Roles:** `admin`
 
@@ -1752,18 +2305,7 @@ Update multiple settings at once.
 
 ```json
 {
-  "settings": [
-    {
-      "category": "display",
-      "key": "currency",
-      "value": "USD"
-    },
-    {
-      "category": "display",
-      "key": "time_period",
-      "value": "Weekly"
-    }
-  ]
+  "currency": "USD"
 }
 ```
 
@@ -1773,55 +2315,163 @@ Update multiple settings at once.
 {
   "success": true,
   "data": {
-    "updated": 2
+    "currency": "USD"
   },
-  "message": "2 settings updated successfully"
+  "message": "Currency updated successfully"
 }
 ```
 
+**Error Responses:**
+
+- `400 Bad Request` - Currency must be EUR or USD
+
+#### GET /api/settings/time-period
+
+Get the current time period setting.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "timePeriod": "monthly"
+  }
+}
+```
+
+#### PUT /api/settings/time-period
+
+Update the time period setting.
+
+**Required Roles:** `admin`
+
+**Request Body:**
+
+```json
+{
+  "timePeriod": "weekly"
+}
+```
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "timePeriod": "weekly"
+  },
+  "message": "Time period updated successfully"
+}
+```
+
+**Error Responses:**
+
+- `400 Bad Request` - Time period must be `daily`, `weekly`, `monthly`, or `yearly`
+
 ---
 
-## ❌ Error Handling
+## Health
+
+System health monitoring endpoints. These endpoints do not require authentication.
+
+### GET /api/health
+
+Returns system health status and performance metrics.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "healthy",
+    "timestamp": "2025-11-01T10:30:00.000Z",
+    "uptime": 86400,
+    "version": "1.0.0",
+    "environment": "development",
+    "services": {
+      "database": "connected",
+      "memory": {
+        "used": 45,
+        "total": 128,
+        "unit": "MB"
+      },
+      "cpu": {
+        "user": 123456,
+        "system": 654321
+      }
+    }
+  }
+}
+```
+
+**Error Responses:**
+
+- `503 Service Unavailable` - Health check failed
+
+### GET /api/health/ready
+
+Readiness check for orchestrators (e.g. Kubernetes). Returns whether the service is ready to accept requests.
+
+**Response:** `200 OK`
+
+```json
+{
+  "success": true,
+  "data": {
+    "status": "ready"
+  }
+}
+```
+
+**Error Responses:**
+
+- `503 Service Unavailable` - Service not ready
+
+---
+
+## Error Handling
 
 All API endpoints follow a consistent error response format.
 
 ### Error Response Structure
 
+`error.code` is optional: many routes return only `error.message`.
+
 ```json
 {
   "success": false,
   "error": {
-    "code": "ERROR_CODE",
     "message": "Human-readable error message",
-    "details": {
-      "field": "Additional error details"
-    }
+    "code": "ERROR_CODE",
+    "details": "Additional error context (development only)"
   }
 }
 ```
 
 ### Common HTTP Status Codes
 
-- `200 OK` - Request succeeded
-- `201 Created` - Resource created successfully
-- `400 Bad Request` - Invalid request parameters or validation errors
-- `401 Unauthorized` - Authentication required or invalid token
-- `403 Forbidden` - Insufficient permissions
-- `404 Not Found` - Resource not found
-- `409 Conflict` - Resource conflict (e.g., duplicate entry)
-- `422 Unprocessable Entity` - Validation error
-- `500 Internal Server Error` - Server error
+| Code | Meaning |
+|------|---------|
+| `200 OK` | Request succeeded |
+| `201 Created` | Resource created successfully |
+| `400 Bad Request` | Invalid request parameters or validation errors |
+| `401 Unauthorized` | Authentication required or invalid token |
+| `403 Forbidden` | Insufficient permissions |
+| `404 Not Found` | Resource not found |
+| `500 Internal Server Error` | Server error |
+| `503 Service Unavailable` | Service health check failure |
 
 ### Common Error Codes
 
 - `VALIDATION_ERROR` - Input validation failed
-- `AUTHENTICATION_REQUIRED` - User must be authenticated
-- `INVALID_CREDENTIALS` - Invalid username or password
-- `INSUFFICIENT_PERMISSIONS` - User lacks required permissions
+- `UNAUTHORIZED` - User not authenticated
+- `LOGIN_FAILED` - Invalid email or password
+- `INSUFFICIENT_PERMISSIONS` - User lacks required role
 - `NOT_FOUND` - Requested resource not found
-- `DUPLICATE_ENTRY` - Resource already exists
-- `CONSTRAINT_VIOLATION` - Business rule or constraint violated
-- `SERVER_ERROR` - Internal server error
+- `INTERNAL_ERROR` - Internal server error
 
 ### Example Error Responses
 
@@ -1832,11 +2482,7 @@ All API endpoints follow a consistent error response format.
   "success": false,
   "error": {
     "code": "VALIDATION_ERROR",
-    "message": "Validation failed",
-    "details": {
-      "email": "Email is required",
-      "password": "Password must be at least 8 characters"
-    }
+    "message": "Email and password are required"
   }
 }
 ```
@@ -1847,8 +2493,8 @@ All API endpoints follow a consistent error response format.
 {
   "success": false,
   "error": {
-    "code": "AUTHENTICATION_REQUIRED",
-    "message": "Authentication token is missing or invalid"
+    "code": "UNAUTHORIZED",
+    "message": "User not found"
   }
 }
 ```
@@ -1859,8 +2505,7 @@ All API endpoints follow a consistent error response format.
 {
   "success": false,
   "error": {
-    "code": "INSUFFICIENT_PERMISSIONS",
-    "message": "You do not have permission to perform this action"
+    "message": "Insufficient permissions"
   }
 }
 ```
@@ -1871,27 +2516,14 @@ All API endpoints follow a consistent error response format.
 {
   "success": false,
   "error": {
-    "code": "NOT_FOUND",
-    "message": "Employee with ID 999 not found"
-  }
-}
-```
-
-**409 Conflict:**
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "DUPLICATE_ENTRY",
-    "message": "An employee with this email already exists"
+    "message": "Employee not found"
   }
 }
 ```
 
 ---
 
-## ✅ Response Format
+## Response Format
 
 All successful API responses follow a consistent format.
 
@@ -1900,122 +2532,51 @@ All successful API responses follow a consistent format.
 ```json
 {
   "success": true,
-  "data": {
-    // Response data here
-  },
+  "data": {},
   "message": "Optional success message"
 }
 ```
 
-### Pagination
+### Sorting and Filtering
 
-For endpoints that return lists, pagination is supported:
-
-**Request:**
-
-```http
-GET /api/employees?page=2&limit=20
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "data": [...],
-  "pagination": {
-    "page": 2,
-    "limit": 20,
-    "total": 142,
-    "totalPages": 8,
-    "hasNext": true,
-    "hasPrev": true
-  }
-}
-```
-
-### Filtering and Sorting
-
-Most list endpoints support filtering and sorting:
-
-**Filtering:**
-
-```http
-GET /api/employees?department=1&status=active
-```
-
-**Sorting:**
-
-```http
-GET /api/employees?sortBy=lastName&sortOrder=asc
-```
-
-**Combined:**
-
-```http
-GET /api/employees?department=1&sortBy=hireDate&sortOrder=desc&page=1&limit=50
-```
+Most list endpoints support filtering via query parameters where documented. Sorting is generally handled server-side by the SQL queries (e.g., by date, name, or creation time).
 
 ---
 
-## 🔧 Rate Limiting
+## Rate Limiting
 
 API requests are rate-limited to prevent abuse:
 
-- **General endpoints:** 100 requests per 15 minutes per IP
-- **Authentication endpoints:** 5 requests per 15 minutes per IP
-
-Rate limit information is included in response headers:
-
-```http
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1635523200
-```
+- **All endpoints:** 100 requests per 15 minutes per IP
 
 When rate limit is exceeded:
 
 **Response:** `429 Too Many Requests`
 
-```json
-{
-  "success": false,
-  "error": {
-    "code": "RATE_LIMIT_EXCEEDED",
-    "message": "Too many requests. Please try again later.",
-    "retryAfter": 300
-  }
-}
+```
+Too many requests from this IP, please try again later.
 ```
 
 ---
 
-## 🔒 Security Best Practices
+## Security
 
-### API Key Security
+### JWT Tokens
 
-- Store JWT tokens securely (HttpOnly cookies or secure storage)
+- Tokens expire after **7 days**
+- Token payload includes: `userId`, `email`, `role`
+- Use the `/api/auth/refresh` endpoint to extend sessions
+- Store tokens securely (HttpOnly cookies or secure storage)
 - Never expose tokens in URLs
-- Regenerate tokens periodically
-- Implement token refresh mechanism
 
-### HTTPS
+### Password Security
 
-Always use HTTPS in production:
-
-```
-https://api.staffscheduler.com/api/
-```
+- Passwords are hashed using **bcrypt** before storage
+- The `password_hash` field is never returned in API responses
 
 ### CORS
 
-Configure CORS appropriately for your frontend domain:
-
-```javascript
-// Allowed origins
-https://app.staffscheduler.com
-http://localhost:3000 (development only)
-```
+In development, all `localhost` origins are allowed. In production, configure `CORS_ORIGIN` environment variable.
 
 ### Input Validation
 
@@ -2023,30 +2584,31 @@ All input is validated on the server side. Client-side validation is supplementa
 
 ### SQL Injection Prevention
 
-All database queries use parameterized statements to prevent SQL injection.
+All database queries use parameterized statements.
 
 ---
 
-## 📝 Changelog
+## Database Schema Reference
 
-### Version 1.0.0 (2025-10-29)
+### Core Tables
 
-- Initial API release
-- Complete CRUD operations for all entities
-- Authentication and authorization
-- Dashboard analytics endpoints
-- Schedule optimization algorithms
-- Real-time conflict detection
-
----
-
-## 📞 Support
-
-For API support or questions:
-
-- **Documentation:** [Technical Documentation](./TECHNICAL.md)
-- **Issues:** [GitHub Issues](https://github.com/lucaosti/StaffScheduler/issues)
-- **Email:** support@staffscheduler.com
+| Table | Description |
+|-------|-------------|
+| `users` | User accounts with authentication and role data |
+| `departments` | Organizational departments |
+| `user_departments` | Many-to-many relationship between users and departments |
+| `skills` | Available skills/competencies |
+| `user_skills` | Many-to-many relationship between users and skills (with proficiency level) |
+| `shift_templates` | Reusable shift definitions |
+| `shift_template_skills` | Required skills for shift templates |
+| `schedules` | Schedule containers/periods |
+| `shifts` | Individual shift instances |
+| `shift_skills` | Required skills for specific shifts |
+| `shift_assignments` | Employee assignments to shifts |
+| `user_unavailability` | Date ranges when employees cannot work |
+| `user_preferences` | Employee scheduling preferences |
+| `system_settings` | Application-wide configuration |
+| `audit_logs` | System activity tracking |
 
 ---
 
@@ -2054,8 +2616,8 @@ For API support or questions:
 
 **Staff Scheduler API** - Version 1.0.0
 
-Developed with ❤️ by Luca Ostinelli
+Developed by Luca Ostinelli
 
-*Last Updated: October 29, 2025*
+*Last Updated: March 2026*
 
 </div>

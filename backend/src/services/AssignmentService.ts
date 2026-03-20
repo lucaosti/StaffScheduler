@@ -581,29 +581,10 @@ export class AssignmentService {
   }
 
   /**
-   * Bulk creates assignments for a shift
-   * 
-   * @param shiftId - Shift ID
-   * @param userIds - Array of user IDs to assign
-   * @returns Promise resolving to array of created assignments
+   * Bulk creates assignments from an array of assignment requests.
+   * Also supports creating multiple assignments for a single shift via
+   * `shiftId` + `userIds` for backward/alternate callers.
    */
-  /**
-   * Bulk creates assignments from an array of assignment requests
-   * 
-   * @param assignments - Array of assignment creation requests
-   * @returns Promise resolving to array of created assignments
-   */
-  async bulkCreateAssignments(assignments: CreateAssignmentRequest[]): Promise<ShiftAssignment[]>;
-  
-  /**
-   * Bulk creates assignments for multiple users on the same shift
-   * 
-   * @param shiftId - Shift ID
-   * @param userIds - Array of user IDs
-   * @returns Promise resolving to array of created assignments
-   */
-  async bulkCreateAssignments(shiftId: number, userIds: number[]): Promise<ShiftAssignment[]>;
-  
   async bulkCreateAssignments(
     assignmentsOrShiftId: CreateAssignmentRequest[] | number, 
     userIds?: number[]
