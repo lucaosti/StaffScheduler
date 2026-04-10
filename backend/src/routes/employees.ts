@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requireRole } from '../middleware/auth';
+import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
   const router = Router();
@@ -13,10 +14,10 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const employees = await employeeService.getAllEmployees();
     res.json({ success: true, data: employees });
   } catch (error) {
-    console.error('Error fetching employees:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch employees' }
+    logger.error('Error fetching employees:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch employees' }
     });
   }
 });
@@ -26,26 +27,26 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid employee ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
       });
     }
 
     const employee = await employeeService.getEmployeeById(id);
     if (!employee) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Employee not found' }
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Employee not found' }
       });
     }
 
     res.json({ success: true, data: employee });
   } catch (error) {
-    console.error('Error fetching employee:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch employee' }
+    logger.error('Error fetching employee:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch employee' }
     });
   }
 });
@@ -54,17 +55,17 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
     const employee = await employeeService.createEmployee(req.body);
-    
-    res.status(201).json({ 
-      success: true, 
+
+    res.status(201).json({
+      success: true,
       data: employee,
       message: 'Employee created successfully'
     });
   } catch (error) {
-    console.error('Error creating employee:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to create employee' }
+    logger.error('Error creating employee:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to create employee' }
     });
   }
 });
@@ -74,31 +75,27 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid employee ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
       });
     }
 
-    const success = await employeeService.updateEmployee(id, req.body);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Employee not found' }
-      });
-    }
-
-    const employee = await employeeService.getEmployeeById(id);
-    res.json({ 
-      success: true, 
+    const employee = await employeeService.updateEmployee(id, req.body);
+    res.json({
+      success: true,
       data: employee,
       message: 'Employee updated successfully'
     });
   } catch (error) {
-    console.error('Error updating employee:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to update employee' }
+    const message = error instanceof Error ? error.message : 'Failed to update employee';
+    if (message.toLowerCase().includes('not found')) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message } });
+    }
+    logger.error('Error updating employee:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to update employee' }
     });
   }
 });
@@ -108,29 +105,26 @@ router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (re
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid employee ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
       });
     }
 
-    const success = await employeeService.deleteEmployee(id);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Employee not found' }
-      });
-    }
-
-    res.json({ 
-      success: true, 
+    await employeeService.deleteEmployee(id);
+    res.json({
+      success: true,
       message: 'Employee deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting employee:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to delete employee' }
+    const message = error instanceof Error ? error.message : 'Failed to delete employee';
+    if (message.toLowerCase().includes('not found')) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message } });
+    }
+    logger.error('Error deleting employee:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to delete employee' }
     });
   }
 });
@@ -140,19 +134,19 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
   try {
     const departmentId = parseInt(req.params.departmentId);
     if (isNaN(departmentId)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid department ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
       });
     }
 
     const employees = await employeeService.getEmployeesByDepartment(departmentId);
     res.json({ success: true, data: employees });
   } catch (error) {
-    console.error('Error fetching employees by department:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch employees by department' }
+    logger.error('Error fetching employees by department:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch employees by department' }
     });
   }
 });
@@ -162,19 +156,19 @@ router.get('/:id/skills', authenticate, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid employee ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
       });
     }
 
     const skills = await employeeService.getEmployeeSkills(id);
     res.json({ success: true, data: skills });
   } catch (error) {
-    console.error('Error fetching employee skills:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch employee skills' }
+    logger.error('Error fetching employee skills:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch employee skills' }
     });
   }
 });
@@ -184,25 +178,25 @@ router.post('/:id/skills', authenticate, requireRole(['admin', 'manager']), asyn
   try {
     const id = parseInt(req.params.id);
     const { skillId, proficiencyLevel } = req.body;
-    
+
     if (isNaN(id) || !skillId || proficiencyLevel === undefined) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid parameters' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid parameters' }
       });
     }
 
     await employeeService.addEmployeeSkill(id, skillId, proficiencyLevel);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Skill added to employee successfully'
     });
   } catch (error) {
-    console.error('Error adding employee skill:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to add skill to employee' }
+    logger.error('Error adding employee skill:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to add skill to employee' }
     });
   }
 });
@@ -212,25 +206,25 @@ router.delete('/:id/skills/:skillId', authenticate, requireRole(['admin', 'manag
   try {
     const id = parseInt(req.params.id);
     const skillId = parseInt(req.params.skillId);
-    
+
     if (isNaN(id) || isNaN(skillId)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid parameters' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid parameters' }
       });
     }
 
     await employeeService.removeEmployeeSkill(id, skillId);
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Skill removed from employee successfully'
     });
   } catch (error) {
-    console.error('Error removing employee skill:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to remove skill from employee' }
+    logger.error('Error removing employee skill:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to remove skill from employee' }
     });
   }
 });

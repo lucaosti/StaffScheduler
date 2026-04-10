@@ -38,15 +38,15 @@ services:
       mysql:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001
       DB_HOST: mysql
       DB_PORT: 3306
       DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
       DB_USER: ${MYSQL_USER:-scheduler_user}
       DB_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
-      SESSION_SECRET: ${SESSION_SECRET:-your-super-secret-session-key}
-      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key}
+      SESSION_SECRET: ${SESSION_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
@@ -82,14 +82,15 @@ services:
     networks:
       - staff_scheduler_network
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # Database Management Interface
+  # Database Management Interface (dev only — start with: docker compose --profile dev up)
   phpmyadmin:
-    image: phpmyadmin/phpmyadmin:latest
+    profiles: ["dev"]
+    image: phpmyadmin/phpmyadmin:5.2
     container_name: staff_scheduler_phpmyadmin
     restart: unless-stopped
     depends_on:

@@ -25,9 +25,17 @@ COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Copy built application from build stage
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Create non-root user for security
+# Create non-root user and fix ownership of nginx runtime dirs
 RUN addgroup -g 1001 -S nginx_user && \
-    adduser -S nginx_user -u 1001
+    adduser -S nginx_user -u 1001 && \
+    chown -R nginx_user:nginx_user /usr/share/nginx/html && \
+    chown -R nginx_user:nginx_user /var/cache/nginx && \
+    chown -R nginx_user:nginx_user /var/log/nginx && \
+    chown -R nginx_user:nginx_user /etc/nginx/conf.d && \
+    touch /var/run/nginx.pid && \
+    chown nginx_user:nginx_user /var/run/nginx.pid
+
+USER nginx_user
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

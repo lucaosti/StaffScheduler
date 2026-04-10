@@ -5,7 +5,7 @@
  * automatic optimization-based assignments, conflict detection, and assignment status management.
  * 
  * @module services/AssignmentService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';

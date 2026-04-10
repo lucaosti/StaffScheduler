@@ -77,18 +77,25 @@ const Schedule: React.FC = () => {
         setShifts(shiftsResponse.data);
       }
 
-      // Load assignments for the current week
+      // Load assignments from the first active schedule's shifts
       if (schedulesResponse.success && schedulesResponse.data && schedulesResponse.data.length > 0) {
         const firstSchedule = schedulesResponse.data[0];
         const scheduleDetails = await scheduleService.getScheduleWithShifts(firstSchedule.id);
         if (scheduleDetails.success && scheduleDetails.data) {
-          // Assignments would be extracted from schedule details
-          setAssignments([]);
+          const allAssignments: Assignment[] = [];
+          const detailShifts = scheduleDetails.data.shifts;
+          if (Array.isArray(detailShifts)) {
+            for (const shift of detailShifts) {
+              if (Array.isArray(shift.assignments)) {
+                allAssignments.push(...shift.assignments);
+              }
+            }
+          }
+          setAssignments(allAssignments);
         }
       }
 
     } catch (err) {
-      console.error('Load data error:', err);
       setError('Failed to load schedule data');
     } finally {
       setLoading(false);
@@ -113,7 +120,7 @@ const Schedule: React.FC = () => {
   };
 
   const formatDate = (date: Date) => {
-    return date.toLocaleDateString('it-IT', { 
+    return date.toLocaleDateString(undefined, { 
       weekday: 'short', 
       day: 'numeric', 
       month: 'short' 
@@ -157,7 +164,6 @@ const Schedule: React.FC = () => {
         alert('Failed to generate schedule: ' + (response.error?.message || 'Unknown error'));
       }
     } catch (err) {
-      console.error('Generate schedule error:', err);
       alert('Failed to generate schedule');
     } finally {
       setIsGenerating(false);
@@ -243,8 +249,8 @@ const Schedule: React.FC = () => {
             </button>
             <h5 className="mb-0">
               {viewMode === 'week' 
-                ? `Week of ${weekDates[0].toLocaleDateString('it-IT')}`
-                : selectedWeek.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
+                ? `Week of ${weekDates[0].toLocaleDateString(undefined)}`
+                : selectedWeek.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
               }
             </h5>
             <button 
