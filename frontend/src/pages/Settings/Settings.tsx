@@ -70,8 +70,8 @@ const Settings: React.FC = () => {
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
       theme: 'light',
-      language: 'it',
-      timezone: 'Europe/Rome',
+      language: 'en',
+      timezone: 'UTC',
       notifications: {
         email: true,
         push: true,
@@ -91,11 +91,11 @@ const Settings: React.FC = () => {
   });
 
   const [hierarchySettings, setHierarchySettings] = useState<Record<string, HospitalHierarchy>>({
-    'direttore-generale': {
+    'general-director': {
       level: 1,
-      role: 'Direttore Generale',
+      role: 'General Director',
       permissions: ['manage-all', 'system-admin', 'reports', 'budget'],
-      canManageRoles: ['direttore-sanitario', 'primario', 'caposala', 'medico', 'infermiere', 'oss'],
+      canManageRoles: ['medical-director', 'department-chief', 'head-nurse', 'senior-physician', 'nurse', 'healthcare-assistant'],
       defaultSettings: {
         maxHoursPerWeek: 40,
         maxConsecutiveDays: 5,
@@ -108,11 +108,11 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'direttore-sanitario': {
+    'medical-director': {
       level: 2,
-      role: 'Direttore Sanitario',
+      role: 'Medical Director',
       permissions: ['manage-medical', 'quality-control', 'protocols'],
-      canManageRoles: ['primario', 'caposala', 'medico', 'infermiere'],
+      canManageRoles: ['department-chief', 'head-nurse', 'senior-physician', 'nurse'],
       defaultSettings: {
         maxHoursPerWeek: 40,
         maxConsecutiveDays: 5,
@@ -125,11 +125,11 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'primario': {
+    'department-chief': {
       level: 3,
-      role: 'Primario',
+      role: 'Department Chief',
       permissions: ['manage-department', 'schedule-department', 'evaluate-staff'],
-      canManageRoles: ['caposala', 'medico-strutturato', 'medico-specializzando'],
+      canManageRoles: ['head-nurse', 'senior-physician', 'resident-physician'],
       defaultSettings: {
         maxHoursPerWeek: 48,
         maxConsecutiveDays: 6,
@@ -142,11 +142,11 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'caposala': {
+    'head-nurse': {
       level: 4,
-      role: 'Caposala',
+      role: 'Head Nurse',
       permissions: ['manage-nursing', 'schedule-nurses', 'quality-nursing'],
-      canManageRoles: ['infermiere-coordinatore', 'infermiere', 'oss'],
+      canManageRoles: ['coordinating-nurse', 'nurse', 'healthcare-assistant'],
       defaultSettings: {
         maxHoursPerWeek: 36,
         maxConsecutiveDays: 5,
@@ -159,11 +159,11 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'medico-strutturato': {
+    'senior-physician': {
       level: 5,
-      role: 'Medico Strutturato',
+      role: 'Senior Physician',
       permissions: ['patient-care', 'procedures', 'consultation'],
-      canManageRoles: ['medico-specializzando'],
+      canManageRoles: ['resident-physician'],
       defaultSettings: {
         maxHoursPerWeek: 38,
         maxConsecutiveDays: 5,
@@ -176,11 +176,11 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'infermiere-coordinatore': {
+    'coordinating-nurse': {
       level: 6,
-      role: 'Infermiere Coordinatore',
+      role: 'Coordinating Nurse',
       permissions: ['coordinate-nursing', 'patient-care', 'training'],
-      canManageRoles: ['infermiere', 'oss'],
+      canManageRoles: ['nurse', 'healthcare-assistant'],
       defaultSettings: {
         maxHoursPerWeek: 36,
         maxConsecutiveDays: 4,
@@ -193,9 +193,9 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'infermiere': {
+    'nurse': {
       level: 7,
-      role: 'Infermiere',
+      role: 'Nurse',
       permissions: ['patient-care', 'medication', 'documentation'],
       canManageRoles: [],
       defaultSettings: {
@@ -210,9 +210,9 @@ const Settings: React.FC = () => {
         }
       }
     },
-    'oss': {
+    'healthcare-assistant': {
       level: 8,
-      role: 'OSS (Operatore Socio Sanitario)',
+      role: 'Healthcare Assistant (OSS)',
       permissions: ['basic-care', 'assistance', 'hygiene'],
       canManageRoles: [],
       defaultSettings: {
@@ -229,59 +229,29 @@ const Settings: React.FC = () => {
     }
   });
 
-  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSavePersonalSettings = async () => {
-    setIsSaving(true);
-    try {
-      // Here you would call the API to save personal settings
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      alert('Personal settings saved successfully!');
-    } catch (err) {
-      console.error('Save error:', err);
-      alert('Failed to save settings');
-    } finally {
-      setIsSaving(false);
-    }
+  const handleSavePersonalSettings = () => {
+    // Settings persistence is not yet implemented.
+    // Connect this handler to the settings API endpoint when available.
   };
 
-  const handleSaveWorkSettings = async () => {
-    setIsSaving(true);
-    try {
-      // Here you would call the API to save work settings
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      alert('Work settings saved successfully!');
-    } catch (err) {
-      console.error('Save error:', err);
-      alert('Failed to save settings');
-    } finally {
-      setIsSaving(false);
-    }
+  const handleSaveWorkSettings = () => {
+    // Settings persistence is not yet implemented.
+    // Connect this handler to the settings API endpoint when available.
   };
 
-  const handleUpdateHierarchyDefault = async (roleKey: string, newDefaults: Partial<HospitalHierarchy['defaultSettings']>) => {
-    setIsSaving(true);
-    try {
-      setHierarchySettings(prev => ({
-        ...prev,
-        [roleKey]: {
-          ...prev[roleKey],
-          defaultSettings: {
-            ...prev[roleKey].defaultSettings,
-            ...newDefaults
-          }
+  const handleUpdateHierarchyDefault = (roleKey: string, newDefaults: Partial<HospitalHierarchy['defaultSettings']>) => {
+    setHierarchySettings(prev => ({
+      ...prev,
+      [roleKey]: {
+        ...prev[roleKey],
+        defaultSettings: {
+          ...prev[roleKey].defaultSettings,
+          ...newDefaults
         }
-      }));
-      
-      // Here you would call the API to update hierarchy settings
-      await new Promise(resolve => setTimeout(resolve, 500));
-      alert(`Default settings updated for ${hierarchySettings[roleKey].role}`);
-    } catch (err) {
-      console.error('Update error:', err);
-      alert('Failed to update hierarchy settings');
-    } finally {
-      setIsSaving(false);
-    }
+      }
+    }));
+    // Hierarchy settings persistence is not yet implemented.
   };
 
   const canManageRole = (targetRole: string) => {
@@ -489,18 +459,11 @@ const Settings: React.FC = () => {
                   </div>
 
                   <div className="mt-4">
-                    <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                      {isSaving ? (
-                        <>
-                          <span className="spinner-border spinner-border-sm me-2" role="status"></span>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <i className="bi bi-check me-2"></i>
-                          Save Personal Settings
-                        </>
-                      )}
+                    <button type="submit" className="btn btn-secondary" disabled title="Settings persistence not yet available">
+                      <>
+                        <i className="bi bi-check me-2"></i>
+                        Save Personal Settings
+                      </>
                     </button>
                   </div>
                 </form>
@@ -658,18 +621,11 @@ const Settings: React.FC = () => {
                   </div>
 
                   <div className="mt-4">
-                    <button type="submit" className="btn btn-primary" disabled={isSaving}>
-                      {isSaving ? (
-                        <>
-                          <span className="spinner-border spinner-border-sm me-2" role="status"></span>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <i className="bi bi-check me-2"></i>
-                          Save Work Settings
-                        </>
-                      )}
+                    <button type="submit" className="btn btn-secondary" disabled title="Settings persistence not yet available">
+                      <>
+                        <i className="bi bi-check me-2"></i>
+                        Save Work Settings
+                      </>
                     </button>
                   </div>
                 </form>

@@ -5,7 +5,7 @@
  * user skill assignments, and shift skill requirements.
  * 
  * @module services/SkillService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';

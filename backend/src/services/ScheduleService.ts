@@ -5,7 +5,7 @@
  * management, shift generation, and publication.
  * 
  * @module services/ScheduleService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';

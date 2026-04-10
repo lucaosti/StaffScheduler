@@ -125,6 +125,7 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       error: {
+        code: 'INTERNAL_ERROR',
         message: 'Failed to fetch dashboard statistics',
         details: error instanceof Error ? error.message : 'Unknown error'
       }

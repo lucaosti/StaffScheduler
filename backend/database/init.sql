@@ -83,8 +83,8 @@ CREATE TABLE IF NOT EXISTS user_skills (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NOT NULL,
     skill_id INT NOT NULL,
-    proficiency_level INT DEFAULT 1,
-    
+    proficiency_level TINYINT DEFAULT 1 CHECK (proficiency_level BETWEEN 1 AND 5),
+
     UNIQUE KEY unique_user_skill (user_id, skill_id),
     INDEX idx_user (user_id),
     INDEX idx_skill (skill_id),
@@ -156,8 +156,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     INDEX idx_department (department_id),
     
     FOREIGN KEY (department_id) REFERENCES departments(id),
-    FOREIGN KEY (created_by) REFERENCES users(id),
-    FOREIGN KEY (published_by) REFERENCES users(id)
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (published_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================
@@ -179,14 +179,15 @@ CREATE TABLE IF NOT EXISTS shifts (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     INDEX idx_schedule (schedule_id),
+    INDEX idx_schedule_date (schedule_id, date),
     INDEX idx_department (department_id),
     INDEX idx_date (date),
     INDEX idx_status (status),
     INDEX idx_template (template_id),
-    
+
     FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
     FOREIGN KEY (department_id) REFERENCES departments(id),
-    FOREIGN KEY (template_id) REFERENCES shift_templates(id)
+    FOREIGN KEY (template_id) REFERENCES shift_templates(id) ON DELETE SET NULL
 );
 
 -- ================================================================
@@ -243,8 +244,8 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
     INDEX idx_user (user_id),
-    INDEX idx_dates (start_date, end_date),
-    
+    INDEX idx_user_dates (user_id, start_date, end_date),
+
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 

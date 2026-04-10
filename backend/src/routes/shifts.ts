@@ -17,6 +17,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
 import { authenticate, requireRole } from '../middleware/auth';
+import { logger } from '../config/logger';
 
 export const createShiftsRouter = (pool: Pool) => {
   const router = Router();
@@ -30,10 +31,10 @@ router.get('/templates', authenticate, async (req: Request, res: Response) => {
     const templates = await shiftService.getAllShiftTemplates();
     res.json({ success: true, data: templates });
   } catch (error) {
-    console.error('Error fetching shift templates:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shift templates' }
+    logger.error('Error fetching shift templates:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shift templates' }
     });
   }
 });
@@ -43,26 +44,26 @@ router.get('/templates/:id', authenticate, async (req: Request, res: Response) =
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid template ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
       });
     }
 
     const template = await shiftService.getShiftTemplateById(id);
     if (!template) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift template not found' }
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Shift template not found' }
       });
     }
 
     res.json({ success: true, data: template });
   } catch (error) {
-    console.error('Error fetching shift template:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shift template' }
+    logger.error('Error fetching shift template:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shift template' }
     });
   }
 });
@@ -72,17 +73,17 @@ router.post('/templates', authenticate, requireRole(['admin', 'manager']), async
   try {
     const templateId = await shiftService.createShiftTemplate(req.body);
     const template = await shiftService.getShiftTemplateById(templateId);
-    
-    res.status(201).json({ 
-      success: true, 
+
+    res.status(201).json({
+      success: true,
       data: template,
       message: 'Shift template created successfully'
     });
   } catch (error) {
-    console.error('Error creating shift template:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to create shift template' }
+    logger.error('Error creating shift template:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to create shift template' }
     });
   }
 });
@@ -92,31 +93,30 @@ router.put('/templates/:id', authenticate, requireRole(['admin', 'manager']), as
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid template ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
       });
     }
 
-    const success = await shiftService.updateShiftTemplate(id, req.body);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift template not found' }
+    const template = await shiftService.updateShiftTemplate(id, req.body);
+    if (!template) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Shift template not found' }
       });
     }
 
-    const template = await shiftService.getShiftTemplateById(id);
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       data: template,
       message: 'Shift template updated successfully'
     });
   } catch (error) {
-    console.error('Error updating shift template:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to update shift template' }
+    logger.error('Error updating shift template:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to update shift template' }
     });
   }
 });
@@ -126,29 +126,29 @@ router.delete('/templates/:id', authenticate, requireRole(['admin', 'manager']),
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid template ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
       });
     }
 
     const success = await shiftService.deleteShiftTemplate(id);
     if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift template not found' }
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Shift template not found' }
       });
     }
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Shift template deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting shift template:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to delete shift template' }
+    logger.error('Error deleting shift template:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to delete shift template' }
     });
   }
 });
@@ -161,10 +161,10 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const shifts = await shiftService.getAllShifts();
     res.json({ success: true, data: shifts });
   } catch (error) {
-    console.error('Error fetching shifts:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shifts' }
+    logger.error('Error fetching shifts:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shifts' }
     });
   }
 });
@@ -174,26 +174,26 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid shift ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
       });
     }
 
     const shift = await shiftService.getShiftById(id);
     if (!shift) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift not found' }
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Shift not found' }
       });
     }
 
     res.json({ success: true, data: shift });
   } catch (error) {
-    console.error('Error fetching shift:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shift' }
+    logger.error('Error fetching shift:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shift' }
     });
   }
 });
@@ -202,17 +202,17 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
   try {
     const shift = await shiftService.createShift(req.body);
-    
-    res.status(201).json({ 
-      success: true, 
+
+    res.status(201).json({
+      success: true,
       data: shift,
       message: 'Shift created successfully'
     });
   } catch (error) {
-    console.error('Error creating shift:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to create shift' }
+    logger.error('Error creating shift:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to create shift' }
     });
   }
 });
@@ -222,31 +222,27 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid shift ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
       });
     }
 
-    const success = await shiftService.updateShift(id, req.body);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift not found' }
-      });
-    }
-
-    const shift = await shiftService.getShiftById(id);
-    res.json({ 
-      success: true, 
+    const shift = await shiftService.updateShift(id, req.body);
+    res.json({
+      success: true,
       data: shift,
       message: 'Shift updated successfully'
     });
   } catch (error) {
-    console.error('Error updating shift:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to update shift' }
+    const message = error instanceof Error ? error.message : 'Failed to update shift';
+    if (message.toLowerCase().includes('not found')) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message } });
+    }
+    logger.error('Error updating shift:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to update shift' }
     });
   }
 });
@@ -256,29 +252,26 @@ router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (re
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid shift ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
       });
     }
 
-    const success = await shiftService.deleteShift(id);
-    if (!success) {
-      return res.status(404).json({ 
-        success: false, 
-        error: { message: 'Shift not found' }
-      });
-    }
-
-    res.json({ 
-      success: true, 
+    await shiftService.deleteShift(id);
+    res.json({
+      success: true,
       message: 'Shift deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting shift:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to delete shift' }
+    const message = error instanceof Error ? error.message : 'Failed to delete shift';
+    if (message.toLowerCase().includes('not found')) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message } });
+    }
+    logger.error('Error deleting shift:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to delete shift' }
     });
   }
 });
@@ -288,19 +281,19 @@ router.get('/schedule/:scheduleId', authenticate, async (req: Request, res: Resp
   try {
     const scheduleId = parseInt(req.params.scheduleId);
     if (isNaN(scheduleId)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid schedule ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
       });
     }
 
     const shifts = await shiftService.getShiftsBySchedule(scheduleId);
     res.json({ success: true, data: shifts });
   } catch (error) {
-    console.error('Error fetching shifts by schedule:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shifts by schedule' }
+    logger.error('Error fetching shifts by schedule:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shifts by schedule' }
     });
   }
 });
@@ -310,19 +303,19 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
   try {
     const departmentId = parseInt(req.params.departmentId);
     if (isNaN(departmentId)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: { message: 'Invalid department ID' }
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
       });
     }
 
     const shifts = await shiftService.getShiftsByDepartment(departmentId);
     res.json({ success: true, data: shifts });
   } catch (error) {
-    console.error('Error fetching shifts by department:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: { message: 'Failed to fetch shifts by department' }
+    logger.error('Error fetching shifts by department:', error);
+    res.status(500).json({
+      success: false,
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch shifts by department' }
     });
   }
 });

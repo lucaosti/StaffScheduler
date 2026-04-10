@@ -62,7 +62,6 @@ const Dashboard: React.FC = () => {
         throw new Error('Failed to load dashboard statistics');
       }
     } catch (err) {
-      console.error('Dashboard error:', err);
       setError('Failed to load dashboard data. Please ensure the backend is running and database is populated.');
       
       // Set empty stats on error

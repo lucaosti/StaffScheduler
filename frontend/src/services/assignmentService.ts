@@ -16,58 +16,20 @@
  */
 
 import { ApiResponse, Assignment } from '../types';
+import { handleResponse, getAuthHeaders } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
-/**
- * Custom error class for API-related errors
- */
-class ApiError extends Error {
-  /**
-   * Creates an ApiError instance
-   * @param message - Error message
-   * @param status - HTTP status code (optional)
-   */
-  constructor(message: string, public status?: number) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-const handleResponse = async <T>(response: Response): Promise<ApiResponse<T>> => {
-  const contentType = response.headers.get('content-type');
-  const isJson = contentType && contentType.includes('application/json');
-  
-  const data = isJson ? await response.json() : await response.text();
-  
-  if (!response.ok) {
-    throw new ApiError(
-      data.message || `HTTP error! status: ${response.status}`,
-      response.status
-    );
-  }
-  
-  return data;
-};
-
-const getAuthHeaders = (): HeadersInit => {
-  const token = localStorage.getItem('token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-  };
-};
-
 export interface AssignmentFilters {
-  employeeId?: string;
+  userId?: string;
   shiftId?: string;
-  status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
 }
 
 export interface CreateAssignmentData {
-  employeeId: string;
+  userId: string;
   shiftId: string;
-  role: string;
+  notes?: string;
 }
 
 export const getAssignments = async (filters: AssignmentFilters = {}): Promise<ApiResponse<Assignment[]>> => {
@@ -106,16 +68,6 @@ export const createAssignment = async (assignmentData: CreateAssignmentData): Pr
   return handleResponse<Assignment>(response);
 };
 
-export const cancelAssignment = async (assignmentId: string): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ action: 'cancel' }),
-  });
-  
-  return handleResponse<void>(response);
-};
-
 export const deleteAssignment = async (assignmentId: string): Promise<ApiResponse<void>> => {
   const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}`, {
     method: 'DELETE',
@@ -125,22 +77,20 @@ export const deleteAssignment = async (assignmentId: string): Promise<ApiRespons
   return handleResponse<void>(response);
 };
 
-export const approveAssignment = async (assignmentId: string, notes?: string): Promise<ApiResponse<Assignment>> => {
-  const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}/approve`, {
-    method: 'POST',
+export const confirmAssignment = async (assignmentId: string): Promise<ApiResponse<Assignment>> => {
+  const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}/confirm`, {
+    method: 'PATCH',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ notes }),
   });
-  
+
   return handleResponse<Assignment>(response);
 };
 
-export const rejectAssignment = async (assignmentId: string, reason: string): Promise<ApiResponse<Assignment>> => {
-  const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}/reject`, {
-    method: 'POST',
+export const declineAssignment = async (assignmentId: string): Promise<ApiResponse<Assignment>> => {
+  const response = await fetch(`${API_BASE_URL}/assignments/${assignmentId}/decline`, {
+    method: 'PATCH',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ reason }),
   });
-  
+
   return handleResponse<Assignment>(response);
 };

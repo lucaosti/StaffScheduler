@@ -6,7 +6,7 @@
  * role filtering for employees only.
  * 
  * @module services/EmployeeService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool } from 'mysql2/promise';

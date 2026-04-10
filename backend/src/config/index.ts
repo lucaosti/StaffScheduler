@@ -20,6 +20,16 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const isProduction = process.env.NODE_ENV === 'production';
+
+function requireSecret(envVar: string, name: string): string {
+  const value = process.env[envVar];
+  if (isProduction && (!value || value.startsWith('fallback') || value.includes('change-in-production') || value.includes('your-super-secret'))) {
+    throw new Error(`${name} must be explicitly set in production. Do not use placeholder values.`);
+  }
+  return value || `fallback-${name.toLowerCase().replace(/\s/g, '-')}`;
+}
+
 export const config = {
   server: {
     port: parseInt(process.env.PORT || '3001'),
@@ -36,7 +46,7 @@ export const config = {
     timeout: 60000,
   },
   session: {
-    secret: process.env.SESSION_SECRET || 'fallback-secret-change-in-production',
+    secret: requireSecret('SESSION_SECRET', 'SESSION_SECRET'),
     name: process.env.SESSION_NAME || 'staff_scheduler_session',
     resave: false,
     saveUninitialized: false,
@@ -47,7 +57,7 @@ export const config = {
     },
   },
   jwt: {
-    secret: process.env.JWT_SECRET || 'fallback-jwt-secret-change-in-production',
+    secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
   },
   email: {

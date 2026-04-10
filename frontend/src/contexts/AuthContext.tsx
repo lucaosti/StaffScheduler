@@ -67,7 +67,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 type AuthAction =
   | { type: 'LOGIN_START' }
   | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'>; token: string } }
-  | { type: 'LOGIN_FAILURE' }
+  | { type: 'LOGIN_FAILURE'; payload?: string }
   | { type: 'LOGOUT' }
   | { type: 'SET_USER'; payload: Omit<User, 'passwordHash' | 'salt'> }
   | { type: 'SET_LOADING'; payload: boolean };
@@ -106,6 +106,7 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
         token: null,
         isAuthenticated: false,
         isLoading: false,
+        error: action.payload || 'Authentication failed',
       };
     case 'LOGOUT':
       return {
@@ -190,7 +191,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         throw new Error((response.error as any)?.message || 'Login failed');
       }
     } catch (error) {
-      dispatch({ type: 'LOGIN_FAILURE' });
+      dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
       throw error;
     }
   };

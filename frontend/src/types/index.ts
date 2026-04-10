@@ -92,7 +92,7 @@ export interface DelegatedAuthority {
 
 // Employee (with matrix organization support)
 export interface Employee {
-  id?: ID; // backend user.id
+  id: ID; // backend user.id
   employeeId?: string;
   firstName: string;
   lastName: string;

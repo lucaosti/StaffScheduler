@@ -4,7 +4,7 @@
  * Handles user authentication, JWT token management, and session validation.
  * 
  * @module services/AuthService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
