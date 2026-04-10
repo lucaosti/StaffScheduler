@@ -1,15 +1,15 @@
 /**
  * System Settings Routes
- * 
+ *
  * Handles system-wide configuration management including:
  * - Currency selection (EUR/USD as requested)
  * - Time period defaults (Monthly as requested)
  * - Other application settings
- * 
+ *
  * Security:
  * - Only admin users can modify system settings
  * - All users can view settings for UI purposes
- * 
+ *
  * @author Luca Ostinelli
  */
 
@@ -18,6 +18,7 @@ import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
 import { authenticate } from '../middleware/auth';
 import { UpdateSystemSettingRequest } from '../types';
+import { logger } from '../config/logger';
 
 // Extend Express Request to include user
 declare module 'express-serve-static-core' {
@@ -40,10 +41,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: settings
       });
     } catch (error) {
-      console.error('Get settings error:', error);
+      logger.error('Get settings error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to retrieve settings' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve settings' }
       });
     }
   });
@@ -59,150 +60,13 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: settings
       });
     } catch (error) {
-      console.error('Get settings by category error:', error);
+      logger.error('Get settings by category error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to retrieve settings' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve settings' }
       });
     }
   });
-
-  // Get specific setting value
-  router.get('/:category/:key', authenticate, async (req, res) => {
-    try {
-      const { category, key } = req.params;
-      const value = await settingsService.getSetting(category, key);
-
-      if (value === null) {
-        return res.status(404).json({
-          success: false,
-          error: { message: 'Setting not found' }
-        });
-      }
-
-      res.json({
-        success: true,
-        data: { category, key, value }
-      });
-    } catch (error) {
-      console.error('Get setting error:', error);
-      res.status(500).json({
-        success: false,
-        error: { message: 'Failed to retrieve setting' }
-      });
-    }
-  });
-
-  // Update setting value (admin only)
-  router.put('/:category/:key', authenticate, async (req, res) => {
-    try {
-      const user = req.user!;
-      
-      // Only admin can modify system settings
-      if (user.role !== 'admin') {
-        return res.status(403).json({
-          success: false,
-          error: { message: 'Only administrators can modify system settings' }
-        });
-      }
-
-      const { category, key } = req.params;
-      const { value }: UpdateSystemSettingRequest = req.body;
-
-      if (!value && value !== '') {
-        return res.status(400).json({
-          success: false,
-          error: { message: 'Setting value is required' }
-        });
-      }
-
-      // Validate specific settings
-      if (category === 'general' && key === 'currency') {
-        if (!['EUR', 'USD'].includes(value)) {
-          return res.status(400).json({
-            success: false,
-            error: { message: 'Currency must be EUR or USD' }
-          });
-        }
-      }
-
-      if (category === 'schedule' && key === 'default_time_period') {
-        if (!['daily', 'weekly', 'monthly', 'yearly'].includes(value)) {
-          return res.status(400).json({
-            success: false,
-            error: { message: 'Time period must be daily, weekly, monthly, or yearly' }
-          });
-        }
-      }
-
-      const updated = await settingsService.updateSetting(category, key, value);
-
-      if (!updated) {
-        return res.status(404).json({
-          success: false,
-          error: { message: 'Setting not found' }
-        });
-      }
-
-      res.json({
-        success: true,
-        message: 'Setting updated successfully',
-        data: { category, key, value }
-      });
-    } catch (error: any) {
-      console.error('Update setting error:', error);
-      
-      if (error.message === 'System setting cannot be modified') {
-        return res.status(403).json({
-          success: false,
-          error: { message: 'This system setting cannot be modified' }
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: { message: 'Failed to update setting' }
-      });
-    }
-  });
-
-  // Reset setting to default value (admin only)
-  router.post('/:category/:key/reset', authenticate, async (req, res) => {
-    try {
-      const user = req.user!;
-      
-      // Only admin can reset system settings
-      if (user.role !== 'admin') {
-        return res.status(403).json({
-          success: false,
-          error: { message: 'Only administrators can reset system settings' }
-        });
-      }
-
-      const { category, key } = req.params;
-      const reset = await settingsService.resetSetting(category, key);
-
-      if (!reset) {
-        return res.status(404).json({
-          success: false,
-          error: { message: 'Setting not found' }
-        });
-      }
-
-      res.json({
-        success: true,
-        message: 'Setting reset to default value successfully'
-      });
-    } catch (error) {
-      console.error('Reset setting error:', error);
-      res.status(500).json({
-        success: false,
-        error: { message: 'Failed to reset setting' }
-      });
-    }
-  });
-
-  // Convenience endpoints for specific settings
 
   // Get current currency
   router.get('/currency', authenticate, async (req, res) => {
@@ -213,10 +77,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: { currency }
       });
     } catch (error) {
-      console.error('Get currency error:', error);
+      logger.error('Get currency error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to get currency setting' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to get currency setting' }
       });
     }
   });
@@ -225,20 +89,20 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   router.put('/currency', authenticate, async (req, res) => {
     try {
       const user = req.user!;
-      
+
       if (user.role !== 'admin') {
         return res.status(403).json({
           success: false,
-          error: { message: 'Only administrators can change currency settings' }
+          error: { code: 'FORBIDDEN', message: 'Only administrators can change currency settings' }
         });
       }
 
       const { currency } = req.body;
-      
+
       if (!['EUR', 'USD'].includes(currency)) {
         return res.status(400).json({
           success: false,
-          error: { message: 'Currency must be EUR or USD' }
+          error: { code: 'INVALID_INPUT', message: 'Currency must be EUR or USD' }
         });
       }
 
@@ -250,10 +114,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: { currency }
       });
     } catch (error) {
-      console.error('Set currency error:', error);
+      logger.error('Set currency error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to update currency' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to update currency' }
       });
     }
   });
@@ -267,10 +131,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: { timePeriod }
       });
     } catch (error) {
-      console.error('Get time period error:', error);
+      logger.error('Get time period error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to get time period setting' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to get time period setting' }
       });
     }
   });
@@ -279,20 +143,20 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   router.put('/time-period', authenticate, async (req, res) => {
     try {
       const user = req.user!;
-      
+
       if (user.role !== 'admin') {
         return res.status(403).json({
           success: false,
-          error: { message: 'Only administrators can change time period settings' }
+          error: { code: 'FORBIDDEN', message: 'Only administrators can change time period settings' }
         });
       }
 
       const { timePeriod } = req.body;
-      
+
       if (!['daily', 'weekly', 'monthly', 'yearly'].includes(timePeriod)) {
         return res.status(400).json({
           success: false,
-          error: { message: 'Time period must be daily, weekly, monthly, or yearly' }
+          error: { code: 'INVALID_INPUT', message: 'Time period must be daily, weekly, monthly, or yearly' }
         });
       }
 
@@ -304,10 +168,145 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         data: { timePeriod }
       });
     } catch (error) {
-      console.error('Set time period error:', error);
+      logger.error('Set time period error:', error);
       res.status(500).json({
         success: false,
-        error: { message: 'Failed to update time period' }
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to update time period' }
+      });
+    }
+  });
+
+  // Get specific setting value
+  router.get('/:category/:key', authenticate, async (req, res) => {
+    try {
+      const { category, key } = req.params;
+      const value = await settingsService.getSetting(category, key);
+
+      if (value === null) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Setting not found' }
+        });
+      }
+
+      res.json({
+        success: true,
+        data: { category, key, value }
+      });
+    } catch (error) {
+      logger.error('Get setting error:', error);
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve setting' }
+      });
+    }
+  });
+
+  // Update setting value (admin only)
+  router.put('/:category/:key', authenticate, async (req, res) => {
+    try {
+      const user = req.user!;
+
+      // Only admin can modify system settings
+      if (user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Only administrators can modify system settings' }
+        });
+      }
+
+      const { category, key } = req.params;
+      const { value }: UpdateSystemSettingRequest = req.body;
+
+      if (!value && value !== '') {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_INPUT', message: 'Setting value is required' }
+        });
+      }
+
+      // Validate specific settings
+      if (category === 'general' && key === 'currency') {
+        if (!['EUR', 'USD'].includes(value)) {
+          return res.status(400).json({
+            success: false,
+            error: { code: 'INVALID_INPUT', message: 'Currency must be EUR or USD' }
+          });
+        }
+      }
+
+      if (category === 'schedule' && key === 'default_time_period') {
+        if (!['daily', 'weekly', 'monthly', 'yearly'].includes(value)) {
+          return res.status(400).json({
+            success: false,
+            error: { code: 'INVALID_INPUT', message: 'Time period must be daily, weekly, monthly, or yearly' }
+          });
+        }
+      }
+
+      const updated = await settingsService.updateSetting(category, key, value);
+
+      if (!updated) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Setting not found' }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Setting updated successfully',
+        data: { category, key, value }
+      });
+    } catch (error: any) {
+      logger.error('Update setting error:', error);
+
+      if (error.message === 'System setting cannot be modified') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'This system setting cannot be modified' }
+        });
+      }
+
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to update setting' }
+      });
+    }
+  });
+
+  // Reset setting to default value (admin only)
+  router.post('/:category/:key/reset', authenticate, async (req, res) => {
+    try {
+      const user = req.user!;
+
+      // Only admin can reset system settings
+      if (user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Only administrators can reset system settings' }
+        });
+      }
+
+      const { category, key } = req.params;
+      const reset = await settingsService.resetSetting(category, key);
+
+      if (!reset) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Setting not found' }
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Setting reset to default value successfully'
+      });
+    } catch (error) {
+      logger.error('Reset setting error:', error);
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to reset setting' }
       });
     }
   });

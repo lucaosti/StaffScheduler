@@ -48,7 +48,6 @@ const Shifts: React.FC = () => {
         setShifts([]);
       }
     } catch (err) {
-      console.error('Load shifts error:', err);
       setError('Failed to load shifts. Please check your connection and try again.');
       setShifts([]);
     } finally {
@@ -69,7 +68,6 @@ const Shifts: React.FC = () => {
       await shiftService.deleteShift(shiftId);
       await loadShifts(); // Reload the list
     } catch (err) {
-      console.error('Delete error:', err);
       alert('Failed to delete shift');
     }
   };
@@ -330,7 +328,6 @@ const Shifts: React.FC = () => {
                     setShowAddModal(false);
                     setEditingShift(null);
                   } catch (err) {
-                    console.error('Save error:', err);
                     alert('Failed to save shift');
                   }
                 }}>
@@ -344,7 +341,7 @@ const Shifts: React.FC = () => {
                         name="shiftName"
                         defaultValue={editingShift?.name || ''}
                         required
-                        placeholder="e.g. Turno Mattina"
+                        placeholder="e.g. Morning Shift"
                       />
                     </div>
                     <div className="col-md-6 mb-3">

@@ -9,21 +9,9 @@
  * @author Luca Ostinelli
  */
 
-// @ts-ignore
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { getAuthHeaders } from './apiUtils';
 
-export interface ScheduleData {
-  id: string;
-  name: string;
-  startDate: string;
-  endDate: string;
-  status: 'draft' | 'published' | 'archived' | 'generated';
-  departmentId?: string;
-  departmentName?: string;
-  createdBy?: string;
-  createdAt: string;
-  updatedAt: string;
-}
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 export interface CreateScheduleParams {
   name: string;
@@ -48,10 +36,7 @@ export const getSchedules = async (params?: Record<string, any>) => {
     const query = new URLSearchParams(params || {});
     const response = await fetch(`${API_BASE_URL}/schedules?${query}`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -77,10 +62,7 @@ export const getScheduleById = async (id: string | number) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -105,10 +87,7 @@ export const getScheduleWithShifts = async (id: string | number) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}/shifts`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -133,10 +112,7 @@ export const createSchedule = async (params: CreateScheduleParams) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(params),
     });
 
@@ -162,10 +138,7 @@ export const updateSchedule = async (id: string | number, params: Partial<Create
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(params),
     });
 
@@ -191,10 +164,7 @@ export const deleteSchedule = async (id: string | number) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
       method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -219,10 +189,7 @@ export const generateSchedule = async (id: string | number): Promise<{ success: 
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}/generate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -247,10 +214,7 @@ export const publishSchedule = async (id: string | number) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}/publish`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -275,10 +239,7 @@ export const archiveSchedule = async (id: string | number) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}/archive`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -303,10 +264,7 @@ export const duplicateSchedule = async (id: string | number, params: CreateSched
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/${id}/duplicate`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
       body: JSON.stringify(params),
     });
 
@@ -332,10 +290,7 @@ export const getSchedulesByDepartment = async (departmentId: string) => {
   try {
     const response = await fetch(`${API_BASE_URL}/schedules/department/${departmentId}`, {
       method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${localStorage.getItem('token')}`,
-      },
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) {

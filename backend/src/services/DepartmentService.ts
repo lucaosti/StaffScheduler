@@ -5,7 +5,7 @@
  * employee management, and department statistics.
  * 
  * @module services/DepartmentService
- * @author Staff Scheduler Team
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
@@ -622,9 +622,7 @@ export class DepartmentService {
   }
 
   /**
-   * Gets department statistics (alias for getDepartmentStatistics)
-   * 
-   * @returns Promise resolving to department statistics
+   * Gets aggregate statistics across all departments
    */
   async getDepartmentStats(): Promise<{
     total: number;
@@ -634,5 +632,45 @@ export class DepartmentService {
     averageEmployeesPerDepartment: number;
   }> {
     return this.getDepartmentStatistics();
+  }
+
+  /**
+   * Gets statistics for a specific department
+   *
+   * @param departmentId - The department to get stats for
+   * @returns Per-department employee count, shift count, and active schedule count
+   */
+  async getDepartmentStatsByDepartment(departmentId: number): Promise<{
+    departmentId: number;
+    employeeCount: number;
+    shiftCount: number;
+    activeScheduleCount: number;
+  }> {
+    try {
+      const [employeeRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT COUNT(DISTINCT user_id) as count FROM user_departments WHERE department_id = ?',
+        [departmentId]
+      );
+
+      const [shiftRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM shifts WHERE department_id = ?',
+        [departmentId]
+      );
+
+      const [scheduleRows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT COUNT(*) as count FROM schedules WHERE department_id = ? AND status = "published"',
+        [departmentId]
+      );
+
+      return {
+        departmentId,
+        employeeCount: Number(employeeRows[0].count),
+        shiftCount: Number(shiftRows[0].count),
+        activeScheduleCount: Number(scheduleRows[0].count),
+      };
+    } catch (error) {
+      logger.error('Failed to get per-department statistics:', error);
+      throw error;
+    }
   }
 }

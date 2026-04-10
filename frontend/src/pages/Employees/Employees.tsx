@@ -20,20 +20,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
 
-// Type assertion for Employee interface to include optional properties
-type EmployeeWithOptionals = Employee & {
-  id?: number | string;
-  employeeType?: string;
-  hourlyRate?: number;
-  maxHoursPerWeek?: number;
-};
 
 /**
  * Employees page component providing complete employee management
  * @returns JSX element containing the employee management interface
  */
 const Employees: React.FC = () => {
-  const [employees, setEmployees] = useState<EmployeeWithOptionals[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,7 +53,6 @@ const Employees: React.FC = () => {
       }
     } catch (err) {
       setError('Failed to load employees. Please check your connection and try again.');
-      console.error('Employees error:', err);
       setEmployees([]);
     } finally {
       setLoading(false);
@@ -80,7 +72,6 @@ const Employees: React.FC = () => {
       await employeeService.deleteEmployee(id);
       await loadEmployees(); // Reload the list
     } catch (err) {
-      console.error('Delete error:', err);
       alert('Failed to delete employee');
     }
   };
@@ -336,7 +327,6 @@ const Employees: React.FC = () => {
                     setShowAddModal(false);
                     setEditingEmployee(null);
                   } catch (err) {
-                    console.error('Save error:', err);
                     alert('Failed to save employee');
                   }
                 }}>
@@ -436,17 +426,17 @@ const Employees: React.FC = () => {
                         required
                       >
                         <option value="">Select Position</option>
-                        <option value="Direttore Generale">Direttore Generale</option>
-                        <option value="Direttore Sanitario">Direttore Sanitario</option>
-                        <option value="Primario">Primario</option>
-                        <option value="Caposala">Caposala</option>
-                        <option value="Medico Strutturato">Medico Strutturato</option>
-                        <option value="Medico Specializzando">Medico Specializzando</option>
-                        <option value="Infermiere Coordinatore">Infermiere Coordinatore</option>
-                        <option value="Infermiere">Infermiere</option>
-                        <option value="OSS">OSS (Operatore Socio Sanitario)</option>
-                        <option value="Tecnico di Radiologia">Tecnico di Radiologia</option>
-                        <option value="Tecnico di Laboratorio">Tecnico di Laboratorio</option>
+                        <option value="General Director">General Director</option>
+                        <option value="Medical Director">Medical Director</option>
+                        <option value="Department Chief">Department Chief</option>
+                        <option value="Head Nurse">Head Nurse</option>
+                        <option value="Senior Physician">Senior Physician</option>
+                        <option value="Resident Physician">Resident Physician</option>
+                        <option value="Coordinating Nurse">Coordinating Nurse</option>
+                        <option value="Nurse">Nurse</option>
+                        <option value="Healthcare Assistant">Healthcare Assistant (OSS)</option>
+                        <option value="Radiology Technician">Radiology Technician</option>
+                        <option value="Laboratory Technician">Laboratory Technician</option>
                       </select>
                     </div>
                     <div className="col-md-6 mb-3">
