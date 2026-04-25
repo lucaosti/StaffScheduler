@@ -48,6 +48,7 @@ import { createCalendarRouter } from './routes/calendar';
 import { createTwoFactorRouter } from './routes/twoFactor';
 import { createOpenApiRouter } from './routes/openapi';
 import { createSkillGapRouter } from './routes/skillGap';
+import { createReportsRouter } from './routes/reports';
 
 async function createApp() {
   const app = express();
@@ -141,6 +142,7 @@ async function createApp() {
   app.use('/api/auth/2fa', createTwoFactorRouter(pool));
   app.use('/api', createOpenApiRouter());
   app.use('/api/skill-gap', createSkillGapRouter(pool));
+  app.use('/api/reports', createReportsRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
