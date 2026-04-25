@@ -42,9 +42,8 @@ node_modules/
 */node_modules/
 jspm_packages/
 
-# Package lock files (regenerated each time)
-package-lock.json
-*/package-lock.json
+# Lockfiles are intentionally tracked (npm ci needs them, CI requires them).
+# yarn.lock stays ignored — this project uses npm.
 yarn.lock
 */yarn.lock
 
