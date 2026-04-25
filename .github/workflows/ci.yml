@@ -11,6 +11,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default: read-only access to the repo.
+# Individual jobs may opt in to writes if/when they need them.
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend (lint, typecheck, test, build)
