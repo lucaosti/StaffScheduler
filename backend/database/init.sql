@@ -250,6 +250,34 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
 );
 
 -- ================================================================
+-- TIME OFF REQUESTS TABLE - Workflow for vacation/sick/personal leave
+-- An approved request materializes into a row in user_unavailability.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS time_off_requests (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    type ENUM('vacation', 'sick', 'personal', 'other') NOT NULL DEFAULT 'vacation',
+    reason TEXT,
+    status ENUM('pending', 'approved', 'rejected', 'cancelled') NOT NULL DEFAULT 'pending',
+    reviewer_id INT NULL,
+    reviewed_at TIMESTAMP NULL,
+    review_notes TEXT,
+    unavailability_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_user (user_id),
+    INDEX idx_status (status),
+    INDEX idx_user_dates (user_id, start_date, end_date),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (unavailability_id) REFERENCES user_unavailability(id) ON DELETE SET NULL
+);
+
+-- ================================================================
 -- USER PREFERENCES TABLE - Employee scheduling preferences
 -- Inspired by PoliTO's teacher preferences
 -- ================================================================
