@@ -1,0 +1,187 @@
+{
+  "_marker": "DEMO — fake data only. Do not enter real personal information.",
+  "departments": [
+    { "name": "Emergency", "description": "[DEMO] Emergency department" },
+    { "name": "Surgery", "description": "[DEMO] Surgical department" },
+    { "name": "Pediatrics", "description": "[DEMO] Pediatric department" },
+    { "name": "Nursing", "description": "[DEMO] Nursing pool" }
+  ],
+  "skills": [
+    { "name": "Triage", "description": "[DEMO] Initial patient assessment" },
+    { "name": "Surgery Assist", "description": "[DEMO] Operating room assistance" },
+    { "name": "Pediatric Care", "description": "[DEMO] Care for pediatric patients" },
+    { "name": "Cardiac Care", "description": "[DEMO] Cardiac monitoring" },
+    { "name": "Pharmacology", "description": "[DEMO] Medication administration" },
+    { "name": "IV Therapy", "description": "[DEMO] Intravenous therapy" },
+    { "name": "CPR Certified", "description": "[DEMO] CPR certification" },
+    { "name": "Mental Health Support", "description": "[DEMO] Mental health support" }
+  ],
+  "users": [
+    {
+      "email": "admin@demo.staffscheduler.local",
+      "firstName": "Ada",
+      "lastName": "Demo",
+      "role": "admin",
+      "employeeId": "DEMO-A001",
+      "departments": ["Emergency", "Surgery", "Pediatrics", "Nursing"],
+      "skillsByName": ["Triage", "CPR Certified"]
+    },
+    {
+      "email": "emergency.manager@demo.staffscheduler.local",
+      "firstName": "Mara",
+      "lastName": "Demo",
+      "role": "manager",
+      "employeeId": "DEMO-M001",
+      "departments": ["Emergency"],
+      "managesDepartment": "Emergency",
+      "skillsByName": ["Triage", "Cardiac Care", "CPR Certified"]
+    },
+    {
+      "email": "surgery.manager@demo.staffscheduler.local",
+      "firstName": "Sergio",
+      "lastName": "Demo",
+      "role": "manager",
+      "employeeId": "DEMO-M002",
+      "departments": ["Surgery"],
+      "managesDepartment": "Surgery",
+      "skillsByName": ["Surgery Assist", "Pharmacology"]
+    },
+    {
+      "email": "pediatrics.manager@demo.staffscheduler.local",
+      "firstName": "Paola",
+      "lastName": "Demo",
+      "role": "manager",
+      "employeeId": "DEMO-M003",
+      "departments": ["Pediatrics"],
+      "managesDepartment": "Pediatrics",
+      "skillsByName": ["Pediatric Care", "Mental Health Support"]
+    },
+    {
+      "email": "emp01@demo.staffscheduler.local", "firstName": "Anna",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E001",
+      "departments": ["Emergency"], "skillsByName": ["Triage", "IV Therapy", "CPR Certified"]
+    },
+    {
+      "email": "emp02@demo.staffscheduler.local", "firstName": "Bruno",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E002",
+      "departments": ["Emergency"], "skillsByName": ["Triage", "CPR Certified"]
+    },
+    {
+      "email": "emp03@demo.staffscheduler.local", "firstName": "Carla",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E003",
+      "departments": ["Emergency"], "skillsByName": ["Triage", "IV Therapy"]
+    },
+    {
+      "email": "emp04@demo.staffscheduler.local", "firstName": "Davide", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E004",
+      "departments": ["Emergency", "Nursing"], "skillsByName": ["IV Therapy", "Cardiac Care"]
+    },
+    {
+      "email": "emp05@demo.staffscheduler.local", "firstName": "Elena",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E005",
+      "departments": ["Emergency"], "skillsByName": ["Triage", "Pharmacology"]
+    },
+    {
+      "email": "emp06@demo.staffscheduler.local", "firstName": "Fabio",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E006",
+      "departments": ["Surgery"], "skillsByName": ["Surgery Assist", "Pharmacology"]
+    },
+    {
+      "email": "emp07@demo.staffscheduler.local", "firstName": "Giulia", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E007",
+      "departments": ["Surgery"], "skillsByName": ["Surgery Assist", "IV Therapy"]
+    },
+    {
+      "email": "emp08@demo.staffscheduler.local", "firstName": "Hugo",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E008",
+      "departments": ["Surgery"], "skillsByName": ["Surgery Assist", "Pharmacology", "CPR Certified"]
+    },
+    {
+      "email": "emp09@demo.staffscheduler.local", "firstName": "Ilaria", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E009",
+      "departments": ["Surgery", "Nursing"], "skillsByName": ["Surgery Assist"]
+    },
+    {
+      "email": "emp10@demo.staffscheduler.local", "firstName": "Jacopo", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E010",
+      "departments": ["Surgery"], "skillsByName": ["Surgery Assist", "Pharmacology"]
+    },
+    {
+      "email": "emp11@demo.staffscheduler.local", "firstName": "Klara",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E011",
+      "departments": ["Pediatrics"], "skillsByName": ["Pediatric Care", "Mental Health Support"]
+    },
+    {
+      "email": "emp12@demo.staffscheduler.local", "firstName": "Luca",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E012",
+      "departments": ["Pediatrics"], "skillsByName": ["Pediatric Care", "CPR Certified"]
+    },
+    {
+      "email": "emp13@demo.staffscheduler.local", "firstName": "Marta",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E013",
+      "departments": ["Pediatrics"], "skillsByName": ["Pediatric Care", "IV Therapy"]
+    },
+    {
+      "email": "emp14@demo.staffscheduler.local", "firstName": "Nicola", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E014",
+      "departments": ["Pediatrics", "Nursing"], "skillsByName": ["Pediatric Care", "Mental Health Support"]
+    },
+    {
+      "email": "emp15@demo.staffscheduler.local", "firstName": "Olga",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E015",
+      "departments": ["Pediatrics"], "skillsByName": ["Pediatric Care"]
+    },
+    {
+      "email": "emp16@demo.staffscheduler.local", "firstName": "Paolo",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E016",
+      "departments": ["Nursing"], "skillsByName": ["IV Therapy", "CPR Certified"]
+    },
+    {
+      "email": "emp17@demo.staffscheduler.local", "firstName": "Quirina","lastName": "Demo", "role": "employee", "employeeId": "DEMO-E017",
+      "departments": ["Nursing"], "skillsByName": ["IV Therapy", "Pharmacology"]
+    },
+    {
+      "email": "emp18@demo.staffscheduler.local", "firstName": "Roberto","lastName": "Demo", "role": "employee", "employeeId": "DEMO-E018",
+      "departments": ["Nursing"], "skillsByName": ["CPR Certified", "Cardiac Care"]
+    },
+    {
+      "email": "emp19@demo.staffscheduler.local", "firstName": "Sara",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E019",
+      "departments": ["Nursing"], "skillsByName": ["IV Therapy"]
+    },
+    {
+      "email": "emp20@demo.staffscheduler.local", "firstName": "Teo",    "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E020",
+      "departments": ["Emergency", "Nursing"], "skillsByName": ["Triage", "IV Therapy"]
+    },
+    {
+      "email": "emp21@demo.staffscheduler.local", "firstName": "Ursula", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E021",
+      "departments": ["Emergency"], "skillsByName": ["Triage", "Cardiac Care", "CPR Certified"]
+    },
+    {
+      "email": "emp22@demo.staffscheduler.local", "firstName": "Valter", "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E022",
+      "departments": ["Surgery"], "skillsByName": ["Surgery Assist", "CPR Certified"]
+    },
+    {
+      "email": "emp23@demo.staffscheduler.local", "firstName": "Wanda",  "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E023",
+      "departments": ["Pediatrics"], "skillsByName": ["Pediatric Care", "Mental Health Support"]
+    },
+    {
+      "email": "emp24@demo.staffscheduler.local", "firstName": "Xeno",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E024",
+      "departments": ["Surgery", "Emergency"], "skillsByName": ["Surgery Assist", "Triage"]
+    },
+    {
+      "email": "emp25@demo.staffscheduler.local", "firstName": "Yara",   "lastName": "Demo", "role": "employee", "employeeId": "DEMO-E025",
+      "departments": ["Nursing", "Pediatrics"], "skillsByName": ["IV Therapy", "Pediatric Care"]
+    }
+  ],
+  "shiftTemplates": [
+    { "name": "Emergency Morning",   "department": "Emergency",  "startTime": "07:00", "endTime": "15:00", "minStaff": 3, "maxStaff": 6, "skillsByName": ["Triage"] },
+    { "name": "Emergency Afternoon", "department": "Emergency",  "startTime": "15:00", "endTime": "23:00", "minStaff": 3, "maxStaff": 6, "skillsByName": ["Triage", "CPR Certified"] },
+    { "name": "Emergency Night",     "department": "Emergency",  "startTime": "23:00", "endTime": "07:00", "minStaff": 2, "maxStaff": 4, "skillsByName": ["Triage", "CPR Certified"] },
+    { "name": "Surgery Morning",     "department": "Surgery",    "startTime": "07:00", "endTime": "15:00", "minStaff": 3, "maxStaff": 5, "skillsByName": ["Surgery Assist"] },
+    { "name": "Surgery Afternoon",   "department": "Surgery",    "startTime": "15:00", "endTime": "23:00", "minStaff": 2, "maxStaff": 4, "skillsByName": ["Surgery Assist"] },
+    { "name": "Pediatrics Day",      "department": "Pediatrics", "startTime": "08:00", "endTime": "20:00", "minStaff": 2, "maxStaff": 4, "skillsByName": ["Pediatric Care"] }
+  ],
+  "schedule": {
+    "name": "Demo Schedule — current month",
+    "department": "Emergency",
+    "status": "published",
+    "shiftsForDays": 14,
+    "assignmentsPerShift": { "min": 2, "max": 4 }
+  },
+  "unavailability": [
+    { "userEmail": "emp03@demo.staffscheduler.local", "daysFromNow": [3, 4],  "reason": "[DEMO] Personal" },
+    { "userEmail": "emp08@demo.staffscheduler.local", "daysFromNow": [7, 8, 9], "reason": "[DEMO] Conference" },
+    { "userEmail": "emp14@demo.staffscheduler.local", "daysFromNow": [10, 11], "reason": "[DEMO] Vacation" }
+  ],
+  "preferences": [
+    { "userEmail": "emp01@demo.staffscheduler.local", "maxHoursPerWeek": 40, "minHoursPerWeek": 24, "maxConsecutiveDays": 5 },
+    { "userEmail": "emp06@demo.staffscheduler.local", "maxHoursPerWeek": 36, "minHoursPerWeek": 20, "maxConsecutiveDays": 4 },
+    { "userEmail": "emp11@demo.staffscheduler.local", "maxHoursPerWeek": 32, "minHoursPerWeek": 16, "maxConsecutiveDays": 4 },
+    { "userEmail": "emp16@demo.staffscheduler.local", "maxHoursPerWeek": 40, "minHoursPerWeek": 32, "maxConsecutiveDays": 6 },
+    { "userEmail": "emp20@demo.staffscheduler.local", "maxHoursPerWeek": 38, "minHoursPerWeek": 20, "maxConsecutiveDays": 5 }
+  ]
+}

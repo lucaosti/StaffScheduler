@@ -17,6 +17,7 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write src/**/*.ts",
     "db:init": "npx ts-node scripts/init-database.ts",
+    "db:seed:demo": "npx ts-node scripts/seed-demo.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {
