@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { act, render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DemoBanner from './DemoBanner';
 import * as systemService from '../services/systemService';
@@ -25,10 +25,13 @@ describe('<DemoBanner />', () => {
       data: { mode: 'production' },
     });
 
-    await act(async () => {
-      render(<DemoBanner />);
-    });
+    render(<DemoBanner />);
 
+    // The component fires off an async fetch on mount; wait for the first
+    // resolution before asserting the alert never appeared.
+    await waitFor(() =>
+      expect((systemService.getSystemInfo as jest.Mock)).toHaveBeenCalled()
+    );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
@@ -38,9 +41,7 @@ describe('<DemoBanner />', () => {
       data: { mode: 'demo' },
     });
 
-    await act(async () => {
-      render(<DemoBanner />);
-    });
+    render(<DemoBanner />);
 
     const banner = await screen.findByRole('alert', { name: /demo environment notice/i });
     expect(banner).toHaveTextContent(/demo environment/i);
@@ -52,9 +53,7 @@ describe('<DemoBanner />', () => {
       data: { mode: 'demo' },
     });
 
-    await act(async () => {
-      render(<DemoBanner />);
-    });
+    render(<DemoBanner />);
 
     const dismiss = await screen.findByRole('button', { name: /dismiss demo banner/i });
     await userEvent.click(dismiss);
@@ -66,10 +65,11 @@ describe('<DemoBanner />', () => {
   it('renders nothing when the API call fails', async () => {
     (systemService.getSystemInfo as jest.Mock).mockRejectedValue(new Error('network'));
 
-    await act(async () => {
-      render(<DemoBanner />);
-    });
+    render(<DemoBanner />);
 
+    await waitFor(() =>
+      expect((systemService.getSystemInfo as jest.Mock)).toHaveBeenCalled()
+    );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
