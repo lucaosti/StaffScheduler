@@ -45,6 +45,7 @@ import { createShiftSwapRouter } from './routes/shiftSwap';
 import { createPreferencesRouter } from './routes/preferences';
 import { createAuditLogsRouter } from './routes/auditLogs';
 import { createCalendarRouter } from './routes/calendar';
+import { createTwoFactorRouter } from './routes/twoFactor';
 
 async function createApp() {
   const app = express();
@@ -135,6 +136,7 @@ async function createApp() {
   app.use('/api/preferences', createPreferencesRouter(pool));
   app.use('/api/audit-logs', createAuditLogsRouter(pool));
   app.use('/api/calendar', createCalendarRouter(pool));
+  app.use('/api/auth/2fa', createTwoFactorRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
