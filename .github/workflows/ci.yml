@@ -43,7 +43,7 @@ jobs:
         run: npm run build
 
       - name: Unit tests
-        run: npm test -- --ci --reporters=default --runInBand
+        run: npm test -- --ci --reporters=default --reporters=github-actions --runInBand --verbose
 
   frontend:
     name: Frontend (lint, test, build)

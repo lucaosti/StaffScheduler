@@ -9,11 +9,12 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
-import { 
+import {
   ShiftAssignment,
   CreateAssignmentRequest
 } from '../types';
 import { logger } from '../config/logger';
+import { evaluateAssignmentCompliance } from './ComplianceEngine';
 
 /**
  * AssignmentService Class
@@ -116,7 +117,7 @@ export class AssignmentService {
 
       if (requiredSkills.length > 0) {
         const [userSkills] = await connection.execute<RowDataPacket[]>(
-          `SELECT skill_id FROM user_skills 
+          `SELECT skill_id FROM user_skills
           WHERE user_id = ? AND skill_id IN (?)`,
           [assignmentData.userId, requiredSkills.map((rs: any) => rs.skill_id)]
         );
@@ -124,6 +125,27 @@ export class AssignmentService {
         if (userSkills.length < requiredSkills.length) {
           throw new Error('User does not have all required skills for this shift');
         }
+      }
+
+      // F19 — compliance hours engine. Block the assignment if it would
+      // exceed configured limits (consecutive days, rest, weekly hours).
+      const compliance = await evaluateAssignmentCompliance(this.pool, assignmentData.userId, {
+        date:
+          typeof shift.date === 'string'
+            ? shift.date
+            : new Date(shift.date).toISOString().slice(0, 10),
+        startTime: shift.start_time,
+        endTime: shift.end_time,
+      });
+      if (!compliance.ok) {
+        const head = compliance.violations[0];
+        const err = new Error(`Compliance violation: ${head.message}`) as Error & {
+          code?: string;
+          violations?: typeof compliance.violations;
+        };
+        err.code = `COMPLIANCE_${head.code}`;
+        err.violations = compliance.violations;
+        throw err;
       }
 
       // Create assignment
