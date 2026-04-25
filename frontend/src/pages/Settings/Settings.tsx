@@ -273,6 +273,16 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
+      {/* TODO(settings-persist): wire save handlers to backend per ROADMAP.md F07 */}
+      <div className="alert alert-warning d-flex align-items-center" role="status">
+        <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
+        <div>
+          <strong>Saving settings is not yet wired to the backend.</strong> Changes you make on
+          this page will not persist across reloads. Save buttons are disabled until the
+          settings API is available.
+        </div>
+      </div>
+
       {/* Navigation Tabs */}
       <div className="row mb-4">
         <div className="col">
