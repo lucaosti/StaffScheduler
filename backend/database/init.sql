@@ -250,6 +250,19 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
 );
 
 -- ================================================================
+-- USER CALENDAR TOKENS TABLE - Per-user opaque tokens for iCal feeds
+-- The .ics URL is shared with calendar apps that cannot send Authorization
+-- headers; rotating the token revokes every active subscription.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS user_calendar_tokens (
+    user_id INT PRIMARY KEY,
+    token VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
 -- SHIFT SWAP REQUESTS TABLE - Employee-to-employee shift exchanges
 -- Both legs of the swap are required; manager approves or declines.
 -- ================================================================
