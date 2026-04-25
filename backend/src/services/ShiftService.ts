@@ -552,7 +552,7 @@ export class ShiftService {
       let query = `
         SELECT 
           s.id, s.schedule_id, s.department_id, s.date, s.start_time, s.end_time,
-          s.min_staff, s.max_staff, s.status, s.created_at,
+          s.min_staff, s.max_staff, s.status, s.created_at, s.updated_at,
           COUNT(DISTINCT sa.id) as assigned_staff,
           sch.name as schedule_name,
           d.name as department_name
@@ -587,7 +587,7 @@ export class ShiftService {
         assignedStaff: row.assigned_staff || 0,
         status: row.status,
         createdAt: row.created_at,
-        updatedAt: row.created_at
+        updatedAt: row.updated_at
       }));
     } catch (error) {
       logger.error('Failed to get unassigned shifts:', error);
