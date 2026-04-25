@@ -1,0 +1,271 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Staff Scheduler API",
+    "version": "1.0.0",
+    "description": "Workforce management REST API. All non-public endpoints require a Bearer JWT obtained via /api/auth/login.",
+    "contact": { "name": "Luca Ostinelli", "email": "ostinelliluca2@gmail.com" }
+  },
+  "servers": [
+    { "url": "http://localhost:3001", "description": "Local development" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+    },
+    "schemas": {
+      "ApiSuccess": {
+        "type": "object",
+        "required": ["success"],
+        "properties": {
+          "success": { "type": "boolean", "const": true },
+          "data": {},
+          "message": { "type": "string" }
+        }
+      },
+      "ApiError": {
+        "type": "object",
+        "required": ["success", "error"],
+        "properties": {
+          "success": { "type": "boolean", "const": false },
+          "error": {
+            "type": "object",
+            "required": ["code", "message"],
+            "properties": {
+              "code": { "type": "string" },
+              "message": { "type": "string" }
+            }
+          }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string", "format": "email" },
+          "firstName": { "type": "string" },
+          "lastName": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "manager", "employee"] },
+          "isActive": { "type": "boolean" }
+        }
+      },
+      "TimeOffRequest": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "userId": { "type": "integer" },
+          "startDate": { "type": "string", "format": "date" },
+          "endDate": { "type": "string", "format": "date" },
+          "type": { "type": "string", "enum": ["vacation", "sick", "personal", "other"] },
+          "status": { "type": "string", "enum": ["pending", "approved", "rejected", "cancelled"] }
+        }
+      },
+      "ShiftSwapRequest": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "requesterUserId": { "type": "integer" },
+          "requesterAssignmentId": { "type": "integer" },
+          "targetUserId": { "type": "integer" },
+          "targetAssignmentId": { "type": "integer" },
+          "status": { "type": "string", "enum": ["pending", "approved", "declined", "cancelled"] }
+        }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health check",
+        "security": [],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/system/info": {
+      "get": {
+        "summary": "Runtime metadata (mode = production | demo | development)",
+        "security": [],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Authenticate with email + password",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "password"],
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "JWT issued" },
+          "401": { "description": "Invalid credentials" }
+        }
+      }
+    },
+    "/api/auth/2fa/setup": {
+      "post": {
+        "summary": "Begin TOTP setup; returns secret and otpauth URI",
+        "responses": { "200": { "description": "Setup payload" } }
+      }
+    },
+    "/api/auth/2fa/enable": {
+      "post": {
+        "summary": "Confirm a TOTP code and enable 2FA; returns recovery codes",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["code"],
+                "properties": { "code": { "type": "string", "pattern": "^[0-9]{6}$" } }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Recovery codes" },
+          "400": { "description": "Invalid code or state" }
+        }
+      }
+    },
+    "/api/auth/2fa/disable": {
+      "post": {
+        "summary": "Disable 2FA for the current user",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/time-off": {
+      "get": {
+        "summary": "List time-off requests",
+        "responses": {
+          "200": {
+            "description": "Array of TimeOffRequest",
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TimeOffRequest" } }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a pending time-off request",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["startDate", "endDate"],
+                "properties": {
+                  "startDate": { "type": "string", "format": "date" },
+                  "endDate": { "type": "string", "format": "date" },
+                  "type": { "type": "string", "enum": ["vacation", "sick", "personal", "other"] },
+                  "reason": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/api/time-off/{id}/approve": {
+      "post": {
+        "summary": "Approve a pending time-off request (manager)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Approved" } }
+      }
+    },
+    "/api/shift-swap": {
+      "post": {
+        "summary": "Create a shift swap request",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["requesterAssignmentId", "targetAssignmentId"],
+                "properties": {
+                  "requesterAssignmentId": { "type": "integer" },
+                  "targetAssignmentId": { "type": "integer" },
+                  "notes": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/api/preferences/me": {
+      "get": { "summary": "Read own scheduling preferences", "responses": { "200": { "description": "OK" } } },
+      "put": {
+        "summary": "Upsert own scheduling preferences",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "maxHoursPerWeek": { "type": "integer" },
+                  "minHoursPerWeek": { "type": "integer" },
+                  "maxConsecutiveDays": { "type": "integer", "minimum": 1, "maximum": 14 }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/audit-logs": {
+      "get": {
+        "summary": "List audit log entries (manager)",
+        "parameters": [
+          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "maximum": 500 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Page of entries" } }
+      }
+    },
+    "/api/calendar/token": {
+      "post": { "summary": "Get or create the calendar feed token", "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/calendar/feed.ics": {
+      "get": {
+        "summary": "iCalendar feed for the user identified by `token`",
+        "security": [],
+        "parameters": [
+          { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar text",
+            "content": { "text/calendar": { "schema": { "type": "string" } } }
+          },
+          "401": { "description": "Missing or invalid token" }
+        }
+      }
+    }
+  }
+}
