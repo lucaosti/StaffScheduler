@@ -253,6 +253,26 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
 );
 
 -- ================================================================
+-- NOTIFICATIONS TABLE - In-app inbox; email delivery is handled in-process
+-- ================================================================
+CREATE TABLE IF NOT EXISTS notifications (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    type VARCHAR(50) NOT NULL,
+    title VARCHAR(200) NOT NULL,
+    body TEXT,
+    link VARCHAR(500),
+    is_read BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    read_at TIMESTAMP NULL,
+
+    INDEX idx_user (user_id),
+    INDEX idx_user_unread (user_id, is_read),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
 -- USER CALENDAR TOKENS TABLE - Per-user opaque tokens for iCal feeds
 -- The .ics URL is shared with calendar apps that cannot send Authorization
 -- headers; rotating the token revokes every active subscription.
