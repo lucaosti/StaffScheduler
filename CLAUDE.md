@@ -117,9 +117,15 @@ The `code` field is required in all error responses.
 - **Language**: All code, comments, UI strings, and documentation must be in **English**.
 - **Logging**: Backend routes must use `logger.error(...)` (Winston). Never use `console.error`.
 - **Type safety**: No `@ts-ignore`. No local type duplicates — import from `types/index.ts` (frontend) or `src/types/index.ts` (backend).
-- **Database**: No ORM. Raw SQL with `mysql2/promise`. All schema changes go in `backend/database/init.sql`.
-- **Auth**: Protected routes apply `authenticate` middleware first, then `requireAdmin` or `requireManager` as needed.
+- **Database**: No ORM. Raw SQL with `mysql2/promise`. All schema changes go in `backend/database/init.sql`. The password column is `password_hash` (never `password`).
+- **Auth**: Protected routes apply `authenticate` middleware first, then `requireAdmin` or `requireManager` as needed. Permission gating is role-based via `requireRole`.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
+
+## Authoring Rules
+
+- **Single author**: All commits must be authored by `Luca Ostinelli <ostinelliluca2@gmail.com>`. No co-authors, no automated bot signatures.
+- **No AI references**: Do not include any reference to Claude, Anthropic, AI tooling, or "Generated with…" footers in commit messages, source code, or documentation. The only exception is this `CLAUDE.md` file itself.
+- **Verification before commit**: `git log --pretty='%an %ae %s' | grep -iE 'claude|anthropic|co-authored'` must return empty.
 
 ## Environment Setup
 
