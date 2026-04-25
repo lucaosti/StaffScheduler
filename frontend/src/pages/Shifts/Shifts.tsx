@@ -284,7 +284,13 @@ const Shifts: React.FC = () => {
       </div>
 
       {/* Add/Edit Modal */}
-      {(showAddModal || editingShift) && (
+      {(showAddModal || editingShift) && (() => {
+        const editingShiftDateDefault = editingShift?.date
+          ? (typeof editingShift.date === 'string'
+              ? editingShift.date
+              : editingShift.date.toISOString().slice(0, 10))
+          : new Date().toISOString().slice(0, 10);
+        return (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
@@ -306,12 +312,21 @@ const Shifts: React.FC = () => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
                   
+                  const editingShiftDate = editingShift?.date
+                    ? (typeof editingShift.date === 'string'
+                        ? editingShift.date
+                        : editingShift.date.toISOString().slice(0, 10))
+                    : '';
+                  const shiftDate = (formData.get('shiftDate') as string)
+                    || editingShiftDate
+                    || new Date().toISOString().slice(0, 10);
+
                   const shiftData = {
                     name: formData.get('shiftName') as string,
                     startTime: formData.get('startTime') as string,
                     endTime: formData.get('endTime') as string,
-                    startDate: '2024-02-05', // Default date for now
-                    endDate: '2024-02-05', // Default date for now
+                    startDate: shiftDate,
+                    endDate: shiftDate,
                     department: formData.get('department') as string,
                     minStaff: parseInt(formData.get('requiredStaff') as string),
                     description: formData.get('description') as string,
@@ -368,6 +383,20 @@ const Shifts: React.FC = () => {
                     </div>
                   </div>
                   
+                  <div className="row">
+                    <div className="col-md-6 mb-3">
+                      <label htmlFor="shiftDate" className="form-label">Date *</label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        id="shiftDate"
+                        name="shiftDate"
+                        defaultValue={editingShiftDateDefault}
+                        required
+                      />
+                    </div>
+                  </div>
+
                   <div className="row">
                     <div className="col-md-6 mb-3">
                       <label htmlFor="startTime" className="form-label">Start Time *</label>
@@ -456,7 +485,8 @@ const Shifts: React.FC = () => {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

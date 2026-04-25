@@ -1,15 +1,19 @@
 /**
  * Schedule Service
- * 
+ *
  * API client for schedule management operations including:
  * - CRUD operations for schedules
  * - Schedule generation and optimization
  * - Schedule publishing and archiving
- * 
+ *
+ * All HTTP responses flow through `handleResponse` from `apiUtils` so that
+ * error shapes are consistent with the rest of the frontend.
+ *
  * @author Luca Ostinelli
  */
 
-import { getAuthHeaders } from './apiUtils';
+import { ApiResponse } from '../types';
+import { getAuthHeaders, handleResponse } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
@@ -28,286 +32,61 @@ export interface GenerateScheduleResponse {
   message: string;
 }
 
-/**
- * Get all schedules
- */
-export const getSchedules = async (params?: Record<string, any>) => {
-  try {
-    const query = new URLSearchParams(params || {});
-    const response = await fetch(`${API_BASE_URL}/schedules?${query}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch schedules: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching schedules:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      data: [],
-    };
-  }
+const request = async <T>(
+  path: string,
+  init: RequestInit = {}
+): Promise<ApiResponse<T>> => {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: { ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+  return handleResponse<T>(response);
 };
 
-/**
- * Get schedule by ID
- */
-export const getScheduleById = async (id: string | number) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
+export const getSchedules = (params?: Record<string, string>) => {
+  const query = new URLSearchParams(params || {}).toString();
+  const suffix = query ? `?${query}` : '';
+  return request<any[]>(`/schedules${suffix}`);
 };
 
-/**
- * Get schedule with all shifts
- */
-export const getScheduleWithShifts = async (id: string | number) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}/shifts`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
+export const getScheduleById = (id: string | number) =>
+  request<any>(`/schedules/${id}`);
 
-    if (!response.ok) {
-      throw new Error(`Failed to fetch schedule with shifts: ${response.statusText}`);
-    }
+export const getScheduleWithShifts = (id: string | number) =>
+  request<any>(`/schedules/${id}/shifts`);
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching schedule with shifts:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
+export const createSchedule = (params: CreateScheduleParams) =>
+  request<any>('/schedules', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 
-/**
- * Create new schedule
- */
-export const createSchedule = async (params: CreateScheduleParams) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(params),
-    });
+export const updateSchedule = (id: string | number, params: Partial<CreateScheduleParams>) =>
+  request<any>(`/schedules/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(params),
+  });
 
-    if (!response.ok) {
-      throw new Error(`Failed to create schedule: ${response.statusText}`);
-    }
+export const deleteSchedule = (id: string | number) =>
+  request<any>(`/schedules/${id}`, { method: 'DELETE' });
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error creating schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
+export const generateSchedule = (id: string | number) =>
+  request<GenerateScheduleResponse>(`/schedules/${id}/generate`, { method: 'POST' });
 
-/**
- * Update schedule
- */
-export const updateSchedule = async (id: string | number, params: Partial<CreateScheduleParams>) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(params),
-    });
+export const publishSchedule = (id: string | number) =>
+  request<any>(`/schedules/${id}/publish`, { method: 'PATCH' });
 
-    if (!response.ok) {
-      throw new Error(`Failed to update schedule: ${response.statusText}`);
-    }
+export const archiveSchedule = (id: string | number) =>
+  request<any>(`/schedules/${id}/archive`, { method: 'PATCH' });
 
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error updating schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
+export const duplicateSchedule = (id: string | number, params: CreateScheduleParams) =>
+  request<any>(`/schedules/${id}/duplicate`, {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
 
-/**
- * Delete schedule
- */
-export const deleteSchedule = async (id: string | number) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to delete schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error deleting schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
-
-/**
- * Generate optimized schedule
- */
-export const generateSchedule = async (id: string | number): Promise<{ success: boolean; data?: GenerateScheduleResponse; error?: any }> => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}/generate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to generate schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error generating schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
-
-/**
- * Publish schedule
- */
-export const publishSchedule = async (id: string | number) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}/publish`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to publish schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error publishing schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
-
-/**
- * Archive schedule
- */
-export const archiveSchedule = async (id: string | number) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}/archive`, {
-      method: 'PATCH',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to archive schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error archiving schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
-
-/**
- * Duplicate schedule
- */
-export const duplicateSchedule = async (id: string | number, params: CreateScheduleParams) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/${id}/duplicate`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(params),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to duplicate schedule: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error duplicating schedule:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-    };
-  }
-};
-
-/**
- * Get schedules by department
- */
-export const getSchedulesByDepartment = async (departmentId: string) => {
-  try {
-    const response = await fetch(`${API_BASE_URL}/schedules/department/${departmentId}`, {
-      method: 'GET',
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to fetch schedules: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error('Error fetching schedules:', error);
-    return {
-      success: false,
-      error: { message: error instanceof Error ? error.message : 'Unknown error' },
-      data: [],
-    };
-  }
-};
+export const getSchedulesByDepartment = (departmentId: string) =>
+  request<any[]>(`/schedules/department/${departmentId}`);
 
 const scheduleService = {
   getSchedules,
