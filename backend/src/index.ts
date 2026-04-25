@@ -39,6 +39,7 @@ import { createAssignmentsRouter } from './routes/assignments';
 import { createSystemSettingsRouter } from './routes/settings';
 import healthRoutes from './routes/health';
 import { createDepartmentsRouter } from './routes/departments';
+import { createSystemRouter } from './routes/system';
 
 async function createApp() {
   const app = express();
@@ -114,6 +115,7 @@ async function createApp() {
 
   // Routes with database pool injection
   app.use('/api/health', healthRoutes);
+  app.use('/api/system', createSystemRouter(pool));
   app.use('/api/auth', createAuthRouter(pool));
   app.use('/api/users', createUsersRouter(pool));
   app.use('/api/dashboard', dashboardRoutes);

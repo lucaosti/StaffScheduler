@@ -39,6 +39,9 @@ import Settings from './pages/Settings/Settings';
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
 
+// Chrome
+import DemoBanner from './components/DemoBanner';
+
 /**
  * Main Application Component
  * 
@@ -60,6 +63,7 @@ import { AuthProvider } from './contexts/AuthContext';
 const App: React.FC = () => {
   return (
     <AuthProvider>
+      <DemoBanner />
       <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
