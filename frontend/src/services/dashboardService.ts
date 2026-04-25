@@ -25,24 +25,6 @@ export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> 
     method: 'GET',
     headers: getAuthHeaders(),
   });
-  
+
   return handleResponse<DashboardStats>(response);
-};
-
-export const getRecentActivity = async (): Promise<ApiResponse<any[]>> => {
-  const response = await fetch(`${API_BASE_URL}/dashboard/activities`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<any[]>(response);
-};
-
-export const getUpcomingShifts = async (): Promise<ApiResponse<any[]>> => {
-  const response = await fetch(`${API_BASE_URL}/dashboard/upcoming-shifts`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<any[]>(response);
 };
