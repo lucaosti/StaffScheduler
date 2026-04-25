@@ -41,6 +41,7 @@ import healthRoutes from './routes/health';
 import { createDepartmentsRouter } from './routes/departments';
 import { createSystemRouter } from './routes/system';
 import { createTimeOffRouter } from './routes/timeOff';
+import { createShiftSwapRouter } from './routes/shiftSwap';
 
 async function createApp() {
   const app = express();
@@ -127,6 +128,7 @@ async function createApp() {
   app.use('/api/assignments', createAssignmentsRouter(pool));
   app.use('/api/settings', createSystemSettingsRouter(pool));
   app.use('/api/time-off', createTimeOffRouter(pool));
+  app.use('/api/shift-swap', createShiftSwapRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

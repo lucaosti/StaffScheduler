@@ -250,6 +250,35 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
 );
 
 -- ================================================================
+-- SHIFT SWAP REQUESTS TABLE - Employee-to-employee shift exchanges
+-- Both legs of the swap are required; manager approves or declines.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS shift_swap_requests (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    requester_user_id INT NOT NULL,
+    requester_assignment_id INT NOT NULL,
+    target_user_id INT NOT NULL,
+    target_assignment_id INT NOT NULL,
+    status ENUM('pending', 'approved', 'declined', 'cancelled') NOT NULL DEFAULT 'pending',
+    notes TEXT,
+    reviewer_id INT NULL,
+    reviewed_at TIMESTAMP NULL,
+    review_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_requester (requester_user_id),
+    INDEX idx_target (target_user_id),
+    INDEX idx_status (status),
+
+    FOREIGN KEY (requester_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (requester_assignment_id) REFERENCES shift_assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_assignment_id) REFERENCES shift_assignments(id) ON DELETE CASCADE,
+    FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
 -- TIME OFF REQUESTS TABLE - Workflow for vacation/sick/personal leave
 -- An approved request materializes into a row in user_unavailability.
 -- ================================================================
