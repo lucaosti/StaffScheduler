@@ -43,6 +43,7 @@ import { createSystemRouter } from './routes/system';
 import { createTimeOffRouter } from './routes/timeOff';
 import { createShiftSwapRouter } from './routes/shiftSwap';
 import { createPreferencesRouter } from './routes/preferences';
+import { createAuditLogsRouter } from './routes/auditLogs';
 
 async function createApp() {
   const app = express();
@@ -131,6 +132,7 @@ async function createApp() {
   app.use('/api/time-off', createTimeOffRouter(pool));
   app.use('/api/shift-swap', createShiftSwapRouter(pool));
   app.use('/api/preferences', createPreferencesRouter(pool));
+  app.use('/api/audit-logs', createAuditLogsRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
