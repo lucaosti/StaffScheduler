@@ -67,23 +67,17 @@ export class ScheduleService {
         throw new Error('Department not found');
       }
 
-      // Check for overlapping schedules if needed
+      // Check for overlapping schedules atomically.
+      // FOR UPDATE acquires gap locks under InnoDB REPEATABLE READ, preventing
+      // concurrent INSERTs in the same date window from racing past this check.
       const [overlapRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM schedules 
-        WHERE department_id = ? 
+        `SELECT id FROM schedules
+        WHERE department_id = ?
         AND status IN ('draft', 'published')
-        AND (
-          (start_date <= ? AND end_date >= ?)
-          OR (start_date <= ? AND end_date >= ?)
-          OR (start_date >= ? AND end_date <= ?)
-        )
-        LIMIT 1`,
-        [
-          scheduleData.departmentId,
-          scheduleData.startDate, scheduleData.startDate,
-          scheduleData.endDate, scheduleData.endDate,
-          scheduleData.startDate, scheduleData.endDate
-        ]
+        AND start_date <= ? AND end_date >= ?
+        LIMIT 1
+        FOR UPDATE`,
+        [scheduleData.departmentId, scheduleData.endDate, scheduleData.startDate]
       );
 
       if (overlapRows.length > 0) {
@@ -806,17 +800,24 @@ export class ScheduleService {
     }
   }
 
-  async generateOptimizedSchedule(scheduleId: number, options: any): Promise<any> {
-    try {
-      logger.info('Optimization requested for schedule: ' + scheduleId);
-      return {
-        success: false,
-        message: 'Optimization not yet implemented. Use ScheduleOptimizer service.',
-        scheduleId
-      };
-    } catch (error) {
-      logger.error('Failed to generate optimized schedule:', error);
-      throw error;
-    }
+  /**
+   * Stub for the optimization engine integration. Returns a structured
+   * NOT_IMPLEMENTED error so the route can map it to HTTP 501 without
+   * resorting to message string matching. See ROADMAP.md F09.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  async generateOptimizedSchedule(scheduleId: number, _options: unknown): Promise<{
+    success: false;
+    code: 'NOT_IMPLEMENTED';
+    message: string;
+    scheduleId: number;
+  }> {
+    logger.warn(`Optimization requested for schedule ${scheduleId} but engine is not wired in`);
+    return {
+      success: false,
+      code: 'NOT_IMPLEMENTED',
+      message: 'Schedule optimization engine is not yet integrated. See ROADMAP.md F09.',
+      scheduleId,
+    };
   }
 }
