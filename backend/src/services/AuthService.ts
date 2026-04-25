@@ -53,7 +53,7 @@ export class AuthService {
 
       // Get user by email
       const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT id, email, password, first_name, last_name, role, is_active
+        `SELECT id, email, password_hash, first_name, last_name, role, employee_id, phone, is_active, last_login
         FROM users
         WHERE email = ? LIMIT 1`,
         [loginData.email]
@@ -85,7 +85,7 @@ export class AuthService {
       }
 
       // Verify password
-      const passwordMatch = await bcrypt.compare(loginData.password, userRow.password);
+      const passwordMatch = await bcrypt.compare(loginData.password, userRow.password_hash);
 
       if (!passwordMatch) {
         logger.warn(`Failed login attempt for user: ${loginData.email}`);
@@ -335,7 +335,7 @@ export class AuthService {
 
       // Get current password hash
       const [userRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT password FROM users WHERE id = ? LIMIT 1',
+        'SELECT password_hash FROM users WHERE id = ? LIMIT 1',
         [userId]
       );
 
@@ -344,17 +344,17 @@ export class AuthService {
       }
 
       // Verify old password
-      const passwordMatch = await bcrypt.compare(oldPassword, userRows[0].password);
+      const passwordMatch = await bcrypt.compare(oldPassword, userRows[0].password_hash);
       if (!passwordMatch) {
         throw new Error('Current password is incorrect');
       }
 
       // Hash new password
-      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      const hashedPassword = await bcrypt.hash(newPassword, config.security.bcryptRounds);
 
       // Update password
       await connection.execute(
-        'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         [hashedPassword, userId]
       );
 
@@ -446,11 +446,11 @@ export class AuthService {
       }
 
       // Hash new password
-      const hashedPassword = await bcrypt.hash(newPassword, 12);
+      const hashedPassword = await bcrypt.hash(newPassword, config.security.bcryptRounds);
 
       // Update password
       await connection.execute(
-        'UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+        'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         [hashedPassword, decoded.userId]
       );
 

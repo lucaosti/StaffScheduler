@@ -9,6 +9,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { logger } from '../config/logger';
+import { config } from '../config';
 
 export class UserService {
   constructor(private pool: Pool) {}
@@ -24,7 +25,7 @@ export class UserService {
       if (existingUsers.length > 0) {
         throw new Error('Email already exists');
       }
-      const passwordHash = await bcrypt.hash(userData.password, 12);
+      const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
       const [result] = await connection.execute<ResultSetHeader>(
         'INSERT INTO users (email, password_hash, first_name, last_name, role, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [userData.email, passwordHash, userData.firstName, userData.lastName, userData.role, userData.phone || null, userData.employeeId || null]
@@ -160,7 +161,7 @@ export class UserService {
         values.push(userData.email);
       }
       if (userData.password !== undefined) {
-        const passwordHash = await bcrypt.hash(userData.password, 12);
+        const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
         updates.push('password_hash = ?');
         values.push(passwordHash);
       }
@@ -327,15 +328,42 @@ export class UserService {
     }
   }
 
+  /**
+   * Returns the users a manager can see: all users for admins, otherwise only
+   * those belonging to a department the manager owns.
+   *
+   * Implemented as a single query (no per-user round-trip) so the listing
+   * stays O(1) in DB calls regardless of the team size.
+   */
   async getUsersForManager(managerId: number, role: string): Promise<User[]> {
     try {
       if (role === 'admin') return this.getAllUsers();
-      const [deptRows] = await this.pool.execute<RowDataPacket[]>('SELECT id FROM departments WHERE manager_id = ?', [managerId]);
-      if (deptRows.length === 0) return [];
-      const departmentIds = deptRows.map((row: any) => row.id);
-      const [userRows] = await this.pool.execute<RowDataPacket[]>('SELECT DISTINCT u.id FROM users u JOIN user_departments ud ON u.id = ud.user_id WHERE ud.department_id IN (?)', [departmentIds]);
-      const users = await Promise.all(userRows.map((row: any) => this.getUserById(row.id)));
-      return users.filter((u): u is User => u !== null);
+
+      const [userRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.role,
+                u.employee_id, u.phone, u.is_active, u.last_login,
+                u.created_at, u.updated_at
+         FROM users u
+         JOIN user_departments ud ON u.id = ud.user_id
+         JOIN departments d ON ud.department_id = d.id
+         WHERE d.manager_id = ?
+         ORDER BY u.last_name ASC, u.first_name ASC`,
+        [managerId]
+      );
+
+      return userRows.map((row: any) => ({
+        id: row.id,
+        email: row.email,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        role: row.role,
+        employeeId: row.employee_id,
+        phone: row.phone,
+        isActive: Boolean(row.is_active),
+        lastLogin: row.last_login,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }));
     } catch (error) {
       logger.error('Failed to get users for manager:', error);
       throw error;
