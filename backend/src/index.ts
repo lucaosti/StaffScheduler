@@ -49,6 +49,7 @@ import { createTwoFactorRouter } from './routes/twoFactor';
 import { createOpenApiRouter } from './routes/openapi';
 import { createSkillGapRouter } from './routes/skillGap';
 import { createReportsRouter } from './routes/reports';
+import { createNotificationsRouter } from './routes/notifications';
 
 async function createApp() {
   const app = express();
@@ -143,6 +144,7 @@ async function createApp() {
   app.use('/api', createOpenApiRouter());
   app.use('/api/skill-gap', createSkillGapRouter(pool));
   app.use('/api/reports', createReportsRouter(pool));
+  app.use('/api/notifications', createNotificationsRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
