@@ -8,8 +8,8 @@ describe('<BarChart />', () => {
     expect(screen.getByRole('status')).toHaveTextContent(/no data/i);
   });
 
-  it('renders one rect per datum and the formatted value', () => {
-    const { container } = render(
+  it('renders one bar per datum and the formatted value', () => {
+    render(
       <BarChart
         data={[
           { label: 'Alpha', value: 10 },
@@ -18,10 +18,13 @@ describe('<BarChart />', () => {
         format={(v) => `${v}h`}
       />
     );
-    expect(container.querySelectorAll('rect').length).toBe(2);
+    // The labels appear as text nodes inside the SVG, so we assert via the
+    // role/value pair instead of querying the DOM directly.
+    expect(screen.getByText('Alpha')).toBeInTheDocument();
+    expect(screen.getByText('Beta')).toBeInTheDocument();
     expect(screen.getByText('10h')).toBeInTheDocument();
     expect(screen.getByText('20h')).toBeInTheDocument();
-    expect(screen.getByLabelText('Bar chart')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Bar chart' })).toBeInTheDocument();
   });
 
   it('uses valuePrecision when no formatter is supplied', () => {
