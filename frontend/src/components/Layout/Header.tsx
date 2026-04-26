@@ -15,6 +15,7 @@
  */
 
 import React from 'react';
+import ThemeToggle from '../ThemeToggle';
 
 /**
  * Props interface for Header component
@@ -42,7 +43,8 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
       
       <h5 className="mb-0 text-dark">Staff Scheduler</h5>
       
-      <div className="ms-auto d-flex align-items-center">
+      <div className="ms-auto d-flex align-items-center gap-2">
+        <ThemeToggle />
         <div className="dropdown">
           <button
             className="btn btn-link text-dark p-0"
