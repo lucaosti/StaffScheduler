@@ -42,8 +42,8 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
-      - name: Unit tests
-        run: npm test -- --ci --reporters=default --reporters=github-actions --runInBand --verbose
+      - name: Unit tests with coverage gate
+        run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand
 
   frontend:
     name: Frontend (lint, test, build)
