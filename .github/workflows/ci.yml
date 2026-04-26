@@ -16,6 +16,13 @@ concurrency:
 permissions:
   contents: read
 
+# Opt every job into the Node 24 action runtime (GitHub deprecated Node 20
+# for action runtimes; the explicit env makes the runner accept actions
+# even after Node 20 is fully removed). The Node version we *use* for our
+# code is set per-job via actions/setup-node.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   backend:
     name: Backend (lint, typecheck, test, build)
@@ -29,7 +36,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
 
@@ -43,7 +50,35 @@ jobs:
         run: npm run build
 
       - name: Unit tests with coverage gate
-        run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand
+        run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
+
+      - name: Publish coverage summary to job summary
+        if: always()
+        run: |
+          echo "## Backend coverage" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const c = require('./coverage/coverage-summary.json').total;
+              const fmt = (m) => \`| \${m.pct.toFixed(2)}% | \${m.covered}/\${m.total} |\`;
+              const out = [
+                '| Metric | Coverage | Covered/Total |',
+                '|---|---|---|',
+                \`| Lines      \${fmt(c.lines)}\`,
+                \`| Statements \${fmt(c.statements)}\`,
+                \`| Functions  \${fmt(c.functions)}\`,
+                \`| Branches   \${fmt(c.branches)}\`,
+              ].join('\n');
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, out + '\n');
+            "
+          fi
+
+      - name: Upload backend coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage
+          retention-days: 30
 
   frontend:
     name: Frontend (lint, test, build)
@@ -59,7 +94,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
@@ -69,8 +104,36 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Unit tests
-        run: npm test -- --watchAll=false --ci
+      - name: Unit tests with coverage
+        run: npm test -- --watchAll=false --ci --coverage --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
+
+      - name: Publish coverage summary to job summary
+        if: always()
+        run: |
+          echo "## Frontend coverage" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const c = require('./coverage/coverage-summary.json').total;
+              const fmt = (m) => \`| \${m.pct.toFixed(2)}% | \${m.covered}/\${m.total} |\`;
+              const out = [
+                '| Metric | Coverage | Covered/Total |',
+                '|---|---|---|',
+                \`| Lines      \${fmt(c.lines)}\`,
+                \`| Statements \${fmt(c.statements)}\`,
+                \`| Functions  \${fmt(c.functions)}\`,
+                \`| Branches   \${fmt(c.branches)}\`,
+              ].join('\n');
+              require('fs').appendFileSync(process.env.GITHUB_STEP_SUMMARY, out + '\n');
+            "
+          fi
+
+      - name: Upload frontend coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage
+          retention-days: 30
 
       - name: Production build
         run: npm run build
