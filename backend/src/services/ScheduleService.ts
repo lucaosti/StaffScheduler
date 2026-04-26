@@ -801,23 +801,27 @@ export class ScheduleService {
   }
 
   /**
-   * Stub for the optimization engine integration. Returns a structured
-   * NOT_IMPLEMENTED error so the route can map it to HTTP 501 without
-   * resorting to message string matching. See ROADMAP.md F09.
+   * Runs the auto-schedule wizard for the given schedule (F09). Delegates
+   * to AutoScheduleService which loads data, runs the optimizer, and
+   * inserts pending assignments.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async generateOptimizedSchedule(scheduleId: number, _options: unknown): Promise<{
-    success: false;
-    code: 'NOT_IMPLEMENTED';
-    message: string;
+  async generateOptimizedSchedule(
+    scheduleId: number,
+    createdBy: number
+  ): Promise<{
+    success: true;
     scheduleId: number;
+    assignmentsCreated: number;
+    totalShifts: number;
+    coveragePercentage: number;
+    status: string;
   }> {
-    logger.warn(`Optimization requested for schedule ${scheduleId} but engine is not wired in`);
-    return {
-      success: false,
-      code: 'NOT_IMPLEMENTED',
-      message: 'Schedule optimization engine is not yet integrated. See ROADMAP.md F09.',
-      scheduleId,
-    };
+    // Lazy require to avoid a circular dependency at module load.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { AutoScheduleService } = require('./AutoScheduleService');
+    const auto = new AutoScheduleService(this.pool);
+    const result = await auto.generate(scheduleId, createdBy);
+    logger.info(`Auto-schedule completed for schedule ${scheduleId}: ${result.assignmentsCreated} assignments`);
+    return { success: true, ...result };
   }
 }
