@@ -38,6 +38,8 @@ import Settings from './pages/Settings/Settings';
 
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+import { I18nProvider } from './i18n/I18nContext';
 
 // Chrome
 import DemoBanner from './components/DemoBanner';
@@ -62,9 +64,11 @@ import DemoBanner from './components/DemoBanner';
  */
 const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <DemoBanner />
-      <Routes>
+    <ThemeProvider>
+      <I18nProvider>
+      <AuthProvider>
+        <DemoBanner />
+        <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
         
@@ -86,10 +90,12 @@ const App: React.FC = () => {
           <Route path="settings" element={<Settings />} />
         </Route>
         
-        {/* Catch-all route - Redirect unknown paths to dashboard */}
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </AuthProvider>
+          {/* Catch-all route - Redirect unknown paths to dashboard */}
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </AuthProvider>
+      </I18nProvider>
+    </ThemeProvider>
   );
 };
 
