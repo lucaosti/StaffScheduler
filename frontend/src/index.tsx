@@ -55,3 +55,11 @@ root.render(
     </QueryClientProvider>
   </React.StrictMode>
 );
+
+// PWA service worker registration (F05). Only in production builds; in
+// development the SW would interfere with hot reload.
+if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/service-worker.js').catch(() => undefined);
+  });
+}
