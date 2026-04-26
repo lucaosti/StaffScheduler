@@ -50,6 +50,7 @@ import { createOpenApiRouter } from './routes/openapi';
 import { createSkillGapRouter } from './routes/skillGap';
 import { createReportsRouter } from './routes/reports';
 import { createNotificationsRouter } from './routes/notifications';
+import { createBulkImportRouter } from './routes/bulkImport';
 
 async function createApp() {
   const app = express();
@@ -145,6 +146,7 @@ async function createApp() {
   app.use('/api/skill-gap', createSkillGapRouter(pool));
   app.use('/api/reports', createReportsRouter(pool));
   app.use('/api/notifications', createNotificationsRouter(pool));
+  app.use('/api/import', createBulkImportRouter(pool));
 
   // Error handling middleware
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
