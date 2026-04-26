@@ -5,6 +5,24 @@
 -- ================================================================
 
 -- ================================================================
+-- TENANTS TABLE (F13) - Multi-tenant scaffolding
+-- All tenant-scoped tables should carry a tenant_id FK to this row.
+-- The default tenant (id=1) seeds a single-tenant deployment.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS tenants (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    slug VARCHAR(50) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_slug (slug),
+    INDEX idx_active (is_active)
+);
+
+INSERT IGNORE INTO tenants (id, name, slug, is_active) VALUES (1, 'Default', 'default', TRUE);
+
+-- ================================================================
 -- USERS TABLE - Authentication and basic user info
 -- ================================================================
 CREATE TABLE IF NOT EXISTS users (
