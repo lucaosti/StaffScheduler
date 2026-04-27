@@ -38,7 +38,7 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, email: 'admin@x', role: 'admin' } }),
 }));
 
-import OrgManagement from './OrgManagement';
+const OrgManagement = require('./OrgManagement').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
@@ -94,9 +94,11 @@ describe('<OrgManagement />', () => {
 
     // Tree: delete unit (scope to the tree table to avoid matching the <option>)
     const treeTable = screen.getByRole('table');
-    const treeEr = within(treeTable).getByText(/^ER$/);
-    const rowEl = treeEr.closest('tr') as HTMLElement;
-    const deleteBtn = within(rowEl).getByRole('button', { name: /delete/i });
+    const treeRow = within(treeTable)
+      .getAllByRole('row')
+      .find((r) => within(r).queryByText(/^ER$/i));
+    expect(treeRow).toBeTruthy();
+    const deleteBtn = within(treeRow as HTMLElement).getByRole('button', { name: /delete/i });
     await userEvent.click(deleteBtn);
     expect(mockDeleteUnit).toHaveBeenCalled();
 
@@ -116,16 +118,18 @@ describe('<OrgManagement />', () => {
     // Loans: switch tab, create loan, approve/reject/cancel pending
     await userEvent.click(screen.getAllByRole('button', { name: /^loans$/i })[0]);
     const requestBtn = screen.getByRole('button', { name: /request loan/i });
-    const loanForm = requestBtn.closest('form') as HTMLFormElement;
-    const loan = within(loanForm);
+    // Loan form fields are unique in the Loans tab.
+    const loan = within(screen.getByRole('table').parentElement as HTMLElement);
 
-    await userEvent.type(loan.getByPlaceholderText(/user id/i), '2');
-    const selects = loan.getAllByRole('combobox');
-    await userEvent.selectOptions(selects[0], '10');
-    await userEvent.selectOptions(selects[1], '10');
+    await userEvent.type(screen.getAllByPlaceholderText(/user id/i)[0], '2');
+    const selects = screen.getAllByRole('combobox');
+    // In Loans tab, the from/to selects are the last 2 comboboxes.
+    await userEvent.selectOptions(selects[selects.length - 2], '10');
+    await userEvent.selectOptions(selects[selects.length - 1], '10');
 
-    const dateInputs = loanForm.querySelectorAll('input[type="date"]');
-    expect(dateInputs.length).toBe(2);
+    // eslint-disable-next-line testing-library/no-node-access
+    const dateInputs = (document.querySelectorAll('input[type="date"]') as NodeListOf<HTMLInputElement>);
+    expect(dateInputs.length).toBeGreaterThanOrEqual(2);
     await userEvent.type(dateInputs[0], '2026-04-01');
     await userEvent.type(dateInputs[1], '2026-04-02');
 

@@ -32,7 +32,7 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, email: 'admin@x', role: 'admin' } }),
 }));
 
-import Policies from './Policies';
+const Policies = require('./Policies').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
