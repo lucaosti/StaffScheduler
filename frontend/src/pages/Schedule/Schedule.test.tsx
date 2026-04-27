@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mockGetSchedules = jest.fn();
@@ -37,7 +37,7 @@ jest.mock('../../services/departmentService', () => ({
   getDepartments: (...args: unknown[]) => mockGetDepartments(...args),
 }));
 
-import Schedule from './Schedule';
+const Schedule = require('./Schedule').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
@@ -158,10 +158,7 @@ describe('<Schedule />', () => {
     await userEvent.click(screen.getAllByRole('button', { name: /^generate$/i })[0]);
     expect(screen.getByText(/Generate Schedule/i)).toBeInTheDocument();
     const dialog = screen.getByRole('dialog');
-    await userEvent.click(
-      // modal submit
-      (dialog.querySelector('button[type="submit"]') as HTMLButtonElement)
-    );
+    await userEvent.click(within(dialog).getByRole('button', { name: /^generate$/i }));
     expect(mockGenerateSchedule).toHaveBeenCalled();
   });
 });

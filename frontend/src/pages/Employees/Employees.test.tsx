@@ -19,7 +19,7 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, email: 'admin@x', role: 'admin' } }),
 }));
 
-import Employees from './Employees';
+const Employees = require('./Employees').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
@@ -92,8 +92,9 @@ describe('<Employees />', () => {
     await userEvent.selectOptions(deptSelect, '');
 
     // Edit flow opens modal with defaults and submits update
-    const adaRow = screen.getByText(/Ada Lovelace/).closest('tr');
-    expect(adaRow).not.toBeNull();
+    const rows = screen.getAllByRole('row');
+    const adaRow = rows.find((r) => within(r).queryByText(/Ada Lovelace/));
+    expect(adaRow).toBeTruthy();
     const editBtn = within(adaRow as HTMLElement).getByTitle(/edit employee/i);
     await userEvent.click(editBtn);
     expect(screen.getByText(/Edit Employee/i)).toBeInTheDocument();
