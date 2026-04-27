@@ -47,6 +47,8 @@ import { createAuditLogsRouter } from './routes/auditLogs';
 import { createCalendarRouter } from './routes/calendar';
 import { createTwoFactorRouter } from './routes/twoFactor';
 import { createOpenApiRouter } from './routes/openapi';
+import { createOnCallRouter } from './routes/onCall';
+import { createDirectoryRouter } from './routes/directory';
 import { createSkillGapRouter } from './routes/skillGap';
 import { createReportsRouter } from './routes/reports';
 import { createNotificationsRouter } from './routes/notifications';
@@ -144,6 +146,8 @@ async function createApp() {
   app.use('/api/calendar', createCalendarRouter(pool));
   app.use('/api/auth/2fa', createTwoFactorRouter(pool));
   app.use('/api', createOpenApiRouter());
+  app.use('/api/on-call', createOnCallRouter(pool));
+  app.use('/api/directory', createDirectoryRouter(pool));
   app.use('/api/skill-gap', createSkillGapRouter(pool));
   app.use('/api/reports', createReportsRouter(pool));
   app.use('/api/notifications', createNotificationsRouter(pool));
