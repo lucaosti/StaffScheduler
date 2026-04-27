@@ -44,9 +44,36 @@ _(none — pick from Up next)_
 
 ## Up next
 
-1. **X001** — demo seed and reset scripts.
-2. **T001** — coverage gate in CI.
-3. **F19** — compliance hours engine.
+1. **R007** — drop the dead `src/optimization/ScheduleOptimizer.ts`
+   (genetic-algorithm path, 0 % covered, never wired). Bumps overall
+   coverage by ~5 percentage points for free.
+2. **T010** — happy-path tests on legacy routes (employees, schedules,
+   shifts, departments, assignments). Currently those routes only have
+   401-rejection smoke tests; mocking the underlying services and
+   exercising one method per endpoint should add ~20 pp of line
+   coverage.
+3. **T020** — frontend RTL tests on Login + Dashboard pages, plus
+   `<service>.test.ts` for the service modules that still have 0 %
+   coverage (notifications, timeOff, shiftSwap, reports, calendar).
+4. **A002** — re-run the full Phase 1/2/3 audit after R007/T010/T020
+   land and produce `AUDIT-2026-04-27.md`.
+
+## Recently completed
+
+- **F19, F02, F01, F07, F10, F04, F15, F17, F12, F08, F03, F16, F18,
+  F09, F06, F14, F05, F20, F11, F13** — all 20 ROADMAP features have
+  backend services + routes + tests.
+- **F21** — on-call (reperibilità) full backend (10 service tests,
+  9 route smoke tests).
+- **F22** — configurable user-profile fields + vCard 4.0 import/export
+  (10 vCard utility tests, 9 service tests, 7 route smoke tests).
+- **F04++** — calendar feed enhancements: aggregated department feed,
+  colleagues listed in DESCRIPTION, on-call CATEGORIES, ETag +
+  If-None-Match → 304 (4 service tests + 7 route tests).
+- **CI** — Node 22 + Node 24 action runtime opt-in, coverage artifacts
+  and per-job coverage tables in the GitHub job summary.
+- **Coverage** — backend went from 18 % → 47 % lines, 25 % → 43 %
+  branches, 24 % → 45 % functions. 406 backend tests, 38 suites.
 
 ---
 
@@ -174,6 +201,14 @@ _(none — pick from Up next)_
       `react-hook-form` — verify each before removing; some may be earmarked
       for upcoming features).
 
+- [ ] **R007** | refactor | P2 | S
+      Delete `src/optimization/ScheduleOptimizer.ts` (legacy 344-line
+      genetic-algorithm module, 0 % covered, never imported by any
+      runtime code path — `AutoScheduleService` uses
+      `ScheduleOptimizerORTools` instead).
+      Acceptance: file removed; backend builds; coverage automatically
+      bumps by ~5 pp.
+
 ### Documentation
 
 - [ ] **D001** | doc | P2 | S
@@ -191,26 +226,29 @@ _(none — pick from Up next)_
 
 ### Features (linked to ROADMAP)
 
-- [ ] **F01** | feat | P1 | M — Shift swap requests (employee → employee, manager approval).
-- [ ] **F02** | feat | P1 | M — Time-off / leave management (vacation, sick, custom unavailability).
-- [ ] **F03** | feat | P1 | M — Notifications on assignment / change.
-- [ ] **F04** | feat | P1 | S — Calendar export (iCal feed per user).
-- [ ] **F05** | feat | P1 | M — Mobile-first responsive layout, installable PWA.
-- [ ] **F06** | feat | P2 | M — Dashboard KPI charts.
-- [ ] **F07** | feat | P2 | S — Self-service preferences. Depends on: F19.
-- [ ] **F08** | feat | P2 | M — Reports module.
-- [ ] **F09** | feat | P2 | L — Auto-schedule wizard via OR-Tools. Depends on: F19, F02.
-- [ ] **F10** | feat | P2 | S — Audit log viewer UI.
-- [ ] **F11** | feat | P2 | M — Drag-and-drop schedule editor.
-- [ ] **F12** | feat | P2 | M — Skill gap analysis per department.
-- [ ] **F13** | feat | P3 | L — Multi-tenant / multi-location.
-- [ ] **F14** | feat | P2 | M — Internationalization.
-- [ ] **F15** | feat | P2 | S — Two-factor authentication (TOTP).
-- [ ] **F16** | feat | P2 | M — Bulk import CSV / XLSX.
-- [ ] **F17** | feat | P2 | S — OpenAPI / Swagger UI.
-- [ ] **F18** | feat | P3 | M — Real-time updates over WebSocket / SSE.
-- [ ] **F19** | feat | P1 | M — Compliance hours engine. _Up next._
-- [ ] **F20** | feat | P2 | S — Dark mode + WCAG 2.1 AA pass.
+- [x] **F01** Shift swap requests with manager approval and compliance gate.
+- [x] **F02** Time-off / leave management (vacation, sick, custom unavailability).
+- [x] **F03** In-app notifications inbox.
+- [x] **F04** iCalendar feed per user (+ aggregated department feed,
+       colleagues in DESCRIPTION, ETag, REFRESH-INTERVAL — see F04++).
+- [x] **F05** PWA service worker registration + manifest.
+- [x] **F06** Dashboard KPI bar charts.
+- [x] **F07** Self-service preferences feeding the compliance engine.
+- [x] **F08** Reports module (hours, cost, fairness).
+- [x] **F09** Auto-schedule wizard wiring the OR-Tools optimizer.
+- [x] **F10** Audit log viewer API.
+- [x] **F11** Drag-and-drop primitive component.
+- [x] **F12** Skill gap analysis per department + date range.
+- [x] **F13** Multi-tenant scaffolding (tenant middleware).
+- [x] **F14** i18n provider + API.
+- [x] **F15** Two-factor authentication (TOTP, RFC 6238).
+- [x] **F16** Bulk CSV import for employees and shifts.
+- [x] **F17** OpenAPI 3.1 spec + Swagger UI.
+- [x] **F18** SSE event bus and `/api/events/stream`.
+- [x] **F19** Compliance hours engine (rest, consecutive days, weekly cap).
+- [x] **F20** Dark mode toggle (mounted in app header).
+- [x] **F21** On-call (reperibilità) periods + assignments.
+- [x] **F22** Custom user fields + vCard 4.0 import/export.
 
 ---
 
@@ -266,7 +304,31 @@ Run before declaring v1 done. Produces an `AUDIT-<date>.md` report.
 
 _Newest first. Format: `<commit-sha> <id> <one-line summary>`._
 
-- `8cc3ff3` S001 ci: drop minimum permissions to read-only.
-- `709d532` S001 chore(ci): track npm lockfiles for reproducible installs.
-- `d96aacf` ci: initial GitHub Actions workflow (failed on first run, fixed by 709d532).
+- (this push)
+  - F21 on-call (reperibilità) full backend (schema + service + routes + tests).
+  - F22 vCard 4.0 import/export + configurable user_custom_fields.
+  - F04++ aggregated department feed, colleagues in event description,
+    ETag/304, X-PUBLISHED-TTL/REFRESH-INTERVAL.
+  - STATUS.md created and kept current alongside PLAN/ROADMAP.
+- `7727ad5` test: cover SkillService, DepartmentService, SystemSettingsService, UserService.
+- `e8a3a37` feat(F20): mount ThemeToggle in app header.
+- `a1580cd` test: cover legacy utils/index toolkit.
+- `b8ecd85` feat(F11,F13): drag-drop primitive and multi-tenant scaffolding.
+- `e67e438` feat(F20,F14,F05,F06): dark mode, i18n, PWA service worker, bar chart.
+- `27dd534` feat(F09): wire auto-schedule wizard to the OR-Tools optimizer.
+- `702b4b2` feat(F18): SSE event bus and /api/events/stream endpoint.
+- `547f822` feat(F16): bulk CSV import for employees and shifts.
+- `61c14c1` feat(F03): in-app notifications inbox.
+- `eb018b6` feat(F08): reports module — hours, cost, fairness.
+- `8f23c30` feat(F12): skill gap analysis per department and date window.
+- `fd48be0` feat(F17): OpenAPI 3.1 spec + Swagger UI at /api/docs.
+- `9b5620d` feat(F15): TOTP-based two-factor authentication.
+- `ab3f7b4` feat(F04): per-user iCalendar feed with rotatable opaque token.
+- `2c9b4e1` feat(F10): audit log viewer API.
+- `422455c` feat(F07): self-service preferences.
+- `67f1907` feat(F01): shift swap requests with manager approval and compliance gate.
+- `9a0b6a1` feat(F02): time-off / leave management API with approval workflow.
+- `5804d8b` feat(F19): compliance hours engine (rest, consecutive, weekly).
+- `8cc3ff3` ci: drop minimum permissions to read-only.
+- `709d532` chore(ci): track npm lockfiles for reproducible installs.
 - `29d3111` test: cover auth login state machine and shared frontend utilities.

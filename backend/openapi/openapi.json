@@ -253,18 +253,179 @@
     },
     "/api/calendar/feed.ics": {
       "get": {
-        "summary": "iCalendar feed for the user identified by `token`",
+        "summary": "iCalendar feed for the user identified by `token`. Lists colleagues working the same shift in DESCRIPTION; emits ETag and X-PUBLISHED-TTL/REFRESH-INTERVAL.",
         "security": [],
         "parameters": [
-          { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } }
+          { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {
           "200": {
             "description": "iCalendar text",
             "content": { "text/calendar": { "schema": { "type": "string" } } }
           },
+          "304": { "description": "Not modified (ETag match)" },
           "401": { "description": "Missing or invalid token" }
         }
+      }
+    },
+    "/api/calendar/department/{id}.ics": {
+      "get": {
+        "summary": "Aggregated iCal feed for an entire department (manager/admin only). Includes assignee names per shift.",
+        "security": [],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar text",
+            "content": { "text/calendar": { "schema": { "type": "string" } } }
+          },
+          "304": { "description": "Not modified" },
+          "401": { "description": "Missing or invalid token" },
+          "403": { "description": "Caller is not a manager of this department" }
+        }
+      }
+    },
+    "/api/on-call/periods": {
+      "get": { "summary": "List on-call periods (filters: departmentId, status, start, end)", "responses": { "200": { "description": "OK" } } },
+      "post": {
+        "summary": "Create an on-call period (manager)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["departmentId", "date", "startTime", "endTime"],
+                "properties": {
+                  "departmentId": { "type": "integer" },
+                  "scheduleId": { "type": "integer" },
+                  "date": { "type": "string", "format": "date" },
+                  "startTime": { "type": "string" },
+                  "endTime": { "type": "string" },
+                  "minStaff": { "type": "integer", "minimum": 1 },
+                  "maxStaff": { "type": "integer", "minimum": 1 },
+                  "notes": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Created" } }
+      }
+    },
+    "/api/on-call/periods/{id}/assign": {
+      "post": {
+        "summary": "Assign a user to an on-call period (manager)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "integer" }, "notes": { "type": "string" } } }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Assigned" },
+          "404": { "description": "Period not found" },
+          "409": { "description": "Period at max capacity" }
+        }
+      }
+    },
+    "/api/on-call/me": {
+      "get": {
+        "summary": "Caller's on-call schedule (filters: start, end)",
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/directory/me": {
+      "get": { "summary": "Caller's profile + custom fields", "responses": { "200": { "description": "OK" } } }
+    },
+    "/api/directory/users/{id}": {
+      "get": {
+        "summary": "Directory profile of another user (manager)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/api/directory/users/{id}/fields": {
+      "put": {
+        "summary": "Bulk upsert custom fields on a user (manager)",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["fields"],
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["key", "value"],
+                      "properties": {
+                        "key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+                        "value": { "type": "string" },
+                        "isPublic": { "type": "boolean" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Updated profile" } }
+      }
+    },
+    "/api/directory/users/{id}/vcard": {
+      "get": {
+        "summary": "Single-user vCard 4.0",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": {
+          "200": {
+            "description": "vCard text",
+            "content": { "text/vcard": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    "/api/directory/vcard.vcf": {
+      "get": {
+        "summary": "Multi-user vCard archive (manager)",
+        "parameters": [{ "name": "ids", "in": "query", "required": true, "schema": { "type": "string", "description": "Comma-separated user ids" } }],
+        "responses": {
+          "200": {
+            "description": "vCard archive",
+            "content": { "text/vcard": { "schema": { "type": "string" } } }
+          }
+        }
+      }
+    },
+    "/api/directory/import-vcard": {
+      "post": {
+        "summary": "Bulk import vCard 4.0 file (admin). Existing emails are skipped.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcf": { "type": "string", "description": "Raw .vcf text" },
+                  "defaultPassword": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Result with inserted + skipped counts" } }
       }
     }
   }

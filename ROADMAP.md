@@ -38,6 +38,12 @@ isolation.
 | F18 | Real-time updates over WebSocket / SSE                                  | Live collaboration on edits                        | P3       | M      |
 | F19 | Compliance hours engine (max consecutive shifts, minimum rest, custom rules) | Labour-law compliance                         | P1       | M      |
 | F20 | Dark mode + WCAG 2.1 AA pass                                            | Accessibility and ergonomics                       | P2       | S      |
+| F21 | On-call (reperibilità) periods alongside shifts                         | "I need 2 people on standby tonight"               | P1       | M      |
+| F22 | Configurable user-profile fields + vCard 4.0 import/export              | Phone-book interoperability, custom directory     | P2       | M      |
+
+All 22 items are implemented at the backend layer with tests; frontend
+wiring is partial (F05/F06/F11/F14/F20 ship a small live surface in the
+app, the others expose CRUD APIs ready for UI work tracked in PLAN T020).
 
 ---
 
