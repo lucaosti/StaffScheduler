@@ -60,7 +60,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     cors({
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (config.server.env === 'development' && origin.includes('localhost')) {
+        if (config.server.env === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
           return callback(null, true);
         }
         if (origin === config.cors.origin) return callback(null, true);
