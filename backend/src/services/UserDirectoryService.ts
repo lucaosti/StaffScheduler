@@ -81,7 +81,7 @@ export class UserDirectoryService {
     try {
       await conn.beginTransaction();
       for (const f of fields) {
-        if (!/^[A-Za-z0-9_\-]{1,64}$/.test(f.key)) {
+        if (!/^[A-Za-z0-9_-]{1,64}$/.test(f.key)) {
           throw new Error(`Invalid field key '${f.key}'`);
         }
         await conn.execute<ResultSetHeader>(
