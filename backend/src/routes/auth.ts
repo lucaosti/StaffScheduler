@@ -32,33 +32,25 @@ export const createAuthRouter = (pool: Pool) => {
   const userService = new UserService(pool);
 
 /**
- * User Login Endpoint
- * 
- * Authenticates users with username/password credentials and returns JWT token.
- * Implements secure password verification and token generation.
- * 
+ * User login endpoint.
+ *
+ * Authenticates a user with email + password credentials and returns a JWT.
+ *
  * @route POST /api/auth/login
- * @param {string} username - User's username or email
- * @param {string} password - User's password
- * @returns {Object} Authentication result with JWT token and user info
- * 
- * @example
- * POST /api/auth/login
- * {
- *   "username": "admin",
- *   "password": "admin123"
- * }
- * 
+ * @body  {string} email    User's email
+ * @body  {string} password User's password
+ * @returns {Object} `{ success, data: { token, user } }` on success;
+ *                   `{ success:false, error:{ code, message } }` otherwise.
+ *
+ * @example Request
+ * { "email": "admin@example.com", "password": "<password>" }
+ *
  * @example Response
  * {
  *   "success": true,
  *   "data": {
- *     "token": "jwt_token_here",
- *     "user": {
- *       "id": "user_id",
- *       "username": "admin",
- *       "role": "admin"
- *     }
+ *     "token": "<jwt>",
+ *     "user": { "id": 1, "email": "admin@example.com", "role": "admin" }
  *   }
  * }
  */
@@ -122,30 +114,13 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 /**
- * Token Verification Endpoint
- * 
- * Verifies JWT token validity and returns current user information.
- * Used by frontend to check authentication status and get user details.
- * 
- * @route GET /api/auth/verify
- * @middleware authenticate - Requires valid JWT token
- * @returns {Object} Current user information without sensitive data
- * 
- * @example
- * GET /api/auth/verify
- * Authorization: Bearer jwt_token_here
- * 
- * @example Response
- * {
- *   "success": true,
- *   "data": {
- *     "id": "user_id",
- *     "username": "admin",
- *     "email": "admin@company.com",
- *     "role": "admin",
- *     "lastLogin": "2024-01-20T10:30:00Z"
- *   }
- * }
+ * Token verification endpoint.
+ *
+ * Validates the incoming JWT and returns the user record (without secrets).
+ *
+ * @route      GET /api/auth/verify
+ * @middleware authenticate
+ * @returns    {Object} `{ success, data: <user> }`
  */
 router.get('/verify', authenticate, async (req: Request, res: Response) => {
   try {
@@ -161,7 +136,7 @@ router.get('/verify', authenticate, async (req: Request, res: Response) => {
     }
 
     // Remove sensitive fields before sending response
-    const { password_hash, salt, ...userWithoutPassword } = user as any;
+    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
     res.json({
       success: true,
       data: userWithoutPassword
@@ -178,31 +153,13 @@ router.get('/verify', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
- * Token Refresh Endpoint
- * 
- * Refreshes JWT token for authenticated users to extend session.
- * Prevents users from being logged out during active sessions.
- * 
- * @route POST /api/auth/refresh
- * @middleware authenticate - Requires valid JWT token
- * @returns {Object} New JWT token and updated user information
- * 
- * @example
- * POST /api/auth/refresh
- * Authorization: Bearer jwt_token_here
- * 
- * @example Response
- * {
- *   "success": true,
- *   "data": {
- *     "token": "new_jwt_token_here",
- *     "user": {
- *       "id": "user_id",
- *       "username": "admin",
- *       "role": "admin"
- *     }
- *   }
- * }
+ * Token refresh endpoint.
+ *
+ * Issues a new JWT for an already-authenticated user.
+ *
+ * @route      POST /api/auth/refresh
+ * @middleware authenticate
+ * @returns    {Object} `{ success, data: { user, token } }`
  */
 router.post('/refresh', authenticate, async (req: Request, res: Response) => {
   try {
@@ -217,7 +174,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const { password_hash, salt, ...userWithoutPassword } = user as any;
+    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
 
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
@@ -244,27 +201,17 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
- * User Logout Endpoint
- * 
- * Handles user logout process. In JWT-based authentication, 
- * logout is typically handled client-side by removing the token.
- * Server-side logout would require token blacklisting.
- * 
- * @route POST /api/auth/logout
- * @middleware authenticate - Requires valid JWT token
- * @returns {Object} Logout confirmation message
- * 
- * @example
- * POST /api/auth/logout
- * Authorization: Bearer jwt_token_here
- * 
- * @example Response
- * {
- *   "success": true,
- *   "message": "Logged out successfully"
- * }
+ * User logout endpoint.
+ *
+ * With JWT auth this is informational: the client drops the token from
+ * storage. A real server-side blacklist would require persistence and is
+ * out of scope here (see security backlog item `B001`).
+ *
+ * @route      POST /api/auth/logout
+ * @middleware authenticate
+ * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, async (req: Request, res: Response) => {
+router.post('/logout', authenticate, async (_req: Request, res: Response) => {
   try {
     // In JWT-based authentication, logout is primarily client-side
     // The client removes the token from storage

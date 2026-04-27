@@ -34,23 +34,25 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
   return (
     <div className="header">
       <button
-        className="btn btn-link text-dark p-0 me-3"
+        className="btn btn-link text-body p-0 me-3 text-decoration-none"
         onClick={onToggleSidebar}
+        aria-label="Toggle sidebar"
         style={{ fontSize: '1.25rem' }}
       >
         <i className="bi bi-list"></i>
       </button>
-      
-      <h5 className="mb-0 text-dark">Staff Scheduler</h5>
-      
+
+      <h5 className="mb-0 text-body">Staff Scheduler</h5>
+
       <div className="ms-auto d-flex align-items-center gap-2">
         <ThemeToggle />
         <div className="dropdown">
           <button
-            className="btn btn-link text-dark p-0"
+            className="btn btn-link text-body p-0 text-decoration-none"
             type="button"
             data-bs-toggle="dropdown"
             aria-expanded="false"
+            aria-label="Notifications"
           >
             <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
           </button>

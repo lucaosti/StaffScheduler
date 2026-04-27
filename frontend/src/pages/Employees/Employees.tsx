@@ -180,7 +180,7 @@ const Employees: React.FC = () => {
         <div className="card-body p-0">
           <div className="table-responsive">
             <table className="table table-hover mb-0">
-              <thead className="table-light">
+              <thead>
                 <tr>
                   <th>Employee</th>
                   <th>Department</th>

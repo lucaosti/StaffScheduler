@@ -29,7 +29,7 @@ const router = Router();
  * @route GET /api/dashboard/stats
  * @returns {Object} Dashboard statistics and KPIs
  */
-router.get('/stats', authenticate, async (req: Request, res: Response) => {
+router.get('/stats', authenticate, async (_req: Request, res: Response) => {
   try {
     // Get basic statistics
     const totalEmployeesQuery =
@@ -134,7 +134,7 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get recent activities
-router.get('/activities', authenticate, async (req: Request, res: Response) => {
+router.get('/activities', authenticate, async (_req: Request, res: Response) => {
   try {
     // Fetch real activities from audit_logs table
     const activitiesQuery = `
@@ -185,7 +185,7 @@ router.get('/activities', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get upcoming shifts
-router.get('/upcoming-shifts', authenticate, async (req: Request, res: Response) => {
+router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
   try {
     // Query upcoming shifts with assignment information (using correct schema)
     const query = `
@@ -248,7 +248,7 @@ router.get('/upcoming-shifts', authenticate, async (req: Request, res: Response)
 });
 
 // Get department overview
-router.get('/departments', authenticate, async (req: Request, res: Response) => {
+router.get('/departments', authenticate, async (_req: Request, res: Response) => {
   try {
     // Query department statistics using correct schema (departments + users + user_departments)
     const query = `

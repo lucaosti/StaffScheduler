@@ -18,7 +18,7 @@ import { getSystemInfo, RuntimeMode } from '../services/systemService';
 
 const SESSION_KEY = 'demoBannerDismissed';
 
-export const DemoBanner: React.FC = () => {
+const DemoBanner: React.FC = () => {
   const [mode, setMode] = useState<RuntimeMode | null>(null);
   const [dismissed, setDismissed] = useState<boolean>(
     typeof window !== 'undefined' && window.sessionStorage.getItem(SESSION_KEY) === '1'

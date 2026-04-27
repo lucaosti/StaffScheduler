@@ -13,7 +13,7 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
-export interface Notification {
+interface Notification {
   id: number;
   userId: number;
   type: string;
@@ -25,7 +25,7 @@ export interface Notification {
   readAt: string | null;
 }
 
-export interface CreateNotificationInput {
+interface CreateNotificationInput {
   userId: number;
   type: string;
   title: string;

@@ -17,20 +17,20 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 
-export interface HoursWorkedRow {
+interface HoursWorkedRow {
   userId: number;
   fullName: string;
   hours: number;
 }
 
-export interface CostByDepartmentRow {
+interface CostByDepartmentRow {
   departmentId: number;
   departmentName: string;
   hours: number;
   cost: number;
 }
 
-export interface FairnessReport {
+interface FairnessReport {
   scheduleId: number;
   perUser: HoursWorkedRow[];
   stats: { count: number; min: number; max: number; mean: number; stddev: number };

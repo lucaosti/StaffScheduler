@@ -212,7 +212,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
     try {
       const user = (req as any).user;
       const departmentId = parseInt(req.params.id);
-      const { userId, isManager } = req.body;
+      const { userId } = req.body;
 
       if (user.role === 'admin') {
         // Admin can add users to any department

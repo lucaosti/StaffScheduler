@@ -10,8 +10,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
-export type ThemeChoice = 'light' | 'dark' | 'system';
-export type ResolvedTheme = 'light' | 'dark';
+type ThemeChoice = 'light' | 'dark' | 'system';
+type ResolvedTheme = 'light' | 'dark';
 
 const STORAGE_KEY = 'theme';
 

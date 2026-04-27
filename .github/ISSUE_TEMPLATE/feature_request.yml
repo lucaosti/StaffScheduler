@@ -1,0 +1,60 @@
+name: Feature request
+description: Propose a new capability or an enhancement to an existing one.
+title: "[feat]: "
+labels:
+  - enhancement
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing an improvement. Please describe the
+        problem you are trying to solve before suggesting a specific
+        implementation.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: |
+        What user-facing problem are you trying to solve? Who is
+        affected? What is the current workaround, if any?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: |
+        Describe the proposed feature. Mention API changes, UI flows,
+        and data model changes if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other options did you think about? Why didn't they work?
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Affected scope
+      multiple: true
+      options:
+        - Backend (Express API / services)
+        - Frontend (React SPA)
+        - Optimizer (CP-SAT)
+        - Database schema
+        - Demo profile
+        - CI / Tooling
+        - Documentation
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have read the [feature parity matrix in the README](../README.md#feature-parity) — this request is not already in scope.
+          required: true

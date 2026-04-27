@@ -9,7 +9,7 @@ export const createSchedulesRouter = (pool: Pool) => {
   const scheduleService = new ScheduleService(pool);
 
 // Get all schedules
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, async (_req: Request, res: Response) => {
   try {
     const schedules = await scheduleService.getAllSchedules();
     res.json({ success: true, data: schedules });
@@ -362,4 +362,3 @@ router.post('/:id/generate', authenticate, requireRole(['admin', 'manager']), as
   return router;
 };
 
-export default createSchedulesRouter;

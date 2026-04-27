@@ -189,4 +189,3 @@ class Database {
  * consistent usage across the application.
  */
 export const database = new Database();
-export default database;

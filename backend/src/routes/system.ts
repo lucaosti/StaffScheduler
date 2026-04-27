@@ -15,7 +15,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router } from 'express';
 import { logger } from '../config/logger';
 
-export type RuntimeMode = 'production' | 'demo' | 'development';
+type RuntimeMode = 'production' | 'demo' | 'development';
 
 export const createSystemRouter = (pool: Pool): Router => {
   const router = Router();

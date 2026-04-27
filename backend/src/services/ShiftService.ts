@@ -12,8 +12,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { 
   Shift,
   CreateShiftRequest,
-  UpdateShiftRequest,
-  ShiftAssignment
+  UpdateShiftRequest
 } from '../types';
 import { logger } from '../config/logger';
 

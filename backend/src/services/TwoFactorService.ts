@@ -20,12 +20,12 @@ import {
 import { config } from '../config';
 import { logger } from '../config/logger';
 
-export interface TwoFactorSetupPayload {
+interface TwoFactorSetupPayload {
   secret: string;
   otpauthUri: string;
 }
 
-export interface TwoFactorEnablePayload {
+interface TwoFactorEnablePayload {
   recoveryCodes: string[];
 }
 

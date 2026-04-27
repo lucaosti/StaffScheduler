@@ -22,7 +22,7 @@ const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api
 /**
  * Interface for employee filtering and pagination options
  */
-export interface EmployeeFilters {
+interface EmployeeFilters {
   /** Filter by department name */
   department?: string;
   /** Filter by position/role */
@@ -42,7 +42,7 @@ export interface EmployeeFilters {
 /**
  * Interface for creating new employee records
  */
-export interface CreateEmployeeData {
+interface CreateEmployeeData {
   /** Unique employee identifier */
   employeeId: string;
   /** Employee's first name */
@@ -79,7 +79,7 @@ export interface CreateEmployeeData {
  * Interface for updating existing employee records
  * Extends CreateEmployeeData with all fields optional
  */
-export interface UpdateEmployeeData extends Partial<CreateEmployeeData> {}
+interface UpdateEmployeeData extends Partial<CreateEmployeeData> {}
 
 /**
  * Retrieves a list of employees with optional filtering and pagination

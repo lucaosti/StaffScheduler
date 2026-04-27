@@ -1,5 +1,5 @@
 /**
- * On-call (reperibilità) service (F21).
+ * On-call service (F21).
  *
  * On-call periods are modelled alongside shifts. A regular shift means
  * active duty; an on-call period means "be reachable, come in if paged".
@@ -14,10 +14,10 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
-export type OnCallStatus = 'open' | 'assigned' | 'cancelled';
-export type OnCallAssignmentStatus = 'pending' | 'confirmed' | 'cancelled';
+type OnCallStatus = 'open' | 'assigned' | 'cancelled';
+type OnCallAssignmentStatus = 'pending' | 'confirmed' | 'cancelled';
 
-export interface OnCallPeriod {
+interface OnCallPeriod {
   id: number;
   scheduleId: number | null;
   departmentId: number;
@@ -34,7 +34,7 @@ export interface OnCallPeriod {
   updatedAt: string;
 }
 
-export interface CreateOnCallPeriodInput {
+interface CreateOnCallPeriodInput {
   scheduleId?: number | null;
   departmentId: number;
   date: string;
@@ -45,7 +45,7 @@ export interface CreateOnCallPeriodInput {
   notes?: string;
 }
 
-export interface UpdateOnCallPeriodInput {
+interface UpdateOnCallPeriodInput {
   date?: string;
   startTime?: string;
   endTime?: string;
@@ -55,7 +55,7 @@ export interface UpdateOnCallPeriodInput {
   status?: OnCallStatus;
 }
 
-export interface OnCallAssignment {
+interface OnCallAssignment {
   id: number;
   periodId: number;
   userId: number;

@@ -35,6 +35,8 @@ import Shifts from './pages/Shifts/Shifts';
 import Schedule from './pages/Schedule/Schedule';
 import Reports from './pages/Reports/Reports';
 import Settings from './pages/Settings/Settings';
+import OrgManagement from './pages/Org/OrgManagement';
+import Policies from './pages/Policies/Policies';
 
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
@@ -87,6 +89,8 @@ const App: React.FC = () => {
           <Route path="shifts" element={<Shifts />} />
           <Route path="schedule" element={<Schedule />} />
           <Route path="reports" element={<Reports />} />
+          <Route path="org" element={<OrgManagement />} />
+          <Route path="policies" element={<Policies />} />
           <Route path="settings" element={<Settings />} />
         </Route>
         

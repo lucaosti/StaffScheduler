@@ -5,7 +5,6 @@
  * and is dismissible only for the current session.
  */
 
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import DemoBanner from './DemoBanner';

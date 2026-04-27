@@ -7,7 +7,7 @@
  *
  * This is the entry point for the multi-tenant story; downstream services
  * still need to add a `tenant_id` column to their tables and start
- * filtering by it. Tracked under R??? in PLAN.md.
+ * filtering by it.
  *
  * @author Luca Ostinelli
  */

@@ -273,7 +273,7 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {/* TODO(settings-persist): wire save handlers to backend per ROADMAP.md F07 */}
+      {/* TODO(settings-persist): wire save handlers to the preferences backend. */}
       <div className="alert alert-warning d-flex align-items-center" role="status">
         <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
         <div>
@@ -666,7 +666,7 @@ const Settings: React.FC = () => {
                       
                       return (
                         <div key={roleKey} className="col-lg-6 mb-4">
-                          <div className={`card ${!canManage && !isOwnRole ? 'bg-light' : ''}`}>
+                          <div className={`card ${!canManage && !isOwnRole ? 'bg-body-tertiary' : ''}`}>
                             <div className="card-header d-flex justify-content-between align-items-center">
                               <div>
                                 <h6 className="mb-0">{hierarchy.role}</h6>

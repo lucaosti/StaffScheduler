@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/lucaosti/StaffScheduler/blob/main/CONTRIBUTING.md#security-policy
+    about: Please report security issues privately, not as a public GitHub issue.
+  - name: Question or discussion
+    url: https://github.com/lucaosti/StaffScheduler/discussions
+    about: Use Discussions for usage questions or design conversations.

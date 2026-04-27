@@ -76,6 +76,18 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       roles: ['admin', 'manager'],
     },
     {
+      path: '/org',
+      icon: 'bi-diagram-3',
+      label: 'Organization',
+      roles: ['admin', 'manager'],
+    },
+    {
+      path: '/policies',
+      icon: 'bi-shield-check',
+      label: 'Policies',
+      roles: ['admin', 'manager', 'employee'],
+    },
+    {
       path: '/settings',
       icon: 'bi-gear',
       label: 'Settings',
@@ -110,9 +122,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
         ))}
       </ul>
 
-      <div className="mt-auto p-3">
+      <div className="mt-auto p-3 border-top">
         {user && (
-          <div className="text-white mb-2">
+          <div className="text-body mb-2">
             <small>
               {user.email}
               <br />
@@ -121,7 +133,8 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
           </div>
         )}
         <button
-          className="btn btn-outline-light btn-sm w-100"
+          className="btn btn-outline-secondary btn-sm w-100"
+          type="button"
           onClick={handleLogout}
         >
           <i className="bi bi-box-arrow-right me-1"></i>

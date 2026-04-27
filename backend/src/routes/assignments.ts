@@ -9,7 +9,7 @@ export const createAssignmentsRouter = (pool: Pool) => {
   const assignmentService = new AssignmentService(pool);
 
 // Get all assignments
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, async (_req: Request, res: Response) => {
   try {
     const assignments = await assignmentService.getAllAssignments();
     res.json({ success: true, data: assignments });
@@ -346,4 +346,3 @@ router.get('/shift/:shiftId/available-employees', authenticate, async (req: Requ
   return router;
 };
 
-export default createAssignmentsRouter;

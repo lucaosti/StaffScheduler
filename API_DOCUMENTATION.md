@@ -6,6 +6,20 @@ Version: 1.0.0
 Base URL: `http://localhost:3001/api`  
 Authentication: JWT Bearer Token
 
+> **Authoritative source.** The single source of truth for the HTTP API
+> is the OpenAPI 3.1 spec in [`backend/openapi/openapi.json`](backend/openapi/openapi.json),
+> served live at `/api/openapi.json` with Swagger UI at `/api/docs`
+> (feature F17). Whenever this human-readable companion conflicts with
+> the spec, the spec wins. New endpoints land in the spec first.
+>
+> This file documents core endpoints (auth, users, employees,
+> departments, shifts, schedules, assignments, dashboard, settings,
+> health). Newer feature endpoints — `/api/time-off`, `/api/shift-swap`,
+> `/api/preferences`, `/api/audit-logs`, `/api/calendar`,
+> `/api/auth/2fa`, `/api/on-call`, `/api/directory`, `/api/skill-gap`,
+> `/api/reports`, `/api/notifications`, `/api/import`, `/api/events` —
+> are described in the OpenAPI spec only.
+
 ---
 
 ## Table of Contents

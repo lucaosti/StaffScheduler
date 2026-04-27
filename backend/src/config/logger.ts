@@ -36,25 +36,34 @@ import { config } from '../config';
  * - JSON: Structured logging for easier parsing
  * - Service metadata: Identifies logs from this service
  */
+const isTest = config.server.env === 'test' || process.env.NODE_ENV === 'test';
+
+// In test runs we silence the logger entirely:
+// - the Console transport otherwise floods Jest output with structured logs;
+// - the File transport otherwise keeps a file handle open and forces Jest
+//   to "Force exiting" at the end of the suite.
 const logger = winston.createLogger({
   level: config.logging.level,
+  silent: isTest,
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.json()
   ),
   defaultMeta: { service: 'staff-scheduler-backend' },
-  transports: [
-    new winston.transports.File({
-      filename: config.logging.file,
-      maxsize: 1024 * 1024 * 10, // 10MB
-      maxFiles: config.logging.maxFiles,
-    }),
-  ],
+  transports: isTest
+    ? []
+    : [
+        new winston.transports.File({
+          filename: config.logging.file,
+          maxsize: 1024 * 1024 * 10, // 10MB
+          maxFiles: config.logging.maxFiles,
+        }),
+      ],
 });
 
-// If we're not in production, log to the console as well
-if (config.server.env !== 'production') {
+// If we're not in production (and not in test), log to the console as well.
+if (!isTest && config.server.env !== 'production') {
   logger.add(new winston.transports.Console({
     format: winston.format.combine(
       winston.format.colorize(),

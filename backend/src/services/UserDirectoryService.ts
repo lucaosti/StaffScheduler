@@ -14,13 +14,13 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { buildVcfFile, parseVcf, VCard } from '../utils/vcard';
 
-export interface CustomField {
+interface CustomField {
   key: string;
   value: string;
   isPublic: boolean;
 }
 
-export interface DirectoryProfile {
+interface DirectoryProfile {
   id: number;
   email: string;
   firstName: string;

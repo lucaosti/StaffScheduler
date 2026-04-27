@@ -26,7 +26,7 @@ export const createShiftsRouter = (pool: Pool) => {
 // Shift Template Routes
 
 // Get all shift templates
-router.get('/templates', authenticate, async (req: Request, res: Response) => {
+router.get('/templates', authenticate, async (_req: Request, res: Response) => {
   try {
     const templates = await shiftService.getAllShiftTemplates();
     res.json({ success: true, data: templates });
@@ -156,7 +156,7 @@ router.delete('/templates/:id', authenticate, requireRole(['admin', 'manager']),
 // Shift Routes
 
 // Get all shifts
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, async (_req: Request, res: Response) => {
   try {
     const shifts = await shiftService.getAllShifts();
     res.json({ success: true, data: shifts });
@@ -323,4 +323,3 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
   return router;
 };
 
-export default createShiftsRouter;

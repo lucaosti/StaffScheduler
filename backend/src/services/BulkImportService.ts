@@ -18,19 +18,17 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
 
-export type ImportEntity = 'employees' | 'shifts';
-
-export interface ImportRowError {
+interface ImportRowError {
   row: number;
   message: string;
 }
 
-export interface ImportResult {
+interface ImportResult {
   inserted: number;
   errors: ImportRowError[];
 }
 
-export interface EmployeeRow {
+interface EmployeeRow {
   email: string;
   firstName: string;
   lastName: string;
@@ -39,7 +37,7 @@ export interface EmployeeRow {
   phone?: string;
 }
 
-export interface ShiftRow {
+interface ShiftRow {
   scheduleId: number;
   departmentId: number;
   date: string;

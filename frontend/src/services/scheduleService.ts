@@ -1,10 +1,10 @@
 /**
  * Schedule Service
  *
- * API client for schedule management operations including:
- * - CRUD operations for schedules
- * - Schedule generation and optimization
- * - Schedule publishing and archiving
+ * API client for schedule management operations:
+ *   - list/get schedules
+ *   - create / update / delete a schedule
+ *   - generate / publish / archive a schedule
  *
  * All HTTP responses flow through `handleResponse` from `apiUtils` so that
  * error shapes are consistent with the rest of the frontend.
@@ -17,14 +17,16 @@ import { getAuthHeaders, handleResponse } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
-export interface CreateScheduleParams {
+interface CreateScheduleParams {
   name: string;
+  description?: string;
   startDate: string;
   endDate: string;
-  departmentId: string;
+  departmentId: number | string;
+  notes?: string;
 }
 
-export interface GenerateScheduleResponse {
+interface GenerateScheduleResponse {
   scheduleId: string;
   totalAssignments: number;
   coverage: string;
@@ -48,9 +50,6 @@ export const getSchedules = (params?: Record<string, string>) => {
   const suffix = query ? `?${query}` : '';
   return request<any[]>(`/schedules${suffix}`);
 };
-
-export const getScheduleById = (id: string | number) =>
-  request<any>(`/schedules/${id}`);
 
 export const getScheduleWithShifts = (id: string | number) =>
   request<any>(`/schedules/${id}/shifts`);
@@ -78,28 +77,3 @@ export const publishSchedule = (id: string | number) =>
 
 export const archiveSchedule = (id: string | number) =>
   request<any>(`/schedules/${id}/archive`, { method: 'PATCH' });
-
-export const duplicateSchedule = (id: string | number, params: CreateScheduleParams) =>
-  request<any>(`/schedules/${id}/duplicate`, {
-    method: 'POST',
-    body: JSON.stringify(params),
-  });
-
-export const getSchedulesByDepartment = (departmentId: string) =>
-  request<any[]>(`/schedules/department/${departmentId}`);
-
-const scheduleService = {
-  getSchedules,
-  getScheduleById,
-  getScheduleWithShifts,
-  createSchedule,
-  updateSchedule,
-  deleteSchedule,
-  generateSchedule,
-  publishSchedule,
-  archiveSchedule,
-  duplicateSchedule,
-  getSchedulesByDepartment,
-};
-
-export default scheduleService;

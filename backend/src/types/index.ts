@@ -24,12 +24,12 @@ export interface User {
   updatedAt: Date;
 }
 
-export interface UserDepartment {
+interface UserDepartment {
   id: number;
   name: string;
 }
 
-export interface UserPreferences {
+interface UserPreferences {
   maxHoursPerWeek: number;
   minHoursPerWeek: number;
   maxConsecutiveDays: number;
@@ -128,49 +128,6 @@ export interface CreateSkillRequest {
 export interface UpdateSkillRequest {
   name?: string;
   description?: string;
-  isActive?: boolean;
-}
-
-// ============================================================================
-// SHIFT TEMPLATE TYPES
-// ============================================================================
-
-export interface ShiftTemplate {
-  id: number;
-  name: string;
-  description?: string;
-  departmentId: number;
-  departmentName?: string;
-  startTime: string;
-  endTime: string;
-  minStaff: number;
-  maxStaff: number;
-  requiredSkills?: Skill[];
-  isActive: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
-export interface CreateShiftTemplateRequest {
-  name: string;
-  description?: string;
-  departmentId: number;
-  startTime: string;
-  endTime: string;
-  minStaff: number;
-  maxStaff: number;
-  requiredSkillIds?: number[];
-}
-
-export interface UpdateShiftTemplateRequest {
-  name?: string;
-  description?: string;
-  departmentId?: number;
-  startTime?: string;
-  endTime?: string;
-  minStaff?: number;
-  maxStaff?: number;
-  requiredSkillIds?: number[];
   isActive?: boolean;
 }
 
@@ -291,117 +248,6 @@ export interface CreateAssignmentRequest {
   shiftId: number;
   userId: number;
   notes?: string;
-}
-
-export interface UpdateAssignmentRequest {
-  status?: 'pending' | 'confirmed' | 'cancelled';
-  notes?: string;
-}
-
-// ============================================================================
-// OPTIMIZATION TYPES
-// ============================================================================
-
-export interface OptimizationRequest {
-  scheduleId: number;
-  startDate: string;
-  endDate: string;
-  departmentIds?: number[];
-  constraints: OptimizationConstraints;
-}
-
-export interface OptimizationConstraints {
-  maxHoursPerWeek: number;
-  minHoursPerWeek: number;
-  maxConsecutiveDays: number;
-  minRestHoursBetweenShifts: number;
-  respectPreferences: boolean;
-  respectUnavailability: boolean;
-  respectSkills: boolean;
-}
-
-export interface OptimizationResult {
-  success: boolean;
-  scheduleId: number;
-  assignments: ShiftAssignment[];
-  statistics: {
-    totalShifts: number;
-    assignedShifts: number;
-    unassignedShifts: number;
-    coverageRate: number;
-    constraintViolations: number;
-  };
-  warnings?: string[];
-  errors?: string[];
-}
-
-// ============================================================================
-// DASHBOARD TYPES
-// ============================================================================
-
-export interface DashboardStats {
-  totalEmployees: number;
-  activeSchedules: number;
-  todayShifts: number;
-  pendingApprovals: number;
-  monthlyHours: number;
-  monthlyCost: number;
-  coverageRate: number;
-  employeeSatisfaction: number;
-}
-
-// ============================================================================
-// API RESPONSE TYPES
-// ============================================================================
-
-export interface ApiResponse<T = any> {
-  success: boolean;
-  data?: T;
-  error?: {
-    code: string;
-    message: string;
-    details?: any;
-  };
-  message?: string;
-}
-
-export interface PaginatedResponse<T = any> {
-  success: boolean;
-  data: T[];
-  pagination: {
-    page: number;
-    limit: number;
-    total: number;
-    pages: number;
-  };
-}
-
-// ============================================================================
-// QUERY FILTER TYPES
-// ============================================================================
-
-export interface UserFilters {
-  role?: 'admin' | 'manager' | 'employee';
-  departmentId?: number;
-  isActive?: boolean;
-  search?: string;
-}
-
-export interface ShiftFilters {
-  scheduleId?: number;
-  departmentId?: number;
-  startDate?: string;
-  endDate?: string;
-  status?: string;
-}
-
-export interface AssignmentFilters {
-  userId?: number;
-  shiftId?: number;
-  scheduleId?: number;
-  status?: string;
-  startDate?: string;
-  endDate?: string;
 }
 
 // System Settings Types
