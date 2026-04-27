@@ -107,49 +107,114 @@ describe('CalendarService.resolveToken', () => {
   });
 });
 
-describe('CalendarService.buildFeed', () => {
+describe('CalendarService.buildFeed (per-user, with on-call + colleagues)', () => {
   it('emits an empty calendar when the user has no assignments', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null]);
+    // Service order: shifts → colleagues (skipped if shifts empty) → on-call
+    execute
+      .mockResolvedValueOnce([[], null]) // shift assignments
+      .mockResolvedValueOnce([[], null]); // on-call assignments
     const service = new CalendarService(pool);
     const ics = await service.buildFeed(7);
     expect(ics).toContain('BEGIN:VCALENDAR');
     expect(ics).not.toContain('BEGIN:VEVENT');
   });
 
-  it('renders one VEVENT per assignment row', async () => {
+  it('renders one VEVENT per assignment row, with colleagues in DESCRIPTION', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([
-      [
-        {
-          assignment_id: 1,
-          status: 'confirmed',
-          shift_id: 10,
-          date: '2026-05-01',
-          start_time: '07:00',
-          end_time: '15:00',
-          notes: 'Full ward',
-          schedule_name: 'May Schedule',
-          department_name: 'Emergency',
-        },
-        {
-          assignment_id: 2,
-          status: 'pending',
-          shift_id: 11,
-          date: '2026-05-02',
-          start_time: '15:00',
-          end_time: '23:00',
-          notes: null,
-          schedule_name: 'May Schedule',
-          department_name: 'Emergency',
-        },
-      ],
-      null,
-    ]);
+    // Service order: shifts query → loadColleagues query → on-call query.
+    execute
+      .mockResolvedValueOnce([
+        [
+          {
+            assignment_id: 1,
+            status: 'confirmed',
+            shift_id: 10,
+            date: '2026-05-01',
+            start_time: '07:00',
+            end_time: '15:00',
+            notes: 'Full ward',
+            schedule_name: 'May Schedule',
+            department_name: 'Emergency',
+            shift_updated: '2026-04-26T12:00:00Z',
+          },
+          {
+            assignment_id: 2,
+            status: 'pending',
+            shift_id: 11,
+            date: '2026-05-02',
+            start_time: '15:00',
+            end_time: '23:00',
+            notes: null,
+            schedule_name: 'May Schedule',
+            department_name: 'Emergency',
+            shift_updated: '2026-04-26T12:00:00Z',
+          },
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([
+        [
+          { shift_id: 10, full_name: 'Bruno Demo' },
+          { shift_id: 10, full_name: 'Carla Demo' },
+        ],
+        null,
+      ]) // colleagues
+      .mockResolvedValueOnce([[], null]); // on-call (none)
     const service = new CalendarService(pool);
     const ics = await service.buildFeed(7);
     expect((ics.match(/BEGIN:VEVENT/g) || []).length).toBe(2);
     expect(ics).toContain('SUMMARY:Emergency (confirmed)');
     expect(ics).toContain('SUMMARY:Emergency (pending)');
+    expect(ics).toContain('Working with: Bruno Demo\\, Carla Demo');
+  });
+
+  it('emits a CATEGORIES:ON-CALL line for on-call periods', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null]) // no shifts
+      .mockResolvedValueOnce([
+        [
+          {
+            assignment_id: 5,
+            period_id: 9,
+            date: '2026-05-01',
+            start_time: '20:00',
+            end_time: '08:00',
+            notes: 'pager #1',
+            department_name: 'Emergency',
+            period_updated: '2026-04-26T12:00:00Z',
+          },
+        ],
+        null,
+      ]);
+    const service = new CalendarService(pool);
+    const ics = await service.buildFeed(7);
+    expect(ics).toContain('CATEGORIES:ON-CALL');
+    expect(ics).toContain('SUMMARY:Emergency (on-call)');
+  });
+
+  it('builds a department feed with assignee names in DESCRIPTION', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        {
+          shift_id: 10,
+          date: '2026-05-01',
+          start_time: '07:00',
+          end_time: '15:00',
+          notes: '',
+          schedule_name: 'May',
+          department_name: 'Emergency',
+          shift_updated: '2026-04-26T12:00:00Z',
+          assignees: 'Anna Demo,Bruno Demo',
+        },
+      ],
+      null,
+    ]);
+    const service = new CalendarService(pool);
+    const out = await service.buildDepartmentFeed(3);
+    expect(out.body).toContain('Assigned: Anna Demo\\, Bruno Demo');
+    expect(out.etag).toMatch(/^"[a-f0-9]+"$/);
   });
 });
