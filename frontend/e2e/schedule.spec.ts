@@ -62,5 +62,7 @@ test('admin can create a schedule via the UI', async ({ page }) => {
   }
 
   await expect(modal).toBeHidden({ timeout: 30_000 });
-  await expect(page.getByText(`E2E smoke ${stamp}`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole('heading', { name: new RegExp(`^E2E smoke ${stamp}$`) })).toBeVisible({
+    timeout: 15_000,
+  });
 });
