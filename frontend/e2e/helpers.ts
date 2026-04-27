@@ -40,30 +40,23 @@ export async function login(page: Page, email: string, password: string): Promis
 
   await page.getByRole('button', { name: /sign in/i }).click();
 
-  // On app-level failures (e.g. unexpected response contract), the UI stays on /login
-  // and shows an error alert. Race the success URL against the alert to get a crisp error.
-  const dashboardPromise = page.waitForURL(/\/dashboard$/, { timeout: 30_000 }).then(() => 'ok' as const);
-  const alertPromise = page
-    .getByRole('alert')
-    .waitFor({ timeout: 30_000 })
-    .then(() => 'alert' as const)
-    .catch(() => 'no-alert' as const);
+  // Demo mode renders a persistent warning banner with role="alert". That must not be treated as
+  // a login failure. We consider login successful only when the redirect to /dashboard happens.
+  try {
+    await expect(page).toHaveURL(/\/dashboard$/, { timeout: 30_000 });
+  } catch {
+    const errorAlert = page.locator('[role="alert"].alert-danger').first();
+    const errorText = (await errorAlert.textContent().catch(() => null))?.trim() ?? null;
 
-  const outcome = await Promise.race([dashboardPromise, alertPromise]);
-  if (outcome !== 'ok') {
-    const alertText = await page.getByRole('alert').textContent().catch(() => null);
     const loginResponse = await loginResponsePromise;
     if (loginResponse) {
       const body = await loginResponse.text().catch(() => '<unreadable>');
       throw new Error(
-        `Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}. ` +
+        `Login did not reach /dashboard. Error alert: ${errorText ?? '<none>'}. ` +
           `Login API: ${loginResponse.status()} ${loginResponse.url()} Body: ${body}`
       );
     }
 
-    throw new Error(
-      `Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}. ` +
-        `No login API response was observed by Playwright.`
-    );
+    throw new Error(`Login did not reach /dashboard. Error alert: ${errorText ?? '<none>'}.`);
   }
 }

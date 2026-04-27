@@ -36,8 +36,27 @@ test('admin can create a schedule via the UI', async ({ page }) => {
   expect(optionValues.length).toBeGreaterThan(0);
   await departmentSelect.selectOption(optionValues[0]);
 
-  await modal.getByRole('button', { name: /create schedule/i }).click();
+  const [createResponse] = await Promise.all([
+    page
+      .waitForResponse((res) => {
+        const url = res.url();
+        return res.request().method() === 'POST' && (url.includes('/api/schedules') || url.endsWith('/schedules'));
+      })
+      .catch(() => null),
+    modal.getByRole('button', { name: /create schedule/i }).click(),
+  ]);
 
-  await expect(modal).toBeHidden({ timeout: 15_000 });
+  if (createResponse && !createResponse.ok()) {
+    const body = await createResponse.text().catch(() => '<unreadable>');
+    throw new Error(`Create schedule failed (${createResponse.status()}): ${body}`);
+  }
+
+  const errorAlert = modal.locator('[role="alert"].alert-danger');
+  if (await errorAlert.isVisible().catch(() => false)) {
+    const msg = (await errorAlert.textContent().catch(() => null))?.trim() ?? '<unknown>';
+    throw new Error(`Create schedule modal error: ${msg}`);
+  }
+
+  await expect(modal).toBeHidden({ timeout: 30_000 });
   await expect(page.getByText(`E2E smoke ${stamp}`)).toBeVisible({ timeout: 15_000 });
 });

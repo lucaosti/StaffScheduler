@@ -26,7 +26,7 @@ test.describe('authentication', () => {
     await page.getByLabel('Email').fill('nobody@example.invalid');
     await page.getByLabel('Password').fill('wrong-password');
     await page.getByRole('button', { name: /sign in/i }).click();
-    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.locator('[role="alert"].alert-danger')).toBeVisible();
     await expect(page).toHaveURL(/\/login$/);
   });
 });
