@@ -9,45 +9,37 @@ constraint-programming optimizer in Python (Google OR-Tools CP-SAT).
 ![React](https://img.shields.io/badge/react-18.2.0-blue.svg)
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 
-## Feature parity
+## Roadmap and capabilities
 
-Mapping the project's surface against the baseline expected of modern
-workforce-scheduling tools. Each row is implemented end-to-end (backend
-route + frontend page or service client) unless flagged as out-of-scope.
+The list of capabilities (implemented, planned, and explicitly out of
+scope) is **not** maintained in this README. The single source of truth
+is the GitHub Project board:
 
-| Capability | Status | Backend | Frontend |
-|---|---|---|---|
-| Automated schedule generation (CP-SAT optimizer) | Implemented | `/api/schedules/:id/generate`, `services/AutoScheduleService`, `optimization/ScheduleOptimizerORTools` | `pages/Schedule` |
-| Manual shift CRUD + drag-and-drop | Implemented | `/api/shifts`, `/api/assignments` | `pages/Shifts`, `pages/Schedule`, `components/DraggableList` |
-| Recurring shift templates | Implemented | `/api/shifts/templates` (under `routes/shifts.ts`) | `pages/Shifts` |
-| Availability + employee preferences | Implemented | `/api/preferences` | `pages/Settings` |
-| Time-off (PTO) requests + approvals | Implemented | `/api/time-off` | `pages/Schedule`, `pages/Settings` |
-| Shift swaps with approval workflow | Implemented | `/api/shift-swap` | `pages/Schedule` |
-| Compliance / labor rules + audit-ready logs | Implemented | `services/ComplianceEngine`, `services/PolicyValidator`, `/api/audit-logs` | `pages/Policies` |
-| Org hierarchy + employee loans across units | Implemented | `/api/org` | `pages/Org/OrgManagement` |
-| Configurable approval matrix + policy exceptions | Implemented | `/api/policies`, `services/ApprovalMatrixService` | `pages/Policies` |
-| On-call scheduling | Implemented | `/api/on-call` | `pages/Schedule` |
-| Skills + skill-gap analysis | Implemented | `/api/skill-gap` (and `services/SkillService`) | `pages/Employees`, `pages/Org/OrgManagement` |
-| Real-time notifications (in-app + SSE stream) | Implemented | `/api/notifications`, `/api/events/stream` | `components/Layout/Header`, notification toasts |
-| Calendar export + per-user signed feed (iCal) | Implemented | `/api/calendar` | `pages/Settings` |
-| Reporting / insights (hours, cost, fairness, coverage) | Implemented | `/api/reports`, `/api/dashboard` | `pages/Reports`, `pages/Dashboard` |
-| Role-based access (admin / manager / employee) | Implemented | `middleware/auth` (`requireRole`, `requireAdmin`, `requireManager`) | route guards in `App.tsx` |
-| Two-factor authentication (TOTP) | Implemented | `/api/auth/2fa` | `pages/Settings` |
-| Bulk import (CSV employees / shifts, vCard) | Implemented | `/api/import`, `/api/directory` | `pages/Employees` |
-| OpenAPI 3.1 contract + Swagger UI | Implemented | `/api/openapi.json`, `/api/docs` | n/a |
-| Internationalization (English + Italian dictionary) | Implemented | n/a | `i18n/I18nContext`, `i18n/messages` |
-| Light / dark / system theme | Implemented | n/a | `contexts/ThemeContext` |
-| Demo mode banner + reset script | Implemented | `/api/system/info` | `components/DemoBanner` |
-| Native mobile apps | Out of scope | responsive web only | responsive web only |
-| Direct payroll integrations (ADP, Gusto, Xero, ...) | Out of scope | CSV export of timesheets only | n/a |
-| GPS clock-in / kiosk attendance | Out of scope | n/a | n/a |
-| SMS / push notifications | Out of scope | email via SMTP + in-app + SSE only | n/a |
-| Multi-tenant SaaS billing | Out of scope | single-tenant deployment | n/a |
-| LLM-driven natural-language scheduling | Out of scope | CP-SAT optimizer only | n/a |
+- **Roadmap board (Projects v2)**:
+  [github.com/users/lucaosti/projects/2](https://github.com/users/lucaosti/projects/2)
 
-The "Out of scope" rows are intentional; this is an open-source
-self-hosted core, not a SaaS product. Pull requests adding any of them
-are welcome (see [`CONTRIBUTING.md`](./CONTRIBUTING.md)).
+Each capability is tracked as a GitHub Issue tagged with
+`type:capability`, plus an `area:*` label (`area:backend`,
+`area:frontend`, `area:database`, `area:optimizer`, `area:docs`) and a
+`capability:*` label (`capability:core`, `capability:out-of-scope`).
+Useful filters:
+
+- All capabilities:
+  [`label:type:capability`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Atype%3Acapability)
+- Implemented core capabilities (closed as completed):
+  [`label:capability:core is:closed reason:completed`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Acapability%3Acore+is%3Aclosed+reason%3Acompleted)
+- Explicitly out-of-scope items:
+  [`label:capability:out-of-scope`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Acapability%3Aout-of-scope)
+
+The Project exposes three custom fields used by the views:
+
+- `Lifecycle` — `Backlog`, `In progress`, `Blocked`, `Done`, `Out of scope`.
+- `Area` — `Backend`, `Frontend`, `Database`, `Optimizer`, `Docs`.
+- `Capability` — `Core`, `Nice-to-have`, `Out-of-scope`.
+
+The "Out of scope" items are intentional design choices (this is an
+open-source self-hosted core, not a SaaS product). Pull requests
+addressing them are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Canonical references
 
