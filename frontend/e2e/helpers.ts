@@ -24,6 +24,33 @@ export async function login(page: Page, email: string, password: string): Promis
   await page.goto('/login');
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/dashboard$/, { timeout: 15_000 });
+
+  const [loginResponse] = await Promise.all([
+    page.waitForResponse((res) => {
+      const url = res.url();
+      return url.includes('/api/auth/login') || url.endsWith('/auth/login');
+    }),
+    page.getByRole('button', { name: /sign in/i }).click(),
+  ]);
+
+  // If the API call itself failed, surface the body for easy CI diagnosis.
+  if (!loginResponse.ok()) {
+    const body = await loginResponse.text().catch(() => '<unreadable>');
+    throw new Error(`Login API failed (${loginResponse.status()}): ${body}`);
+  }
+
+  // On app-level failures (e.g. unexpected response contract), the UI stays on /login
+  // and shows an error alert. Race the success URL against the alert to get a crisp error.
+  const dashboardPromise = page.waitForURL(/\/dashboard$/, { timeout: 30_000 }).then(() => 'ok' as const);
+  const alertPromise = page
+    .getByRole('alert')
+    .waitFor({ timeout: 30_000 })
+    .then(() => 'alert' as const)
+    .catch(() => 'no-alert' as const);
+
+  const outcome = await Promise.race([dashboardPromise, alertPromise]);
+  if (outcome !== 'ok') {
+    const alertText = await page.getByRole('alert').textContent().catch(() => null);
+    throw new Error(`Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}`);
+  }
 }
