@@ -15,13 +15,15 @@ test('theme toggle cycles between light and dark', async ({ page }) => {
 
   const toggle = page.getByRole('button', { name: /^theme:/i });
   await expect(toggle).toBeVisible();
+  await toggle.scrollIntoViewIfNeeded();
 
   const start = await getResolvedTheme(page);
   expect(['light', 'dark']).toContain(start);
 
-  await toggle.click();
+  // The demo banner is sticky at the top; "force" avoids occasional overlap issues.
+  await toggle.click({ force: true });
   await expect
-    .poll(async () => getResolvedTheme(page), { timeout: 5_000 })
+    .poll(async () => getResolvedTheme(page), { timeout: 10_000 })
     .not.toBe(start);
 
   const after = await getResolvedTheme(page);

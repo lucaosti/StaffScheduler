@@ -20,14 +20,18 @@ test('admin can create a schedule via the UI', async ({ page }) => {
   await expect(modal).toBeVisible();
 
   const stamp = Date.now().toString(36);
+  // Demo seed data often contains at least one schedule in the near-term date range.
+  // Pick a window far enough in the future to avoid "overlapping schedule" conflicts.
   const today = new Date();
-  const inAWeek = new Date(today);
-  inAWeek.setDate(today.getDate() + 7);
+  const start = new Date(today);
+  start.setDate(today.getDate() + 60);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 7);
   const iso = (d: Date) => d.toISOString().slice(0, 10);
 
   await modal.getByLabel(/^name/i).fill(`E2E smoke ${stamp}`);
-  await modal.getByLabel(/start date/i).fill(iso(today));
-  await modal.getByLabel(/end date/i).fill(iso(inAWeek));
+  await modal.getByLabel(/start date/i).fill(iso(start));
+  await modal.getByLabel(/end date/i).fill(iso(end));
 
   const departmentSelect = modal.getByLabel(/^department/i);
   const optionValues = await departmentSelect.locator('option:not([disabled])').evaluateAll(
