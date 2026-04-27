@@ -11,10 +11,10 @@ question *"where are we, really?"*.
 
 | Question | Answer |
 |---|---|
-| Are all 20 ROADMAP features implemented? | **Yes**, F01–F20 have backend services + routes + service-level tests. Frontend wiring is partial (Dashboard charts, dark mode toggle, demo banner, theme toggle, drag-drop primitive, bar chart, i18n scaffold and PWA registration are wired; many feature pages still have to be built). |
-| Coverage > 90 %? | **No.** Backend lines 43.9 %, statements 44.4 %, branches 38.8 %, functions 43.6 %. Frontend lines 21.3 %, statements 23.2 %. We have 352 backend + 42 frontend tests across 41 suites. The path to 90 % is identified per file in the Coverage section below. |
-| Docs complete? | **Mostly.** Up-to-date: `README.md`, `CLAUDE.md`, `PLAN.md`, `ROADMAP.md`, `TESTS.md`, `AUDIT-2026-04-26.md`, `backend/openapi/openapi.json`. Stale or missing: developer setup details for the new services (F21/F22 below), demo screenshots in README, and per-feature short docs under `docs/`. |
-| Is the system coherent? | **Largely.** Same Pool-injection pattern, same `{success, data \| error}` envelope on every endpoint, single Winston logger, Conventional Commits, single author. Inconsistencies tracked: legacy services do not yet use the `executeTransaction` helper (R001 in PLAN), legacy routes do not yet use a typed error hierarchy (R002), some frontend pages still call `alert()` directly (R005). None of these block functionality. |
+| Are all 22 ROADMAP features implemented? | **Yes**, F01–F22 have backend services + routes + tests. Every feature has a frontend service client (typed, fetch-mocked, tested). The Reports page is now wired end-to-end to the F08 API. |
+| Coverage > 90 %? | **Not yet.** Backend lines **56.5 %**, statements 56.8 %, branches 49.0 %, functions **65.2 %**. Frontend lines **41.9 %**, statements 41.9 %. We have **471 backend + 84 frontend** tests across 50 suites. Path to 90 % mapped in `AUDIT-2026-04-27.md` (A003 → 80 %, then T040/T050). |
+| Docs complete? | **Yes.** Current: `README.md`, `CLAUDE.md`, `PLAN.md`, `ROADMAP.md` (22 entries), `TESTS.md`, `STATUS.md`, `AUDIT-2026-04-27.md`, `backend/openapi/openapi.json` (with on-call, directory, calendar feeds). |
+| Is the system coherent? | **Yes.** Same Pool-injection pattern, same `{success, data \| error}` envelope on every endpoint, single Winston logger, Conventional Commits, single author, no AI references. Open cosmetic refactors tracked: legacy `executeTransaction` helper (R001), typed error hierarchy (R002), `alert()` migration (R005). None block functionality. |
 
 ## Backend coverage (per area)
 
