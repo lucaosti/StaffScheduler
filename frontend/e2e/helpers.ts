@@ -25,19 +25,20 @@ export async function login(page: Page, email: string, password: string): Promis
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password').fill(password);
 
-  const [loginResponse] = await Promise.all([
-    page.waitForResponse((res) => {
+  // Best-effort capture of the login response for diagnostics.
+  // Do not hard-block the flow on this because some environments may not expose the response
+  // (e.g. request is blocked preflight, service worker, or navigation interruption).
+  const loginResponsePromise = page
+    .waitForResponse(
+      (res) => {
       const url = res.url();
       return url.includes('/api/auth/login') || url.endsWith('/auth/login');
-    }),
-    page.getByRole('button', { name: /sign in/i }).click(),
-  ]);
+      },
+      { timeout: 30_000 }
+    )
+    .catch(() => null);
 
-  // If the API call itself failed, surface the body for easy CI diagnosis.
-  if (!loginResponse.ok()) {
-    const body = await loginResponse.text().catch(() => '<unreadable>');
-    throw new Error(`Login API failed (${loginResponse.status()}): ${body}`);
-  }
+  await page.getByRole('button', { name: /sign in/i }).click();
 
   // On app-level failures (e.g. unexpected response contract), the UI stays on /login
   // and shows an error alert. Race the success URL against the alert to get a crisp error.
@@ -51,6 +52,18 @@ export async function login(page: Page, email: string, password: string): Promis
   const outcome = await Promise.race([dashboardPromise, alertPromise]);
   if (outcome !== 'ok') {
     const alertText = await page.getByRole('alert').textContent().catch(() => null);
-    throw new Error(`Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}`);
+    const loginResponse = await loginResponsePromise;
+    if (loginResponse) {
+      const body = await loginResponse.text().catch(() => '<unreadable>');
+      throw new Error(
+        `Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}. ` +
+          `Login API: ${loginResponse.status()} ${loginResponse.url()} Body: ${body}`
+      );
+    }
+
+    throw new Error(
+      `Login did not reach /dashboard. Alert: ${alertText ?? '<none>'}. ` +
+        `No login API response was observed by Playwright.`
+    );
   }
 }
