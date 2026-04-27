@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS schedules (
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     status ENUM('draft', 'published', 'archived') DEFAULT 'draft',
-    created_by INT NOT NULL,
+    created_by INT NULL,
     published_by INT NULL,
     published_at TIMESTAMP NULL,
     notes TEXT,
@@ -496,6 +496,172 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 );
 
 -- ================================================================
+-- ORG UNITS TABLE - Hierarchical organizational tree
+-- Each unit has an optional parent (self-FK) and an optional manager.
+-- The tree is the primary backbone for policy scoping and approvals.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS org_units (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(150) NOT NULL,
+    description TEXT,
+    parent_id INT NULL,
+    manager_user_id INT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_parent (parent_id),
+    INDEX idx_manager (manager_user_id),
+    INDEX idx_active (is_active),
+
+    FOREIGN KEY (parent_id) REFERENCES org_units(id) ON DELETE SET NULL,
+    FOREIGN KEY (manager_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- USER ORG UNITS - Membership of users in the tree
+-- A user may belong to multiple units; exactly one row should be flagged
+-- `is_primary = TRUE` (enforced at app level).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS user_org_units (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    org_unit_id INT NOT NULL,
+    is_primary BOOLEAN NOT NULL DEFAULT FALSE,
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_user_org_unit (user_id, org_unit_id),
+    INDEX idx_user (user_id),
+    INDEX idx_org_unit (org_unit_id),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE
+);
+
+-- ================================================================
+-- EMPLOYEE LOANS - Time-bounded cross-unit assignments
+-- Used when a manager borrows an employee from another org unit. Both the
+-- source and target unit managers are notified; the configured approver
+-- (per the approval matrix) accepts/declines.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS employee_loans (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    from_org_unit_id INT NOT NULL,
+    to_org_unit_id INT NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    reason TEXT,
+    status ENUM('pending', 'approved', 'rejected', 'cancelled', 'ended')
+        NOT NULL DEFAULT 'pending',
+    requested_by INT NULL,
+    approver_user_id INT NULL,
+    reviewed_at TIMESTAMP NULL,
+    review_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_user (user_id),
+    INDEX idx_from (from_org_unit_id),
+    INDEX idx_to (to_org_unit_id),
+    INDEX idx_status (status),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (from_org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (to_org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- POLICIES - Imposed rules. A policy carries an owner; exceptions to it
+-- must be approved by that owner (or an escalation chain).
+-- `policy_value` is JSON so we can encode arbitrary parameters per key.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS policies (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    scope_type ENUM('global', 'org_unit', 'schedule', 'shift_template')
+        NOT NULL DEFAULT 'global',
+    scope_id INT NULL,
+    policy_key VARCHAR(80) NOT NULL,
+    policy_value JSON,
+    description TEXT,
+    imposed_by_user_id INT NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_scope (scope_type, scope_id),
+    INDEX idx_active (is_active),
+    INDEX idx_owner (imposed_by_user_id),
+
+    FOREIGN KEY (imposed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
+);
+
+-- ================================================================
+-- POLICY EXCEPTION REQUESTS - Per-target derogations to a policy
+-- ================================================================
+CREATE TABLE IF NOT EXISTS policy_exception_requests (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    policy_id INT NOT NULL,
+    target_type VARCHAR(60) NOT NULL,
+    target_id INT NOT NULL,
+    reason TEXT,
+    status ENUM('pending', 'approved', 'rejected', 'cancelled')
+        NOT NULL DEFAULT 'pending',
+    requested_by_user_id INT NOT NULL,
+    reviewer_user_id INT NULL,
+    reviewed_at TIMESTAMP NULL,
+    review_notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_policy (policy_id),
+    INDEX idx_target (target_type, target_id),
+    INDEX idx_status (status),
+    INDEX idx_requested_by (requested_by_user_id),
+
+    FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE CASCADE,
+    FOREIGN KEY (requested_by_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (reviewer_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- APPROVAL MATRIX - Configurable approver scope per change type
+-- `change_type` is a free-form key (for example `Loan.Request`,
+-- `Policy.Update`, `Schedule.Publish`). `approver_scope` controls how the
+-- approver is resolved at runtime:
+--   - `policy_owner`        - owner of the policy at hand
+--   - `unit_manager`        - manager of the involved org_unit
+--   - `unit_manager_chain`  - escalate up the org tree until a manager is found
+--   - `company_role`        - any user with the role stored in `approver_role`
+--   - `company_user`        - the specific user stored in `approver_user_id`
+-- The `auto_approve_for_owner` flag controls "if actor is the resolved
+-- approver, auto-approve and write an audit log row".
+-- ================================================================
+CREATE TABLE IF NOT EXISTS approval_matrix (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    change_type VARCHAR(80) NOT NULL,
+    approver_scope ENUM(
+        'policy_owner',
+        'unit_manager',
+        'unit_manager_chain',
+        'company_role',
+        'company_user'
+    ) NOT NULL,
+    approver_role ENUM('admin', 'manager', 'employee') NULL,
+    approver_user_id INT NULL,
+    auto_approve_for_owner BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_change_type (change_type),
+
+    FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
 -- DEFAULT DATA INSERTION
 -- Minimal essential data - users and departments will be created by init-database.ts
 -- ================================================================
@@ -513,6 +679,19 @@ INSERT IGNORE INTO system_settings (category, `key`, value, type, default_value,
 ('general', 'time_period', 'monthly', 'string', 'monthly', 'Default time period for scheduling (monthly, weekly, daily)', TRUE),
 ('scheduling', 'max_shifts_per_week', '5', 'number', '5', 'Maximum number of shifts an employee can work per week', TRUE),
 ('scheduling', 'min_hours_between_shifts', '8', 'number', '8', 'Minimum hours required between shifts for the same employee', TRUE);
+
+-- Default approval matrix
+-- These rows ensure the workflow has sane defaults from the very first run.
+INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role, auto_approve_for_owner, description) VALUES
+('Loan.Request',          'unit_manager',       NULL,    TRUE, 'Cross-department employee loans approved by the receiving unit manager'),
+('Loan.Cancel',           'unit_manager',       NULL,    TRUE, 'Cancellation of an approved loan requires receiving unit manager approval'),
+('Policy.Create',         'company_role',       'admin', TRUE, 'New policy creation goes through admin'),
+('Policy.Update',         'policy_owner',       NULL,    TRUE, 'Edits to a policy require approval by the policy owner'),
+('Policy.Exception',      'policy_owner',       NULL,    TRUE, 'Derogations to a policy require approval by its owner'),
+('Schedule.Publish',      'unit_manager',       NULL,    TRUE, 'Publishing a schedule requires the receiving unit manager'),
+('Schedule.Override',     'unit_manager_chain', NULL,    TRUE, 'Schedule overrides escalate up the org tree if needed'),
+('OrgUnit.Update',        'company_role',       'admin', TRUE, 'Org tree edits go through admin'),
+('Membership.Update',     'unit_manager',       NULL,    TRUE, 'User membership changes need the unit manager');
 
 -- ================================================================
 -- END OF SCHEMA

@@ -32,7 +32,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   const settingsService = new SystemSettingsService(pool);
 
   // Get all system settings
-  router.get('/', authenticate, async (req, res) => {
+  router.get('/', authenticate, async (_req, res) => {
     try {
       const settings = await settingsService.getAllSettings();
 
@@ -69,7 +69,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get current currency
-  router.get('/currency', authenticate, async (req, res) => {
+  router.get('/currency', authenticate, async (_req, res) => {
     try {
       const currency = await settingsService.getCurrency();
       res.json({
@@ -123,7 +123,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get current time period
-  router.get('/time-period', authenticate, async (req, res) => {
+  router.get('/time-period', authenticate, async (_req, res) => {
     try {
       const timePeriod = await settingsService.getTimePeriod();
       res.json({

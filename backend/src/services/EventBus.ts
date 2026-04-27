@@ -14,7 +14,7 @@
 
 import type { Response } from 'express';
 
-export interface BusEvent {
+interface BusEvent {
   type: string;
   payload?: unknown;
 }
@@ -62,4 +62,3 @@ class EventBus {
 }
 
 export const eventBus = new EventBus();
-export type { EventBus };

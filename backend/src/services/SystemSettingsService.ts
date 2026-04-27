@@ -10,7 +10,7 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { Pool, RowDataPacket } from 'mysql2/promise';
 import { SystemSetting } from '../types';
 import { logger } from '../config/logger';
 

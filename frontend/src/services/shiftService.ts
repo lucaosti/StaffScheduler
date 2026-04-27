@@ -20,7 +20,7 @@ import { handleResponse, getAuthHeaders } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
-export interface ShiftFilters {
+interface ShiftFilters {
   department?: string;
   status?: 'open' | 'assigned' | 'confirmed' | 'cancelled';
   startDate?: string;
@@ -31,26 +31,29 @@ export interface ShiftFilters {
   sortOrder?: 'asc' | 'desc';
 }
 
-export interface CreateShiftData {
-  name: string;
-  description?: string;
-  startDate: string;
-  endDate: string;
+interface CreateShiftData {
+  scheduleId: number;
+  departmentId: number;
+  templateId?: number;
+  date: string;
   startTime: string;
   endTime: string;
-  department?: string;
-  location?: string;
-  rolesRequired: Array<{
-    role: string;
-    count: number;
-    skills?: string[];
-  }>;
   minStaff: number;
   maxStaff?: number;
+  requiredSkillIds?: number[];
   notes?: string;
 }
 
-export interface UpdateShiftData extends Partial<CreateShiftData> {}
+interface UpdateShiftData {
+  date?: string;
+  startTime?: string;
+  endTime?: string;
+  minStaff?: number;
+  maxStaff?: number;
+  status?: 'open' | 'assigned' | 'confirmed' | 'cancelled';
+  requiredSkillIds?: number[];
+  notes?: string;
+}
 
 export const getShifts = async (filters: ShiftFilters = {}): Promise<ApiResponse<Shift[]>> => {
   const queryParams = new URLSearchParams();
@@ -69,14 +72,6 @@ export const getShifts = async (filters: ShiftFilters = {}): Promise<ApiResponse
   return handleResponse<Shift[]>(response);
 };
 
-export const getShift = async (shiftId: string | number): Promise<ApiResponse<Shift>> => {
-  const response = await fetch(`${API_BASE_URL}/shifts/${shiftId}`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<Shift>(response);
-};
 
 export const createShift = async (shiftData: CreateShiftData): Promise<ApiResponse<Shift>> => {
   const response = await fetch(`${API_BASE_URL}/shifts`, {

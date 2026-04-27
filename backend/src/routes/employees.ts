@@ -9,7 +9,7 @@ export const createEmployeesRouter = (pool: Pool) => {
   const employeeService = new EmployeeService(pool);
 
 // Get all employees
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, async (_req: Request, res: Response) => {
   try {
     const employees = await employeeService.getAllEmployees();
     res.json({ success: true, data: employees });
@@ -232,4 +232,3 @@ router.delete('/:id/skills/:skillId', authenticate, requireRole(['admin', 'manag
   return router;
 };
 
-export default createEmployeesRouter;

@@ -47,7 +47,7 @@ export interface CompliancePolicy {
   maxHoursPerWeek: number;
 }
 
-export interface ComplianceInput {
+interface ComplianceInput {
   /** The shift the user is being asked to take. */
   candidate: CandidateShift;
   /** Active assignments the user already has. */
@@ -56,19 +56,19 @@ export interface ComplianceInput {
   policy: CompliancePolicy;
 }
 
-export type ComplianceCode =
+type ComplianceCode =
   | 'MAX_CONSECUTIVE_DAYS'
   | 'MIN_REST_HOURS'
   | 'MAX_WEEKLY_HOURS';
 
-export interface ComplianceViolation {
+interface ComplianceViolation {
   code: ComplianceCode;
   message: string;
   /** Numbers used to render the violation in the UI. */
   details: Record<string, number | string>;
 }
 
-export type ComplianceResult =
+type ComplianceResult =
   | { ok: true; violations: [] }
   | { ok: false; violations: ComplianceViolation[] };
 

@@ -1,0 +1,98 @@
+name: Bug report
+description: Report something that is not working as expected.
+title: "[bug]: "
+labels:
+  - bug
+  - triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in
+        the sections below; the more detail you provide, the faster the
+        bug can be triaged and fixed.
+
+        For security vulnerabilities, do **not** use this form — see
+        [`CONTRIBUTING.md` → Security Policy](../CONTRIBUTING.md#security-policy).
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit SHA
+      description: Output of `git rev-parse HEAD` or the published version you are running.
+      placeholder: e.g. main @ a1b2c3d
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      multiple: true
+      options:
+        - Backend (Express API)
+        - Frontend (React SPA)
+        - OR-Tools optimizer
+        - Demo seed / scripts
+        - CI / GitHub Actions
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Numbered steps that let a maintainer reproduce the issue. If
+        relevant, mention which user role you are signed in as and
+        whether you used `npm run db:seed:demo`.
+      placeholder: |
+        1. `./scripts/demo.sh up`
+        2. Sign in as `admin@demo.staffscheduler.local`
+        3. Click "Generate Schedule"
+        4. ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs / screenshots
+      description: |
+        Paste server logs, browser console output, or attach
+        screenshots / recordings. Trim irrelevant lines.
+      render: shell
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        OS, Node version, browser version, MySQL version, etc.
+      placeholder: |
+        - OS: macOS 14.5
+        - Node: 20.10.0
+        - Browser: Firefox 124
+        - MySQL: 8.0.36 (Docker)
+    validations:
+      required: true
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have read the [Contributing guide](../CONTRIBUTING.md).
+          required: true

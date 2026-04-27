@@ -13,7 +13,7 @@ export type Locale = 'en' | 'it';
 
 type MessageDictionary = Record<string, string>;
 
-export const MESSAGES: Record<Locale, MessageDictionary> = {
+const MESSAGES: Record<Locale, MessageDictionary> = {
   en: {
     'app.title': 'Staff Scheduler',
     'common.loading': 'Loading…',

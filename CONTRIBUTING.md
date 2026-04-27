@@ -3,16 +3,84 @@
 > **Comprehensive development standards, code guidelines, testing requirements, and contribution process for Staff Scheduler project**
 
 **Table of Contents:**
-1. [Getting Started](#getting-started)
-2. [Code Standards](#code-standards)
-3. [Development Workflow](#development-workflow)
-4. [Testing Requirements](#testing-requirements)
-5. [Git Workflow & PR Process](#git-workflow--pr-process)
-6. [Code Review Guidelines](#code-review-guidelines)
-7. [Performance Benchmarks](#performance-benchmarks)
-8. [Security Requirements](#security-requirements)
-9. [Pre-commit Hooks & Linting](#pre-commit-hooks--linting)
-10. [Commit Message Standards](#commit-message-standards)
+1. [Code of Conduct](#code-of-conduct)
+2. [Security Policy](#security-policy)
+3. [Getting Started](#getting-started)
+4. [Code Standards](#code-standards)
+5. [Development Workflow](#development-workflow)
+6. [Testing Requirements](#testing-requirements)
+7. [Git Workflow & PR Process](#git-workflow--pr-process)
+8. [Code Review Guidelines](#code-review-guidelines)
+9. [Performance Benchmarks](#performance-benchmarks)
+10. [Security Requirements](#security-requirements)
+11. [Pre-commit Hooks & Linting](#pre-commit-hooks--linting)
+12. [Commit Message Standards](#commit-message-standards)
+
+---
+
+## CODE OF CONDUCT
+
+This project follows the spirit of the
+[Contributor Covenant v2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
+
+In short:
+
+- Be respectful, welcoming, and inclusive.
+- Assume good faith and prefer constructive feedback over personal
+  criticism.
+- Harassment of any kind is not tolerated, in issues, pull requests,
+  commit messages, or any other project space.
+- Reports of unacceptable behavior can be sent privately to the
+  maintainer (see [Security Policy](#security-policy) for the address).
+  Reports are handled confidentially.
+
+By contributing — opening issues, submitting pull requests, or reviewing
+others' work — you agree to abide by these expectations.
+
+---
+
+## SECURITY POLICY
+
+### Reporting a vulnerability
+
+Please **do not** open a public GitHub issue for security problems.
+
+Instead, contact the maintainer privately at
+[lucaostinelli@protonmail.com](mailto:lucaostinelli@protonmail.com) with:
+
+- a description of the vulnerability,
+- steps to reproduce it (proof of concept welcome),
+- the affected version / commit SHA,
+- and your assessment of the impact.
+
+You should expect an acknowledgement within **5 business days** and a
+status update within **15 business days**. Coordinated disclosure
+windows are negotiated case-by-case; the default is 90 days from the
+acknowledgement before public disclosure, shorter if a fix is available
+sooner.
+
+### Supported versions
+
+The project is pre-1.0 and does not maintain back-ported security
+branches. Fixes ship on `main`; users are expected to track the latest
+release.
+
+### Scope
+
+In scope:
+
+- The HTTP API (`backend/src/routes/**`) and the services it exposes.
+- The web frontend (`frontend/src/**`) when built with the documented
+  configuration.
+- The OR-Tools optimizer bridge (`backend/optimization-scripts/**`).
+
+Out of scope:
+
+- Vulnerabilities that require an attacker who already has admin
+  credentials in the application.
+- Vulnerabilities in third-party services (MySQL, Docker, OS, browser).
+- Findings against forks or unsupported deployments (e.g. running
+  behind a misconfigured reverse proxy).
 
 ---
 
@@ -25,16 +93,16 @@
 - **Docker Desktop**: 4.0+ with Docker Compose V2
 - **Git**: 2.37.0 or higher
 - **VS Code** (recommended) with recommended extensions:
-  - ESLint
-  - Prettier
-  - TypeScript Vue Plugin
-  - Thunder Client (API testing)
+  - ESLint (`dbaeumer.vscode-eslint`)
+  - Prettier (`esbenp.prettier-vscode`)
+  - Jest Runner (`firsttris.vscode-jest-runner`) for inline test runs
+  - Thunder Client / REST Client for API testing
 
 ### Initial Setup
 
 ```bash
 # Clone repository
-git clone https://github.com/yourorg/StaffScheduler.git
+git clone https://github.com/lucaosti/StaffScheduler.git
 cd StaffScheduler
 
 # Install dependencies (backend)
@@ -48,22 +116,26 @@ npm install
 # Return to root
 cd ..
 
-# Start development environment
-docker-compose up -d mysql redis phpmyadmin
+# Start development environment (mysql + phpmyadmin under the dev profile)
+docker compose --profile dev up -d
 
-# Run database migrations
+# Initialize database schema (no demo data)
 cd backend
-npm run migrate
+npm run db:init
+
+# Optional: seed a demo dataset (idempotent)
+npm run db:seed:demo
 
 # Start backend (terminal 1)
 npm run dev
 
 # Start frontend (terminal 2, from frontend dir)
-npm run dev
+npm start
 
 # Access:
 # Frontend: http://localhost:3000
 # Backend API: http://localhost:3001/api
+# Swagger UI: http://localhost:3001/api/docs
 # PhpMyAdmin: http://localhost:8080
 ```
 
@@ -513,18 +585,20 @@ describe('ScheduleOptimizer', () => {
 ```bash
 # Backend tests
 cd backend
-npm run test                    # Run all tests
+npm test                       # Run unit + integration suites
 npm run test:watch             # Watch mode
 npm run test:coverage          # Generate coverage report
-npm run test -- --testNamePattern="ScheduleOptimizer" # Specific test
+npm run test:integration       # Run only *.integration.test.ts files
+npm test -- --testNamePattern="ScheduleOptimizer"   # Specific test
 
-# Frontend tests
+# Frontend tests (CRA / react-scripts)
 cd frontend
-npm run test                    # Run all tests
-npm run test:coverage          # Generate coverage report
+CI=true npm test -- --watchAll=false                # Run once
+CI=true npm test -- --watchAll=false --coverage     # With coverage
 
-# Integration tests
-npm run test:integration       # Full stack tests
+# End-to-end (Playwright, requires the demo stack to be running)
+cd frontend
+npm run test:e2e
 ```
 
 ### Test Naming Convention
@@ -730,15 +804,17 @@ npm run build
 
 ### Load Testing
 
-```bash
-# Run load tests before deployment
-npm run load-test
+The repository does not currently ship a load-testing harness; before
+production deployment you should benchmark the relevant endpoints with a
+tool of your choice (e.g. [`k6`](https://k6.io),
+[`autocannon`](https://github.com/mcollina/autocannon)) against the
+demo dataset.
 
-# Expected results
-- 100 concurrent users: 95th %ile < 2s
-- 1000 concurrent users: 95th %ile < 5s
+Targets to aim for on a single node deployment with the demo dataset:
+
+- 100 concurrent users: 95th percentile < 2 s
+- 1000 concurrent users: 95th percentile < 5 s
 - Error rate: < 0.1%
-```
 
 ---
 
@@ -908,46 +984,36 @@ npm ci                     # Use exact versions from package-lock.json
 
 ### Pre-commit Hooks
 
-**File: `.husky/pre-commit`**
-```bash
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
-
-# Run linter
-npm run lint --fix
-
-# Run type check
-npm run type-check
-
-# Run tests
-npm run test -- --bail --findRelatedTests
-
-# Add fixed files back
-git add .
-```
-
-### Setup Husky
+The repository does **not** ship a Husky / lint-staged setup today —
+gating happens in CI (`.github/workflows/ci.yml`) which runs lint +
+test + build on every push and PR. If you want a local pre-commit
+parity, you can opt in with:
 
 ```bash
-npm install husky --save-dev
-npx husky install
-npx husky add .husky/pre-commit "npm run lint && npm run test --bail"
+# From the repo root
+npm install --save-dev husky
+npx husky init
+echo "cd backend && npm run lint && cd ../frontend && npm run lint" \
+  > .husky/pre-commit
+chmod +x .husky/pre-commit
 ```
+
+This is purely local; nothing in the repo depends on it.
 
 ### Running Linters
 
 ```bash
 # Backend
 cd backend
-npm run lint                   # Check linting errors
+npm run lint                   # ESLint
 npm run lint:fix              # Auto-fix fixable errors
-npm run type-check            # TypeScript type checking
+npm run build                 # tsc --noEmit-equivalent (full build)
 
 # Frontend
 cd frontend
-npm run lint                   # Check linting errors
+npm run lint                   # ESLint
 npm run lint:fix              # Auto-fix fixable errors
-npm run type-check            # TypeScript type checking
+CI=true npm run build          # Production build (acts as type check)
 ```
 
 ---
@@ -974,6 +1040,7 @@ npm run type-check            # TypeScript type checking
 - `perf`: Code change that improves performance
 - `test`: Adding missing tests or updating tests
 - `chore`: Changes to build process or dependencies
+- `ci`: Changes to CI configuration files and scripts
 
 ### Scope Convention
 
@@ -1033,28 +1100,26 @@ Closes #123"
 ## Checking Your Work Before Submitting
 
 ```bash
-# 1. Run full linting
+# Backend (run from ./backend)
 npm run lint
-
-# 2. Run type checking
-npm run type-check
-
-# 3. Run all tests
-npm run test
-
-# 4. Check test coverage
-npm run test:coverage
-
-# 5. Build for production
+npm test
 npm run build
 
-# 6. Review your changes
+# Frontend (run from ./frontend)
+npm run lint
+CI=true npm test -- --watchAll=false
+CI=true npm run build
+
+# Optional: e2e against a running demo stack (./scripts/demo.sh up)
+cd frontend && npm run test:e2e
+
+# Review your changes
 git diff main...HEAD
 
-# 7. Verify commit messages
+# Verify commit messages
 git log --oneline -5
 
-# 8. Push to branch
+# Push to branch
 git push origin feature/my-feature
 ```
 
@@ -1064,11 +1129,9 @@ git push origin feature/my-feature
 
 - **Development Issues**: Create GitHub issue with `help wanted` label
 - **Code Questions**: Ask in PR comments
-- **Security Issues**: Report privately to security@example.com
+- **Security Issues**: see the [Security Policy](#security-policy) above
 - **Documentation**: Update relevant files and submit PR
 
 ---
 
-**Version:** 1.0.0  
-**Last Updated:** October 24, 2025  
-**Maintained by:** Development Team
+**Maintained by:** [@lucaosti](https://github.com/lucaosti)

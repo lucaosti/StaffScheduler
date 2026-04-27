@@ -16,10 +16,10 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
-export type TimeOffType = 'vacation' | 'sick' | 'personal' | 'other';
-export type TimeOffStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
+type TimeOffType = 'vacation' | 'sick' | 'personal' | 'other';
+type TimeOffStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
-export interface TimeOffRequest {
+interface TimeOffRequest {
   id: number;
   userId: number;
   startDate: string;
@@ -35,7 +35,7 @@ export interface TimeOffRequest {
   updatedAt: string;
 }
 
-export interface CreateTimeOffInput {
+interface CreateTimeOffInput {
   userId: number;
   startDate: string;
   endDate: string;
@@ -43,7 +43,7 @@ export interface CreateTimeOffInput {
   reason?: string;
 }
 
-export interface ListTimeOffFilters {
+interface ListTimeOffFilters {
   userId?: number;
   status?: TimeOffStatus;
   /** When set, only return requests overlapping this window. */

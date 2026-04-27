@@ -5,7 +5,6 @@
  * then drives the form via userEvent and asserts on the login() mock.
  */
 
-import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -24,6 +23,7 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ login: mockLogin }),
 }));
 
+// eslint-disable-next-line import/first
 import Login from './Login';
 
 describe('<Login />', () => {

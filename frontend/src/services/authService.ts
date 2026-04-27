@@ -14,7 +14,7 @@
  */
 
 import { ApiResponse, LoginRequest, LoginResponse, User } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
+import { handleResponse } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
@@ -88,23 +88,3 @@ export const refreshToken = async (token: string): Promise<ApiResponse<LoginResp
   return handleResponse<LoginResponse>(response);
 };
 
-/**
- * Logs out the current user and invalidates their session
- * @returns Promise resolving when logout is complete
- * @throws {ApiError} When logout request fails
- * 
- * @example
- * ```typescript
- * await logout();
- * localStorage.removeItem('token');
- * navigate('/login');
- * ```
- */
-export const logout = async (): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/auth/logout`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<void>(response);
-};

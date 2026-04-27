@@ -10,7 +10,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 
-export interface AuditLogEntry {
+interface AuditLogEntry {
   id: number;
   userId: number | null;
   action: string;
@@ -22,7 +22,7 @@ export interface AuditLogEntry {
   createdAt: string;
 }
 
-export interface AuditLogFilters {
+interface AuditLogFilters {
   userId?: number;
   action?: string;
   entityType?: string;
@@ -35,7 +35,7 @@ export interface AuditLogFilters {
   offset?: number;
 }
 
-export interface AuditLogPage {
+interface AuditLogPage {
   total: number;
   items: AuditLogEntry[];
 }

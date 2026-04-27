@@ -13,9 +13,9 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 
-export type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
+type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
 
-export interface ShiftSwapRequest {
+interface ShiftSwapRequest {
   id: number;
   requesterUserId: number;
   requesterAssignmentId: number;
@@ -30,7 +30,7 @@ export interface ShiftSwapRequest {
   updatedAt: string;
 }
 
-export interface CreateSwapInput {
+interface CreateSwapInput {
   requesterUserId: number;
   requesterAssignmentId: number;
   targetAssignmentId: number;

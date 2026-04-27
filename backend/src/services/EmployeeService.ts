@@ -133,9 +133,9 @@ export class EmployeeService {
    */
   async getAvailableEmployees(
     departmentId: number,
-    date: string,
-    startTime: string,
-    endTime: string
+    _date: string,
+    _startTime: string,
+    _endTime: string
   ): Promise<User[]> {
     try {
       // This is a simplified version. In a real implementation, you would

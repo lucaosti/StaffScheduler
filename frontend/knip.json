@@ -1,0 +1,22 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/index.tsx",
+    "src/setupTests.ts",
+    "src/**/*.test.{ts,tsx}",
+    "e2e/**/*.spec.ts"
+  ],
+  "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts"],
+  "ignoreBinaries": ["source-map-explorer"],
+  "ignoreDependencies": [
+    "eslint-config-react-app",
+    "@typescript-eslint/eslint-plugin",
+    "@typescript-eslint/parser",
+    "eslint-plugin-react",
+    "eslint-plugin-react-hooks",
+    "jest-environment-jsdom",
+    "sass",
+    "web-vitals",
+    "whatwg-fetch"
+  ]
+}

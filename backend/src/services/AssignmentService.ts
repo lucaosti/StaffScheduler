@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
+import { PolicyValidator } from './PolicyValidator';
 
 /**
  * AssignmentService Class
@@ -33,7 +34,11 @@ export class AssignmentService {
    * 
    * @param pool - MySQL connection pool for database operations
    */
-  constructor(private pool: Pool) {}
+  private policyValidator: PolicyValidator;
+
+  constructor(private pool: Pool) {
+    this.policyValidator = new PolicyValidator(pool);
+  }
 
   /**
    * Creates a new shift assignment
@@ -145,6 +150,24 @@ export class AssignmentService {
         };
         err.code = `COMPLIANCE_${head.code}`;
         err.violations = compliance.violations;
+        throw err;
+      }
+
+      // Policy-based blocking (derogations). This is the main hook that lets
+      // org owners impose rules and require explicit exceptions.
+      const policyValidation = await this.policyValidator.validateAssignment({
+        userId: assignmentData.userId,
+        shiftId: assignmentData.shiftId,
+      });
+      if (!policyValidation.ok) {
+        const blocking = policyValidation.violations.filter((v) => !v.hasApprovedException);
+        const head = blocking[0];
+        const err = new Error(`Policy violation: ${head?.message ?? 'Blocked by policy'}`) as Error & {
+          code?: string;
+          violations?: typeof policyValidation.violations;
+        };
+        err.code = `POLICY_${head?.policyKey ?? 'VIOLATION'}`.toUpperCase();
+        err.violations = policyValidation.violations;
         throw err;
       }
 
@@ -512,8 +535,8 @@ export class AssignmentService {
   async checkUserAvailability(
     userId: number,
     date: string,
-    startTime: string,
-    endTime: string
+    _startTime: string,
+    _endTime: string
   ): Promise<boolean> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(

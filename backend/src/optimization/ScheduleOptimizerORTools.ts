@@ -18,7 +18,7 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import logger from '../config/logger';
 
-export interface ScheduleAssignment {
+interface ScheduleAssignment {
   employeeId: string;
   shiftId: string;
   date: string;
@@ -27,7 +27,7 @@ export interface ScheduleAssignment {
   hours: number;
 }
 
-export interface OptimizationConfig {
+interface OptimizationConfig {
   timeLimitSeconds?: number;
   
   // Constraint weights (inspired by PoliTO Parameters.py)
@@ -45,7 +45,7 @@ export interface OptimizationConfig {
   };
 }
 
-export interface Employee {
+interface Employee {
   id: string;
   max_hours_per_week: number;
   min_hours_per_week?: number;
@@ -54,7 +54,7 @@ export interface Employee {
   max_consecutive_days?: number;
 }
 
-export interface Shift {
+interface Shift {
   id: string;
   date: string;
   start_time: string;
@@ -64,7 +64,7 @@ export interface Shift {
   required_skills?: string[];
 }
 
-export interface Preference {
+interface Preference {
   employee_id: string;
   preferred_shifts: string[];
   avoid_shifts: string[];
@@ -79,7 +79,7 @@ export interface OptimizationProblem {
   weights?: Record<string, number>;
 }
 
-export interface OptimizationResult {
+interface OptimizationResult {
   status: 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | 'ERROR';
   objectiveValue?: number;
   solveTimeSeconds: number;
@@ -297,8 +297,7 @@ export class ScheduleOptimizer {
     // Assign employees to shifts greedily
     for (const shift of sortedShifts) {
       const requiredSkills = new Set(shift.required_skills || []);
-      const assignedCount = 0;
-      
+
       // Find available employees with required skills
       const candidates = problem.employees.filter(emp => {
         // Check if already assigned to overlapping shift
@@ -385,4 +384,3 @@ export class ScheduleOptimizer {
   }
 }
 
-export default new ScheduleOptimizer();

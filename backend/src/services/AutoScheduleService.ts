@@ -19,7 +19,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
 
-export interface AutoScheduleResult {
+interface AutoScheduleResult {
   scheduleId: number;
   assignmentsCreated: number;
   totalShifts: number;

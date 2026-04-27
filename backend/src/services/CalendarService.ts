@@ -40,7 +40,7 @@ export interface CalendarEvent {
   categories?: string[];
 }
 
-export interface FeedResult {
+interface FeedResult {
   body: string;
   etag: string;
 }

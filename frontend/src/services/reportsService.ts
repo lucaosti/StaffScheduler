@@ -21,12 +21,6 @@ export interface CostByDepartmentRow {
   cost: number;
 }
 
-export interface FairnessReport {
-  scheduleId: number;
-  perUser: HoursWorkedRow[];
-  stats: { count: number; min: number; max: number; mean: number; stddev: number };
-}
-
 const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -43,6 +37,3 @@ export const hoursWorked = (start: string, end: string, departmentId?: number) =
 
 export const costByDepartment = (start: string, end: string) =>
   request<CostByDepartmentRow[]>(`/reports/cost-by-department?start=${start}&end=${end}`);
-
-export const fairness = (scheduleId: number) =>
-  request<FairnessReport>(`/reports/fairness/${scheduleId}`);

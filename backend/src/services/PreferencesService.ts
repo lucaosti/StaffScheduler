@@ -11,7 +11,7 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
-export interface UserPreferences {
+interface UserPreferences {
   userId: number;
   maxHoursPerWeek: number;
   minHoursPerWeek: number;
@@ -22,7 +22,7 @@ export interface UserPreferences {
   updatedAt: string;
 }
 
-export interface UpsertPreferencesInput {
+interface UpsertPreferencesInput {
   maxHoursPerWeek?: number;
   minHoursPerWeek?: number;
   maxConsecutiveDays?: number;

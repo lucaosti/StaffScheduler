@@ -13,7 +13,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 
-export interface SkillGapEntry {
+interface SkillGapEntry {
   skillId: number;
   skillName: string;
   demand: number;
@@ -21,7 +21,7 @@ export interface SkillGapEntry {
   gap: number;
 }
 
-export interface SkillGapReport {
+interface SkillGapReport {
   departmentId: number;
   rangeStart: string;
   rangeEnd: string;

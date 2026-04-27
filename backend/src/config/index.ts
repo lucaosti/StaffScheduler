@@ -110,5 +110,3 @@ export const config = {
     inAppEnabled: process.env.IN_APP_NOTIFICATIONS_ENABLED !== 'false',
   },
 };
-
-export default config;
