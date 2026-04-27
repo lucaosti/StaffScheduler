@@ -118,8 +118,6 @@ describe('<OrgManagement />', () => {
     // Loans: switch tab, create loan, approve/reject/cancel pending
     await userEvent.click(screen.getAllByRole('button', { name: /^loans$/i })[0]);
     const requestBtn = screen.getByRole('button', { name: /request loan/i });
-    // Loan form fields are unique in the Loans tab.
-    const loan = within(screen.getByRole('table').parentElement as HTMLElement);
 
     await userEvent.type(screen.getAllByPlaceholderText(/user id/i)[0], '2');
     const selects = screen.getAllByRole('combobox');
@@ -127,11 +125,14 @@ describe('<OrgManagement />', () => {
     await userEvent.selectOptions(selects[selects.length - 2], '10');
     await userEvent.selectOptions(selects[selects.length - 1], '10');
 
-    // eslint-disable-next-line testing-library/no-node-access
-    const dateInputs = (document.querySelectorAll('input[type="date"]') as NodeListOf<HTMLInputElement>);
-    expect(dateInputs.length).toBeGreaterThanOrEqual(2);
-    await userEvent.type(dateInputs[0], '2026-04-01');
-    await userEvent.type(dateInputs[1], '2026-04-02');
+    const dateInputs = screen.getAllByDisplayValue('');
+    const loanDateInputs = dateInputs.filter(
+      (el): el is HTMLInputElement =>
+        el instanceof HTMLInputElement && el.type === 'date'
+    );
+    expect(loanDateInputs.length).toBeGreaterThanOrEqual(2);
+    await userEvent.type(loanDateInputs[0], '2026-04-01');
+    await userEvent.type(loanDateInputs[1], '2026-04-02');
 
     await userEvent.click(requestBtn);
     expect(mockCreateLoan).toHaveBeenCalled();
