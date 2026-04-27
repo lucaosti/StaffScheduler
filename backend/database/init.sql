@@ -253,6 +253,79 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
 );
 
 -- ================================================================
+-- ON-CALL PERIODS TABLE - "Reperibilità": be available on short notice
+-- Modelled alongside shifts so a regular shift means active duty and an
+-- on-call period means standby. Compliance treats on-call hours at half
+-- weight by default (configurable in system_settings).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS on_call_periods (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    schedule_id INT NULL,
+    department_id INT NOT NULL,
+    date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    min_staff INT NOT NULL DEFAULT 1,
+    max_staff INT NOT NULL DEFAULT 2,
+    notes TEXT,
+    status ENUM('open', 'assigned', 'cancelled') NOT NULL DEFAULT 'open',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_schedule (schedule_id),
+    INDEX idx_department_date (department_id, date),
+    INDEX idx_status (status),
+
+    FOREIGN KEY (schedule_id) REFERENCES schedules(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+);
+
+-- ================================================================
+-- ON-CALL ASSIGNMENTS TABLE - Users on-call for a given period
+-- ================================================================
+CREATE TABLE IF NOT EXISTS on_call_assignments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    period_id INT NOT NULL,
+    user_id INT NOT NULL,
+    status ENUM('pending', 'confirmed', 'cancelled') NOT NULL DEFAULT 'pending',
+    assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    assigned_by INT NULL,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_period_user (period_id, user_id),
+    INDEX idx_period (period_id),
+    INDEX idx_user (user_id),
+    INDEX idx_status (status),
+
+    FOREIGN KEY (period_id) REFERENCES on_call_periods(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- USER CUSTOM FIELDS TABLE - Configurable per-tenant profile fields
+-- Free-form key/value rows so admins can extend the directory without
+-- changing the schema. is_public controls whether the field appears in
+-- exported vCards and the directory listing.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS user_custom_fields (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    field_key VARCHAR(64) NOT NULL,
+    field_value TEXT,
+    is_public BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_user_key (user_id, field_key),
+    INDEX idx_user (user_id),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
 -- USER UNAVAILABILITY TABLE - When employees cannot work
 -- Similar to Teachers_Unavailability in PoliTO
 -- ================================================================
