@@ -6,10 +6,19 @@
  * deterministic and focuses on the data plumbing.
  */
 
-import { AutoScheduleService } from '../services/AutoScheduleService';
-import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
+const mockOptimize = jest.fn();
+const mockGreedy = jest.fn();
 
-jest.mock('../optimization/ScheduleOptimizerORTools');
+const mockCtor = jest.fn().mockImplementation(() => ({
+    optimize: mockOptimize,
+    generateGreedySchedule: mockGreedy,
+  }));
+
+jest.mock('../optimization/ScheduleOptimizerORTools', () => ({
+  ScheduleOptimizer: mockCtor,
+}));
+
+import { AutoScheduleService } from '../services/AutoScheduleService';
 
 const makePool = () => {
   const execute = jest.fn();
@@ -29,12 +38,22 @@ const makePool = () => {
 
 describe('AutoScheduleService.generate', () => {
   beforeEach(() => {
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
-      generateGreedySchedule: jest.fn().mockResolvedValue([
+    delete process.env.OPTIMIZATION_ENGINE;
+    mockOptimize.mockReset();
+    mockGreedy.mockReset();
+    mockGreedy.mockResolvedValue([
+      { shiftId: '10', employeeId: '1' },
+      { shiftId: '11', employeeId: '2' },
+    ]);
+    mockOptimize.mockResolvedValue({
+      status: 'OPTIMAL',
+      solveTimeSeconds: 0.1,
+      assignments: [
         { shiftId: '10', employeeId: '1' },
         { shiftId: '11', employeeId: '2' },
-      ]),
-    }));
+      ],
+      statistics: { isOptimal: true, totalAssignedShifts: 2, coverageStats: { totalShifts: 2, fullyCoveredShifts: 2, coveragePercentage: 100 } },
+    });
   });
 
   it('throws when the schedule does not exist', async () => {
@@ -79,6 +98,32 @@ describe('AutoScheduleService.generate', () => {
     expect(out.assignmentsCreated).toBe(2);
     expect(out.coveragePercentage).toBe(100);
     expect(conn.commit).toHaveBeenCalled();
+    expect(mockGreedy).toHaveBeenCalled();
+  });
+
+  it('uses the Python optimizer when OPTIMIZATION_ENGINE=or-tools', async () => {
+    process.env.OPTIMIZATION_ENGINE = 'or-tools';
+    jest.resetModules();
+    const { AutoScheduleService: FreshService } = await import('../services/AutoScheduleService');
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
+      .mockResolvedValueOnce([
+        [
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 2, max_staff: 5, department_id: 3, skill_names: 'Triage' },
+          { id: 11, date: '2026-05-01', start_time: '16:00', end_time: '23:59', min_staff: 1, max_staff: 4, department_id: 3, skill_names: null },
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]);
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const service = new FreshService(pool);
+    const out = await service.generate(1, 7);
+
+    expect(out.status).toBe('OK');
+    expect(mockOptimize).toHaveBeenCalled();
   });
 
   it('rolls back when an INSERT fails', async () => {
@@ -144,8 +189,7 @@ describe('AutoScheduleService.generate', () => {
     const service = new AutoScheduleService(pool);
     await service.generate(1, 1);
 
-    const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results[0].value;
-    const problem = optimizerInstance.generateGreedySchedule.mock.calls[0][0];
+    const problem = mockGreedy.mock.calls[0][0];
     expect(problem.employees[0].unavailable_dates).toEqual(['2026-05-01', '2026-05-02', '2026-05-03']);
   });
 });
