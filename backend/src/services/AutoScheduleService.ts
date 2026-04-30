@@ -18,6 +18,7 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
+import { config } from '../config';
 
 interface AutoScheduleResult {
   scheduleId: number;
@@ -99,7 +100,7 @@ export class AutoScheduleService {
       unavailableByUser.set(userId, [...existing, ...dates]);
     }
 
-    // 3. Build problem and run greedy.
+    // 3. Build problem and run optimizer.
     const optimizer = new ScheduleOptimizer();
     const problem = {
       shifts: shiftRows.map((s) => ({
@@ -128,7 +129,10 @@ export class AutoScheduleService {
       },
     };
 
-    const assignments = await optimizer.generateGreedySchedule(problem as never);
+    const assignments =
+      config.optimization.engine === 'or-tools'
+        ? (await optimizer.optimize(problem as never)).assignments
+        : await optimizer.generateGreedySchedule(problem as never);
 
     // 4. Persist assignments.
     const conn = await this.pool.getConnection();
