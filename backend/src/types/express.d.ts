@@ -6,15 +6,11 @@
  * `Request.user` or `Request.tenantId` in route or middleware files.
  */
 
-import { User } from './index';
+import type { User } from './index';
 
-declare global {
-  namespace Express {
-    interface Request {
-      user?: User;
-      tenantId?: number;
-    }
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: User;
+    tenantId?: number;
   }
 }
-
-export {};

@@ -113,7 +113,7 @@ export class AuthService {
         },
         config.jwt.secret,
         {
-          expiresIn: '7d'
+          expiresIn: config.jwt.expiresIn as jwt.SignOptions['expiresIn']
         }
       );
 
@@ -256,7 +256,7 @@ export class AuthService {
         },
         config.jwt.secret,
         {
-          expiresIn: '7d'
+          expiresIn: config.jwt.expiresIn as jwt.SignOptions['expiresIn']
         }
       );
 
