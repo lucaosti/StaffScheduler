@@ -60,6 +60,28 @@ describe('POST /api/auth/login', () => {
     const decoded = jwt.verify(res.body.data.token, config.jwt.secret) as { userId: number };
     expect(decoded.userId).toBe(7);
   });
+
+  it('issues a token whose TTL respects config.jwt.expiresIn', async () => {
+    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 7,
+      email: 'a@x.com',
+      firstName: 'A',
+      lastName: 'B',
+      role: 'manager',
+    });
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw' });
+    expect(res.status).toBe(200);
+    const decoded = jwt.verify(res.body.data.token, config.jwt.secret) as {
+      iat: number;
+      exp: number;
+    };
+    // Default config.jwt.expiresIn is '24h'; allow a small drift.
+    const ttlSeconds = decoded.exp - decoded.iat;
+    expect(ttlSeconds).toBeGreaterThanOrEqual(24 * 60 * 60 - 5);
+    expect(ttlSeconds).toBeLessThanOrEqual(24 * 60 * 60 + 5);
+  });
 });
 
 describe('GET /api/auth/verify', () => {
