@@ -8,26 +8,17 @@
  * @author Luca Ostinelli
  */
 
-import { createPool } from 'mysql2/promise';
 import { config } from './config';
 import { logger } from './config/logger';
 import { buildApp } from './app';
+import { database } from './config/database';
 
 export async function startServer(): Promise<void> {
   try {
-    const pool = createPool({
-      host: config.database.host,
-      port: config.database.port,
-      user: config.database.user,
-      password: config.database.password,
-      database: config.database.database,
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
-    });
+    const pool = database.getPool();
 
     try {
-      await pool.execute('SELECT 1');
+      await database.testConnection();
       logger.info('Database connection test successful');
     } catch (error) {
       logger.error('Database connection test failed:', error);
