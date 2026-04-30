@@ -10,6 +10,7 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import crypto from 'crypto';
 import { User, LoginRequest, LoginResponse } from '../types';
 import { logger } from '../config/logger';
 import { config } from '../config';
@@ -399,15 +400,17 @@ export class AuthService {
 
       const userId = userRows[0].id;
 
-      // Generate reset token
-      const resetToken = jwt.sign(
-        { userId, purpose: 'password_reset' },
-        config.jwt.secret,
-        { expiresIn: '1h' }
+      // Generate a one-time token (store only its hash).
+      const resetToken = crypto.randomBytes(32).toString('base64url');
+      const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+      // 1 hour expiry
+      await connection.execute(
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))`,
+        [userId, tokenHash]
       );
 
-      // Store reset token (in a real system, you'd have a password_reset_tokens table)
-      // For now, we just log it
       await connection.commit();
 
       logger.info(`Password reset initiated for user: ${email}`, { userId });
@@ -438,12 +441,27 @@ export class AuthService {
     try {
       await connection.beginTransaction();
 
-      // Verify reset token
-      const decoded: any = jwt.verify(resetToken, config.jwt.secret);
-      
-      if (!decoded || !decoded.userId || decoded.purpose !== 'password_reset') {
+      if (!resetToken || !newPassword) {
         throw new Error('Invalid reset token');
       }
+
+      const tokenHash = crypto.createHash('sha256').update(resetToken).digest('hex');
+
+      const [rows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id, user_id
+           FROM password_reset_tokens
+          WHERE token_hash = ?
+            AND used_at IS NULL
+            AND expires_at > NOW()
+          LIMIT 1`,
+        [tokenHash]
+      );
+
+      if (rows.length === 0) {
+        throw new Error('Invalid reset token');
+      }
+
+      const resetRow = rows[0];
 
       // Hash new password
       const hashedPassword = await bcrypt.hash(newPassword, config.security.bcryptRounds);
@@ -451,12 +469,16 @@ export class AuthService {
       // Update password
       await connection.execute(
         'UPDATE users SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [hashedPassword, decoded.userId]
+        [hashedPassword, resetRow.user_id]
       );
+
+      await connection.execute('UPDATE password_reset_tokens SET used_at = NOW() WHERE id = ?', [
+        resetRow.id,
+      ]);
 
       await connection.commit();
 
-      logger.info(`Password reset completed for user: ${decoded.userId}`);
+      logger.info(`Password reset completed for user: ${resetRow.user_id}`);
       return true;
     } catch (error) {
       await connection.rollback();

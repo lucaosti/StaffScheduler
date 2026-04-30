@@ -18,12 +18,19 @@ import { Pool } from 'mysql2/promise';
 import { AuthService } from '../services/AuthService';
 import { authenticate } from '../middleware/auth';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
 import { config } from '../config';
 import { UserWithSecrets } from '../types';
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
   const authService = new AuthService(pool);
+
+  const passwordResetLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: 'Too many password reset attempts, please try again later.',
+  });
 
 /**
  * User login endpoint.
@@ -70,6 +77,60 @@ router.post('/login', async (req: Request, res: Response) => {
       },
     });
   }
+});
+
+/**
+ * Initiate password reset.
+ *
+ * Always returns success to avoid email enumeration. In non-production
+ * environments, the reset token is returned in `data.resetToken` to support
+ * local development and tests (no email service is wired).
+ *
+ * @route POST /api/auth/forgot-password
+ */
+router.post('/forgot-password', passwordResetLimiter, async (req: Request, res: Response) => {
+  const { email } = req.body ?? {};
+  if (!email) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Email is required' },
+    });
+  }
+
+  const token = await authService.initiatePasswordReset(String(email));
+  const payload: any = {
+    success: true,
+    message: 'If the email exists, a reset link has been sent.',
+  };
+  if (config.server.env !== 'production') {
+    payload.data = { resetToken: token };
+  }
+  return res.json(payload);
+});
+
+/**
+ * Complete password reset.
+ *
+ * @route POST /api/auth/reset-password
+ */
+router.post('/reset-password', passwordResetLimiter, async (req: Request, res: Response) => {
+  const { resetToken, newPassword } = req.body ?? {};
+  if (!resetToken || !newPassword) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'resetToken and newPassword are required' },
+    });
+  }
+
+  const ok = await authService.completePasswordReset(String(resetToken), String(newPassword));
+  if (!ok) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'RESET_FAILED', message: 'Invalid or expired reset token' },
+    });
+  }
+
+  return res.json({ success: true, message: 'Password reset successful' });
 });
 
 /**
