@@ -31,6 +31,7 @@ jest.mock('../services/ShiftService');
 jest.mock('../services/EmployeeService');
 jest.mock('../services/DepartmentService');
 jest.mock('../services/UserService');
+jest.mock('../services/AuthService');
 jest.mock('../services/SystemSettingsService');
 jest.mock('../services/TimeOffService');
 jest.mock('../services/ShiftSwapService');
@@ -49,6 +50,7 @@ import { ShiftService } from '../services/ShiftService';
 import { EmployeeService } from '../services/EmployeeService';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
+import { AuthService } from '../services/AuthService';
 import { SystemSettingsService } from '../services/SystemSettingsService';
 import { TimeOffService } from '../services/TimeOffService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
@@ -1810,12 +1812,19 @@ describe('auth router (extended)', () => {
   const app = () => mountApp('/api/auth', createAuthRouter(fakePool));
 
   it('POST /login 400 on missing fields', async () => {
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Email and password are required' },
+    });
     const res = await request(app()).post('/api/auth/login').send({});
     expect(res.status).toBe(400);
   });
 
   it('POST /login 401 on invalid credentials', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue(null);
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'LOGIN_FAILED', message: 'Invalid email or password' },
+    });
     const res = await request(app()).post('/api/auth/login').send({
       email: 'x@y.com',
       password: 'bad',
@@ -1824,12 +1833,12 @@ describe('auth router (extended)', () => {
   });
 
   it('POST /login 200 on valid credentials', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 1,
-      email: 'a@x',
-      firstName: 'A',
-      lastName: 'B',
-      role: 'admin',
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: true,
+      data: {
+        token: 'token',
+        user: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' },
+      },
     });
     const res = await request(app()).post('/api/auth/login').send({
       email: 'a@x',
@@ -1840,7 +1849,10 @@ describe('auth router (extended)', () => {
   });
 
   it('POST /login 401 on service throw', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockRejectedValue(new Error('x'));
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'LOGIN_ERROR', message: 'x' },
+    });
     const res = await request(app()).post('/api/auth/login').send({
       email: 'a@x',
       password: 'pw',
