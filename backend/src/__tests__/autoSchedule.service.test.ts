@@ -100,8 +100,35 @@ describe('AutoScheduleService.generate', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 
+  it('only counts rows that were actually inserted (INSERT IGNORE skip)', async () => {
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
+      .mockResolvedValueOnce([
+        [
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+          { id: 11, date: '2026-05-01', start_time: '16:00', end_time: '23:59', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null]);
+    // First insert succeeds, second is skipped (duplicate row → affectedRows = 0).
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+
+    const service = new AutoScheduleService(pool);
+    const out = await service.generate(1, 7);
+
+    expect(out.assignmentsCreated).toBe(1);
+    expect(out.totalShifts).toBe(2);
+    expect(out.coveragePercentage).toBe(50);
+  });
+
   it('expands an unavailability date range into a per-day list per user', async () => {
-    const { pool, execute } = makePool();
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
     execute
       .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
       .mockResolvedValueOnce([[
