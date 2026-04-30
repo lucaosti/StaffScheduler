@@ -198,10 +198,12 @@ describe('AuthService.initiatePasswordReset / completePasswordReset', () => {
 
   it('initiate returns reset token for known user', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([[{ id: 1 }], null]);
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 1 }], null]) // lookup user
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // insert token
     const svc = new AuthService(pool);
     const t = await svc.initiatePasswordReset('a@b');
-    expect(t).toMatch(/^[\w-]+\.[\w-]+\.[\w-]+$/);
+    expect(t).toMatch(/^[A-Za-z0-9_-]{40,}$/);
   });
 
   it('initiate returns null and rolls back on DB error', async () => {
@@ -218,19 +220,14 @@ describe('AuthService.initiatePasswordReset / completePasswordReset', () => {
     expect(await svc.completePasswordReset('garbage', 'np')).toBe(false);
   });
 
-  it('complete returns false for token of wrong purpose', async () => {
-    const { pool } = makePool();
-    const svc = new AuthService(pool);
-    const t = sign({ userId: 1, purpose: 'login' });
-    expect(await svc.completePasswordReset(t, 'np')).toBe(false);
-  });
-
   it('complete updates password and commits', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 9, user_id: 1 }], null]) // token lookup
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // update user pw
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // mark token used
     const svc = new AuthService(pool);
-    const t = sign({ userId: 1, purpose: 'password_reset' });
-    expect(await svc.completePasswordReset(t, 'np')).toBe(true);
+    expect(await svc.completePasswordReset('valid-token', 'np')).toBe(true);
     expect(conn.commit).toHaveBeenCalled();
   });
 });

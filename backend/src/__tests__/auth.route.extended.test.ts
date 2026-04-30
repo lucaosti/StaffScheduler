@@ -122,3 +122,46 @@ describe('POST /api/auth/login — service surfaces an error', () => {
   });
 });
 
+describe('POST /api/auth/forgot-password', () => {
+  it('returns 400 when email is missing', async () => {
+    const res = await request(buildApp()).post('/api/auth/forgot-password').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns success without enumerating users', async () => {
+    (AuthService.prototype.initiatePasswordReset as jest.Mock) = jest.fn().mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post('/api/auth/forgot-password')
+      .send({ email: 'unknown@example.com' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
+describe('POST /api/auth/reset-password', () => {
+  it('returns 400 when inputs are missing', async () => {
+    const res = await request(buildApp()).post('/api/auth/reset-password').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 when reset token is invalid', async () => {
+    (AuthService.prototype.completePasswordReset as jest.Mock) = jest.fn().mockResolvedValue(false);
+    const res = await request(buildApp())
+      .post('/api/auth/reset-password')
+      .send({ resetToken: 'bad', newPassword: 'new' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('RESET_FAILED');
+  });
+
+  it('returns 200 when reset succeeds', async () => {
+    (AuthService.prototype.completePasswordReset as jest.Mock) = jest.fn().mockResolvedValue(true);
+    const res = await request(buildApp())
+      .post('/api/auth/reset-password')
+      .send({ resetToken: 'ok', newPassword: 'new' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+});
+
