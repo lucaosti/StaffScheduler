@@ -99,6 +99,7 @@ export interface Shift {
   assignedStaff?: number;
   notes?: string | null;
   status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
+  assignments?: Assignment[];
 
   // Legacy fields (optional)
   department?: string;
@@ -166,6 +167,7 @@ export interface Schedule {
 export interface ApiResponse<T = any> {
   success: boolean;
   data?: T;
+  message?: string;
   error?: {
     code: string;
     message: string;

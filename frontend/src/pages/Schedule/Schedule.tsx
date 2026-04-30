@@ -209,7 +209,7 @@ const Schedule: React.FC = () => {
       const response = await scheduleService.generateSchedule(selectedScheduleId);
       if (response.success) {
         setShowGenerateModal(false);
-        setInfo(response.data?.message || 'Schedule generation completed.');
+        setInfo(response.message || 'Schedule generation completed.');
         await loadData();
       } else {
         setGenerateError(response.error?.message || 'Failed to generate schedule.');
