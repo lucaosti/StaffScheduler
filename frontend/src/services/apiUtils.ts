@@ -13,6 +13,8 @@
 
 import { ApiResponse } from '../types';
 
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+
 /**
  * Custom error class for API-related errors.
  * Carries the HTTP status code alongside the message so callers
@@ -48,6 +50,47 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
   }
 
   return data as ApiResponse<T>;
+};
+
+/**
+ * Fetch wrapper that retries once on 401 by refreshing the JWT.
+ *
+ * This keeps services thin and provides defence-in-depth against token expiry.
+ * Auth flows themselves should call `authService.refreshToken` directly.
+ */
+const apiFetch = async (path: string, init: RequestInit = {}, retried = false): Promise<Response> => {
+  const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
+  const response = await fetch(url, {
+    ...init,
+    headers: { ...getAuthHeaders(), ...(init.headers || {}) },
+  });
+
+  const token = localStorage.getItem('token');
+  const isAuthRefresh = url.endsWith('/auth/refresh');
+
+  if (response.status === 401 && token && !retried && !isAuthRefresh) {
+    // Attempt a token refresh, then retry the original request once.
+    const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    if (refreshRes.ok) {
+      const parsed = (await refreshRes.json()) as ApiResponse<{ token: string; user: unknown }>;
+      const newToken = parsed.data?.token;
+      if (newToken) {
+        localStorage.setItem('token', newToken);
+        return apiFetch(path, init, true);
+      }
+    }
+  }
+
+  return response;
+};
+
+export const requestJson = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
+  const response = await apiFetch(path, init);
+  return handleResponse<T>(response);
 };
 
 /**

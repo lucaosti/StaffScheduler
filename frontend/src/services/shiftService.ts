@@ -16,9 +16,7 @@
  */
 
 import { ApiResponse, Shift } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { requestJson } from './apiUtils';
 
 interface ShiftFilters {
   department?: string;
@@ -64,41 +62,19 @@ export const getShifts = async (filters: ShiftFilters = {}): Promise<ApiResponse
     }
   });
 
-  const response = await fetch(`${API_BASE_URL}/shifts?${queryParams}`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<Shift[]>(response);
+  return requestJson<Shift[]>(`/shifts?${queryParams}`, { method: 'GET' });
 };
 
 
 export const createShift = async (shiftData: CreateShiftData): Promise<ApiResponse<Shift>> => {
-  const response = await fetch(`${API_BASE_URL}/shifts`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(shiftData),
-  });
-  
-  return handleResponse<Shift>(response);
+  return requestJson<Shift>('/shifts', { method: 'POST', body: JSON.stringify(shiftData) });
 };
 
 export const updateShift = async (shiftId: string | number, shiftData: UpdateShiftData): Promise<ApiResponse<Shift>> => {
-  const response = await fetch(`${API_BASE_URL}/shifts/${shiftId}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(shiftData),
-  });
-  
-  return handleResponse<Shift>(response);
+  return requestJson<Shift>(`/shifts/${shiftId}`, { method: 'PUT', body: JSON.stringify(shiftData) });
 };
 
 export const deleteShift = async (shiftId: string | number): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/shifts/${shiftId}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<void>(response);
+  return requestJson<void>(`/shifts/${shiftId}`, { method: 'DELETE' });
 };
 

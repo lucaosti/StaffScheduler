@@ -13,9 +13,7 @@
  */
 
 import { ApiResponse, Schedule, Shift, Assignment } from '../types';
-import { getAuthHeaders, handleResponse } from './apiUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { requestJson } from './apiUtils';
 
 interface CreateScheduleParams {
   name: string;
@@ -41,11 +39,7 @@ const request = async <T>(
   path: string,
   init: RequestInit = {}
 ): Promise<ApiResponse<T>> => {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: { ...getAuthHeaders(), ...(init.headers || {}) },
-  });
-  return handleResponse<T>(response);
+  return requestJson<T>(path, init);
 };
 
 export const getSchedules = (params?: Record<string, string>) => {

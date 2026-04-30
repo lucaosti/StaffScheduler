@@ -15,9 +15,7 @@
  */
 
 import { ApiResponse, Employee } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { requestJson } from './apiUtils';
 
 /**
  * Interface for employee filtering and pagination options
@@ -110,12 +108,7 @@ export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiRe
     }
   });
 
-  const response = await fetch(`${API_BASE_URL}/employees?${queryParams}`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<Employee[]>(response);
+  return requestJson<Employee[]>(`/employees?${queryParams}`, { method: 'GET' });
 };
 
 /**
@@ -130,14 +123,8 @@ export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiRe
  * console.log(`Employee: ${employee.data.firstName} ${employee.data.lastName}`);
  * ```
  */
-export const getEmployee = async (id: number | string): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<Employee>(response);
-};
+export const getEmployee = async (id: number | string): Promise<ApiResponse<Employee>> =>
+  requestJson<Employee>(`/employees/${id}`, { method: 'GET' });
 
 /**
  * Creates a new employee record
@@ -158,13 +145,7 @@ export const getEmployee = async (id: number | string): Promise<ApiResponse<Empl
  * ```
  */
 export const createEmployee = async (employeeData: CreateEmployeeData): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees`, {
-    method: 'POST',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(employeeData),
-  });
-  
-  return handleResponse<Employee>(response);
+  return requestJson<Employee>('/employees', { method: 'POST', body: JSON.stringify(employeeData) });
 };
 
 /**
@@ -183,13 +164,7 @@ export const createEmployee = async (employeeData: CreateEmployeeData): Promise<
  * ```
  */
 export const updateEmployee = async (id: number | string, employeeData: UpdateEmployeeData): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify(employeeData),
-  });
-  
-  return handleResponse<Employee>(response);
+  return requestJson<Employee>(`/employees/${id}`, { method: 'PUT', body: JSON.stringify(employeeData) });
 };
 
 /**
@@ -205,10 +180,5 @@ export const updateEmployee = async (id: number | string, employeeData: UpdateEm
  * ```
  */
 export const deleteEmployee = async (id: number | string): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'DELETE',
-    headers: getAuthHeaders(),
-  });
-  
-  return handleResponse<void>(response);
+  return requestJson<void>(`/employees/${id}`, { method: 'DELETE' });
 };
