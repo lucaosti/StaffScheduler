@@ -15,7 +15,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { UserService } from '../services/UserService';
+import { AuthService } from '../services/AuthService';
 import { authenticate } from '../middleware/auth';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
@@ -23,7 +23,7 @@ import { UserWithSecrets } from '../types';
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
-  const userService = new UserService(pool);
+  const authService = new AuthService(pool);
 
 /**
  * User login endpoint.
@@ -50,59 +50,24 @@ export const createAuthRouter = (pool: Pool) => {
  */
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body ?? {};
+    const result = await authService.login({ email, password });
 
-    // Input validation
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Email and password are required'
-        }
-      });
+    if (!result.success) {
+      const code = result.error?.code ?? 'LOGIN_FAILED';
+      const status =
+        code === 'VALIDATION_ERROR' ? 400 : code === 'ACCOUNT_INACTIVE' ? 403 : 401;
+      return res.status(status).json(result);
     }
 
-    // Authenticate user and generate token
-    const user = await userService.validatePassword(email, password);
-    
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'LOGIN_FAILED',
-          message: 'Invalid email or password'
-        }
-      });
-    }
-
-    // Generate JWT token
-    const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
-      config.jwt.secret,
-      { expiresIn: config.jwt.expiresIn as jwt.SignOptions['expiresIn'] }
-    );
-    
-    res.json({
-      success: true,
-      data: { 
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          role: user.role
-        }
-      }
-    });
+    return res.json(result);
   } catch (error) {
-    res.status(401).json({
+    return res.status(401).json({
       success: false,
       error: {
         code: 'LOGIN_FAILED',
-        message: (error as Error).message
-      }
+        message: (error as Error).message,
+      },
     });
   }
 });

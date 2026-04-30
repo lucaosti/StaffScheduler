@@ -10,11 +10,13 @@ import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { UserService } from '../services/UserService';
+import { AuthService } from '../services/AuthService';
 import { database } from '../config/database';
 import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
+jest.mock('../services/AuthService');
 jest.mock('../config/database', () => ({
   database: { getPool: jest.fn().mockReturnValue({}) },
 }));
@@ -105,14 +107,17 @@ describe('POST /api/auth/logout', () => {
   });
 });
 
-describe('POST /api/auth/login — service throws', () => {
-  it('returns 401 with the error message when validatePassword throws', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockRejectedValue(new Error('service failure'));
+describe('POST /api/auth/login — service surfaces an error', () => {
+  it('returns 401 with the error envelope when AuthService.login fails', async () => {
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'LOGIN_ERROR', message: 'service failure' },
+    });
 
     const res = await request(buildApp()).post('/api/auth/login').send({ email: 'a@x.com', password: 'pw' });
 
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('LOGIN_FAILED');
+    expect(res.body.error.code).toBe('LOGIN_ERROR');
     expect(res.body.error.message).toBe('service failure');
   });
 });

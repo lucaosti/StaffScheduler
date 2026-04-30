@@ -9,19 +9,38 @@
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import { UserService } from '../services/UserService';
+import { AuthService } from '../services/AuthService';
 import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
-jest.mock('../services/UserService');
+jest.mock('../services/AuthService');
 
 const buildApp = (): express.Express => {
   const app = express();
   app.use(express.json());
-  // Pool is irrelevant — UserService is mocked.
+  // Pool is irrelevant — AuthService is mocked.
   app.use('/api/auth', createAuthRouter({} as never));
   return app;
 };
+
+const successResponse = (overrides: Record<string, unknown> = {}) => ({
+  success: true,
+  data: {
+    token: jwt.sign(
+      { userId: 7, email: 'a@x.com', role: 'manager' },
+      config.jwt.secret,
+      { expiresIn: config.jwt.expiresIn as jwt.SignOptions['expiresIn'] }
+    ),
+    user: {
+      id: 7,
+      email: 'a@x.com',
+      firstName: 'A',
+      lastName: 'B',
+      role: 'manager',
+    },
+    ...overrides,
+  },
+});
 
 describe('POST /api/auth/login', () => {
   beforeEach(() => {
@@ -29,13 +48,20 @@ describe('POST /api/auth/login', () => {
   });
 
   it('returns 400 when credentials are missing', async () => {
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'VALIDATION_ERROR', message: 'Email and password are required' },
+    });
     const res = await request(buildApp()).post('/api/auth/login').send({});
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 401 when credentials are invalid', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue(null);
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue({
+      success: false,
+      error: { code: 'LOGIN_FAILED', message: 'Invalid email or password' },
+    });
     const res = await request(buildApp())
       .post('/api/auth/login')
       .send({ email: 'a@x.com', password: 'wrong' });
@@ -44,13 +70,7 @@ describe('POST /api/auth/login', () => {
   });
 
   it('returns a JWT and user payload on success', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 7,
-      email: 'a@x.com',
-      firstName: 'A',
-      lastName: 'B',
-      role: 'manager',
-    });
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue(successResponse());
     const res = await request(buildApp())
       .post('/api/auth/login')
       .send({ email: 'a@x.com', password: 'pw' });
@@ -62,13 +82,7 @@ describe('POST /api/auth/login', () => {
   });
 
   it('issues a token whose TTL respects config.jwt.expiresIn', async () => {
-    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 7,
-      email: 'a@x.com',
-      firstName: 'A',
-      lastName: 'B',
-      role: 'manager',
-    });
+    (AuthService.prototype.login as jest.Mock) = jest.fn().mockResolvedValue(successResponse());
     const res = await request(buildApp())
       .post('/api/auth/login')
       .send({ email: 'a@x.com', password: 'pw' });
