@@ -14,7 +14,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get all departments
   router.get('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
 
       let departments;
       if (user.role === 'admin') {
@@ -36,7 +36,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get single department
   router.get('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
 
       if (user.role !== 'admin') {
@@ -72,7 +72,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Create new department
   router.post('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
 
       if (!['admin', 'manager'].includes(user.role)) {
         return res.status(403).json({
@@ -122,7 +122,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Update department
   router.put('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
       const departmentData: UpdateDepartmentRequest = req.body;
 
@@ -177,7 +177,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Delete department
   router.delete('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
 
       if (user.role !== 'admin') {
@@ -210,7 +210,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Add user to department
   router.post('/:id/users', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
       const { userId } = req.body;
 
@@ -264,7 +264,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Remove user from department
   router.delete('/:id/users/:userId', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
       const targetUserId = parseInt(req.params.userId);
 
@@ -302,7 +302,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get department statistics
   router.get('/:id/stats', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const departmentId = parseInt(req.params.id);
 
       if (user.role !== 'admin') {
