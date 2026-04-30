@@ -9,29 +9,11 @@
 
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { User } from '../types';
+import { JWTPayload } from '../types';
 import { UserService } from '../services/UserService';
 import { config } from '../config';
 import { logger } from '../config/logger';
 import { database } from '../config/database';
-
-// Extend Express Request to include user
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: User;
-  }
-}
-
-/**
- * JWT Token Payload Interface
- */
-interface JWTPayload {
-  userId: string;
-  email: string;
-  role: 'admin' | 'manager' | 'employee';
-  iat?: number;
-  exp?: number;
-}
 
 /**
  * Main Authentication Middleware
