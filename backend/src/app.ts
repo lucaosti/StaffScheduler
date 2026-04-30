@@ -45,6 +45,7 @@ import { createBulkImportRouter } from './routes/bulkImport';
 import { createEventsRouter } from './routes/events';
 import { createOrgRouter } from './routes/org';
 import { createPoliciesRouter } from './routes/policies';
+import { resolveTenant } from './middleware/tenant';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -90,6 +91,9 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(compression());
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  // Multi-tenant scaffolding: default tenant is applied when header is absent.
+  app.use(resolveTenant(pool));
 
   app.use('/api/health', healthRoutes);
   app.use('/api/system', createSystemRouter(pool));
