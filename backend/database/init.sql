@@ -51,6 +51,25 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 -- ================================================================
+-- PASSWORD RESET TOKENS - One-time tokens for account recovery
+-- ================================================================
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uniq_token_hash (token_hash),
+    INDEX idx_user (user_id),
+    INDEX idx_expires (expires_at),
+    INDEX idx_used (used_at),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
 -- DEPARTMENTS TABLE - Organizational structure
 -- ================================================================
 CREATE TABLE IF NOT EXISTS departments (
