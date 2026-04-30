@@ -15,7 +15,7 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
 
@@ -136,12 +136,15 @@ export class AutoScheduleService {
     try {
       await conn.beginTransaction();
       for (const a of assignments) {
-        await conn.execute(
+        const [result] = await conn.execute<ResultSetHeader>(
           `INSERT IGNORE INTO shift_assignments (shift_id, user_id, status, assigned_by)
            VALUES (?, ?, 'pending', ?)`,
           [Number(a.shiftId), Number(a.employeeId), createdBy]
         );
-        inserted++;
+        // INSERT IGNORE returns affectedRows = 0 when the row was skipped due
+        // to a duplicate-key conflict. Only count rows that were actually
+        // persisted so coverage metrics stay accurate.
+        inserted += result.affectedRows ?? 0;
       }
       await conn.commit();
     } catch (err) {
