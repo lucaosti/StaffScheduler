@@ -19,7 +19,6 @@ interface ThemeContextValue {
   choice: ThemeChoice;
   resolved: ResolvedTheme;
   setChoice: (choice: ThemeChoice) => void;
-  toggle: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -66,11 +65,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => mql.removeEventListener('change', handler);
   }, [choice]);
 
-  const toggle = useCallback((): void => {
-    setChoice(resolved === 'dark' ? 'light' : 'dark');
-  }, [resolved, setChoice]);
-
-  const value = useMemo(() => ({ choice, resolved, setChoice, toggle }), [choice, resolved, setChoice, toggle]);
+  const value = useMemo(() => ({ choice, resolved, setChoice }), [choice, resolved, setChoice]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };

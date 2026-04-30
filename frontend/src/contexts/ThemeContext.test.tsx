@@ -4,13 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider, useTheme } from './ThemeContext';
 
 const Probe: React.FC = () => {
-  const { choice, resolved, setChoice, toggle } = useTheme();
+  const { choice, resolved, setChoice } = useTheme();
   return (
     <div>
       <span data-testid="choice">{choice}</span>
       <span data-testid="resolved">{resolved}</span>
       <button onClick={() => setChoice('dark')}>setDark</button>
-      <button onClick={toggle}>toggle</button>
     </div>
   );
 };
@@ -54,14 +53,5 @@ describe('ThemeContext', () => {
     expect(document.documentElement.getAttribute('data-bs-theme')).toBe('dark');
   });
 
-  it('toggle flips dark <-> light based on the resolved value', async () => {
-    localStorage.setItem('theme', 'light');
-    render(
-      <ThemeProvider>
-        <Probe />
-      </ThemeProvider>
-    );
-    await userEvent.click(screen.getByText('toggle'));
-    expect(screen.getByTestId('choice')).toHaveTextContent('dark');
-  });
+  // Theme cycling is handled by ThemeToggle (light -> dark -> system).
 });

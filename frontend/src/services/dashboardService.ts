@@ -16,15 +16,8 @@
  */
 
 import { ApiResponse, DashboardStats } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { requestJson } from './apiUtils';
 
 export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> => {
-  const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
-    method: 'GET',
-    headers: getAuthHeaders(),
-  });
-
-  return handleResponse<DashboardStats>(response);
+  return requestJson<DashboardStats>('/dashboard/stats', { method: 'GET' });
 };

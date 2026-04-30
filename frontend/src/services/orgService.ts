@@ -4,9 +4,7 @@
  */
 
 import { ApiResponse } from '../types';
-import { getAuthHeaders, handleResponse } from './apiUtils';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+import { requestJson } from './apiUtils';
 
 export interface OrgUnit {
   id: number;
@@ -51,11 +49,7 @@ export interface EmployeeLoan {
 }
 
 const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: { ...getAuthHeaders(), ...(init.headers || {}) },
-  });
-  return handleResponse<T>(res);
+  return requestJson<T>(path, init);
 };
 
 // -------- Org units --------
