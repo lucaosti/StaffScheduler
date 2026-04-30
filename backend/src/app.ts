@@ -74,8 +74,8 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
 
   if (!options.silent) {
     const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 100,
+      windowMs: config.security.rateLimitWindow,
+      max: config.security.rateLimitMax,
       message: 'Too many requests from this IP, please try again later.',
     });
     app.use(limiter);
