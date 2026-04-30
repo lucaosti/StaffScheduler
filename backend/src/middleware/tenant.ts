@@ -15,12 +15,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { Pool, RowDataPacket } from 'mysql2/promise';
 
-declare module 'express-serve-static-core' {
-  interface Request {
-    tenantId?: number;
-  }
-}
-
 export const DEFAULT_TENANT_ID = 1;
 
 export const resolveTenant = (pool: Pool) => {

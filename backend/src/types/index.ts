@@ -65,6 +65,27 @@ export interface LoginRequest {
   password: string;
 }
 
+/**
+ * Single source of truth for the JWT payload issued by `/api/auth/login`
+ * and consumed by `authenticate` middleware. Do not redefine locally.
+ */
+export interface JWTPayload {
+  userId: string;
+  email: string;
+  role: 'admin' | 'manager' | 'employee';
+  iat?: number;
+  exp?: number;
+}
+
+/**
+ * Internal-only widening of `User` for routes that need to defensively
+ * strip secret columns before serializing the user record.
+ */
+export type UserWithSecrets = User & {
+  password_hash?: string;
+  salt?: string;
+};
+
 export interface LoginResponse {
   success: boolean;
   data?: {

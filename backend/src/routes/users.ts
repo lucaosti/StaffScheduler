@@ -12,7 +12,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Get all users (with role-based filtering)
   router.get('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const { search, department, role } = req.query;
 
       let users;
@@ -59,7 +59,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Create new user
   router.post('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
 
       if (!['admin', 'manager'].includes(user.role)) {
         return res.status(403).json({
@@ -100,7 +100,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Get user by ID
   router.get('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
@@ -139,7 +139,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Update user
   router.put('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
@@ -201,7 +201,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Delete user
   router.delete('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user!;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
