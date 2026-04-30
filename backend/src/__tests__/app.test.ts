@@ -65,3 +65,35 @@ describe('buildApp', () => {
     expect(res.body.success).toBe(false);
   });
 });
+
+describe('rate limiter (config-driven)', () => {
+  it('uses config.security.rateLimitWindow / rateLimitMax', async () => {
+    const previousMax = process.env.RATE_LIMIT_MAX_REQUESTS;
+    const previousWindow = process.env.RATE_LIMIT_WINDOW_MS;
+    process.env.RATE_LIMIT_MAX_REQUESTS = '2';
+    process.env.RATE_LIMIT_WINDOW_MS = '60000';
+
+    jest.resetModules();
+    const { buildApp: buildAppFresh } = await import('../app');
+    const limitedApp = buildAppFresh(fakePool); // not silent → limiter active
+
+    const r1 = await request(limitedApp).get('/api/health');
+    const r2 = await request(limitedApp).get('/api/health');
+    const r3 = await request(limitedApp).get('/api/health');
+
+    expect([200, 503]).toContain(r1.status);
+    expect([200, 503]).toContain(r2.status);
+    expect(r3.status).toBe(429);
+
+    if (previousMax === undefined) {
+      delete process.env.RATE_LIMIT_MAX_REQUESTS;
+    } else {
+      process.env.RATE_LIMIT_MAX_REQUESTS = previousMax;
+    }
+    if (previousWindow === undefined) {
+      delete process.env.RATE_LIMIT_WINDOW_MS;
+    } else {
+      process.env.RATE_LIMIT_WINDOW_MS = previousWindow;
+    }
+  });
+});
