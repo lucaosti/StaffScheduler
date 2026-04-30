@@ -26,6 +26,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 // Layout Components
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
+import RoleRoute from './components/Auth/RoleRoute';
 
 // Page Components
 import Login from './pages/Auth/Login';
@@ -85,13 +86,48 @@ const App: React.FC = () => {
           
           {/* Main application pages */}
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="employees" element={<Employees />} />
-          <Route path="shifts" element={<Shifts />} />
+          <Route
+            path="employees"
+            element={
+              <RoleRoute allowedRoles={['admin', 'manager']}>
+                <Employees />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="shifts"
+            element={
+              <RoleRoute allowedRoles={['admin', 'manager']}>
+                <Shifts />
+              </RoleRoute>
+            }
+          />
           <Route path="schedule" element={<Schedule />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="org" element={<OrgManagement />} />
+          <Route
+            path="reports"
+            element={
+              <RoleRoute allowedRoles={['admin', 'manager']}>
+                <Reports />
+              </RoleRoute>
+            }
+          />
+          <Route
+            path="org"
+            element={
+              <RoleRoute allowedRoles={['admin', 'manager']}>
+                <OrgManagement />
+              </RoleRoute>
+            }
+          />
           <Route path="policies" element={<Policies />} />
-          <Route path="settings" element={<Settings />} />
+          <Route
+            path="settings"
+            element={
+              <RoleRoute allowedRoles={['admin']}>
+                <Settings />
+              </RoleRoute>
+            }
+          />
         </Route>
         
           {/* Catch-all route - Redirect unknown paths to dashboard */}
