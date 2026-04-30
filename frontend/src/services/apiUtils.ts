@@ -13,7 +13,7 @@
 
 import { ApiResponse } from '../types';
 
-export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 /**
  * Custom error class for API-related errors.
@@ -58,7 +58,7 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
  * This keeps services thin and provides defence-in-depth against token expiry.
  * Auth flows themselves should call `authService.refreshToken` directly.
  */
-export const apiFetch = async (path: string, init: RequestInit = {}, retried = false): Promise<Response> => {
+const apiFetch = async (path: string, init: RequestInit = {}, retried = false): Promise<Response> => {
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
   const response = await fetch(url, {
     ...init,
