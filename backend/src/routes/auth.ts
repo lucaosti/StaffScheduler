@@ -18,14 +18,8 @@ import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
 import { authenticate } from '../middleware/auth';
 import jwt from 'jsonwebtoken';
-
-// Extend Express Request to include user
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: import('../types').User;
-  }
-}
 import { config } from '../config';
+import { UserWithSecrets } from '../types';
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
@@ -136,7 +130,7 @@ router.get('/verify', authenticate, async (req: Request, res: Response) => {
     }
 
     // Remove sensitive fields before sending response
-    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
+    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as UserWithSecrets;
     res.json({
       success: true,
       data: userWithoutPassword
@@ -174,7 +168,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
+    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as UserWithSecrets;
 
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
