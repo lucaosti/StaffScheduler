@@ -537,7 +537,7 @@ const Policies: React.FC = () => {
               </thead>
               <tbody>
                 {matrix.map((row) => (
-                  <tr key={row.id}>
+                  <tr key={row.changeType}>
                     <td>{row.changeType}</td>
                     <td>
                       <select

@@ -8,7 +8,7 @@ Staff Scheduler is an enterprise workforce management system.
 
 - **Backend**: Node.js/Express/TypeScript REST API — runs on port **3001**
 - **Frontend**: React 18/TypeScript SPA (Create React App) — runs on port **3000**
-- **Database**: MySQL 8.0 (15 tables, schema in `backend/database/init.sql`)
+- **Database**: MySQL 8.0 (29 tables, schema in `backend/database/init.sql`)
 - **Optimizer**: Python 3.8+ with Google OR-Tools CP-SAT, invoked via `child_process` from `backend/src/optimization/ScheduleOptimizerORTools.ts`
 
 ## Commands
