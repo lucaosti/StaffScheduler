@@ -42,4 +42,20 @@ describe('resolveTenant', () => {
     expect(res.status).toBe(200);
     expect(res.body.tenantId).toBe(7);
   });
+
+  it('forwards DB errors to the Express error handler instead of hanging', async () => {
+    const execute = jest.fn().mockRejectedValueOnce(new Error('connection lost'));
+    const res = await request(buildApp(execute)).get('/probe').set('X-Tenant-Id', '7');
+    expect(res.status).toBe(500);
+  });
+
+  it('calls next with the error on a DB failure', async () => {
+    const execute = jest.fn().mockRejectedValueOnce(new Error('connection lost'));
+    const next = jest.fn();
+    const req = { header: () => '7' } as never;
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as never;
+    await resolveTenant({ execute } as never)(req, res, next);
+    expect(next).toHaveBeenCalledWith(expect.any(Error));
+    expect((next.mock.calls[0][0] as Error).message).toBe('connection lost');
+  });
 });
