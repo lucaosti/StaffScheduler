@@ -85,11 +85,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // Attach user to request object
     req.user = user;
 
-    // Log authentication success
-    logger.info(`User authenticated: ${user.email}`, { 
-      userId: user.id, 
-      role: user.role,
-      endpoint: req.path 
+    // Log authentication success at debug level without PII (no email/path)
+    logger.debug('User authenticated', {
+      userId: user.id,
+      role: user.role
     });
 
     next();
