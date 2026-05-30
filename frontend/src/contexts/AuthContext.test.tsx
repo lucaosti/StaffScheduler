@@ -149,6 +149,20 @@ describe('AuthProvider actions', () => {
     expect(localStorage.getItem('token')).toBe('new');
   });
 
+  it('keeps callback identities stable across renders', async () => {
+    const { result, rerender } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    const first = {
+      login: result.current.login,
+      logout: result.current.logout,
+      refreshToken: result.current.refreshToken,
+    };
+    rerender();
+    expect(result.current.login).toBe(first.login);
+    expect(result.current.logout).toBe(first.logout);
+    expect(result.current.refreshToken).toBe(first.refreshToken);
+  });
+
   it('refreshToken failure logs out', async () => {
     localStorage.setItem('token', 'old');
     mockedAuthService.verifyToken.mockResolvedValue({
