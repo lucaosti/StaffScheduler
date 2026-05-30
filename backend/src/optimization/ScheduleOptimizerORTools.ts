@@ -16,6 +16,7 @@
 
 import { spawn } from 'child_process';
 import { join } from 'path';
+import { config } from '../config';
 import logger from '../config/logger';
 
 interface ScheduleAssignment {
@@ -186,15 +187,50 @@ export class ScheduleOptimizer {
         '--time-limit',
         timeLimitSeconds.toString()
       ]);
-      
+
       let stdoutData = '';
       let stderrData = '';
-      
+      let settled = false;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+
+      // Ensure the Promise settles exactly once and the watchdog timer is
+      // always cleared, so it can never fire after the process has finished.
+      const finalize = (action: () => void): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+        action();
+      };
+
+      // Watchdog: kill the process and reject if it never settles, so a
+      // hanging Python optimizer cannot leak the child process forever.
+      const timeoutMs = config.optimization.timeout;
+      timeoutHandle = setTimeout(() => {
+        if (settled) {
+          return;
+        }
+        logger.error(`Python optimizer timed out after ${timeoutMs}ms; killing process`);
+        // Request graceful termination, then force-kill if it ignores SIGTERM.
+        pythonProcess.kill('SIGTERM');
+        setTimeout(() => {
+          if (!pythonProcess.killed) {
+            pythonProcess.kill('SIGKILL');
+          }
+        }, 5000).unref?.();
+        finalize(() => reject(new Error(`Python optimizer timed out after ${timeoutMs}ms`)));
+      }, timeoutMs);
+      timeoutHandle.unref?.();
+
       // Collect stdout (JSON result)
       pythonProcess.stdout.on('data', (data) => {
         stdoutData += data.toString();
       });
-      
+
       // Collect stderr (logs)
       pythonProcess.stderr.on('data', (data) => {
         const message = data.toString();
@@ -202,28 +238,30 @@ export class ScheduleOptimizer {
         // Log Python script output
         logger.debug(`[Python Optimizer] ${message.trim()}`);
       });
-      
+
       // Handle process completion
       pythonProcess.on('close', (code) => {
-        if (code === 0 || code === 1) {
-          // Success (0) or infeasible (1)
-          try {
-            const result = JSON.parse(stdoutData);
-            resolve(result);
-          } catch (error) {
-            reject(new Error(`Failed to parse optimizer output: ${error instanceof Error ? error.message : 'Unknown error'}`));
+        finalize(() => {
+          if (code === 0 || code === 1) {
+            // Success (0) or infeasible (1)
+            try {
+              const result = JSON.parse(stdoutData);
+              resolve(result);
+            } catch (error) {
+              reject(new Error(`Failed to parse optimizer output: ${error instanceof Error ? error.message : 'Unknown error'}`));
+            }
+          } else {
+            // Error
+            reject(new Error(`Optimizer failed with code ${code}: ${stderrData}`));
           }
-        } else {
-          // Error
-          reject(new Error(`Optimizer failed with code ${code}: ${stderrData}`));
-        }
+        });
       });
-      
+
       // Handle process errors
       pythonProcess.on('error', (error) => {
-        reject(new Error(`Failed to start Python optimizer: ${error.message}`));
+        finalize(() => reject(new Error(`Failed to start Python optimizer: ${error.message}`)));
       });
-      
+
       // Send problem data to stdin
       pythonProcess.stdin.write(JSON.stringify(problem));
       pythonProcess.stdin.end();
