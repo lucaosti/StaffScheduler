@@ -6,7 +6,33 @@
  * _timesOverlap, _calculateShiftHours) via the public surface.
  */
 
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
+import { config } from '../config';
 import { ScheduleOptimizer, OptimizationProblem } from '../optimization/ScheduleOptimizerORTools';
+
+jest.mock('child_process', () => ({
+  spawn: jest.fn(),
+}));
+
+const mockedSpawn = spawn as unknown as jest.Mock;
+
+/**
+ * Build a fake child process that accepts stdin and emits stdout/stderr,
+ * but never fires 'close' or 'error' — simulating a hanging Python optimizer.
+ */
+const buildHangingProcess = (): any => {
+  const proc = new EventEmitter() as any;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = { write: jest.fn(), end: jest.fn() };
+  proc.killed = false;
+  proc.kill = jest.fn(() => {
+    proc.killed = true;
+    return true;
+  });
+  return proc;
+};
 
 const buildProblem = (overrides: Partial<OptimizationProblem> = {}): OptimizationProblem => ({
   shifts: [],
@@ -128,5 +154,37 @@ describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavail
       })
     );
     expect(result).toHaveLength(1);
+  });
+});
+
+describe('ScheduleOptimizer._callPythonOptimizer timeout', () => {
+  const originalTimeout = config.optimization.timeout;
+
+  beforeEach(() => {
+    mockedSpawn.mockReset();
+  });
+
+  afterEach(() => {
+    config.optimization.timeout = originalTimeout;
+  });
+
+  it('kills the process and rejects when the optimizer never settles', async () => {
+    // Use a small timeout so the test is fast.
+    config.optimization.timeout = 50;
+
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const opt = new ScheduleOptimizer();
+    const problem = buildProblem({
+      shifts: [buildShift({ id: 's1', min_staff: 1 })],
+      employees: [buildEmployee({ id: 'e1' })],
+    });
+
+    // Access the private method via the public-ish surface.
+    const promise = (opt as any)._callPythonOptimizer(problem, 300);
+
+    await expect(promise).rejects.toThrow(/timed out after 50ms/);
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
   });
 });
