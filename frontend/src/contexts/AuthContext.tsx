@@ -20,7 +20,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
 
@@ -174,12 +174,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initializeAuth();
   }, []);
 
-  const login = async (credentials: LoginRequest): Promise<void> => {
+  const login = useCallback(async (credentials: LoginRequest): Promise<void> => {
     dispatch({ type: 'LOGIN_START' });
-    
+
     try {
       const response: ApiResponse<LoginResponse> = await authService.login(credentials);
-      
+
       if (response.success && response.data) {
         const { user, token } = response.data;
         localStorage.setItem('token', token);
@@ -194,14 +194,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
       throw error;
     }
-  };
+  }, []);
 
-  const logout = (): void => {
+  const logout = useCallback((): void => {
     localStorage.removeItem('token');
     dispatch({ type: 'LOGOUT' });
-  };
+  }, []);
 
-  const refreshToken = async (): Promise<void> => {
+  const refreshToken = useCallback(async (): Promise<void> => {
     const token = localStorage.getItem('token');
     if (!token) {
       logout();
@@ -222,14 +222,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       logout();
     }
-  };
+  }, [logout]);
 
-  const value: AuthContextType = {
-    ...state,
-    login,
-    logout,
-    refreshToken,
-  };
+  const value: AuthContextType = useMemo(
+    () => ({
+      ...state,
+      login,
+      logout,
+      refreshToken,
+    }),
+    [state, login, logout, refreshToken]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
