@@ -77,6 +77,15 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
+      // Only admins may create admin accounts. A manager must not be able to
+      // escalate privileges by creating an admin user.
+      if (userData.role === 'admin' && user.role !== 'admin') {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Only admins can create admin users' }
+        });
+      }
+
       const createdUser = await userService.createUser(userData);
 
       res.status(201).json({ success: true, data: createdUser });
@@ -167,6 +176,24 @@ export const createUsersRouter = (pool: Pool) => {
           return res.status(403).json({
             success: false,
             error: { code: 'FORBIDDEN', message: `Employees cannot update: ${invalidFields.join(', ')}` }
+          });
+        }
+      }
+
+      // Role changes are restricted to admins, and no one may change their own
+      // role. This prevents privilege escalation and self-promotion.
+      if (updateData.role !== undefined) {
+        if (user.role !== 'admin') {
+          return res.status(403).json({
+            success: false,
+            error: { code: 'FORBIDDEN', message: 'Only admins can change user roles' }
+          });
+        }
+
+        if (user.id === userId) {
+          return res.status(403).json({
+            success: false,
+            error: { code: 'FORBIDDEN', message: 'You cannot change your own role' }
           });
         }
       }

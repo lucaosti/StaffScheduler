@@ -130,6 +130,39 @@ describe('users router POST /', () => {
     expect(res.body.data.id).toBe(11);
   });
 
+  it('returns 403 when a manager tries to create an admin', async () => {
+    currentUser = { id: 9, role: 'manager', email: 'm@x' };
+    const create = jest.fn().mockResolvedValue({ id: 11 });
+    (UserService.prototype.createUser as jest.Mock) = create;
+    const res = await request(mountApp())
+      .post('/api/users')
+      .send({
+        email: 'a@x.com',
+        password: 'pw1234',
+        firstName: 'A',
+        lastName: 'B',
+        role: 'admin',
+      });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('allows an admin to create an admin', async () => {
+    (UserService.prototype.createUser as jest.Mock) = jest.fn().mockResolvedValue({ id: 12 });
+    const res = await request(mountApp())
+      .post('/api/users')
+      .send({
+        email: 'a@x.com',
+        password: 'pw1234',
+        firstName: 'A',
+        lastName: 'B',
+        role: 'admin',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.id).toBe(12);
+  });
+
   it('returns 409 on duplicate', async () => {
     const dup: any = new Error('dup');
     dup.code = 'ER_DUP_ENTRY';
@@ -209,6 +242,32 @@ describe('users router PUT /:id', () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
     const res = await request(mountApp()).put('/api/users/5').send({ role: 'admin' });
     expect(res.status).toBe(403);
+  });
+
+  it('returns 403 when a manager tries to change a role', async () => {
+    currentUser = { id: 9, role: 'manager', email: 'm@x' };
+    const update = jest.fn().mockResolvedValue({ id: 3 });
+    (UserService.prototype.updateUser as jest.Mock) = update;
+    const res = await request(mountApp()).put('/api/users/3').send({ role: 'admin' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('returns 403 when a user tries to promote themselves', async () => {
+    const update = jest.fn().mockResolvedValue({ id: 1 });
+    (UserService.prototype.updateUser as jest.Mock) = update;
+    const res = await request(mountApp()).put('/api/users/1').send({ role: 'admin' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('allows an admin to change another user role', async () => {
+    (UserService.prototype.updateUser as jest.Mock) = jest.fn().mockResolvedValue({ id: 9 });
+    const res = await request(mountApp()).put('/api/users/9').send({ role: 'manager' });
+    expect(res.status).toBe(200);
+    expect(res.body.data.id).toBe(9);
   });
 
   it('returns 404 when service returns null', async () => {
