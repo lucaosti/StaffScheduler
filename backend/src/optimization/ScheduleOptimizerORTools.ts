@@ -191,7 +191,7 @@ export class ScheduleOptimizer {
       let stdoutData = '';
       let stderrData = '';
       let settled = false;
-      let timeoutHandle: NodeJS.Timeout | undefined;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
       // Ensure the Promise settles exactly once and the watchdog timer is
       // always cleared, so it can never fire after the process has finished.

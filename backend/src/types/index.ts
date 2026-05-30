@@ -60,23 +60,6 @@ export interface UpdateUserRequest {
   isActive?: boolean;
 }
 
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-export interface LoginResponse {
-  success: boolean;
-  data?: {
-    token: string;
-    user: Omit<User, 'createdAt' | 'updatedAt'>;
-  };
-  error?: {
-    code: string;
-    message: string;
-  };
-}
-
 // ============================================================================
 // DEPARTMENT TYPES
 // ============================================================================
