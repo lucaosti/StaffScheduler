@@ -15,9 +15,10 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
+import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
 import { authenticate } from '../middleware/auth';
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 
 // Extend Express Request to include user
 declare module 'express-serve-static-core' {
@@ -30,6 +31,36 @@ import { config } from '../config';
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
   const userService = new UserService(pool);
+
+  // Shared JWT signing options, driven by configuration rather than hardcoded.
+  const jwtSignOptions: SignOptions = {
+    expiresIn: config.jwt.expiresIn as SignOptions['expiresIn']
+  };
+
+  /**
+   * Brute-force protection for the login endpoint.
+   *
+   * Limits each client IP to a small number of login attempts per window,
+   * returning the standard error envelope once the threshold is exceeded.
+   * The limiter is intentionally lenient under `NODE_ENV === 'test'` so the
+   * integration suites can call `/login` repeatedly without hitting 429.
+   */
+  const isTestEnv = process.env.NODE_ENV === 'test';
+  const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: isTestEnv ? 1000 : 10,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req: Request, res: Response) => {
+      res.status(429).json({
+        success: false,
+        error: {
+          code: 'TOO_MANY_REQUESTS',
+          message: 'Too many login attempts, please try again later.'
+        }
+      });
+    }
+  });
 
 /**
  * User login endpoint.
@@ -54,7 +85,7 @@ export const createAuthRouter = (pool: Pool) => {
  *   }
  * }
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
 
@@ -86,7 +117,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       config.jwt.secret,
-      { expiresIn: '7d' }
+      jwtSignOptions
     );
     
     res.json({
@@ -179,7 +210,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },
       config.jwt.secret,
-      { expiresIn: '7d' }
+      jwtSignOptions
     );
     
     res.json({
