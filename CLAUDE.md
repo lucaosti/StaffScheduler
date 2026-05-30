@@ -81,6 +81,8 @@ backend/src/
 
 **Route → Service pattern**: Routes validate input, instantiate a service, call one method, and return JSON. Services own all SQL and business rules; they throw named errors on failure.
 
+> **Note**: Authentication lives in `UserService.validatePassword` (`src/routes/auth.ts` → `createAuthRouter`). There are **no password-reset endpoints** yet; if you add password reset / token refresh, build it into `UserService` or a dedicated service and wire a route — there is no standalone `AuthService`.
+
 **Error detection in routes**: Services throw `Error('X not found')` for 404 cases and `Error('X already confirmed')` for conflict cases. Routes check `error.message.toLowerCase().includes('not found')` in catch blocks to return 404 vs 500.
 
 ### Frontend
@@ -133,10 +135,13 @@ Backend requires `backend/.env` (copy from `.env.example`):
 
 ```
 DB_HOST=localhost  DB_PORT=3306  DB_USER=...  DB_PASSWORD=...  DB_NAME=staff_scheduler
-JWT_SECRET=...  JWT_EXPIRATION=7d
+JWT_SECRET=...  JWT_EXPIRES_IN=24h
 BCRYPT_ROUNDS=12
 CORS_ORIGIN=http://localhost:3000
 ```
+
+Note: `JWT_EXPIRES_IN` (default `24h`) controls the token lifetime — it is read into
+`config.jwt.expiresIn` and applied at sign time in `src/routes/auth.ts`.
 
 Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev proxy handles it by default).
 
