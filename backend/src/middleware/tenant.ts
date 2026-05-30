@@ -14,6 +14,7 @@
 
 import { NextFunction, Request, Response } from 'express';
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { logger } from '../config/logger';
 
 declare module 'express-serve-static-core' {
   interface Request {
@@ -38,18 +39,23 @@ export const resolveTenant = (pool: Pool) => {
       });
       return;
     }
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT id FROM tenants WHERE id = ? AND is_active = 1 LIMIT 1`,
-      [tenantId]
-    );
-    if (rows.length === 0) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'TENANT_NOT_FOUND', message: 'Unknown or inactive tenant' },
-      });
-      return;
+    try {
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        `SELECT id FROM tenants WHERE id = ? AND is_active = 1 LIMIT 1`,
+        [tenantId]
+      );
+      if (rows.length === 0) {
+        res.status(404).json({
+          success: false,
+          error: { code: 'TENANT_NOT_FOUND', message: 'Unknown or inactive tenant' },
+        });
+        return;
+      }
+      req.tenantId = tenantId;
+      next();
+    } catch (err) {
+      logger.error('Tenant lookup failed', { tenantId, error: err });
+      next(err);
     }
-    req.tenantId = tenantId;
-    next();
   };
 };
