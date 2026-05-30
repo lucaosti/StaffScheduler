@@ -119,6 +119,13 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use('/api/org', createOrgRouter(pool));
   app.use('/api/policies', createPoliciesRouter(pool));
 
+  app.use('*', (_req: express.Request, res: express.Response) => {
+    res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'Endpoint not found' },
+    });
+  });
+
   app.use(
     (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
       logger.error('Unhandled error:', err);
@@ -132,13 +139,6 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
       });
     }
   );
-
-  app.use('*', (_req: express.Request, res: express.Response) => {
-    res.status(404).json({
-      success: false,
-      error: { code: 'NOT_FOUND', message: 'Endpoint not found' },
-    });
-  });
 
   return app;
 }
