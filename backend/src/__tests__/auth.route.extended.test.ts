@@ -117,3 +117,49 @@ describe('POST /api/auth/login — service throws', () => {
   });
 });
 
+describe('POST /api/auth/login — rate limiting', () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    jest.resetModules();
+  });
+
+  it('eventually returns 429 once the per-IP login threshold is exceeded', async () => {
+    // Force the strict (non-test) limiter by building a router in a module
+    // registry where NODE_ENV is not 'test'. 'development' is used rather than
+    // 'production' to avoid tripping the production secret guard in config.
+    process.env.NODE_ENV = 'development';
+
+    let limitedStatus = 0;
+    let limitedBody: any;
+
+    await jest.isolateModulesAsync(async () => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { UserService: IsolatedUserService } = require('../services/UserService');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { createAuthRouter: isolatedCreateAuthRouter } = require('../routes/auth');
+
+      (IsolatedUserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue(null);
+
+      const app = express();
+      app.use(express.json());
+      app.use('/api/auth', isolatedCreateAuthRouter({} as never));
+
+      // Strict limiter allows 10 attempts per window; the 11th must be blocked.
+      for (let i = 0; i < 10; i += 1) {
+        const res = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: 'wrong' });
+        expect(res.status).toBe(401);
+      }
+
+      const blocked = await request(app).post('/api/auth/login').send({ email: 'a@x.com', password: 'wrong' });
+      limitedStatus = blocked.status;
+      limitedBody = blocked.body;
+    });
+
+    expect(limitedStatus).toBe(429);
+    expect(limitedBody.success).toBe(false);
+    expect(limitedBody.error.code).toBe('TOO_MANY_REQUESTS');
+  });
+});
+
