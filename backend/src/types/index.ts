@@ -75,12 +75,6 @@ export interface UpdateRoleRequest {
   permissionCodes?: string[];
 }
 
-export interface AssignRoleRequest {
-  roleId: number;
-  scopeOrgUnitId?: number | null;
-  expiresAt?: string | null;
-}
-
 export interface Delegation {
   id: number;
   delegatorId: number;
