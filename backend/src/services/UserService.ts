@@ -110,7 +110,15 @@ export class UserService {
     }
   }
 
-  async getAllUsers(filters?: { roleId?: number; departmentId?: number; isActive?: boolean; search?: string }): Promise<User[]> {
+  async getAllUsers(filters?: {
+    roleId?: number;
+    departmentId?: number;
+    isActive?: boolean;
+    search?: string;
+    /** When set, restricts results to users whose primary org-unit membership
+     *  falls within the provided set. Pass `null` or omit for full access. */
+    orgUnitIds?: number[];
+  }): Promise<User[]> {
     try {
       let query = 'SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.employee_id, u.phone, u.is_active, u.last_login, u.created_at, u.updated_at FROM users u';
       const conditions: string[] = [];
@@ -124,6 +132,12 @@ export class UserService {
         query += ' JOIN user_roles ur ON u.id = ur.user_id';
         conditions.push('ur.role_id = ?');
         params.push(filters.roleId);
+      }
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        query += ' JOIN user_org_units uou ON u.id = uou.user_id';
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`uou.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
       }
       if (filters?.isActive !== undefined) {
         conditions.push('u.is_active = ?');

@@ -43,6 +43,7 @@ export class EmployeeService {
     departmentId?: number;
     isActive?: boolean;
     search?: string;
+    orgUnitIds?: number[];
   }): Promise<User[]> {
     try {
       return await this.userService.getAllUsers({ ...filters });

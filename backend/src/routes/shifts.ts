@@ -156,9 +156,12 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 // Shift Routes
 
 // Get all shifts
-router.get('/', authenticate, async (_req: Request, res: Response) => {
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const shifts = await shiftService.getAllShifts();
+    const scope = req.user?.allowedOrgUnitIds;
+    const shifts = await shiftService.getAllShifts(
+      scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
+    );
     res.json({ success: true, data: shifts });
   } catch (error) {
     logger.error('Error fetching shifts:', error);
