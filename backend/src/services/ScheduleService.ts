@@ -15,6 +15,7 @@ import {
   UpdateScheduleRequest
 } from '../types';
 import { logger } from '../config/logger';
+import { AuditLogService } from './AuditLogService';
 
 /**
  * ScheduleService Class
@@ -27,12 +28,10 @@ import { logger } from '../config/logger';
  * - Integration with optimization engine
  */
 export class ScheduleService {
-  /**
-   * Creates a new ScheduleService instance
-   * 
-   * @param pool - MySQL connection pool for database operations
-   */
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   /**
    * Creates a new schedule
@@ -476,6 +475,15 @@ export class ScheduleService {
         throw new Error('Schedule not found after publishing');
       }
 
+      await this.audit.write({
+        actorId: null,
+        action: 'schedule.publish',
+        entityType: 'schedule',
+        entityId: id,
+        description: `Schedule published: ${publishedSchedule.name}`,
+        after: { id, status: 'published' },
+      });
+
       return publishedSchedule;
     } catch (error) {
       await connection.rollback();
@@ -515,6 +523,16 @@ export class ScheduleService {
       if (!archivedSchedule) {
         throw new Error('Schedule not found after archiving');
       }
+
+      await this.audit.write({
+        actorId: null,
+        action: 'schedule.archive',
+        entityType: 'schedule',
+        entityId: id,
+        description: `Schedule archived: ${archivedSchedule.name}`,
+        before: { id, status: 'published' },
+        after: { id, status: 'archived' },
+      });
 
       return archivedSchedule;
     } catch (error) {

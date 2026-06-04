@@ -154,11 +154,11 @@ export class DelegationService {
     details: Record<string, unknown>
   ): Promise<void> {
     try {
-      const resourceId = (details.delegationId as number | null | undefined) ?? null;
+      const entityId = (details.delegationId as number | null | undefined) ?? null;
       await this.pool.execute(
-        `INSERT INTO audit_logs (user_id, action, resource_type, resource_id, details)
+        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
          VALUES (?, ?, 'delegation', ?, ?)`,
-        [userId, action, resourceId, JSON.stringify(details)]
+        [userId, action, entityId, JSON.stringify(details)]
       );
     } catch (err) {
       logger.error('Failed to write delegation audit log:', err);
