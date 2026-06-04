@@ -4,7 +4,9 @@ import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { CreateUserRequest, UpdateUserRequest, User } from '../types';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, createUserBody } from '../schemas';
+import { UpdateUserRequest, User } from '../types';
 import { logger } from '../config/logger';
 
 export const createUsersRouter = (pool: Pool) => {
@@ -80,7 +82,7 @@ export const createUsersRouter = (pool: Pool) => {
   });
 
   // Create new user
-  router.post('/', authenticate, async (req, res) => {
+  router.post('/', authenticate, validateBody(createUserBody), async (req, res) => {
     try {
       const user = req.user as User;
 
@@ -91,14 +93,7 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      const userData: CreateUserRequest = req.body;
-
-      if (!userData.email || !userData.password || !userData.firstName || !userData.lastName) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Missing required fields' }
-        });
-      }
+      const userData = res.locals.body;
 
       // Prevent privilege escalation through role assignment.
       const roleError = await validateRoleAssignment(user, userData.roleIds);
@@ -130,17 +125,10 @@ export const createUsersRouter = (pool: Pool) => {
   });
 
   // Get user by ID
-  router.get('/:id', authenticate, async (req, res) => {
+  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = req.user as User;
-      const userId = parseInt(req.params.id);
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Invalid user ID' }
-        });
-      }
+      const userId = res.locals.params.id;
 
       const targetUser = await userService.getUserById(userId);
 
@@ -170,17 +158,10 @@ export const createUsersRouter = (pool: Pool) => {
   });
 
   // Update user
-  router.put('/:id', authenticate, async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = req.user as User;
-      const userId = parseInt(req.params.id);
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Invalid user ID' }
-        });
-      }
+      const userId = res.locals.params.id;
 
       const canManageUsers = userHasPermission(user, 'user.manage');
 
@@ -254,17 +235,10 @@ export const createUsersRouter = (pool: Pool) => {
   });
 
   // Delete user
-  router.delete('/:id', authenticate, async (req, res) => {
+  router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = req.user as User;
-      const userId = parseInt(req.params.id);
-
-      if (!userId) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Invalid user ID' }
-        });
-      }
+      const userId = res.locals.params.id;
 
       if (!userHasPermission(user, 'user.manage')) {
         return res.status(403).json({

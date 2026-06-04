@@ -17,6 +17,8 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateParams } from '../middleware/validation';
+import { idParam } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
@@ -82,12 +84,9 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Update a workflow
-  router.put('/:id', authenticate, requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'Invalid workflow ID' } });
-      }
+      const { id } = res.locals.params;
       const workflow = await engine.updateWorkflow(id, req.body);
       res.json({ success: true, data: workflow, message: 'Workflow updated' });
     } catch (error: any) {
@@ -100,12 +99,9 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Delete a workflow
-  router.delete('/:id', authenticate, requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.delete('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'Invalid workflow ID' } });
-      }
+      const { id } = res.locals.params;
       await engine.deleteWorkflow(id);
       res.json({ success: true, message: 'Workflow deleted' });
     } catch (error: any) {

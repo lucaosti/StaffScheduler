@@ -18,6 +18,13 @@ import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
+import { validateParams, validateBody } from '../middleware/validation';
+import {
+  idParam,
+  scheduleIdParam,
+  departmentIdParam,
+  createShiftBody,
+} from '../schemas';
 import { logger } from '../config/logger';
 
 export const createShiftsRouter = (pool: Pool) => {
@@ -41,15 +48,9 @@ router.get('/templates', authenticate, async (_req: Request, res: Response) => {
 });
 
 // Get shift template by ID
-router.get('/templates/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/templates/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const template = await shiftService.getShiftTemplateById(id);
     if (!template) {
@@ -90,15 +91,9 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), async
 });
 
 // Update shift template
-router.put('/templates/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const template = await shiftService.updateShiftTemplate(id, req.body);
     if (!template) {
@@ -123,15 +118,9 @@ router.put('/templates/:id', authenticate, requirePermission('shift.manage'), as
 });
 
 // Delete shift template
-router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid template ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const success = await shiftService.deleteShiftTemplate(id);
     if (!success) {
@@ -179,15 +168,9 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get shift by ID
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const shift = await shiftService.getShiftById(id);
     if (!shift) {
@@ -208,9 +191,9 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new shift
-router.post('/', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('shift.manage'), validateBody(createShiftBody), async (_req: Request, res: Response) => {
   try {
-    const shift = await shiftService.createShift(req.body);
+    const shift = await shiftService.createShift(res.locals.body);
 
     res.status(201).json({
       success: true,
@@ -227,15 +210,9 @@ router.post('/', authenticate, requirePermission('shift.manage'), async (req: Re
 });
 
 // Update shift
-router.put('/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const shift = await shiftService.updateShift(id, req.body);
     res.json({
@@ -257,15 +234,9 @@ router.put('/:id', authenticate, requirePermission('shift.manage'), async (req: 
 });
 
 // Delete shift
-router.delete('/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     await shiftService.deleteShift(id);
     res.json({
@@ -286,15 +257,9 @@ router.delete('/:id', authenticate, requirePermission('shift.manage'), async (re
 });
 
 // Get shifts by schedule
-router.get('/schedule/:scheduleId', authenticate, async (req: Request, res: Response) => {
+router.get('/schedule/:scheduleId', authenticate, validateParams(scheduleIdParam), async (_req: Request, res: Response) => {
   try {
-    const scheduleId = parseInt(req.params.scheduleId);
-    if (isNaN(scheduleId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { scheduleId } = res.locals.params;
 
     const shifts = await shiftService.getShiftsBySchedule(scheduleId);
     res.json({ success: true, data: shifts });
@@ -308,15 +273,9 @@ router.get('/schedule/:scheduleId', authenticate, async (req: Request, res: Resp
 });
 
 // Get shifts by department
-router.get('/department/:departmentId', authenticate, async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   try {
-    const departmentId = parseInt(req.params.departmentId);
-    if (isNaN(departmentId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
-      });
-    }
+    const { departmentId } = res.locals.params;
 
     const shifts = await shiftService.getShiftsByDepartment(departmentId);
     res.json({ success: true, data: shifts });
@@ -331,4 +290,3 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
 
   return router;
 };
-

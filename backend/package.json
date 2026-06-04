@@ -32,7 +32,8 @@
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.0",
     "mysql2": "^3.6.0",
-    "winston": "^3.10.0"
+    "winston": "^3.10.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/bcrypt": "^5.0.0",

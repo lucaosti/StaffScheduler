@@ -12,6 +12,8 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DelegationService } from '../services/DelegationService';
 import { authenticate } from '../middleware/auth';
+import { validateParams } from '../middleware/validation';
+import { idParam } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createDelegationsRouter = (pool: Pool): Router => {
@@ -65,12 +67,9 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   });
 
   // Revoke a delegation
-  router.delete('/:id', authenticate, async (req: Request, res: Response) => {
+  router.delete('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) {
-        return res.status(400).json({ success: false, error: { code: 'INVALID_INPUT', message: 'Invalid delegation ID' } });
-      }
+      const { id } = res.locals.params;
 
       await delegationService.revokeDelegation(id, req.user!.id);
       res.json({ success: true, message: 'Delegation revoked' });
