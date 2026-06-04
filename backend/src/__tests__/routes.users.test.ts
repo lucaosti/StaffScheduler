@@ -18,17 +18,19 @@ let currentUser: { id: number; role: 'admin' | 'manager' | 'employee'; email: st
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.user = { ...currentUser, isActive: true };
+    req.user = { ...currentUser, isActive: true, permissions: require("./helpers/permissions").permissionsForRole(currentUser.role) };
     next();
   },
-  requireRole: () => (_req: any, _res: any, next: any) => next(),
-  requireAdmin: (_req: any, _res: any, next: any) => next(),
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  userHasPermission: (user: any, code: string) =>
+    Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
 jest.mock('../services/UserService');
+jest.mock('../services/RbacService');
 
 import { UserService } from '../services/UserService';
+import { RbacService } from '../services/RbacService';
 import { createUsersRouter } from '../routes/users';
 
 const fakePool = {} as never;
@@ -43,6 +45,10 @@ const mountApp = (): express.Express => {
 beforeEach(() => {
   jest.clearAllMocks();
   currentUser = { id: 1, role: 'admin', email: 'admin@example' };
+  // Default RbacService stubs (auto-mock always returns undefined by default).
+  (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue(null);
+  (RbacService.prototype.getEffectivePermissions as jest.Mock).mockResolvedValue([]);
+  (RbacService.prototype.getUserRoles as jest.Mock).mockResolvedValue([]);
 });
 
 describe('users router GET /', () => {
@@ -50,10 +56,10 @@ describe('users router GET /', () => {
     const all = jest.fn().mockResolvedValue([{ id: 1 }]);
     (UserService.prototype.getAllUsers as jest.Mock) = all;
     const res = await request(mountApp()).get(
-      '/api/users?search=foo&department=2&role=manager'
+      '/api/users?search=foo&department=2&roleId=3'
     );
     expect(res.status).toBe(200);
-    expect(all).toHaveBeenCalledWith({ search: 'foo', departmentId: 2, role: 'manager' });
+    expect(all).toHaveBeenCalledWith({ search: 'foo', departmentId: 2, roleId: 3 });
   });
 
   it('admin lists without optional filters', async () => {
@@ -61,7 +67,7 @@ describe('users router GET /', () => {
     (UserService.prototype.getAllUsers as jest.Mock) = all;
     const res = await request(mountApp()).get('/api/users');
     expect(res.status).toBe(200);
-    expect(all).toHaveBeenCalledWith({ search: undefined, departmentId: undefined, role: undefined });
+    expect(all).toHaveBeenCalledWith({ search: undefined, departmentId: undefined, roleId: undefined });
   });
 
   it('manager lists only own scope and applies post-filtering', async () => {
@@ -130,35 +136,36 @@ describe('users router POST /', () => {
     expect(res.body.data.id).toBe(11);
   });
 
-  it('returns 403 when a manager tries to create an admin', async () => {
+  it('returns 403 when a manager tries to assign a role with escalated permissions', async () => {
     currentUser = { id: 9, role: 'manager', email: 'm@x' };
     const create = jest.fn().mockResolvedValue({ id: 11 });
     (UserService.prototype.createUser as jest.Mock) = create;
+    // The roleId 99 maps to a role with settings.manage which the manager doesn't hold.
+    (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({
+      id: 99,
+      name: 'Administrator',
+      isSystem: true,
+      permissions: ['settings.manage', 'role.manage'],
+    });
     const res = await request(mountApp())
       .post('/api/users')
-      .send({
-        email: 'a@x.com',
-        password: 'pw1234',
-        firstName: 'A',
-        lastName: 'B',
-        role: 'admin',
-      });
+      .send({ email: 'a@x.com', password: 'pw1234', firstName: 'A', lastName: 'B', roleIds: [99] });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(create).not.toHaveBeenCalled();
   });
 
-  it('allows an admin to create an admin', async () => {
+  it('allows an admin to assign any role', async () => {
     (UserService.prototype.createUser as jest.Mock) = jest.fn().mockResolvedValue({ id: 12 });
+    (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({
+      id: 99,
+      name: 'Administrator',
+      isSystem: true,
+      permissions: ['settings.manage', 'role.manage'],
+    });
     const res = await request(mountApp())
       .post('/api/users')
-      .send({
-        email: 'a@x.com',
-        password: 'pw1234',
-        firstName: 'A',
-        lastName: 'B',
-        role: 'admin',
-      });
+      .send({ email: 'a@x.com', password: 'pw1234', firstName: 'A', lastName: 'B', roleIds: [99] });
     expect(res.status).toBe(201);
     expect(res.body.data.id).toBe(12);
   });
@@ -244,28 +251,40 @@ describe('users router PUT /:id', () => {
     expect(res.status).toBe(403);
   });
 
-  it('returns 403 when a manager tries to change a role', async () => {
+  it('returns 403 when a manager tries to assign a privileged role', async () => {
     currentUser = { id: 9, role: 'manager', email: 'm@x' };
     const update = jest.fn().mockResolvedValue({ id: 3 });
     (UserService.prototype.updateUser as jest.Mock) = update;
-    const res = await request(mountApp()).put('/api/users/3').send({ role: 'admin' });
+    (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({
+      id: 99,
+      name: 'Administrator',
+      isSystem: true,
+      permissions: ['settings.manage', 'role.manage'],
+    });
+    const res = await request(mountApp()).put('/api/users/3').send({ roleIds: [99] });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('returns 403 when a user tries to promote themselves', async () => {
+  it('returns 403 when a user tries to change their own roles', async () => {
     const update = jest.fn().mockResolvedValue({ id: 1 });
     (UserService.prototype.updateUser as jest.Mock) = update;
-    const res = await request(mountApp()).put('/api/users/1').send({ role: 'admin' });
+    const res = await request(mountApp()).put('/api/users/1').send({ roleIds: [2] });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(update).not.toHaveBeenCalled();
   });
 
-  it('allows an admin to change another user role', async () => {
+  it('allows an admin to assign a role to another user', async () => {
     (UserService.prototype.updateUser as jest.Mock) = jest.fn().mockResolvedValue({ id: 9 });
-    const res = await request(mountApp()).put('/api/users/9').send({ role: 'manager' });
+    (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({
+      id: 2,
+      name: 'Manager',
+      isSystem: false,
+      permissions: ['schedule.manage'],
+    });
+    const res = await request(mountApp()).put('/api/users/9').send({ roleIds: [2] });
     expect(res.status).toBe(200);
     expect(res.body.data.id).toBe(9);
   });

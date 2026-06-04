@@ -1,10 +1,11 @@
 /**
  * Employee Service
  * 
- * Specialized service for managing employee users. This service provides
- * employee-specific methods that wrap UserService functionality with
- * role filtering for employees only.
- * 
+ * Specialized service for managing staff users. In the configurable role
+ * model every active user is potentially schedulable staff, so this service
+ * exposes the staff roster and per-person convenience operations on top of
+ * UserService rather than filtering by a hardcoded role.
+ *
  * @module services/EmployeeService
  * @author Luca Ostinelli
  */
@@ -16,9 +17,9 @@ import { logger } from '../config/logger';
 
 /**
  * EmployeeService Class
- * 
- * Provides employee-specific operations by filtering UserService results
- * to only include users with the 'employee' role.
+ *
+ * Provides staff-oriented operations over UserService. "Employee" here means
+ * schedulable staff, i.e. any active user, not a fixed authorization role.
  */
 export class EmployeeService {
   private userService: UserService;
@@ -33,10 +34,10 @@ export class EmployeeService {
   }
 
   /**
-   * Gets all employees (users with role 'employee')
-   * 
+   * Gets all staff (every user; optionally filtered by department/active/search)
+   *
    * @param filters - Optional filters (department, active status)
-   * @returns Promise resolving to array of employee users
+   * @returns Promise resolving to array of staff users
    */
   async getAllEmployees(filters?: {
     departmentId?: number;
@@ -44,10 +45,7 @@ export class EmployeeService {
     search?: string;
   }): Promise<User[]> {
     try {
-      return await this.userService.getAllUsers({
-        ...filters,
-        role: 'employee'
-      });
+      return await this.userService.getAllUsers({ ...filters });
     } catch (error) {
       logger.error('Error getting all employees:', error);
       throw error;
@@ -64,11 +62,7 @@ export class EmployeeService {
    */
   async getEmployeeById(id: number): Promise<User | null> {
     try {
-      const user = await this.userService.getUserById(id);
-      if (user && user.role !== 'employee') {
-        return null;
-      }
-      return user;
+      return await this.userService.getUserById(id);
     } catch (error) {
       logger.error('Error getting employee by ID:', error);
       throw error;
@@ -101,17 +95,13 @@ export class EmployeeService {
     inactive: number;
   }> {
     try {
+      // Every user is schedulable staff, so staff headcount equals the
+      // overall user headcount.
       const stats = await this.userService.getUserStatistics();
-      const employeeCount = stats.byRole.find(r => r.role === 'employee')?.count || 0;
-      
-      // Calculate active/inactive employees only
-      const employees = await this.getAllEmployees();
-      const activeCount = employees.filter(e => e.isActive).length;
-      
       return {
-        total: employeeCount,
-        active: activeCount,
-        inactive: employeeCount - activeCount
+        total: stats.total,
+        active: stats.active,
+        inactive: stats.inactive
       };
     } catch (error) {
       logger.error('Error getting employee statistics:', error);
@@ -158,10 +148,8 @@ export class EmployeeService {
    */
   async createEmployee(userData: any): Promise<User> {
     try {
-      return await this.userService.createUser({
-        ...userData,
-        role: 'employee'
-      });
+      // Roles, if any, are supplied by the caller via `roleIds`.
+      return await this.userService.createUser({ ...userData });
     } catch (error) {
       logger.error('Error creating employee:', error);
       throw error;

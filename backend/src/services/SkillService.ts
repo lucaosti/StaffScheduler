@@ -399,7 +399,7 @@ export class SkillService {
   async getUsersWithSkill(skillId: number): Promise<any[]> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.first_name, u.last_name, u.email, u.role
+        `SELECT u.id, u.first_name, u.last_name, u.email
         FROM users u
         JOIN user_skills us ON u.id = us.user_id
         WHERE us.skill_id = ? AND u.is_active = 1
@@ -411,8 +411,7 @@ export class SkillService {
         id: row.id,
         firstName: row.first_name,
         lastName: row.last_name,
-        email: row.email,
-        role: row.role
+        email: row.email
       }));
     } catch (error) {
       logger.error('Failed to get users with skill:', error);
@@ -592,7 +591,7 @@ export class SkillService {
       }
 
       let query = `
-        SELECT u.id, u.first_name, u.last_name, u.email, u.role,
+        SELECT u.id, u.first_name, u.last_name, u.email,
           COUNT(DISTINCT us.skill_id) as matching_skills
         FROM users u
         JOIN user_skills us ON u.id = us.user_id
@@ -622,8 +621,7 @@ export class SkillService {
         id: row.id,
         firstName: row.first_name,
         lastName: row.last_name,
-        email: row.email,
-        role: row.role
+        email: row.email
       }));
     } catch (error) {
       logger.error('Failed to find users with all skills:', error);

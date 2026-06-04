@@ -111,10 +111,10 @@ describe('UserService.getAllUsers', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[buildUserRow()], null]);
     const service = new UserService(pool);
-    await service.getAllUsers({ role: 'manager', departmentId: 3, isActive: false, search: 'demo' });
+    await service.getAllUsers({ roleId: 1, departmentId: 3, isActive: false, search: 'demo' });
     const sql = execute.mock.calls[0][0] as string;
     expect(sql).toMatch(/JOIN user_departments/);
-    expect(sql).toMatch(/u\.role = \?/);
+    expect(sql).toMatch(/JOIN user_roles/);
     expect(sql).toMatch(/u\.is_active = \?/);
     expect(sql).toMatch(/LIKE \?/);
   });
@@ -190,7 +190,7 @@ describe('UserService.getUsersForManager', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[buildUserRow()], null]);
     const service = new UserService(pool);
-    const users = await service.getUsersForManager(1, 'admin');
+    const users = await service.getUsersForManager({ id: 1, email: 'a@x', isActive: true, permissions: ['settings.manage'] } as never);
     expect(users).toHaveLength(1);
   });
 
@@ -198,7 +198,7 @@ describe('UserService.getUsersForManager', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[buildUserRow()], null]);
     const service = new UserService(pool);
-    const users = await service.getUsersForManager(1, 'manager');
+    const users = await service.getUsersForManager({ id: 1, email: 'm@x', isActive: true, permissions: [] } as never);
     expect(users).toHaveLength(1);
     expect(execute.mock.calls[0][0]).toMatch(/d\.manager_id = \?/);
   });

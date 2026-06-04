@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash VARCHAR(255) NOT NULL,
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
-    role ENUM('admin', 'manager', 'employee') NOT NULL DEFAULT 'employee',
     employee_id VARCHAR(50) UNIQUE,
     position VARCHAR(100),
     hourly_rate DECIMAL(10, 2) DEFAULT 0,
@@ -46,8 +45,73 @@ CREATE TABLE IF NOT EXISTS users (
 
     INDEX idx_email (email),
     INDEX idx_employee_id (employee_id),
-    INDEX idx_role (role),
     INDEX idx_active (is_active)
+);
+
+-- ================================================================
+-- RBAC: Configurable roles and permissions (no hardcoded roles)
+-- ----------------------------------------------------------------
+-- Authorization is permission-based. Application code references only
+-- permission CODES; roles are editable DATA that group permissions, so an
+-- organization can define any role at any level of its hierarchy.
+--   permissions       - the fixed catalog of capability codes the code checks
+--   roles             - configurable named bundles of permissions (data)
+--   role_permissions  - which permissions each role grants (M:N)
+--   user_roles        - role grants to users, optionally scoped to an org_unit
+--                       subtree and optionally time-bound (expires_at)
+-- `roles.is_system` only protects the bootstrap super-admin from deletion;
+-- every other role is fully editable and removable.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS permissions (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(80) NOT NULL UNIQUE,
+    resource VARCHAR(60) NOT NULL,
+    action VARCHAR(40) NOT NULL,
+    description VARCHAR(255) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    INDEX idx_resource (resource)
+);
+
+CREATE TABLE IF NOT EXISTS roles (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(80) NOT NULL UNIQUE,
+    description VARCHAR(255) NULL,
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_system (is_system)
+);
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+    role_id INT NOT NULL,
+    permission_id INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    PRIMARY KEY (role_id, permission_id),
+    INDEX idx_role (role_id),
+    INDEX idx_permission (permission_id),
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    role_id INT NOT NULL,
+    scope_org_unit_id INT NULL,
+    expires_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_user_role_scope (user_id, role_id, scope_org_unit_id),
+    INDEX idx_user (user_id),
+    INDEX idx_role (role_id),
+    INDEX idx_scope (scope_org_unit_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
+    -- scope_org_unit_id intentionally has no FK: org_units is created later in
+    -- this script and scope integrity is enforced at the application layer.
 );
 
 -- ================================================================
@@ -634,7 +698,7 @@ CREATE TABLE IF NOT EXISTS policy_exception_requests (
 --   - `policy_owner`        - owner of the policy at hand
 --   - `unit_manager`        - manager of the involved org_unit
 --   - `unit_manager_chain`  - escalate up the org tree until a manager is found
---   - `company_role`        - any user with the role stored in `approver_role`
+--   - `company_role`        - any user holding the role stored in `approver_role_id`
 --   - `company_user`        - the specific user stored in `approver_user_id`
 -- The `auto_approve_for_owner` flag controls "if actor is the resolved
 -- approver, auto-approve and write an audit log row".
@@ -649,7 +713,7 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
         'company_role',
         'company_user'
     ) NOT NULL,
-    approver_role ENUM('admin', 'manager', 'employee') NULL,
+    approver_role_id INT NULL,
     approver_user_id INT NULL,
     auto_approve_for_owner BOOLEAN NOT NULL DEFAULT TRUE,
     description TEXT,
@@ -658,6 +722,7 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
 
     UNIQUE KEY unique_change_type (change_type),
 
+    FOREIGN KEY (approver_role_id) REFERENCES roles(id) ON DELETE SET NULL,
     FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
@@ -665,6 +730,71 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
 -- DEFAULT DATA INSERTION
 -- Minimal essential data - users and departments will be created by init-database.ts
 -- ================================================================
+
+-- ----------------------------------------------------------------
+-- RBAC catalog: permission codes (referenced by name in application code)
+-- ----------------------------------------------------------------
+INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
+('employee.read',     'employee',  'read',    'View staff / employee records'),
+('employee.manage',   'employee',  'manage',  'Create, update and delete staff records and their skills'),
+('schedule.read',     'schedule',  'read',    'View schedules'),
+('schedule.manage',   'schedule',  'manage',  'Create, update, delete, duplicate and archive schedules'),
+('schedule.publish',  'schedule',  'publish', 'Publish schedules'),
+('schedule.optimize', 'schedule',  'optimize','Run the optimizer / auto-generate schedules'),
+('assignment.manage', 'assignment','manage',  'Create, update and delete shift assignments'),
+('shift.manage',      'shift',     'manage',  'Manage shift templates and shifts'),
+('department.read',   'department','read',    'View departments'),
+('department.manage', 'department','manage',  'Create, update and delete departments'),
+('org_unit.read',     'org_unit',  'read',    'View the organization tree'),
+('org_unit.manage',   'org_unit',  'manage',  'Create, update and delete organization units'),
+('oncall.manage',     'oncall',    'manage',  'Manage on-call periods and assignments'),
+('policy.read',       'policy',    'read',    'View policies'),
+('policy.manage',     'policy',    'manage',  'Create, update and delete policies'),
+('policy.approve',    'policy',    'approve', 'Approve or reject policy exception requests'),
+('approval.manage',   'approval',  'manage',  'Configure the approval matrix / workflows'),
+('loan.request',      'loan',      'request', 'Create employee loan requests'),
+('loan.approve',      'loan',      'approve', 'Approve or reject employee loan requests'),
+('timeoff.approve',   'timeoff',   'approve', 'Approve or reject time-off requests'),
+('shiftswap.approve', 'shiftswap', 'approve', 'Approve or decline shift-swap requests'),
+('preferences.manage','preferences','manage', 'View and edit other users'' preferences'),
+('report.read',       'report',    'read',    'View reports and analytics'),
+('audit.read',        'audit',     'read',    'View audit logs'),
+('user.read',         'user',      'read',    'View user accounts and the directory'),
+('user.manage',       'user',      'manage',  'Create, update and delete user accounts and assign roles'),
+('settings.manage',   'settings',  'manage',  'Edit system settings'),
+('role.manage',       'role',      'manage',  'Create roles and assign permissions to them');
+
+-- ----------------------------------------------------------------
+-- Default roles (editable data; not hardcoded in application code).
+-- Administrator is a protected system role; Manager and Employee are
+-- ordinary, fully-editable starter roles.
+-- ----------------------------------------------------------------
+INSERT IGNORE INTO roles (name, description, is_system) VALUES
+('Administrator', 'Full, unrestricted system access', TRUE),
+('Manager',       'Manages staff, schedules and approvals', FALSE),
+('Employee',      'Self-service access for scheduled staff', FALSE);
+
+-- Administrator gets every permission.
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r CROSS JOIN permissions p WHERE r.name = 'Administrator';
+
+-- Manager gets the day-to-day management subset (no system settings, role or
+-- org-tree administration, which stay with Administrator).
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
+  'employee.read','employee.manage','schedule.read','schedule.manage','schedule.publish',
+  'schedule.optimize','assignment.manage','shift.manage','department.read','department.manage',
+  'org_unit.read','oncall.manage','policy.read','policy.manage','policy.approve',
+  'loan.request','loan.approve','timeoff.approve','shiftswap.approve','preferences.manage',
+  'report.read','audit.read','user.read','user.manage'
+) WHERE r.name = 'Manager';
+
+-- Employee gets read-only visibility; self-service actions (creating own
+-- time-off / swap / loan requests) require only authentication, not a permission.
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
+  'schedule.read','department.read','org_unit.read','policy.read','employee.read'
+) WHERE r.name = 'Employee';
 
 -- Default skills
 INSERT IGNORE INTO skills (name, description, is_active) VALUES
@@ -682,16 +812,16 @@ INSERT IGNORE INTO system_settings (category, `key`, value, type, default_value,
 
 -- Default approval matrix
 -- These rows ensure the workflow has sane defaults from the very first run.
-INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role, auto_approve_for_owner, description) VALUES
-('Loan.Request',          'unit_manager',       NULL,    TRUE, 'Cross-department employee loans approved by the receiving unit manager'),
-('Loan.Cancel',           'unit_manager',       NULL,    TRUE, 'Cancellation of an approved loan requires receiving unit manager approval'),
-('Policy.Create',         'company_role',       'admin', TRUE, 'New policy creation goes through admin'),
-('Policy.Update',         'policy_owner',       NULL,    TRUE, 'Edits to a policy require approval by the policy owner'),
-('Policy.Exception',      'policy_owner',       NULL,    TRUE, 'Derogations to a policy require approval by its owner'),
-('Schedule.Publish',      'unit_manager',       NULL,    TRUE, 'Publishing a schedule requires the receiving unit manager'),
-('Schedule.Override',     'unit_manager_chain', NULL,    TRUE, 'Schedule overrides escalate up the org tree if needed'),
-('OrgUnit.Update',        'company_role',       'admin', TRUE, 'Org tree edits go through admin'),
-('Membership.Update',     'unit_manager',       NULL,    TRUE, 'User membership changes need the unit manager');
+INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role_id, auto_approve_for_owner, description) VALUES
+('Loan.Request',          'unit_manager',       NULL, TRUE, 'Cross-department employee loans approved by the receiving unit manager'),
+('Loan.Cancel',           'unit_manager',       NULL, TRUE, 'Cancellation of an approved loan requires receiving unit manager approval'),
+('Policy.Create',         'company_role',       (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 'New policy creation goes through an administrator'),
+('Policy.Update',         'policy_owner',       NULL, TRUE, 'Edits to a policy require approval by the policy owner'),
+('Policy.Exception',      'policy_owner',       NULL, TRUE, 'Derogations to a policy require approval by its owner'),
+('Schedule.Publish',      'unit_manager',       NULL, TRUE, 'Publishing a schedule requires the receiving unit manager'),
+('Schedule.Override',     'unit_manager_chain', NULL, TRUE, 'Schedule overrides escalate up the org tree if needed'),
+('OrgUnit.Update',        'company_role',       (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 'Org tree edits go through an administrator'),
+('Membership.Update',     'unit_manager',       NULL, TRUE, 'User membership changes need the unit manager');
 
 -- ================================================================
 -- END OF SCHEMA

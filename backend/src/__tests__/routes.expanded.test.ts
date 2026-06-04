@@ -17,12 +17,12 @@ let currentUser: { id: number; role: 'admin' | 'manager' | 'employee'; email: st
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.user = { ...currentUser, isActive: true };
+    req.user = { ...currentUser, isActive: true, permissions: require("./helpers/permissions").permissionsForRole(currentUser.role) };
     next();
   },
-  requireRole: () => (_req: any, _res: any, next: any) => next(),
-  requireAdmin: (_req: any, _res: any, next: any) => next(),
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  userHasPermission: (user: any, code: string) =>
+    Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
 jest.mock('../services/AssignmentService');
@@ -42,6 +42,7 @@ jest.mock('../services/OnCallService');
 jest.mock('../services/UserDirectoryService');
 jest.mock('../services/BulkImportService');
 jest.mock('../services/NotificationService');
+jest.mock('../services/RbacService');
 
 import { AssignmentService } from '../services/AssignmentService';
 import { ScheduleService } from '../services/ScheduleService';
@@ -78,8 +79,21 @@ import { createDirectoryRouter } from '../routes/directory';
 import { createBulkImportRouter } from '../routes/bulkImport';
 import { createNotificationsRouter } from '../routes/notifications';
 import { createAuthRouter } from '../routes/auth';
+import { RbacService } from '../services/RbacService';
 
 const fakePool = {} as never;
+
+// Default RbacService stub so auth route tests that call RbacService don't fail.
+beforeEach(() => {
+  if ((RbacService.prototype.getEffectivePermissions as jest.Mock)?.mockReset) {
+    (RbacService.prototype.getEffectivePermissions as jest.Mock).mockReset();
+    (RbacService.prototype.getEffectivePermissions as jest.Mock).mockResolvedValue([]);
+  }
+  if ((RbacService.prototype.getUserRoles as jest.Mock)?.mockReset) {
+    (RbacService.prototype.getUserRoles as jest.Mock).mockReset();
+    (RbacService.prototype.getUserRoles as jest.Mock).mockResolvedValue([]);
+  }
+});
 
 const mountApp = (prefix: string, router: express.Router): express.Express => {
   const app = express();
@@ -935,15 +949,10 @@ describe('departments router (extended)', () => {
     res = await request(app()).post('/api/departments').send({ name: 'X', managerId: 5 });
     expect(res.status).toBe(400);
 
+    // Any active user can be a department manager — no role restriction.
     (UserService.prototype.getUserById as jest.Mock) = jest
       .fn()
-      .mockResolvedValue({ id: 5, role: 'employee' });
-    res = await request(app()).post('/api/departments').send({ name: 'X', managerId: 5 });
-    expect(res.status).toBe(400);
-
-    (UserService.prototype.getUserById as jest.Mock) = jest
-      .fn()
-      .mockResolvedValue({ id: 5, role: 'manager' });
+      .mockResolvedValue({ id: 5 });
     (DepartmentService.prototype.createDepartment as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1 });
@@ -989,11 +998,15 @@ describe('departments router (extended)', () => {
     res = await request(app()).put('/api/departments/1').send({ managerId: 9 });
     expect(res.status).toBe(400);
 
+    // Any existing user can be a department manager (no role restriction).
     (UserService.prototype.getUserById as jest.Mock) = jest
       .fn()
-      .mockResolvedValue({ id: 9, role: 'employee' });
+      .mockResolvedValue({ id: 9 });
+    (DepartmentService.prototype.updateDepartment as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 1 });
     res = await request(app()).put('/api/departments/1').send({ managerId: 9 });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
 
     currentUser = { id: 1, role: 'admin', email: 'a@x' };
     (DepartmentService.prototype.updateDepartment as jest.Mock) = jest

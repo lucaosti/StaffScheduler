@@ -2,14 +2,14 @@
  * Extended auth middleware tests — covers:
  *   - The outer catch in `authenticate`: when `getUserById` throws (not just
  *     returns null), the middleware returns 500 AUTH_ERROR.
- *   - `requireRole` called without a preceding `authenticate`: `req.user` is
- *     undefined, so the middleware returns 401 UNAUTHORIZED.
+ *   - `requirePermission` called without a preceding `authenticate`: `req.user`
+ *     is undefined, so the middleware returns 401 UNAUTHORIZED.
  */
 
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { config } from '../config';
 import { UserService } from '../services/UserService';
 import { database } from '../config/database';
@@ -36,7 +36,7 @@ describe('authenticate — outer catch returns 500 AUTH_ERROR', () => {
       res.json({ success: true });
     });
 
-    const token = signToken({ userId: 1, email: 'a@x', role: 'admin' });
+    const token = signToken({ userId: 1, email: 'a@x' });
     const res = await request(app).get('/protected').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(500);
@@ -44,12 +44,12 @@ describe('authenticate — outer catch returns 500 AUTH_ERROR', () => {
   });
 });
 
-describe('requireRole — returns 401 UNAUTHORIZED when req.user is not set', () => {
+describe('requirePermission — returns 401 UNAUTHORIZED when req.user is not set', () => {
   it('returns 401 when the route has no authenticate middleware before it', async () => {
     const app = express();
     app.use(express.json());
-    // requireRole is mounted directly without authenticate — req.user stays undefined.
-    app.get('/admin-only', requireRole(['admin']), (_req, res) => {
+    // requirePermission is mounted directly without authenticate — req.user stays undefined.
+    app.get('/admin-only', requirePermission('settings.manage'), (_req, res) => {
       res.json({ success: true });
     });
 

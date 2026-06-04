@@ -15,9 +15,12 @@ import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
+jest.mock('../services/RbacService');
 jest.mock('../config/database', () => ({
   database: { getPool: jest.fn().mockReturnValue({}) },
 }));
+
+import { RbacService } from '../services/RbacService';
 
 const buildApp = () => {
   const app = express();
@@ -42,6 +45,8 @@ describe('GET /api/auth/verify', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
   });
 
   it('returns 200 with the user payload (minus sensitive fields) on success', async () => {
@@ -64,6 +69,8 @@ describe('POST /api/auth/refresh', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
   });
 
   it('issues a new token for a valid user', async () => {
@@ -91,6 +98,8 @@ describe('POST /api/auth/logout', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
   });
 
   it('returns 200 with a logout confirmation for an authenticated user', async () => {

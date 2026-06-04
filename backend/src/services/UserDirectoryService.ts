@@ -25,7 +25,7 @@ interface DirectoryProfile {
   email: string;
   firstName: string;
   lastName: string;
-  role: string;
+  roles: string[];
   employeeId: string | null;
   phone: string | null;
   position: string | null;
@@ -43,12 +43,18 @@ export class UserDirectoryService {
 
   async getProfile(userId: number): Promise<DirectoryProfile | null> {
     const [userRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, email, first_name, last_name, role, employee_id, phone, position
+      `SELECT id, email, first_name, last_name, employee_id, phone, position
          FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
     if (userRows.length === 0) return null;
     const u = userRows[0];
+
+    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = ? ORDER BY r.name`,
+      [userId]
+    );
 
     const [fieldRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT field_key, field_value, is_public
@@ -63,7 +69,7 @@ export class UserDirectoryService {
       email: u.email as string,
       firstName: u.first_name as string,
       lastName: u.last_name as string,
-      role: u.role as string,
+      roles: roleRows.map((r: any) => r.name as string),
       employeeId: (u.employee_id as string | null) ?? null,
       phone: (u.phone as string | null) ?? null,
       position: (u.position as string | null) ?? null,
@@ -124,7 +130,7 @@ export class UserDirectoryService {
     };
     const extra: Record<string, string> = {};
     if (profile.employeeId) extra['X-EMPLOYEE-ID'] = profile.employeeId;
-    extra['X-ROLE'] = profile.role;
+    if (profile.roles.length > 0) extra['X-ROLE'] = profile.roles.join(', ');
     for (const f of profile.fields.filter((f) => f.isPublic)) {
       const k = `X-${f.key.toUpperCase().replace(/[^A-Z0-9]/g, '-')}`;
       extra[k] = f.value;
@@ -173,27 +179,35 @@ export class UserDirectoryService {
           continue;
         }
         const employeeId = card.extra?.['X-EMPLOYEE-ID'] ?? null;
-        const role = (card.extra?.['X-ROLE']?.toLowerCase() === 'admin'
-          ? 'admin'
-          : card.extra?.['X-ROLE']?.toLowerCase() === 'manager'
-            ? 'manager'
-            : 'employee');
         const [userRes] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO users (email, password_hash, first_name, last_name, role,
+          `INSERT INTO users (email, password_hash, first_name, last_name,
                               employee_id, phone, position, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
           [
             card.email,
             options.defaultPasswordHash,
             card.givenName ?? card.fn.split(/\s+/)[0] ?? '',
             card.familyName ?? card.fn.split(/\s+/).slice(1).join(' ') ?? '',
-            role,
             employeeId,
             card.phone ?? null,
             card.title ?? null,
           ]
         );
         const userId = userRes.insertId;
+
+        // Assign roles referenced by name in the X-ROLE field (comma-separated).
+        // Unknown role names are ignored; the user is still created.
+        const roleNames = (card.extra?.['X-ROLE'] ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        for (const roleName of roleNames) {
+          await conn.execute(
+            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id)
+             SELECT ?, id, NULL FROM roles WHERE name = ?`,
+            [userId, roleName]
+          );
+        }
         for (const [k, v] of Object.entries(card.extra ?? {})) {
           if (k === 'X-EMPLOYEE-ID' || k === 'X-ROLE') continue;
           const cleanKey = k.replace(/^X-/, '').toLowerCase();

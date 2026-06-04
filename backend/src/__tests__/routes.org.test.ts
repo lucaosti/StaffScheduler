@@ -15,12 +15,12 @@ let currentUser: { id: number; role: 'admin' | 'manager' | 'employee'; email: st
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.user = { ...currentUser, isActive: true };
+    req.user = { ...currentUser, isActive: true, permissions: require("./helpers/permissions").permissionsForRole(currentUser.role) };
     next();
   },
-  requireRole: () => (_req: any, _res: any, next: any) => next(),
-  requireAdmin: (_req: any, _res: any, next: any) => next(),
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  userHasPermission: (user: any, code: string) =>
+    Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
 jest.mock('../services/OrgUnitService');

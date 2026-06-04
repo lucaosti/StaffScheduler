@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
@@ -52,7 +52,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new employee
-router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
   try {
     const employee = await employeeService.createEmployee(req.body);
 
@@ -71,7 +71,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
 });
 
 // Update employee
-router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -101,7 +101,7 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
 });
 
 // Delete employee (soft delete)
-router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -174,7 +174,7 @@ router.get('/:id/skills', authenticate, async (req: Request, res: Response) => {
 });
 
 // Add skill to employee
-router.post('/:id/skills', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/:id/skills', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     const { skillId, proficiencyLevel } = req.body;
@@ -202,7 +202,7 @@ router.post('/:id/skills', authenticate, requireRole(['admin', 'manager']), asyn
 });
 
 // Remove skill from employee
-router.delete('/:id/skills/:skillId', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     const skillId = parseInt(req.params.skillId);

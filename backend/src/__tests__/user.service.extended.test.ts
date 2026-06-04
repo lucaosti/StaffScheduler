@@ -145,13 +145,12 @@ describe('UserService.getAllUsers filters', () => {
       .mockRejectedValueOnce(new Error('boom'));
     const svc = new UserService(pool);
     const out = await svc.getAllUsers({
-      role: 'manager',
-      departmentId: 3,
+      roleId: 1, departmentId: 3,
       isActive: false,
       search: 'foo',
     });
     expect(out.length).toBe(1);
-    await expect(svc.getAllUsers({ role: 'admin' })).rejects.toThrow(/boom/);
+    await expect(svc.getAllUsers({ roleId: 1 })).rejects.toThrow(/boom/);
   });
 });
 
@@ -338,7 +337,7 @@ describe('UserService getters / stats', () => {
     execute.mockResolvedValue([[userRow], null] as Tuple);
     const svc = new UserService(pool);
     expect((await svc.getUsersByDepartment(3)).length).toBe(1);
-    expect((await svc.getUsersByRole('manager')).length).toBe(1);
+    expect((await svc.getUsersByRoleId(2)).length).toBe(1);
   });
 
   it('getUserStatistics returns aggregates and bubbles errors', async () => {
@@ -360,7 +359,7 @@ describe('UserService getters / stats', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[userRow], null] as Tuple);
     const svc = new UserService(pool);
-    expect((await svc.getUsersForManager(1, 'admin')).length).toBe(1);
+    expect((await svc.getUsersForManager({ id: 1, email: 'a@x', isActive: true, permissions: ['settings.manage'] } as never)).length).toBe(1);
   });
 
   it('getUsersForManager manager path filters by manager and bubbles errors', async () => {
@@ -369,7 +368,7 @@ describe('UserService getters / stats', () => {
       .mockResolvedValueOnce([[userRow], null] as Tuple)
       .mockRejectedValueOnce(new Error('boom'));
     const svc = new UserService(pool);
-    expect((await svc.getUsersForManager(1, 'manager')).length).toBe(1);
-    await expect(svc.getUsersForManager(1, 'manager')).rejects.toThrow(/boom/);
+    expect((await svc.getUsersForManager({ id: 1, email: 'm@x', isActive: true, permissions: [] } as never)).length).toBe(1);
+    await expect(svc.getUsersForManager({ id: 1, email: 'm@x', isActive: true, permissions: [] } as never)).rejects.toThrow(/boom/);
   });
 });

@@ -70,16 +70,14 @@ describe('EmployeeService', () => {
     await expect(svc.getAllEmployees()).rejects.toThrow(/boom/);
   });
 
-  it('getEmployeeById returns null for non-employee role and bubbles errors', async () => {
+  it('getEmployeeById returns the user, null when missing, and bubbles errors', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[employee], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple)
-      .mockResolvedValueOnce([[{ ...employee, role: 'admin' }], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple)
-      .mockRejectedValueOnce(new Error('boom'));
+      .mockResolvedValueOnce([[employee], null] as Tuple) // getUserById #1: user row
+      .mockResolvedValueOnce([[], null] as Tuple) // departments
+      .mockResolvedValueOnce([[], null] as Tuple) // skills
+      .mockResolvedValueOnce([[], null] as Tuple) // getUserById #2: no user -> null
+      .mockRejectedValueOnce(new Error('boom')); // getUserById #3: throws
     const svc = new EmployeeService(pool);
     expect((await svc.getEmployeeById(1))?.id).toBe(1);
     expect(await svc.getEmployeeById(1)).toBeNull();
@@ -96,17 +94,17 @@ describe('EmployeeService', () => {
     await expect(svc.getEmployeesByDepartment(3)).rejects.toThrow(/boom/);
   });
 
-  it('getEmployeeStatistics aggregates active/inactive', async () => {
+  it('getEmployeeStatistics aggregates active/inactive from user stats', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[{ count: 10 }], null] as Tuple)
       .mockResolvedValueOnce([[{ count: 8 }], null] as Tuple)
-      .mockResolvedValueOnce([[{ role: 'employee', count: 4 }], null] as Tuple)
-      .mockResolvedValueOnce([[employee, { ...employee, is_active: 0 }], null] as Tuple);
+      .mockResolvedValueOnce([[{ role: 'Employee', count: 10 }], null] as Tuple);
     const svc = new EmployeeService(pool);
     const s = await svc.getEmployeeStatistics();
-    expect(s.total).toBe(4);
-    expect(s.active).toBe(1);
+    expect(s.total).toBe(10);
+    expect(s.active).toBe(8);
+    expect(s.inactive).toBe(2);
   });
 
   it('getEmployeeStatistics propagates errors', async () => {
@@ -128,17 +126,12 @@ describe('EmployeeService', () => {
     );
   });
 
-  it('createEmployee forces role=employee and bubbles', async () => {
+  it('createEmployee delegates to createUser and bubbles', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockRejectedValueOnce(new Error('boom'));
     const svc = new EmployeeService(pool);
     await expect(
-      svc.createEmployee({
-        email: 'a@b',
-        password: 'p',
-        firstName: 'A',
-        lastName: 'B',
-      })
+      svc.createEmployee({ email: 'a@b', password: 'p', firstName: 'A', lastName: 'B' })
     ).rejects.toThrow(/boom/);
   });
 
