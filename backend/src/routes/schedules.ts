@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ScheduleService } from '../services/ScheduleService';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { logger } from '../config/logger';
 
 export const createSchedulesRouter = (pool: Pool) => {
@@ -81,7 +81,7 @@ router.get('/:id/shifts', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new schedule
-router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -108,7 +108,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
 });
 
 // Update schedule
-router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -138,7 +138,7 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
 });
 
 // Delete schedule
-router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -214,7 +214,7 @@ router.get('/user/:userId', authenticate, async (req: Request, res: Response) =>
 });
 
 // Publish schedule
-router.patch('/:id/publish', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -244,7 +244,7 @@ router.patch('/:id/publish', authenticate, requireRole(['admin', 'manager']), as
 });
 
 // Archive schedule
-router.patch('/:id/archive', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -274,7 +274,7 @@ router.patch('/:id/archive', authenticate, requireRole(['admin', 'manager']), as
 });
 
 // Duplicate schedule
-router.post('/:id/duplicate', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -317,7 +317,7 @@ router.post('/:id/duplicate', authenticate, requireRole(['admin', 'manager']), a
 });
 
 // Generate optimized schedule
-router.post('/:id/generate', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {

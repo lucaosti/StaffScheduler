@@ -10,12 +10,12 @@ import request from 'supertest';
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.user = { id: 1, role: 'admin', email: 'a@x', isActive: true };
+    req.user = { id: 1, role: 'admin', email: 'a@x', isActive: true, permissions: require('./helpers/permissions').ALL_PERMISSIONS };
     next();
   },
-  requireRole: () => (_req: any, _res: any, next: any) => next(),
-  requireAdmin: (_req: any, _res: any, next: any) => next(),
-  requireManager: (_req: any, _res: any, next: any) => next(),
+  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  userHasPermission: (user: any, code: string) =>
+    Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
 const queryOne = jest.fn();

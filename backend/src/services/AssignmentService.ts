@@ -858,7 +858,6 @@ export class AssignmentService {
         FROM users u
         INNER JOIN user_departments ud ON u.id = ud.user_id
         WHERE u.is_active = 1
-        AND u.role = 'employee'
         AND ud.department_id = ?
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments sa

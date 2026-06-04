@@ -46,6 +46,7 @@ describe('UserDirectoryService.getProfile', () => {
         ],
         null,
       ])
+      .mockResolvedValueOnce([[{ name: 'Employee' }], null])
       .mockResolvedValueOnce([
         [
           { field_key: 'birthday', field_value: '1990-01-01', is_public: 1 },
@@ -103,6 +104,7 @@ describe('UserDirectoryService.exportVcf', () => {
         ],
         null,
       ])
+      .mockResolvedValueOnce([[{ name: 'Employee' }], null])
       .mockResolvedValueOnce([
         [{ field_key: 'birthday', field_value: '1990-01-01', is_public: 1 }],
         null,
@@ -132,6 +134,7 @@ describe('UserDirectoryService.exportVcf', () => {
         ],
         null,
       ])
+      .mockResolvedValueOnce([[{ name: 'Employee' }], null])
       .mockResolvedValueOnce([
         [{ field_key: 'allergies', field_value: 'penicillin', is_public: 0 }],
         null,

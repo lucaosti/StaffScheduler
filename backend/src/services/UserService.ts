@@ -27,10 +27,18 @@ export class UserService {
       }
       const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
       const [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO users (email, password_hash, first_name, last_name, role, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        [userData.email, passwordHash, userData.firstName, userData.lastName, userData.role, userData.phone || null, userData.employeeId || null]
+        'INSERT INTO users (email, password_hash, first_name, last_name, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [userData.email, passwordHash, userData.firstName, userData.lastName, userData.phone || null, userData.employeeId || null]
       );
       const userId = result.insertId;
+      if (userData.roleIds && userData.roleIds.length > 0) {
+        for (const roleId of userData.roleIds) {
+          await connection.execute(
+            'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
+            [userId, roleId]
+          );
+        }
+      }
       if (userData.departmentIds && userData.departmentIds.length > 0) {
         for (const departmentId of userData.departmentIds) {
           await connection.execute('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)', [userId, departmentId]);
@@ -58,7 +66,7 @@ export class UserService {
   async getUserById(id: number): Promise<User | null> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT id, email, first_name, last_name, role, employee_id, phone, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, employee_id, phone, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
         [id]
       );
       if (rows.length === 0) return null;
@@ -76,7 +84,6 @@ export class UserService {
         email: row.email,
         firstName: row.first_name,
         lastName: row.last_name,
-        role: row.role,
         employeeId: row.employee_id,
         phone: row.phone,
         isActive: Boolean(row.is_active),
@@ -103,9 +110,9 @@ export class UserService {
     }
   }
 
-  async getAllUsers(filters?: { role?: string; departmentId?: number; isActive?: boolean; search?: string }): Promise<User[]> {
+  async getAllUsers(filters?: { roleId?: number; departmentId?: number; isActive?: boolean; search?: string }): Promise<User[]> {
     try {
-      let query = 'SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.role, u.employee_id, u.phone, u.is_active, u.last_login, u.created_at, u.updated_at FROM users u';
+      let query = 'SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.employee_id, u.phone, u.is_active, u.last_login, u.created_at, u.updated_at FROM users u';
       const conditions: string[] = [];
       const params: any[] = [];
       if (filters?.departmentId) {
@@ -113,9 +120,10 @@ export class UserService {
         conditions.push('ud.department_id = ?');
         params.push(filters.departmentId);
       }
-      if (filters?.role) {
-        conditions.push('u.role = ?');
-        params.push(filters.role);
+      if (filters?.roleId) {
+        query += ' JOIN user_roles ur ON u.id = ur.user_id';
+        conditions.push('ur.role_id = ?');
+        params.push(filters.roleId);
       }
       if (filters?.isActive !== undefined) {
         conditions.push('u.is_active = ?');
@@ -134,7 +142,6 @@ export class UserService {
         email: row.email,
         firstName: row.first_name,
         lastName: row.last_name,
-        role: row.role,
         employeeId: row.employee_id,
         phone: row.phone,
         isActive: Boolean(row.is_active),
@@ -173,10 +180,6 @@ export class UserService {
         updates.push('last_name = ?');
         values.push(userData.lastName);
       }
-      if (userData.role !== undefined) {
-        updates.push('role = ?');
-        values.push(userData.role);
-      }
       if (userData.employeeId !== undefined) {
         updates.push('employee_id = ?');
         values.push(userData.employeeId);
@@ -192,6 +195,19 @@ export class UserService {
       if (updates.length > 0) {
         values.push(id);
         await connection.execute(`UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, values);
+      }
+      // Replace unscoped role grants when roleIds is provided.
+      if (userData.roleIds !== undefined) {
+        await connection.execute(
+          'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
+          [id]
+        );
+        for (const roleId of userData.roleIds) {
+          await connection.execute(
+            'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
+            [id, roleId]
+          );
+        }
       }
       await connection.commit();
       logger.info('User updated: ' + id);
@@ -307,15 +323,23 @@ export class UserService {
     return this.getAllUsers({ departmentId, isActive: true });
   }
 
-  async getUsersByRole(role: string): Promise<User[]> {
-    return this.getAllUsers({ role, isActive: true });
+  async getUsersByRoleId(roleId: number): Promise<User[]> {
+    return this.getAllUsers({ roleId, isActive: true });
   }
 
   async getUserStatistics(): Promise<{ total: number; active: number; inactive: number; byRole: Array<{ role: string; count: number }> }> {
     try {
       const [totalRows] = await this.pool.execute<RowDataPacket[]>('SELECT COUNT(*) as count FROM users');
       const [activeRows] = await this.pool.execute<RowDataPacket[]>('SELECT COUNT(*) as count FROM users WHERE is_active = 1');
-      const [roleRows] = await this.pool.execute<RowDataPacket[]>('SELECT role, COUNT(*) as count FROM users GROUP BY role');
+      // Headcount per role, derived from role assignments (a user may hold
+      // more than one role and therefore count under several role names).
+      const [roleRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT r.name AS role, COUNT(DISTINCT ur.user_id) AS count
+           FROM roles r
+           LEFT JOIN user_roles ur ON ur.role_id = r.id
+           GROUP BY r.id
+           ORDER BY r.name ASC`
+      );
       return {
         total: totalRows[0].count || 0,
         active: activeRows[0].count || 0,
@@ -329,18 +353,22 @@ export class UserService {
   }
 
   /**
-   * Returns the users a manager can see: all users for admins, otherwise only
-   * those belonging to a department the manager owns.
+   * Returns the users the given actor may list.
+   *
+   * Users whose management is unrestricted (they hold the `settings.manage`
+   * administrator permission) see everyone; otherwise the listing is scoped to
+   * the departments the actor manages. Fine-grained org-subtree scoping across
+   * all resources is tracked as a follow-up (hierarchical access scoping).
    *
    * Implemented as a single query (no per-user round-trip) so the listing
    * stays O(1) in DB calls regardless of the team size.
    */
-  async getUsersForManager(managerId: number, role: string): Promise<User[]> {
+  async getUsersForManager(actor: User): Promise<User[]> {
     try {
-      if (role === 'admin') return this.getAllUsers();
+      if (actor.permissions?.includes('settings.manage')) return this.getAllUsers();
 
       const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.role,
+        `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name,
                 u.employee_id, u.phone, u.is_active, u.last_login,
                 u.created_at, u.updated_at
          FROM users u
@@ -348,7 +376,7 @@ export class UserService {
          JOIN departments d ON ud.department_id = d.id
          WHERE d.manager_id = ?
          ORDER BY u.last_name ASC, u.first_name ASC`,
-        [managerId]
+        [actor.id]
       );
 
       return userRows.map((row: any) => ({
@@ -356,7 +384,6 @@ export class UserService {
         email: row.email,
         firstName: row.first_name,
         lastName: row.last_name,
-        role: row.role,
         employeeId: row.employee_id,
         phone: row.phone,
         isActive: Boolean(row.is_active),

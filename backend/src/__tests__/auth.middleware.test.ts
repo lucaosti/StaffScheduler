@@ -1,28 +1,35 @@
 /**
  * Auth middleware tests.
  *
- * Mounts a tiny app with `authenticate` and the role guards in front of a
+ * Mounts a tiny app with `authenticate` and the permission guard in front of a
  * test handler so we can exercise:
  *   - missing Authorization header
  *   - malformed / non-Bearer header
  *   - expired or tampered JWT
  *   - inactive user
  *   - happy path
- *   - requireRole / requireAdmin / requireManager
+ *   - requirePermission
  */
 
 import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
-import { authenticate, requireRole, requireAdmin, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { config } from '../config';
 import { UserService } from '../services/UserService';
+import { RbacService } from '../services/RbacService';
 import { database } from '../config/database';
 
 jest.mock('../services/UserService');
+jest.mock('../services/RbacService');
 jest.mock('../config/database', () => ({
   database: { getPool: jest.fn().mockReturnValue({}) },
 }));
+
+const setPermissions = (perms: string[]): void => {
+  (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue(perms);
+  (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
+};
 
 const buildApp = (extraMiddleware: express.RequestHandler[] = []): express.Express => {
   const app = express();
@@ -40,6 +47,7 @@ describe('authenticate', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
+    setPermissions([]);
   });
 
   it('returns 401 MISSING_TOKEN with no Authorization header', async () => {
@@ -63,7 +71,7 @@ describe('authenticate', () => {
   });
 
   it('returns 401 INVALID_TOKEN with a JWT signed by a different secret', async () => {
-    const token = signToken({ userId: 1, email: 'a@x', role: 'admin' }, 'wrong-secret');
+    const token = signToken({ userId: 1, email: 'a@x' }, 'wrong-secret');
     const res = await request(buildApp())
       .get('/protected')
       .set('Authorization', `Bearer ${token}`);
@@ -73,7 +81,7 @@ describe('authenticate', () => {
 
   it('returns 401 USER_NOT_FOUND when the user is missing or inactive', async () => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(null);
-    const token = signToken({ userId: 1, email: 'a@x', role: 'admin' });
+    const token = signToken({ userId: 1, email: 'a@x' });
     const res = await request(buildApp())
       .get('/protected')
       .set('Authorization', `Bearer ${token}`);
@@ -85,10 +93,9 @@ describe('authenticate', () => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
       id: 7,
       email: 'a@x',
-      role: 'manager',
       isActive: true,
     });
-    const token = signToken({ userId: 7, email: 'a@x', role: 'manager' });
+    const token = signToken({ userId: 7, email: 'a@x' });
     const res = await request(buildApp())
       .get('/protected')
       .set('Authorization', `Bearer ${token}`);
@@ -97,60 +104,29 @@ describe('authenticate', () => {
   });
 });
 
-describe('requireRole / requireAdmin / requireManager', () => {
+describe('requirePermission', () => {
   beforeEach(() => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
       id: 7,
       email: 'a@x',
-      role: 'employee',
       isActive: true,
     });
   });
 
-  it('returns 403 FORBIDDEN when role does not match the allow list', async () => {
-    const token = signToken({ userId: 7, email: 'a@x', role: 'employee' });
-    const res = await request(buildApp([requireRole(['admin'])]))
+  it('returns 403 FORBIDDEN when the user lacks the required permission', async () => {
+    setPermissions(['schedule.read']);
+    const token = signToken({ userId: 7, email: 'a@x' });
+    const res = await request(buildApp([requirePermission('settings.manage')]))
       .get('/protected')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
-  it('requireAdmin lets admins through and blocks managers', async () => {
-    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 7,
-      email: 'admin@x',
-      role: 'admin',
-      isActive: true,
-    });
-    const adminToken = signToken({ userId: 7, email: 'admin@x', role: 'admin' });
-    const ok = await request(buildApp([requireAdmin]))
-      .get('/protected')
-      .set('Authorization', `Bearer ${adminToken}`);
-    expect(ok.status).toBe(200);
-
-    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 8,
-      email: 'm@x',
-      role: 'manager',
-      isActive: true,
-    });
-    const mgrToken = signToken({ userId: 8, email: 'm@x', role: 'manager' });
-    const blocked = await request(buildApp([requireAdmin]))
-      .get('/protected')
-      .set('Authorization', `Bearer ${mgrToken}`);
-    expect(blocked.status).toBe(403);
-  });
-
-  it('requireManager admits both admin and manager', async () => {
-    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
-      id: 8,
-      email: 'm@x',
-      role: 'manager',
-      isActive: true,
-    });
-    const token = signToken({ userId: 8, email: 'm@x', role: 'manager' });
-    const res = await request(buildApp([requireManager]))
+  it('lets a user through when they hold the required permission', async () => {
+    setPermissions(['settings.manage', 'schedule.read']);
+    const token = signToken({ userId: 7, email: 'a@x' });
+    const res = await request(buildApp([requirePermission('settings.manage')]))
       .get('/protected')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);

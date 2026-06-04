@@ -22,7 +22,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireAdmin, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { logger } from '../config/logger';
@@ -69,7 +69,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/units', requireAdmin, async (req: Request, res: Response) => {
+  router.post('/units', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
     try {
       const created = await units.create({
         name: req.body?.name,
@@ -83,7 +83,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/units/:id', requireAdmin, async (req: Request, res: Response) => {
+  router.put('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
     try {
       const updated = await units.update(Number(req.params.id), req.body ?? {});
       res.json({ success: true, data: updated });
@@ -94,7 +94,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/units/:id', requireAdmin, async (req: Request, res: Response) => {
+  router.delete('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
     try {
       await units.remove(Number(req.params.id));
       res.json({ success: true });
@@ -116,7 +116,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/units/:id/members', requireManager, async (req: Request, res: Response) => {
+  router.post('/units/:id/members', requirePermission('employee.manage'), async (req: Request, res: Response) => {
     try {
       const userId = Number(req.body?.userId);
       if (!userId) return respondError(res, 400, 'VALIDATION_ERROR', 'userId is required');
@@ -133,7 +133,7 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   router.patch(
     '/units/:id/members/:userId/primary',
-    requireManager,
+    requirePermission('employee.manage'),
     async (req: Request, res: Response) => {
       try {
         await units.setPrimary(Number(req.params.userId), Number(req.params.id));
@@ -148,7 +148,7 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   router.delete(
     '/units/:id/members/:userId',
-    requireManager,
+    requirePermission('employee.manage'),
     async (req: Request, res: Response) => {
       try {
         await units.removeMember(Number(req.params.userId), Number(req.params.id));
@@ -163,7 +163,7 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   router.get('/loans', async (req: Request, res: Response) => {
     try {
-      const isManager = req.user!.role === 'admin' || req.user!.role === 'manager';
+      const isManager = userHasPermission(req.user, 'loan.approve');
       const filters = isManager
         ? {
             userId: req.query.userId ? Number(req.query.userId) : undefined,
@@ -179,7 +179,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans', requireManager, async (req: Request, res: Response) => {
+  router.post('/loans', requirePermission('loan.request'), async (req: Request, res: Response) => {
     try {
       const created = await loans.create({
         userId: Number(req.body?.userId),
@@ -196,7 +196,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/approve', requireManager, async (req: Request, res: Response) => {
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), async (req: Request, res: Response) => {
     try {
       const updated = await loans.approve(Number(req.params.id), req.user!.id, req.body?.notes ?? null);
       res.json({ success: true, data: updated });
@@ -210,7 +210,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/reject', requireManager, async (req: Request, res: Response) => {
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), async (req: Request, res: Response) => {
     try {
       const updated = await loans.reject(Number(req.params.id), req.user!.id, req.body?.notes ?? null);
       res.json({ success: true, data: updated });

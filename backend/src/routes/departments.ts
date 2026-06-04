@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
-import { authenticate } from '../middleware/auth';
+import { authenticate, userHasPermission } from '../middleware/auth';
 import { CreateDepartmentRequest, UpdateDepartmentRequest } from '../types';
 import { logger } from '../config/logger';
 
@@ -17,7 +17,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const user = (req as any).user;
 
       let departments;
-      if (user.role === 'admin') {
+      if (userHasPermission(user, 'settings.manage')) {
         departments = await departmentService.getAllDepartments();
       } else {
         departments = await departmentService.getDepartmentsForUser(user.id);
@@ -39,7 +39,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const user = (req as any).user;
       const departmentId = parseInt(req.params.id);
 
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
         const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
 
@@ -74,7 +74,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
     try {
       const user = (req as any).user;
 
-      if (!['admin', 'manager'].includes(user.role)) {
+      if (!userHasPermission(user, 'department.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
@@ -90,19 +90,14 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
+      // Any existing user may be designated as a department manager; the
+      // configurable role model no longer restricts this to specific roles.
       if (departmentData.managerId) {
         const manager = await userService.getUserById(departmentData.managerId);
         if (!manager) {
           return res.status(400).json({
             success: false,
             error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
-          });
-        }
-
-        if (!['admin', 'manager'].includes(manager.role)) {
-          return res.status(400).json({
-            success: false,
-            error: { code: 'INVALID_INPUT', message: 'Specified user cannot be a department manager' }
           });
         }
       }
@@ -126,9 +121,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const departmentId = parseInt(req.params.id);
       const departmentData: UpdateDepartmentRequest = req.body;
 
-      if (user.role === 'admin') {
-        // Admin can update any department
-      } else if (user.role === 'manager') {
+      if (userHasPermission(user, 'settings.manage')) {
+        // Full administrators can update any department
+      } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
         const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
 
@@ -145,19 +140,13 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
+      // Any existing user may be designated as a department manager.
       if (departmentData.managerId) {
         const manager = await userService.getUserById(departmentData.managerId);
         if (!manager) {
           return res.status(400).json({
             success: false,
             error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
-          });
-        }
-
-        if (!['admin', 'manager'].includes(manager.role)) {
-          return res.status(400).json({
-            success: false,
-            error: { code: 'INVALID_INPUT', message: 'Specified user cannot be a department manager' }
           });
         }
       }
@@ -180,7 +169,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const user = (req as any).user;
       const departmentId = parseInt(req.params.id);
 
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Only administrators can delete departments' }
@@ -214,9 +203,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const departmentId = parseInt(req.params.id);
       const { userId } = req.body;
 
-      if (user.role === 'admin') {
-        // Admin can add users to any department
-      } else if (['admin', 'manager'].includes(user.role)) {
+      if (userHasPermission(user, 'settings.manage')) {
+        // Full administrators can add users to any department
+      } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
         const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
 
@@ -268,9 +257,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const departmentId = parseInt(req.params.id);
       const targetUserId = parseInt(req.params.userId);
 
-      if (user.role === 'admin') {
-        // Admin can remove users from any department
-      } else if (['admin', 'manager'].includes(user.role)) {
+      if (userHasPermission(user, 'settings.manage')) {
+        // Full administrators can remove users from any department
+      } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
         const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
 
@@ -305,7 +294,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       const user = (req as any).user;
       const departmentId = parseInt(req.params.id);
 
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
         const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
 

@@ -44,12 +44,12 @@ describe('mapEmployeeRows', () => {
     expect(out.errors[0].message).toMatch(/Missing required columns/);
   });
 
-  it('rejects an invalid role and continues with the rest', () => {
+  it('rejects rows with an empty role and continues with the rest', () => {
     const csv = parseCsv(
       'email,firstName,lastName,role\n' +
-        'a@x.com,A,A,manager\n' +
-        'b@x.com,B,B,king\n' +
-        'c@x.com,C,C,employee\n'
+        'a@x.com,A,A,Manager\n' +
+        'b@x.com,B,B,\n' +
+        'c@x.com,C,C,Employee\n'
     );
     const out = mapEmployeeRows(csv);
     expect(out.rows.map((r) => r.email)).toEqual(['a@x.com', 'c@x.com']);
@@ -131,14 +131,18 @@ describe('BulkImportService.importEmployees', () => {
   it('inserts every valid row in one transaction', async () => {
     const csv =
       'email,firstName,lastName,role\n' +
-      'a@x.com,A,A,employee\n' +
-      'b@x.com,B,B,manager\n';
+      'a@x.com,A,A,Employee\n' +
+      'b@x.com,B,B,Manager\n';
     const { pool, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([{ insertId: 2, affectedRows: 1 }, null]);
+      .mockResolvedValueOnce([[], null])                         // email check row 1
+      .mockResolvedValueOnce([[{ id: 3 }], null])               // role lookup row 1
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]) // INSERT user row 1
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])       // INSERT IGNORE user_roles row 1
+      .mockResolvedValueOnce([[], null])                         // email check row 2
+      .mockResolvedValueOnce([[{ id: 2 }], null])               // role lookup row 2
+      .mockResolvedValueOnce([{ insertId: 2, affectedRows: 1 }, null]) // INSERT user row 2
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);      // INSERT IGNORE user_roles row 2
 
     const service = new BulkImportService(pool);
     const out = await service.importEmployees(csv, 'pw');

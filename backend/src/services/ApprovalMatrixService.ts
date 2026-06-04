@@ -12,7 +12,7 @@
  *   - `policy_owner`        owner of the policy at hand
  *   - `unit_manager`        manager of the involved org_unit
  *   - `unit_manager_chain`  walks up parent units until a manager is found
- *   - `company_role`        any active user with the configured role
+ *   - `company_role`        any active user holding the configured role id
  *   - `company_user`        the explicit user stored in the matrix row
  *
  * @author Luca Ostinelli
@@ -31,7 +31,7 @@ interface ApprovalMatrixRow {
   id: number;
   changeType: string;
   approverScope: ApproverScope;
-  approverRole: 'admin' | 'manager' | 'employee' | null;
+  approverRoleId: number | null;
   approverUserId: number | null;
   autoApproveForOwner: boolean;
   description: string | null;
@@ -59,7 +59,7 @@ const mapRow = (row: RowDataPacket): ApprovalMatrixRow => ({
   id: row.id as number,
   changeType: row.change_type as string,
   approverScope: row.approver_scope as ApproverScope,
-  approverRole: (row.approver_role as ApprovalMatrixRow['approverRole']) ?? null,
+  approverRoleId: (row.approver_role_id as number | null) ?? null,
   approverUserId: (row.approver_user_id as number | null) ?? null,
   autoApproveForOwner: Boolean(row.auto_approve_for_owner),
   description: (row.description as string | null) ?? null,
@@ -96,14 +96,14 @@ export class ApprovalMatrixService {
     await this.pool.execute(
       `UPDATE approval_matrix
           SET approver_scope = ?,
-              approver_role = ?,
+              approver_role_id = ?,
               approver_user_id = ?,
               auto_approve_for_owner = ?,
               description = ?
         WHERE change_type = ?`,
       [
         merged.approverScope,
-        merged.approverRole,
+        merged.approverRoleId,
         merged.approverUserId,
         merged.autoApproveForOwner ? 1 : 0,
         merged.description,
@@ -118,8 +118,7 @@ export class ApprovalMatrixService {
   /**
    * Resolves the approver for a change type given a runtime context.
    * Returns `approverUserId = null` when no approver can be determined; the
-   * caller decides whether to fall back to "everyone with admin role" or to
-   * fail loudly.
+   * caller decides whether to fall back to a configured role or to fail loudly.
    */
   async resolve(changeType: string, ctx: ResolveContext): Promise<ResolvedApprover> {
     const matrix = await this.getByChangeType(changeType);
@@ -144,8 +143,8 @@ export class ApprovalMatrixService {
           : null;
         break;
       case 'company_role':
-        approverUserId = matrix.approverRole
-          ? await this.findFirstActiveByRole(matrix.approverRole)
+        approverUserId = matrix.approverRoleId
+          ? await this.findFirstActiveByRoleId(matrix.approverRoleId)
           : null;
         break;
       case 'company_user':
@@ -190,12 +189,15 @@ export class ApprovalMatrixService {
     return null;
   }
 
-  private async findFirstActiveByRole(
-    role: 'admin' | 'manager' | 'employee'
-  ): Promise<number | null> {
+  private async findFirstActiveByRoleId(roleId: number): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id FROM users WHERE role = ? AND is_active = 1 ORDER BY id ASC LIMIT 1`,
-      [role]
+      `SELECT u.id
+         FROM users u
+         JOIN user_roles ur ON ur.user_id = u.id
+        WHERE ur.role_id = ? AND u.is_active = 1
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        ORDER BY u.id ASC LIMIT 1`,
+      [roleId]
     );
     return rows.length === 0 ? null : (rows[0].id as number);
   }

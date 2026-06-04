@@ -367,12 +367,11 @@ export class DepartmentService {
     email: string;
     firstName: string;
     lastName: string;
-    role: string;
     employeeId?: string;
   }>> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT u.id, u.email, u.first_name, u.last_name, u.role, u.employee_id
+        `SELECT u.id, u.email, u.first_name, u.last_name, u.employee_id
         FROM users u
         JOIN user_departments ud ON u.id = ud.user_id
         WHERE ud.department_id = ? AND u.is_active = 1
@@ -385,7 +384,6 @@ export class DepartmentService {
         email: row.email,
         firstName: row.first_name,
         lastName: row.last_name,
-        role: row.role,
         employeeId: row.employee_id
       }));
     } catch (error) {

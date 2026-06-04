@@ -12,7 +12,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { BulkImportService } from '../services/BulkImportService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -23,7 +23,7 @@ export const createBulkImportRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new BulkImportService(pool);
 
-  router.use(authenticate, requireManager);
+  router.use(authenticate, requirePermission('employee.manage'));
 
   router.post('/employees', async (req: Request, res: Response) => {
     const csv = req.body?.csv as string | undefined;

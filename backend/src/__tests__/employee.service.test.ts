@@ -38,40 +38,35 @@ describe('EmployeeService', () => {
     mockUserService = (UserService as jest.MockedClass<typeof UserService>).mock.instances[0] as jest.Mocked<UserService>;
   });
 
-  it('getAllEmployees forces role=employee on the underlying call', async () => {
+  it('getAllEmployees forwards filters without forcing a role', async () => {
     mockUserService.getAllUsers = jest.fn().mockResolvedValue([buildUser()]);
     await service.getAllEmployees({ departmentId: 5 });
-    expect(mockUserService.getAllUsers).toHaveBeenCalledWith({ departmentId: 5, role: 'employee' });
+    expect(mockUserService.getAllUsers).toHaveBeenCalledWith({ departmentId: 5 });
   });
 
-  it('getEmployeeById returns null if the user has a different role', async () => {
-    mockUserService.getUserById = jest.fn().mockResolvedValue(buildUser({ role: 'admin' }));
-    const result = await service.getEmployeeById(7);
-    expect(result).toBeNull();
-  });
-
-  it('getEmployeeById returns the user when role matches', async () => {
+  it('getEmployeeById returns the user regardless of their roles', async () => {
     mockUserService.getUserById = jest.fn().mockResolvedValue(buildUser());
     const result = await service.getEmployeeById(7);
     expect(result?.id).toBe(7);
   });
 
-  it('getEmployeeStatistics aggregates active vs inactive', async () => {
+  it('getEmployeeById returns null when the user does not exist', async () => {
+    mockUserService.getUserById = jest.fn().mockResolvedValue(null);
+    const result = await service.getEmployeeById(7);
+    expect(result).toBeNull();
+  });
+
+  it('getEmployeeStatistics reflects the overall user headcount', async () => {
     mockUserService.getUserStatistics = jest.fn().mockResolvedValue({
       total: 10,
       active: 8,
       inactive: 2,
-      byRole: [{ role: 'employee', count: 8 }],
+      byRole: [{ role: 'Employee', count: 8 }],
     });
-    mockUserService.getAllUsers = jest.fn().mockResolvedValue([
-      buildUser({ id: 1, isActive: true }),
-      buildUser({ id: 2, isActive: false }),
-      buildUser({ id: 3, isActive: true }),
-    ]);
     const stats = await service.getEmployeeStatistics();
-    expect(stats.total).toBe(8);
-    expect(stats.active).toBe(2);
-    expect(stats.inactive).toBe(6);
+    expect(stats.total).toBe(10);
+    expect(stats.active).toBe(8);
+    expect(stats.inactive).toBe(2);
   });
 
   it('getEmployeesByDepartment delegates with no role filter override', async () => {
@@ -80,16 +75,16 @@ describe('EmployeeService', () => {
     expect(mockUserService.getUsersByDepartment).toHaveBeenCalledWith(3);
   });
 
-  it('createEmployee always sets role=employee', async () => {
+  it('createEmployee forwards the supplied data (roles via roleIds)', async () => {
     mockUserService.createUser = jest.fn().mockResolvedValue(buildUser());
-    await service.createEmployee({ email: 'a@x.com', role: 'admin' });
+    await service.createEmployee({ email: 'a@x.com', roleIds: [3] });
     expect(mockUserService.createUser).toHaveBeenCalledWith(
-      expect.objectContaining({ role: 'employee' })
+      expect.objectContaining({ email: 'a@x.com', roleIds: [3] })
     );
   });
 
-  it('updateEmployee throws when target is not an employee', async () => {
-    mockUserService.getUserById = jest.fn().mockResolvedValue(buildUser({ role: 'manager' }));
+  it('updateEmployee throws when the target user does not exist', async () => {
+    mockUserService.getUserById = jest.fn().mockResolvedValue(null);
     await expect(service.updateEmployee(7, { firstName: 'X' })).rejects.toThrow(/Employee not found/);
   });
 

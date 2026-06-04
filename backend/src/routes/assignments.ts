@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { logger } from '../config/logger';
 
 export const createAssignmentsRouter = (pool: Pool) => {
@@ -52,7 +52,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new assignment
-router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
   try {
     const assignment = await assignmentService.createAssignment(req.body);
 
@@ -72,7 +72,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
 });
 
 // Update assignment
-router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -102,7 +102,7 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
 });
 
 // Delete assignment
-router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -201,7 +201,7 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
 });
 
 // Bulk create assignments
-router.post('/bulk', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/bulk', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
   try {
     const { assignments } = req.body;
     if (!Array.isArray(assignments)) {

@@ -1,9 +1,13 @@
 /**
- * Authentication Middleware
- * 
- * Updated to work with the real database schema and user roles.
- * Implements JWT-based authentication with proper role checking.
- * 
+ * Authentication & Authorization Middleware
+ *
+ * JWT-based authentication plus permission-based authorization. The former
+ * hardcoded role checks (`requireAdmin` / `requireManager` / `requireRole`)
+ * have been replaced by `requirePermission(code)`, which consults the user's
+ * effective permissions resolved from the configurable RBAC model. The token
+ * carries only the user id; permissions are resolved from the database on every
+ * request so role/permission changes take effect immediately.
+ *
  * @author Luca Ostinelli
  */
 
@@ -11,6 +15,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { User } from '../types';
 import { UserService } from '../services/UserService';
+import { RbacService } from '../services/RbacService';
 import { config } from '../config';
 import { logger } from '../config/logger';
 import { database } from '../config/database';
@@ -28,20 +33,25 @@ declare module 'express-serve-static-core' {
 interface JWTPayload {
   userId: string;
   email: string;
-  role: 'admin' | 'manager' | 'employee';
   iat?: number;
   exp?: number;
 }
 
 /**
+ * Returns true when the authenticated user holds the given permission code.
+ * Safe to call in route bodies for finer-grained, in-handler authorization.
+ */
+export const userHasPermission = (user: User | undefined, code: string): boolean =>
+  Boolean(user?.permissions?.includes(code));
+
+/**
  * Main Authentication Middleware
- * 
- * Validates JWT tokens and loads user information into the request context.
- * All protected routes must use this middleware.
+ *
+ * Validates JWT tokens, loads the user and their effective permissions into the
+ * request context. All protected routes must use this middleware.
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
@@ -55,7 +65,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
-    // Verify and decode JWT token
     let decodedToken: JWTPayload;
     try {
       decodedToken = jwt.verify(token, config.jwt.secret) as JWTPayload;
@@ -69,9 +78,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Get user from database
-    const userService = new UserService(database.getPool());
-    const user = await userService.getUserById(parseInt(decodedToken.userId.toString()));
+    const pool = database.getPool();
+    const userService = new UserService(pool);
+    const userId = parseInt(decodedToken.userId.toString());
+    const user = await userService.getUserById(userId);
     if (!user || !user.isActive) {
       return res.status(401).json({
         success: false,
@@ -82,14 +92,18 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    // Attach user to request object
+    // Resolve effective permissions and role assignments for this request.
+    const rbac = new RbacService(pool);
+    const [permissions, roles] = await Promise.all([
+      rbac.getEffectivePermissions(userId),
+      rbac.getUserRoles(userId),
+    ]);
+    user.permissions = permissions;
+    user.roles = roles;
+
     req.user = user;
 
-    // Log authentication success at debug level without PII (no email/path)
-    logger.debug('User authenticated', {
-      userId: user.id,
-      role: user.role
-    });
+    logger.debug('User authenticated', { userId: user.id });
 
     next();
   } catch (error) {
@@ -105,17 +119,17 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 };
 
 /**
- * Role-based Authorization Middleware
- * 
- * Restricts access based on user roles. Supports multiple roles.
- * 
- * @param roles - Array of allowed roles
- * @returns Express middleware function
+ * Permission-based Authorization Middleware
+ *
+ * Restricts access to users holding the given permission code. Replaces the
+ * previous role-based guards.
+ *
+ * @param code - Required permission code (e.g. `schedule.manage`)
  */
-export const requireRole = (roles: Array<'admin' | 'manager' | 'employee'>) => {
+export const requirePermission = (code: string) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = req.user;
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -126,7 +140,7 @@ export const requireRole = (roles: Array<'admin' | 'manager' | 'employee'>) => {
       });
     }
 
-    if (!roles.includes(user.role)) {
+    if (!userHasPermission(user, code)) {
       return res.status(403).json({
         success: false,
         error: {
@@ -139,20 +153,3 @@ export const requireRole = (roles: Array<'admin' | 'manager' | 'employee'>) => {
     next();
   };
 };
-
-/**
- * Admin Only Middleware
- * 
- * Restricts access to admin users only.
- * Used for system-wide administrative functions.
- */
-export const requireAdmin = requireRole(['admin']);
-
-/**
- * Manager and Above Middleware
- * 
- * Allows access to admin and manager roles.
- * Used for management functions.
- */
-export const requireManager = requireRole(['admin', 'manager']);
-

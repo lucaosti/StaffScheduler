@@ -1,0 +1,292 @@
+/**
+ * RBAC Service
+ *
+ * Owns the configurable role/permission model that replaced the former
+ * hardcoded `role` ENUM. Authorization is permission-based: application code
+ * checks permission CODES (e.g. `schedule.manage`), while roles are editable
+ * data that bundle permissions and are granted to users — optionally scoped to
+ * an org unit and optionally time-bound.
+ *
+ * Responsibilities:
+ *   - resolve a user's effective permissions and role assignments
+ *   - CRUD for roles, role-permission membership and user-role grants
+ *   - list the permission catalog
+ *
+ * @author Luca Ostinelli
+ */
+
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import {
+  Permission,
+  Role,
+  UserRoleAssignment,
+  CreateRoleRequest,
+  UpdateRoleRequest,
+} from '../types';
+import { logger } from '../config/logger';
+
+export class RbacService {
+  constructor(private pool: Pool) {}
+
+  /**
+   * Returns the de-duplicated set of permission codes a user effectively holds,
+   * across all their (non-expired) role grants.
+   */
+  async getEffectivePermissions(userId: number): Promise<string[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT p.code
+         FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE ur.user_id = ?
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+      [userId]
+    );
+    return rows.map((r: any) => r.code as string);
+  }
+
+  /**
+   * Returns the user's role assignments (with scope), excluding expired grants.
+   */
+  async getUserRoles(userId: number): Promise<UserRoleAssignment[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT ur.role_id, r.name AS role_name, ur.scope_org_unit_id, ur.expires_at
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = ?
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        ORDER BY r.name ASC`,
+      [userId]
+    );
+    return rows.map((r: any) => ({
+      roleId: r.role_id,
+      roleName: r.role_name,
+      scopeOrgUnitId: r.scope_org_unit_id ?? null,
+      expiresAt: r.expires_at ?? null,
+    }));
+  }
+
+  /** Convenience: does the user hold the given permission code? */
+  async userHasPermission(userId: number, code: string): Promise<boolean> {
+    const perms = await this.getEffectivePermissions(userId);
+    return perms.includes(code);
+  }
+
+  // --------------------------------------------------------------------------
+  // Permission catalog
+  // --------------------------------------------------------------------------
+
+  async listPermissions(): Promise<Permission[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, code, resource, action, description FROM permissions ORDER BY resource, action`
+    );
+    return rows.map((r: any) => ({
+      id: r.id,
+      code: r.code,
+      resource: r.resource,
+      action: r.action,
+      description: r.description ?? undefined,
+    }));
+  }
+
+  // --------------------------------------------------------------------------
+  // Roles
+  // --------------------------------------------------------------------------
+
+  async listRoles(): Promise<Role[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at,
+              GROUP_CONCAT(p.code) AS perm_codes
+         FROM roles r
+         LEFT JOIN role_permissions rp ON rp.role_id = r.id
+         LEFT JOIN permissions p ON p.id = rp.permission_id
+        GROUP BY r.id
+        ORDER BY r.name ASC`
+    );
+    return rows.map((r: any) => this.mapRole(r));
+  }
+
+  async getRoleById(id: number): Promise<Role | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT r.id, r.name, r.description, r.is_system, r.created_at, r.updated_at,
+              GROUP_CONCAT(p.code) AS perm_codes
+         FROM roles r
+         LEFT JOIN role_permissions rp ON rp.role_id = r.id
+         LEFT JOIN permissions p ON p.id = rp.permission_id
+        WHERE r.id = ?
+        GROUP BY r.id`,
+      [id]
+    );
+    return rows.length ? this.mapRole(rows[0]) : null;
+  }
+
+  async createRole(input: CreateRoleRequest): Promise<Role> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const [existing] = await connection.execute<RowDataPacket[]>(
+        'SELECT id FROM roles WHERE name = ? LIMIT 1',
+        [input.name]
+      );
+      if (existing.length > 0) throw new Error('Role name already exists');
+
+      const [res] = await connection.execute<ResultSetHeader>(
+        'INSERT INTO roles (name, description, is_system) VALUES (?, ?, FALSE)',
+        [input.name, input.description || null]
+      );
+      const roleId = res.insertId;
+      await this.replacePermissionsTx(connection, roleId, input.permissionCodes || []);
+      await connection.commit();
+      logger.info(`Role created: ${roleId} (${input.name})`);
+      const role = await this.getRoleById(roleId);
+      if (!role) throw new Error('Failed to retrieve created role');
+      return role;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async updateRole(id: number, input: UpdateRoleRequest): Promise<Role> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const updates: string[] = [];
+      const values: any[] = [];
+      if (input.name !== undefined) {
+        updates.push('name = ?');
+        values.push(input.name);
+      }
+      if (input.description !== undefined) {
+        updates.push('description = ?');
+        values.push(input.description);
+      }
+      if (updates.length > 0) {
+        values.push(id);
+        await connection.execute(
+          `UPDATE roles SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+          values
+        );
+      }
+      if (input.permissionCodes !== undefined) {
+        await this.replacePermissionsTx(connection, id, input.permissionCodes);
+      }
+      await connection.commit();
+      logger.info(`Role updated: ${id}`);
+      const role = await this.getRoleById(id);
+      if (!role) throw new Error('Role not found');
+      return role;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async deleteRole(id: number): Promise<void> {
+    const role = await this.getRoleById(id);
+    if (!role) throw new Error('Role not found');
+    if (role.isSystem) throw new Error('System roles cannot be deleted');
+    await this.pool.execute('DELETE FROM roles WHERE id = ?', [id]);
+    logger.info(`Role deleted: ${id}`);
+  }
+
+  // --------------------------------------------------------------------------
+  // User-role grants
+  // --------------------------------------------------------------------------
+
+  /** Replaces the user's unscoped role grants with the provided role ids. */
+  async setUserRoles(userId: number, roleIds: number[]): Promise<void> {
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.execute(
+        'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
+        [userId]
+      );
+      for (const roleId of roleIds) {
+        await connection.execute(
+          'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
+          [userId, roleId]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  async assignRole(
+    userId: number,
+    roleId: number,
+    scopeOrgUnitId: number | null = null,
+    expiresAt: string | null = null
+  ): Promise<void> {
+    await this.pool.execute(
+      `INSERT INTO user_roles (user_id, role_id, scope_org_unit_id, expires_at)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)`,
+      [userId, roleId, scopeOrgUnitId, expiresAt]
+    );
+  }
+
+  async removeRole(userId: number, roleId: number, scopeOrgUnitId: number | null = null): Promise<void> {
+    if (scopeOrgUnitId === null) {
+      await this.pool.execute(
+        'DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND scope_org_unit_id IS NULL',
+        [userId, roleId]
+      );
+    } else {
+      await this.pool.execute(
+        'DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND scope_org_unit_id = ?',
+        [userId, roleId, scopeOrgUnitId]
+      );
+    }
+  }
+
+  /** Resolves a role id from its (unique) name. Useful for seeding/import. */
+  async getRoleIdByName(name: string): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT id FROM roles WHERE name = ? LIMIT 1',
+      [name]
+    );
+    return rows.length ? (rows[0] as any).id : null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Helpers
+  // --------------------------------------------------------------------------
+
+  private async replacePermissionsTx(
+    connection: any,
+    roleId: number,
+    permissionCodes: string[]
+  ): Promise<void> {
+    await connection.execute('DELETE FROM role_permissions WHERE role_id = ?', [roleId]);
+    if (permissionCodes.length === 0) return;
+    const placeholders = permissionCodes.map(() => '?').join(', ');
+    await connection.execute(
+      `INSERT IGNORE INTO role_permissions (role_id, permission_id)
+       SELECT ?, id FROM permissions WHERE code IN (${placeholders})`,
+      [roleId, ...permissionCodes]
+    );
+  }
+
+  private mapRole(r: any): Role {
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description ?? undefined,
+      isSystem: Boolean(r.is_system),
+      permissions: r.perm_codes ? String(r.perm_codes).split(',') : [],
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
+  }
+}

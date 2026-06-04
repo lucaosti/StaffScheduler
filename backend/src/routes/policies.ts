@@ -21,7 +21,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireAdmin, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
@@ -68,7 +68,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/approval-matrix/:changeType', requireAdmin, async (req: Request, res: Response) => {
+  router.put('/approval-matrix/:changeType', requirePermission('approval.manage'), async (req: Request, res: Response) => {
     try {
       const updated = await matrix.update(req.params.changeType, req.body ?? {});
       res.json({ success: true, data: updated });
@@ -83,7 +83,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
 
   router.get('/exceptions', async (req: Request, res: Response) => {
     try {
-      const isManager = req.user!.role === 'admin' || req.user!.role === 'manager';
+      const isManager = userHasPermission(req.user, 'policy.approve');
       const filters = {
         policyId: req.query.policyId ? Number(req.query.policyId) : undefined,
         targetType: (req.query.targetType as string) ?? undefined,
@@ -117,7 +117,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/exceptions/:id/approve', requireManager, async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), async (req: Request, res: Response) => {
     try {
       const updated = await exceptions.approve(
         Number(req.params.id),
@@ -132,7 +132,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/exceptions/:id/reject', requireManager, async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), async (req: Request, res: Response) => {
     try {
       const updated = await exceptions.reject(
         Number(req.params.id),
@@ -181,7 +181,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/', requireManager, async (req: Request, res: Response) => {
+  router.post('/', requirePermission('policy.manage'), async (req: Request, res: Response) => {
     try {
       const created = await policies.create({
         scopeType: req.body?.scopeType,
@@ -197,13 +197,13 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/:id', requireManager, async (req: Request, res: Response) => {
+  router.put('/:id', requirePermission('policy.manage'), async (req: Request, res: Response) => {
     try {
       const existing = await policies.getById(Number(req.params.id));
       if (!existing) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
-      // Only the owner or an admin may edit a policy directly.
-      if (existing.imposedByUserId !== req.user!.id && req.user!.role !== 'admin') {
-        return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an admin may edit this policy');
+      // Only the owner or a full administrator may edit a policy directly.
+      if (existing.imposedByUserId !== req.user!.id && !userHasPermission(req.user, 'settings.manage')) {
+        return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an administrator may edit this policy');
       }
       const updated = await policies.update(Number(req.params.id), req.body ?? {});
       res.json({ success: true, data: updated });
@@ -214,12 +214,12 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/:id', requireManager, async (req: Request, res: Response) => {
+  router.delete('/:id', requirePermission('policy.manage'), async (req: Request, res: Response) => {
     try {
       const existing = await policies.getById(Number(req.params.id));
       if (!existing) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
-      if (existing.imposedByUserId !== req.user!.id && req.user!.role !== 'admin') {
-        return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an admin may delete this policy');
+      if (existing.imposedByUserId !== req.user!.id && !userHasPermission(req.user, 'settings.manage')) {
+        return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an administrator may delete this policy');
       }
       await policies.remove(Number(req.params.id));
       res.json({ success: true });

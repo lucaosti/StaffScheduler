@@ -4,6 +4,8 @@
  * Pure parsing functions plus a DB-aware importer. Today we accept CSV text
  * for two entity types:
  *   - employees: email,firstName,lastName,role,employeeId,phone
+ *       (the `role` column holds a role NAME, e.g. "Manager", resolved against
+ *        the configurable `roles` table at import time)
  *   - shifts:    scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff
  *
  * The parser is hand-rolled (no csv-parser dependency surface in the public
@@ -32,7 +34,8 @@ interface EmployeeRow {
   email: string;
   firstName: string;
   lastName: string;
-  role: 'admin' | 'manager' | 'employee';
+  /** Role name to assign, resolved against the `roles` table at import time. */
+  roleName: string;
   employeeId?: string;
   phone?: string;
 }
@@ -121,9 +124,9 @@ export const mapEmployeeRows = (rows: string[][]): { rows: EmployeeRow[]; errors
   const out: EmployeeRow[] = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const role = (r[roleIdx] || '').trim().toLowerCase();
-    if (!['admin', 'manager', 'employee'].includes(role)) {
-      errors.push({ row: i + 1, message: `Invalid role '${r[roleIdx]}'` });
+    const roleName = (r[roleIdx] || '').trim();
+    if (roleName.length === 0) {
+      errors.push({ row: i + 1, message: 'Missing role' });
       continue;
     }
     const email = (r[emailIdx] || '').trim();
@@ -135,7 +138,7 @@ export const mapEmployeeRows = (rows: string[][]): { rows: EmployeeRow[]; errors
       email,
       firstName: (r[firstIdx] || '').trim(),
       lastName: (r[lastIdx] || '').trim(),
-      role: role as EmployeeRow['role'],
+      roleName,
       employeeId: employeeIdIdx >= 0 ? (r[employeeIdIdx] || '').trim() || undefined : undefined,
       phone: phoneIdx >= 0 ? (r[phoneIdx] || '').trim() || undefined : undefined,
     });
@@ -216,18 +219,33 @@ export class BulkImportService {
             errors: [{ row: i + 2, message: `Email already exists: ${r.email}` }],
           };
         }
-        await conn.execute<ResultSetHeader>(
-          `INSERT INTO users (email, password_hash, first_name, last_name, role, employee_id, phone, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        const [roleRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT id FROM roles WHERE name = ? LIMIT 1`,
+          [r.roleName]
+        );
+        if (roleRows.length === 0) {
+          await conn.rollback();
+          return {
+            inserted: 0,
+            errors: [{ row: i + 2, message: `Unknown role: ${r.roleName}` }],
+          };
+        }
+        const roleId = (roleRows[0] as any).id as number;
+        const [userRes] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, phone, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, 1)`,
           [
             r.email,
             passwordHash,
             r.firstName,
             r.lastName,
-            r.role,
             r.employeeId ?? null,
             r.phone ?? null,
           ]
+        );
+        await conn.execute(
+          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)`,
+          [userRes.insertId, roleId]
         );
         inserted++;
       }

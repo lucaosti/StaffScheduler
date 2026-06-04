@@ -15,7 +15,7 @@
 import { Pool } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireAdmin, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -35,13 +35,13 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     res.json({ success: true, data: profile });
   });
 
-  router.get('/users/:id', requireManager, async (req: Request, res: Response) => {
+  router.get('/users/:id', requirePermission('user.read'), async (req: Request, res: Response) => {
     const profile = await service.getProfile(Number(req.params.id));
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     res.json({ success: true, data: profile });
   });
 
-  router.put('/users/:id/fields', requireManager, async (req: Request, res: Response) => {
+  router.put('/users/:id/fields', requirePermission('user.manage'), async (req: Request, res: Response) => {
     try {
       const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
       await service.setFields(Number(req.params.id), fields);
@@ -54,7 +54,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
 
   router.delete(
     '/users/:id/fields/:key',
-    requireManager,
+    requirePermission('user.manage'),
     async (req: Request, res: Response) => {
       const ok = await service.removeField(Number(req.params.id), req.params.key);
       if (!ok) return error(res, 404, 'NOT_FOUND', 'Field not found');
@@ -73,7 +73,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .send(vcf);
   });
 
-  router.get('/vcard.vcf', requireManager, async (req: Request, res: Response) => {
+  router.get('/vcard.vcf', requirePermission('user.read'), async (req: Request, res: Response) => {
     const idsParam = (req.query.ids as string | undefined) ?? '';
     const ids = idsParam
       .split(',')
@@ -88,7 +88,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .send(vcf);
   });
 
-  router.post('/import-vcard', requireAdmin, async (req: Request, res: Response) => {
+  router.post('/import-vcard', requirePermission('user.manage'), async (req: Request, res: Response) => {
     try {
       const text = typeof req.body === 'string' ? req.body : (req.body?.vcf as string | undefined);
       if (!text) return error(res, 400, 'VALIDATION_ERROR', 'vcf body required');

@@ -111,6 +111,7 @@ const wipeAll = async (conn: mysql.Connection): Promise<void> => {
     'user_custom_fields',
     'user_skills',
     'user_departments',
+    'user_roles',
     'policy_exception_requests',
     'policies',
     'employee_loans',
@@ -120,7 +121,8 @@ const wipeAll = async (conn: mysql.Connection): Promise<void> => {
     'departments',
     'users',
     // Keep system_settings as-is; we set the mode key explicitly below.
-    // Keep approval_matrix as-is; defaults are seeded by init.sql.
+    // Keep approval_matrix, roles, permissions and role_permissions as-is;
+    // they are seeded by init.sql and are configuration, not demo data.
   ];
   for (const table of tables) {
     await conn.query(`TRUNCATE TABLE \`${table}\``);
@@ -176,7 +178,8 @@ const insertBulkOperationsDepartment = async (
   conn: mysql.Connection,
   deptIds: Map<string, number>,
   skillIds: Map<string, number>,
-  userIds: Map<string, number>
+  userIds: Map<string, number>,
+  roleIds: Map<string, number>
 ): Promise<void> => {
   // 1. Department
   const [deptRes] = await conn.execute<mysql.ResultSetHeader>(
@@ -205,13 +208,14 @@ const insertBulkOperationsDepartment = async (
     const lastName = padded;
 
     const [userRes] = await conn.execute<mysql.ResultSetHeader>(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role,
+      `INSERT INTO users (email, password_hash, first_name, last_name,
                           employee_id, position, phone, is_active)
-       VALUES (?, ?, ?, ?, 'employee', ?, '[DEMO] Operations', '+39 000 0000000', 1)`,
+       VALUES (?, ?, ?, ?, ?, '[DEMO] Operations', '+39 000 0000000', 1)`,
       [email, passwordHash, firstName, lastName, employeeId]
     );
     const userId = userRes.insertId;
     userIds.set(email, userId);
+    await assignRole(conn, userId, roleIds.get('Employee'));
 
     await conn.execute(
       'INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)',
@@ -232,24 +236,56 @@ const insertBulkOperationsDepartment = async (
   );
 };
 
+/**
+ * Maps the fixture's shorthand role keys to the seeded role names created by
+ * init.sql. Roles are data, so the seed assigns users to roles by name.
+ */
+const ROLE_NAME_BY_KEY: Record<DemoUser['role'], string> = {
+  admin: 'Administrator',
+  manager: 'Manager',
+  employee: 'Employee',
+};
+
+/** Resolves seeded role ids by name so the demo can assign user_roles rows. */
+const loadRoleIds = async (conn: mysql.Connection): Promise<Map<string, number>> => {
+  const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT id, name FROM roles');
+  const map = new Map<string, number>();
+  for (const row of rows as Array<{ id: number; name: string }>) map.set(row.name, row.id);
+  return map;
+};
+
+const assignRole = async (
+  conn: mysql.Connection,
+  userId: number,
+  roleId: number | undefined
+): Promise<void> => {
+  if (!roleId) return;
+  await conn.execute(
+    'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
+    [userId, roleId]
+  );
+};
+
 const insertUsers = async (
   conn: mysql.Connection,
   fixture: DemoFixture,
   deptIds: Map<string, number>,
-  skillIds: Map<string, number>
+  skillIds: Map<string, number>,
+  roleIds: Map<string, number>
 ): Promise<Map<string, number>> => {
   const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 4);
   const map = new Map<string, number>();
 
   for (const user of fixture.users) {
     const [res] = await conn.execute<mysql.ResultSetHeader>(
-      `INSERT INTO users (email, password_hash, first_name, last_name, role,
+      `INSERT INTO users (email, password_hash, first_name, last_name,
                           employee_id, position, phone, is_active)
-       VALUES (?, ?, ?, ?, ?, ?, '[DEMO]', '+39 000 0000000', 1)`,
-      [user.email, passwordHash, user.firstName, user.lastName, user.role, user.employeeId]
+       VALUES (?, ?, ?, ?, ?, '[DEMO]', '+39 000 0000000', 1)`,
+      [user.email, passwordHash, user.firstName, user.lastName, user.employeeId]
     );
     const userId = res.insertId;
     map.set(user.email, userId);
+    await assignRole(conn, userId, roleIds.get(ROLE_NAME_BY_KEY[user.role]));
 
     for (const deptName of user.departments) {
       const deptId = deptIds.get(deptName);
@@ -859,10 +895,11 @@ export async function seedDemo(): Promise<void> {
 
     await wipeAll(conn);
 
+    const roleIds = await loadRoleIds(conn);
     const deptIds = await insertDepartments(conn, fixture);
     const skillIds = await insertSkills(conn, fixture);
-    const userIds = await insertUsers(conn, fixture, deptIds, skillIds);
-    await insertBulkOperationsDepartment(conn, deptIds, skillIds, userIds);
+    const userIds = await insertUsers(conn, fixture, deptIds, skillIds, roleIds);
+    await insertBulkOperationsDepartment(conn, deptIds, skillIds, userIds, roleIds);
     const templateIds = await insertShiftTemplates(conn, fixture, deptIds, skillIds);
     await insertScheduleWithShifts(
       conn,

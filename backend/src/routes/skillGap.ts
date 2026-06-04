@@ -8,14 +8,14 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { SkillGapService } from '../services/SkillGapService';
 
 export const createSkillGapRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new SkillGapService(pool);
 
-  router.use(authenticate, requireManager);
+  router.use(authenticate, requirePermission('report.read'));
 
   router.get('/', async (req: Request, res: Response) => {
     const departmentId = Number(req.query.departmentId);

@@ -12,16 +12,66 @@ export interface User {
   email: string;
   firstName: string;
   lastName: string;
-  role: 'admin' | 'manager' | 'employee';
   employeeId?: string;
   phone?: string;
   isActive: boolean;
   lastLogin?: Date;
+  /** Roles assigned to the user, each optionally scoped to an org unit. */
+  roles?: UserRoleAssignment[];
+  /** Flattened, de-duplicated effective permission codes (e.g. `schedule.manage`). */
+  permissions?: string[];
   departments?: UserDepartment[];
   skills?: Skill[];
   preferences?: UserPreferences;
   createdAt: Date;
   updatedAt: Date;
+}
+
+// ============================================================================
+// RBAC TYPES — configurable roles and permissions (no hardcoded roles)
+// ============================================================================
+
+export interface Permission {
+  id: number;
+  code: string;
+  resource: string;
+  action: string;
+  description?: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  permissions?: string[];
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+export interface UserRoleAssignment {
+  roleId: number;
+  roleName: string;
+  scopeOrgUnitId?: number | null;
+  expiresAt?: Date | null;
+}
+
+export interface CreateRoleRequest {
+  name: string;
+  description?: string;
+  permissionCodes?: string[];
+}
+
+export interface UpdateRoleRequest {
+  name?: string;
+  description?: string;
+  permissionCodes?: string[];
+}
+
+export interface AssignRoleRequest {
+  roleId: number;
+  scopeOrgUnitId?: number | null;
+  expiresAt?: string | null;
 }
 
 interface UserDepartment {
@@ -42,7 +92,8 @@ export interface CreateUserRequest {
   password: string;
   firstName: string;
   lastName: string;
-  role: 'admin' | 'manager' | 'employee';
+  /** Role ids to grant the new user (unscoped). */
+  roleIds?: number[];
   employeeId?: string;
   phone?: string;
   departmentIds?: number[];
@@ -54,7 +105,8 @@ export interface UpdateUserRequest {
   password?: string;
   firstName?: string;
   lastName?: string;
-  role?: 'admin' | 'manager' | 'employee';
+  /** When provided, replaces the user's unscoped role grants. */
+  roleIds?: number[];
   employeeId?: string;
   phone?: string;
   isActive?: boolean;

@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
-import { authenticate } from '../middleware/auth';
+import { authenticate, userHasPermission } from '../middleware/auth';
 import { UpdateSystemSettingRequest } from '../types';
 import { logger } from '../config/logger';
 
@@ -90,7 +90,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
     try {
       const user = req.user!;
 
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Only administrators can change currency settings' }
@@ -144,7 +144,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
     try {
       const user = req.user!;
 
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Only administrators can change time period settings' }
@@ -208,7 +208,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       const user = req.user!;
 
       // Only admin can modify system settings
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Only administrators can modify system settings' }
@@ -281,7 +281,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       const user = req.user!;
 
       // Only admin can reset system settings
-      if (user.role !== 'admin') {
+      if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Only administrators can reset system settings' }

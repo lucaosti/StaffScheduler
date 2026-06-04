@@ -31,9 +31,10 @@ const router = Router();
  */
 router.get('/stats', authenticate, async (_req: Request, res: Response) => {
   try {
-    // Get basic statistics
+    // Get basic statistics. Every active user is schedulable staff, so the
+    // headcount is the count of active users.
     const totalEmployeesQuery =
-      "SELECT COUNT(*) as count FROM users WHERE role = 'employee' AND is_active = TRUE";
+      'SELECT COUNT(*) as count FROM users WHERE is_active = TRUE';
     const totalEmployees = await database.queryOne<{ count: number }>(totalEmployeesQuery);
 
     const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
@@ -256,8 +257,20 @@ router.get('/departments', authenticate, async (_req: Request, res: Response) =>
         d.name as department,
         COUNT(DISTINCT u.id) as total_employees,
         COUNT(DISTINCT CASE WHEN u.is_active = TRUE THEN u.id END) as active_employees,
-        COUNT(DISTINCT CASE WHEN u.role = 'employee' THEN u.id END) as employee_count,
-        COUNT(DISTINCT CASE WHEN u.role = 'manager' THEN u.id END) as manager_count
+        COUNT(DISTINCT CASE WHEN NOT EXISTS (
+          SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+           WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
+             AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        ) THEN u.id END) as employee_count,
+        COUNT(DISTINCT CASE WHEN EXISTS (
+          SELECT 1 FROM user_roles ur
+            JOIN role_permissions rp ON rp.role_id = ur.role_id
+            JOIN permissions p ON p.id = rp.permission_id
+           WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
+             AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        ) THEN u.id END) as manager_count
       FROM departments d
       LEFT JOIN user_departments ud ON d.id = ud.department_id
       LEFT JOIN users u ON ud.user_id = u.id

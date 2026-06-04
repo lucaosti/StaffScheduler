@@ -1,29 +1,50 @@
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
-import { authenticate } from '../middleware/auth';
+import { RbacService } from '../services/RbacService';
+import { authenticate, userHasPermission } from '../middleware/auth';
 import { CreateUserRequest, UpdateUserRequest, User } from '../types';
 import { logger } from '../config/logger';
 
 export const createUsersRouter = (pool: Pool) => {
   const router = Router();
   const userService = new UserService(pool);
+  const rbacService = new RbacService(pool);
 
-  // Get all users (with role-based filtering)
+  /**
+   * Anti-privilege-escalation guard. An actor may only grant a role whose
+   * permissions are a subset of their own — unless they hold `role.manage`,
+   * which authorizes assigning any role. Returns an error message, or null
+   * when the assignment is allowed.
+   */
+  const validateRoleAssignment = async (actor: User, roleIds?: number[]): Promise<string | null> => {
+    if (!roleIds || roleIds.length === 0) return null;
+    if (userHasPermission(actor, 'role.manage')) return null;
+    const actorPerms = new Set(actor.permissions ?? []);
+    for (const roleId of roleIds) {
+      const role = await rbacService.getRoleById(roleId);
+      if (!role) return `Role ${roleId} not found`;
+      const escalates = (role.permissions ?? []).some((p) => !actorPerms.has(p));
+      if (escalates) return 'You cannot assign a role with permissions you do not hold';
+    }
+    return null;
+  };
+
+  // Get all users (scoped by the caller's permissions)
   router.get('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
-      const { search, department, role } = req.query;
+      const user = req.user as User;
+      const { search, department, roleId } = req.query;
 
       let users;
-      if (user.role === 'admin') {
+      if (userHasPermission(user, 'settings.manage')) {
         users = await userService.getAllUsers({
           search: search as string,
           departmentId: department ? parseInt(department as string) : undefined,
-          role: role as string
+          roleId: roleId ? parseInt(roleId as string) : undefined
         });
       } else {
-        users = await userService.getUsersForManager(user.id, user.role);
+        users = await userService.getUsersForManager(user);
 
         if (search) {
           const searchTerm = (search as string).toLowerCase();
@@ -40,10 +61,6 @@ export const createUsersRouter = (pool: Pool) => {
             u.departments?.some((d: any) => d.departmentId === parseInt(department as string))
           );
         }
-
-        if (role) {
-          users = users.filter((u: User) => u.role === role);
-        }
       }
 
       res.json({ success: true, data: users });
@@ -59,9 +76,9 @@ export const createUsersRouter = (pool: Pool) => {
   // Create new user
   router.post('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user as User;
 
-      if (!['admin', 'manager'].includes(user.role)) {
+      if (!userHasPermission(user, 'user.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
@@ -70,19 +87,19 @@ export const createUsersRouter = (pool: Pool) => {
 
       const userData: CreateUserRequest = req.body;
 
-      if (!userData.email || !userData.password || !userData.firstName || !userData.lastName || !userData.role) {
+      if (!userData.email || !userData.password || !userData.firstName || !userData.lastName) {
         return res.status(400).json({
           success: false,
           error: { code: 'INVALID_INPUT', message: 'Missing required fields' }
         });
       }
 
-      // Only admins may create admin accounts. A manager must not be able to
-      // escalate privileges by creating an admin user.
-      if (userData.role === 'admin' && user.role !== 'admin') {
+      // Prevent privilege escalation through role assignment.
+      const roleError = await validateRoleAssignment(user, userData.roleIds);
+      if (roleError) {
         return res.status(403).json({
           success: false,
-          error: { code: 'FORBIDDEN', message: 'Only admins can create admin users' }
+          error: { code: 'FORBIDDEN', message: roleError }
         });
       }
 
@@ -109,7 +126,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Get user by ID
   router.get('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user as User;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
@@ -128,7 +145,8 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      if (user.role === 'employee' && user.id !== userId) {
+      // Users without directory read access may only view their own record.
+      if (!userHasPermission(user, 'user.read') && user.id !== userId) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
@@ -148,7 +166,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Update user
   router.put('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user as User;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
@@ -158,7 +176,10 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      if (user.role === 'employee' && user.id !== userId) {
+      const canManageUsers = userHasPermission(user, 'user.manage');
+
+      // Users without user management may only edit their own record.
+      if (!canManageUsers && user.id !== userId) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
@@ -167,7 +188,8 @@ export const createUsersRouter = (pool: Pool) => {
 
       const updateData: UpdateUserRequest = req.body;
 
-      if (user.role === 'employee') {
+      // Self-service editors are limited to a small set of profile fields.
+      if (!canManageUsers) {
         const allowedFields = ['firstName', 'lastName', 'phone'];
         const submittedFields = Object.keys(updateData);
         const invalidFields = submittedFields.filter(field => !allowedFields.includes(field));
@@ -175,25 +197,25 @@ export const createUsersRouter = (pool: Pool) => {
         if (invalidFields.length > 0) {
           return res.status(403).json({
             success: false,
-            error: { code: 'FORBIDDEN', message: `Employees cannot update: ${invalidFields.join(', ')}` }
+            error: { code: 'FORBIDDEN', message: `You cannot update: ${invalidFields.join(', ')}` }
           });
         }
       }
 
-      // Role changes are restricted to admins, and no one may change their own
-      // role. This prevents privilege escalation and self-promotion.
-      if (updateData.role !== undefined) {
-        if (user.role !== 'admin') {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Only admins can change user roles' }
-          });
-        }
-
+      // Role changes require user management, are subject to the
+      // anti-escalation rule, and may never target one's own account.
+      if (updateData.roleIds !== undefined) {
         if (user.id === userId) {
           return res.status(403).json({
             success: false,
-            error: { code: 'FORBIDDEN', message: 'You cannot change your own role' }
+            error: { code: 'FORBIDDEN', message: 'You cannot change your own roles' }
+          });
+        }
+        const roleError = await validateRoleAssignment(user, updateData.roleIds);
+        if (roleError) {
+          return res.status(403).json({
+            success: false,
+            error: { code: 'FORBIDDEN', message: roleError }
           });
         }
       }
@@ -228,7 +250,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Delete user
   router.delete('/:id', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user as User;
       const userId = parseInt(req.params.id);
 
       if (!userId) {
@@ -238,7 +260,7 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      if (!['admin', 'manager'].includes(user.role)) {
+      if (!userHasPermission(user, 'user.manage')) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }

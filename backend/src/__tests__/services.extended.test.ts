@@ -50,7 +50,7 @@ const matrixRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
   change_type: 'Policy.Exception',
   approver_scope: 'policy_owner',
-  approver_role: null,
+  approver_role_id: null,
   approver_user_id: null,
   auto_approve_for_owner: 1,
   description: null,
@@ -689,7 +689,7 @@ describe('ApprovalMatrixService', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([
-        [matrixRow({ approver_scope: 'company_role', approver_role: 'admin' })],
+        [matrixRow({ approver_scope: 'company_role', approver_role_id: 1 })],
         null,
       ] as Tuple)
       .mockResolvedValueOnce([[{ id: 1 }], null] as Tuple);
@@ -701,7 +701,7 @@ describe('ApprovalMatrixService', () => {
   it('company_role returns null without role', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([
-      [matrixRow({ approver_scope: 'company_role', approver_role: null })],
+      [matrixRow({ approver_scope: 'company_role', approver_role_id: null })],
       null,
     ] as Tuple);
     const svc = new ApprovalMatrixService(pool);
