@@ -1,25 +1,39 @@
 /**
- * Audit log query service (F10).
+ * Audit log service.
  *
- * Read-only over the existing `audit_logs` table. The table is written
- * elsewhere (auth events, schedule lifecycle, etc.); this service only
- * surfaces it for the audit log viewer UI.
+ * Provides both read (list / getById) and write (write) operations over the
+ * `audit_logs` table. All sensitive mutations in the application should call
+ * `AuditLogService.write` (or use a shared pool write helper) to record a
+ * structured audit entry, optionally with before/after JSON snapshots.
  *
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { logger } from '../config/logger';
 
-interface AuditLogEntry {
+export interface AuditLogEntry {
   id: number;
   userId: number | null;
   action: string;
   entityType: string | null;
   entityId: number | null;
   description: string | null;
+  beforeSnapshot?: Record<string, unknown> | null;
+  afterSnapshot?: Record<string, unknown> | null;
   ipAddress: string | null;
   userAgent: string | null;
   createdAt: string;
+}
+
+export interface WriteAuditLogInput {
+  actorId: number | null;
+  action: string;
+  entityType?: string;
+  entityId?: number | null;
+  description?: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
 }
 
 interface AuditLogFilters {
@@ -47,6 +61,8 @@ const mapRow = (row: RowDataPacket): AuditLogEntry => ({
   entityType: (row.entity_type as string | null) ?? null,
   entityId: (row.entity_id as number | null) ?? null,
   description: (row.description as string | null) ?? null,
+  beforeSnapshot: row.before_snapshot ? JSON.parse(row.before_snapshot as string) : null,
+  afterSnapshot: row.after_snapshot ? JSON.parse(row.after_snapshot as string) : null,
   ipAddress: (row.ip_address as string | null) ?? null,
   userAgent: (row.user_agent as string | null) ?? null,
   createdAt: row.created_at as string,
@@ -119,5 +135,31 @@ export class AuditLogService {
       [id]
     );
     return rows.length === 0 ? null : mapRow(rows[0]);
+  }
+
+  /**
+   * Writes a single audit log entry. Silently swallows errors so a write
+   * failure never blocks the primary operation.
+   */
+  async write(input: WriteAuditLogInput): Promise<void> {
+    try {
+      await this.pool.execute<ResultSetHeader>(
+        `INSERT INTO audit_logs
+           (user_id, action, entity_type, entity_id, description,
+            before_snapshot, after_snapshot)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.actorId,
+          input.action,
+          input.entityType ?? null,
+          input.entityId ?? null,
+          input.description ?? null,
+          input.before != null ? JSON.stringify(input.before) : null,
+          input.after != null ? JSON.stringify(input.after) : null,
+        ]
+      );
+    } catch (err) {
+      logger.error('Failed to write audit log:', err);
+    }
   }
 }

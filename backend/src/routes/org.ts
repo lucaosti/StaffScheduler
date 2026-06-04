@@ -25,6 +25,7 @@ import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
+import { AuditLogService } from '../services/AuditLogService';
 import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -35,6 +36,7 @@ export const createOrgRouter = (pool: Pool): Router => {
   const router = Router();
   const units = new OrgUnitService(pool);
   const loans = new EmployeeLoanService(pool);
+  const audit = new AuditLogService(pool);
 
   router.use(authenticate);
 
@@ -77,6 +79,11 @@ export const createOrgRouter = (pool: Pool): Router => {
         parentId: req.body?.parentId ?? null,
         managerUserId: req.body?.managerUserId ?? null,
       });
+      await audit.write({
+        actorId: req.user!.id, action: 'org_unit.create',
+        entityType: 'org_unit', entityId: created.id,
+        after: { name: created.name, parentId: created.parentId },
+      });
       res.status(201).json({ success: true, data: created });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
@@ -86,6 +93,11 @@ export const createOrgRouter = (pool: Pool): Router => {
   router.put('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
     try {
       const updated = await units.update(Number(req.params.id), req.body ?? {});
+      await audit.write({
+        actorId: req.user!.id, action: 'org_unit.update',
+        entityType: 'org_unit', entityId: Number(req.params.id),
+        after: req.body ?? {},
+      });
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -97,6 +109,10 @@ export const createOrgRouter = (pool: Pool): Router => {
   router.delete('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
     try {
       await units.remove(Number(req.params.id));
+      await audit.write({
+        actorId: req.user!.id, action: 'org_unit.delete',
+        entityType: 'org_unit', entityId: Number(req.params.id),
+      });
       res.json({ success: true });
     } catch (err) {
       const msg = (err as Error).message;
