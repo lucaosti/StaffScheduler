@@ -78,12 +78,20 @@ export const createCalendarRouter = (pool: Pool): Router => {
       return;
     }
 
-    // Authorisation: the token's user must be admin OR manager of the target
-    // department. We resolve role + manager_id directly on the pool to avoid
-    // pulling in the heavier UserService for a read-only check.
+    // Authorisation: the token's user must be a full administrator (holds the
+    // `settings.manage` permission) OR the manager of the target department.
+    // Permissions are resolved with a correlated EXISTS to avoid pulling in the
+    // heavier UserService/RbacService for a read-only check.
     const departmentId = Number(req.params.id);
     const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT u.role, d.manager_id
+      `SELECT d.manager_id,
+              EXISTS(
+                SELECT 1 FROM user_roles ur
+                  JOIN role_permissions rp ON rp.role_id = ur.role_id
+                  JOIN permissions p ON p.id = rp.permission_id
+                 WHERE ur.user_id = u.id AND p.code = 'settings.manage'
+                   AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+              ) AS is_admin
          FROM users u
          LEFT JOIN departments d ON d.id = ?
         WHERE u.id = ? LIMIT 1`,
@@ -91,8 +99,7 @@ export const createCalendarRouter = (pool: Pool): Router => {
     );
     const row = rows[0];
     const allowed =
-      !!row &&
-      (row.role === 'admin' || (row.role === 'manager' && row.manager_id === userId));
+      !!row && (Number(row.is_admin) === 1 || row.manager_id === userId);
     if (!allowed) {
       res.status(403).type('text/plain').send('forbidden');
       return;

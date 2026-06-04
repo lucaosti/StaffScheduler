@@ -16,7 +16,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
-import { authenticate, requireRole } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { logger } from '../config/logger';
 
 export const createShiftsRouter = (pool: Pool) => {
@@ -69,7 +69,7 @@ router.get('/templates/:id', authenticate, async (req: Request, res: Response) =
 });
 
 // Create new shift template
-router.post('/templates', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/templates', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const templateId = await shiftService.createShiftTemplate(req.body);
     const template = await shiftService.getShiftTemplateById(templateId);
@@ -89,7 +89,7 @@ router.post('/templates', authenticate, requireRole(['admin', 'manager']), async
 });
 
 // Update shift template
-router.put('/templates/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -122,7 +122,7 @@ router.put('/templates/:id', authenticate, requireRole(['admin', 'manager']), as
 });
 
 // Delete shift template
-router.delete('/templates/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -199,7 +199,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new shift
-router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const shift = await shiftService.createShift(req.body);
 
@@ -218,7 +218,7 @@ router.post('/', authenticate, requireRole(['admin', 'manager']), async (req: Re
 });
 
 // Update shift
-router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {
@@ -248,7 +248,7 @@ router.put('/:id', authenticate, requireRole(['admin', 'manager']), async (req: 
 });
 
 // Delete shift
-router.delete('/:id', authenticate, requireRole(['admin', 'manager']), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) {

@@ -13,7 +13,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { TimeOffService } from '../services/TimeOffService';
 import { logger } from '../config/logger';
 
@@ -45,7 +45,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
 
   router.get('/', async (req: Request, res: Response) => {
     try {
-      const isManager = req.user!.role === 'admin' || req.user!.role === 'manager';
+      const isManager = userHasPermission(req.user, 'timeoff.approve');
       const filters = isManager
         ? {
             userId: req.query.userId ? Number(req.query.userId) : undefined,
@@ -66,7 +66,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
       const item = await service.getById(id);
       if (!item) return respondError(res, 404, 'NOT_FOUND', 'Time-off request not found');
       const isOwn = item.userId === req.user!.id;
-      const isManager = req.user!.role === 'admin' || req.user!.role === 'manager';
+      const isManager = userHasPermission(req.user, 'timeoff.approve');
       if (!isOwn && !isManager) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
       res.json({ success: true, data: item });
     } catch (err) {
@@ -75,7 +75,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/approve', requireManager, async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('timeoff.approve'), async (req: Request, res: Response) => {
     try {
       const id = Number(req.params.id);
       const updated = await service.approve(id, req.user!.id, req.body?.notes ?? null);
@@ -87,7 +87,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/reject', requireManager, async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('timeoff.approve'), async (req: Request, res: Response) => {
     try {
       const id = Number(req.params.id);
       const updated = await service.reject(id, req.user!.id, req.body?.notes ?? null);

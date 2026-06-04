@@ -17,6 +17,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
+import { RbacService } from '../services/RbacService';
 import { authenticate } from '../middleware/auth';
 import jwt, { SignOptions } from 'jsonwebtoken';
 
@@ -31,6 +32,7 @@ import { config } from '../config';
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
   const userService = new UserService(pool);
+  const rbacService = new RbacService(pool);
 
   // Shared JWT signing options, driven by configuration rather than hardcoded.
   const jwtSignOptions: SignOptions = {
@@ -113,23 +115,31 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       });
     }
 
-    // Generate JWT token
+    // Resolve effective permissions/roles so the client can gate its UI.
+    const [permissions, roles] = await Promise.all([
+      rbacService.getEffectivePermissions(user.id),
+      rbacService.getUserRoles(user.id),
+    ]);
+
+    // Generate JWT token. Only the user id is embedded; permissions are
+    // resolved from the database on every request by the auth middleware.
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      { userId: user.id, email: user.email },
       config.jwt.secret,
       jwtSignOptions
     );
-    
+
     res.json({
       success: true,
-      data: { 
+      data: {
         token,
         user: {
           id: user.id,
           email: user.email,
           firstName: user.firstName,
           lastName: user.lastName,
-          role: user.role
+          roles,
+          permissions
         }
       }
     });
@@ -208,7 +218,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
     const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
 
     const token = jwt.sign(
-      { userId: user.id, email: user.email, role: user.role },
+      { userId: user.id, email: user.email },
       config.jwt.secret,
       jwtSignOptions
     );

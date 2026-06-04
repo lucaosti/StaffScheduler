@@ -6,7 +6,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { ReportsService } from '../services/ReportsService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -17,7 +17,7 @@ export const createReportsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new ReportsService(pool);
 
-  router.use(authenticate, requireManager);
+  router.use(authenticate, requirePermission('report.read'));
 
   router.get('/hours-worked', async (req: Request, res: Response) => {
     const start = req.query.start as string | undefined;

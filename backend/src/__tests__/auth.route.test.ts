@@ -10,10 +10,12 @@ import express from 'express';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { UserService } from '../services/UserService';
+import { RbacService } from '../services/RbacService';
 import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
+jest.mock('../services/RbacService');
 
 const buildApp = (): express.Express => {
   const app = express();
@@ -49,13 +51,19 @@ describe('POST /api/auth/login', () => {
       email: 'a@x.com',
       firstName: 'A',
       lastName: 'B',
-      role: 'manager',
     });
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue(['schedule.manage', 'schedule.read']);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ roleId: 2, roleName: 'Manager', scopeOrgUnitId: null, expiresAt: null }]);
     const res = await request(buildApp())
       .post('/api/auth/login')
       .send({ email: 'a@x.com', password: 'pw' });
     expect(res.status).toBe(200);
-    expect(res.body.data.user.role).toBe('manager');
+    expect(res.body.data.user.permissions).toContain('schedule.manage');
+    expect(res.body.data.user.roles[0].roleName).toBe('Manager');
     expect(typeof res.body.data.token).toBe('string');
     const decoded = jwt.verify(res.body.data.token, config.jwt.secret) as { userId: number };
     expect(decoded.userId).toBe(7);

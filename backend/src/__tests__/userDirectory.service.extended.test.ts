@@ -69,10 +69,11 @@ describe('UserDirectoryService.importVcf — custom X- fields are persisted', ()
     expect(cfCall[1]).toContain('Engineering');
   });
 
-  it('skips X-EMPLOYEE-ID and X-ROLE when storing custom fields', async () => {
+  it('skips X-EMPLOYEE-ID and X-ROLE custom-field storage but assigns the role by name', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([[], null]);
-    conn.execute.mockResolvedValueOnce([{ insertId: 6 }, null]);
+    conn.execute.mockResolvedValueOnce([[], null]);            // duplicate-email check
+    conn.execute.mockResolvedValueOnce([{ insertId: 6 }, null]); // INSERT user
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]); // INSERT IGNORE user_roles
 
     const vcf =
       'BEGIN:VCARD\r\n' +
@@ -80,14 +81,19 @@ describe('UserDirectoryService.importVcf — custom X- fields are persisted', ()
       'FN:Alice Admin\r\n' +
       'EMAIL:alice@example.com\r\n' +
       'X-EMPLOYEE-ID:E-999\r\n' +
-      'X-ROLE:admin\r\n' +
+      'X-ROLE:Administrator\r\n' +
       'END:VCARD\r\n';
 
     const service = new UserDirectoryService(pool);
     const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1 });
 
     expect(out.inserted).toBe(1);
-    expect(conn.execute).toHaveBeenCalledTimes(2);
+    // 3 calls: duplicate check, INSERT user, INSERT IGNORE user_roles
+    expect(conn.execute).toHaveBeenCalledTimes(3);
+    // No custom_fields INSERT should have been called (X-ROLE and X-EMPLOYEE-ID are reserved).
+    expect(conn.execute.mock.calls.some((c: any[]) =>
+      typeof c[0] === 'string' && c[0].includes('user_custom_fields')
+    )).toBe(false);
   });
 });
 

@@ -16,7 +16,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireManager } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { OnCallService } from '../services/OnCallService';
 
 const error = (res: Response, status: number, code: string, message: string): void => {
@@ -47,7 +47,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     res.json({ success: true, data });
   });
 
-  router.post('/periods', requireManager, async (req: Request, res: Response) => {
+  router.post('/periods', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
     try {
       const created = await service.createPeriod(req.body || {});
       res.status(201).json({ success: true, data: created });
@@ -62,7 +62,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     res.json({ success: true, data: period });
   });
 
-  router.put('/periods/:id', requireManager, async (req: Request, res: Response) => {
+  router.put('/periods/:id', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
     try {
       const updated = await service.updatePeriod(Number(req.params.id), req.body || {});
       res.json({ success: true, data: updated });
@@ -73,7 +73,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/periods/:id', requireManager, async (req: Request, res: Response) => {
+  router.delete('/periods/:id', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
     try {
       await service.deletePeriod(Number(req.params.id));
       res.json({ success: true });
@@ -87,7 +87,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     res.json({ success: true, data });
   });
 
-  router.post('/periods/:id/assign', requireManager, async (req: Request, res: Response) => {
+  router.post('/periods/:id/assign', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
     try {
       const data = await service.assign(
         Number(req.params.id),
@@ -104,7 +104,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/periods/:id/assign/:userId', requireManager, async (req: Request, res: Response) => {
+  router.delete('/periods/:id/assign/:userId', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
     const ok = await service.unassign(Number(req.params.id), Number(req.params.userId));
     if (!ok) return error(res, 404, 'NOT_FOUND', 'Assignment not found');
     res.json({ success: true });
