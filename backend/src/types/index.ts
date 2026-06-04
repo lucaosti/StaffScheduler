@@ -20,6 +20,13 @@ export interface User {
   roles?: UserRoleAssignment[];
   /** Flattened, de-duplicated effective permission codes (e.g. `schedule.manage`). */
   permissions?: string[];
+  /**
+   * Org-unit IDs the user may access (union of all scoped-role subtrees).
+   * `null` means no scoping — the user has full access across all org units.
+   * An empty array means the user has scoped roles but none resolve to any
+   * valid org unit, so they can access nothing.
+   */
+  allowedOrgUnitIds?: number[] | null;
   departments?: UserDepartment[];
   skills?: Skill[];
   preferences?: UserPreferences;

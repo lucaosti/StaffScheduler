@@ -138,10 +138,11 @@ export class ScheduleService {
   async getScheduleById(id: number): Promise<Schedule | null> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT 
+        `SELECT
           s.id, s.name, s.department_id, s.start_date, s.end_date,
           s.status, s.published_at, s.notes, s.created_at, s.updated_at,
           d.name as department_name,
+          d.org_unit_id as department_org_unit_id,
           COUNT(DISTINCT sh.id) as total_shifts,
           COUNT(DISTINCT sa.id) as total_assignments
         FROM schedules s
@@ -159,11 +160,12 @@ export class ScheduleService {
 
       const row = rows[0];
 
-      const schedule: Schedule = {
+      const schedule: Schedule & { departmentOrgUnitId?: number | null } = {
         id: row.id,
         name: row.name,
         departmentId: row.department_id,
         departmentName: row.department_name,
+        departmentOrgUnitId: row.department_org_unit_id ?? null,
         startDate: row.start_date,
         endDate: row.end_date,
         status: row.status,
@@ -193,6 +195,7 @@ export class ScheduleService {
     status?: string;
     startDate?: string;
     endDate?: string;
+    orgUnitIds?: number[];
   }): Promise<Schedule[]> {
     try {
       let query = `
@@ -229,6 +232,12 @@ export class ScheduleService {
       if (filters?.endDate) {
         conditions.push('s.start_date <= ?');
         params.push(filters.endDate);
+      }
+
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`d.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
       }
 
       if (conditions.length > 0) {

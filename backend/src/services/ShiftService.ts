@@ -232,6 +232,7 @@ export class ShiftService {
     startDate?: string;
     endDate?: string;
     status?: string;
+    orgUnitIds?: number[];
   }): Promise<Shift[]> {
     try {
       let query = `
@@ -274,6 +275,12 @@ export class ShiftService {
       if (filters?.status) {
         conditions.push('s.status = ?');
         params.push(filters.status);
+      }
+
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`d.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
       }
 
       if (conditions.length > 0) {

@@ -122,11 +122,15 @@ CREATE TABLE IF NOT EXISTS departments (
     name VARCHAR(100) NOT NULL UNIQUE,
     description TEXT,
     manager_id INT NULL,
+    -- Links this department to the org-unit tree for hierarchical access scoping.
+    -- FK added below (after org_units is defined) via ALTER TABLE.
+    org_unit_id INT NULL,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
     INDEX idx_manager (manager_id),
+    INDEX idx_org_unit (org_unit_id),
     INDEX idx_active (is_active),
     FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL
 );
@@ -822,6 +826,16 @@ INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role_i
 ('Schedule.Override',     'unit_manager_chain', NULL, TRUE, 'Schedule overrides escalate up the org tree if needed'),
 ('OrgUnit.Update',        'company_role',       (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 'Org tree edits go through an administrator'),
 ('Membership.Update',     'unit_manager',       NULL, TRUE, 'User membership changes need the unit manager');
+
+-- ================================================================
+-- DEFERRED FOREIGN KEYS
+-- Added here because they reference tables defined later than the source table.
+-- ================================================================
+
+-- departments.org_unit_id → org_units (org_units is defined after departments)
+ALTER TABLE departments
+    ADD CONSTRAINT fk_departments_org_unit
+    FOREIGN KEY (org_unit_id) REFERENCES org_units(id) ON DELETE SET NULL;
 
 -- ================================================================
 -- END OF SCHEMA
