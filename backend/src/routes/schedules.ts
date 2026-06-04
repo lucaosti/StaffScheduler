@@ -3,6 +3,14 @@ import { Pool } from 'mysql2/promise';
 import { ScheduleService } from '../services/ScheduleService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
+import { validateParams, validateBody } from '../middleware/validation';
+import {
+  idParam,
+  departmentIdParam,
+  userIdParam,
+  createScheduleBody,
+  duplicateScheduleBody,
+} from '../schemas';
 import { logger } from '../config/logger';
 
 export const createSchedulesRouter = (pool: Pool) => {
@@ -31,15 +39,9 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get schedule by ID
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const schedule = await scheduleService.getScheduleById(id);
     if (!schedule) {
@@ -72,15 +74,9 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get schedule with shifts
-router.get('/:id/shifts', authenticate, async (req: Request, res: Response) => {
+router.get('/:id/shifts', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const schedule = await scheduleService.getScheduleWithShifts(id);
     if (!schedule) {
@@ -101,7 +97,7 @@ router.get('/:id/shifts', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new schedule
-router.post('/', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), async (req: Request, res: Response) => {
   try {
     const user = req.user;
     if (!user) {
@@ -111,7 +107,7 @@ router.post('/', authenticate, requirePermission('schedule.manage'), async (req:
       });
     }
 
-    const schedule = await scheduleService.createSchedule({ ...req.body, createdBy: user.id });
+    const schedule = await scheduleService.createSchedule({ ...res.locals.body, createdBy: user.id });
 
     res.status(201).json({
       success: true,
@@ -128,15 +124,9 @@ router.post('/', authenticate, requirePermission('schedule.manage'), async (req:
 });
 
 // Update schedule
-router.put('/:id', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const schedule = await scheduleService.updateSchedule(id, req.body);
     res.json({
@@ -158,15 +148,9 @@ router.put('/:id', authenticate, requirePermission('schedule.manage'), async (re
 });
 
 // Delete schedule
-router.delete('/:id', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     await scheduleService.deleteSchedule(id);
     res.json({
@@ -190,15 +174,9 @@ router.delete('/:id', authenticate, requirePermission('schedule.manage'), async 
 });
 
 // Get schedules by department
-router.get('/department/:departmentId', authenticate, async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   try {
-    const departmentId = parseInt(req.params.departmentId);
-    if (isNaN(departmentId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
-      });
-    }
+    const { departmentId } = res.locals.params;
 
     const schedules = await scheduleService.getSchedulesByDepartment(departmentId);
     res.json({ success: true, data: schedules });
@@ -212,15 +190,9 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
 });
 
 // Get schedules by user
-router.get('/user/:userId', authenticate, async (req: Request, res: Response) => {
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (_req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
-    if (isNaN(userId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid user ID' }
-      });
-    }
+    const { userId } = res.locals.params;
 
     const schedules = await scheduleService.getSchedulesByUser(userId);
     res.json({ success: true, data: schedules });
@@ -234,15 +206,9 @@ router.get('/user/:userId', authenticate, async (req: Request, res: Response) =>
 });
 
 // Publish schedule
-router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), async (req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const schedule = await scheduleService.publishSchedule(id);
     res.json({
@@ -264,15 +230,9 @@ router.patch('/:id/publish', authenticate, requirePermission('schedule.publish')
 });
 
 // Archive schedule
-router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
+router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const schedule = await scheduleService.archiveSchedule(id);
     res.json({
@@ -294,15 +254,9 @@ router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'),
 });
 
 // Duplicate schedule
-router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), async (req: Request, res: Response) => {
+router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const user = req.user;
     if (!user) {
@@ -312,13 +266,7 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
       });
     }
 
-    const { name, startDate, endDate } = req.body;
-    if (!name || !startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Name, start date, and end date are required' }
-      });
-    }
+    const { name, startDate, endDate } = res.locals.body;
 
     const newSchedule = await scheduleService.duplicateSchedule(id, name, startDate, endDate);
 
@@ -337,15 +285,9 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
 });
 
 // Generate optimized schedule
-router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), async (req: Request, res: Response) => {
+router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid schedule ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const user = req.user;
     if (!user) {
@@ -381,4 +323,3 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
 
   return router;
 };
-

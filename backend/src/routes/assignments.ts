@@ -2,6 +2,15 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateParams, validateBody } from '../middleware/validation';
+import {
+  idParam,
+  userIdParam,
+  shiftIdParam,
+  departmentIdParam,
+  createAssignmentBody,
+  bulkCreateAssignmentsBody,
+} from '../schemas';
 import { logger } from '../config/logger';
 
 export const createAssignmentsRouter = (pool: Pool) => {
@@ -23,15 +32,9 @@ router.get('/', authenticate, async (_req: Request, res: Response) => {
 });
 
 // Get assignment by ID
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const assignment = await assignmentService.getAssignmentById(id);
     if (!assignment) {
@@ -52,9 +55,9 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 // Create new assignment
-router.post('/', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), async (_req: Request, res: Response) => {
   try {
-    const assignment = await assignmentService.createAssignment(req.body);
+    const assignment = await assignmentService.createAssignment(res.locals.body);
 
     res.status(201).json({
       success: true,
@@ -72,15 +75,9 @@ router.post('/', authenticate, requirePermission('assignment.manage'), async (re
 });
 
 // Update assignment
-router.put('/:id', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const assignment = await assignmentService.updateAssignment(id, req.body);
     res.json({
@@ -102,15 +99,9 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), async (
 });
 
 // Delete assignment
-router.delete('/:id', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     await assignmentService.deleteAssignment(id);
     res.json({
@@ -131,15 +122,9 @@ router.delete('/:id', authenticate, requirePermission('assignment.manage'), asyn
 });
 
 // Get assignments by user
-router.get('/user/:userId', authenticate, async (req: Request, res: Response) => {
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (_req: Request, res: Response) => {
   try {
-    const userId = parseInt(req.params.userId);
-    if (isNaN(userId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid user ID' }
-      });
-    }
+    const { userId } = res.locals.params;
 
     const assignments = await assignmentService.getAssignmentsByUser(userId);
     res.json({ success: true, data: assignments });
@@ -153,15 +138,9 @@ router.get('/user/:userId', authenticate, async (req: Request, res: Response) =>
 });
 
 // Get assignments by shift
-router.get('/shift/:shiftId', authenticate, async (req: Request, res: Response) => {
+router.get('/shift/:shiftId', authenticate, validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   try {
-    const shiftId = parseInt(req.params.shiftId);
-    if (isNaN(shiftId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
-      });
-    }
+    const { shiftId } = res.locals.params;
 
     const assignments = await assignmentService.getAssignmentsByShift(shiftId);
     res.json({ success: true, data: assignments });
@@ -175,17 +154,11 @@ router.get('/shift/:shiftId', authenticate, async (req: Request, res: Response) 
 });
 
 // Get assignments by department
-router.get('/department/:departmentId', authenticate, async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (req: Request, res: Response) => {
   try {
-    const departmentId = parseInt(req.params.departmentId);
-    if (isNaN(departmentId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
-      });
-    }
-
+    const { departmentId } = res.locals.params;
     const { status } = req.query;
+
     const assignments = await assignmentService.getAssignmentsByDepartment(
       departmentId,
       status as string
@@ -201,15 +174,9 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
 });
 
 // Bulk create assignments
-router.post('/bulk', authenticate, requirePermission('assignment.manage'), async (req: Request, res: Response) => {
+router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), async (_req: Request, res: Response) => {
   try {
-    const { assignments } = req.body;
-    if (!Array.isArray(assignments)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Assignments must be an array' }
-      });
-    }
+    const { assignments } = res.locals.body;
 
     const createdAssignments = await assignmentService.bulkCreateAssignments(assignments);
 
@@ -228,15 +195,9 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), async
 });
 
 // Confirm assignment
-router.patch('/:id/confirm', authenticate, async (req: Request, res: Response) => {
+router.patch('/:id/confirm', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const assignment = await assignmentService.confirmAssignment(id);
     res.json({
@@ -261,15 +222,9 @@ router.patch('/:id/confirm', authenticate, async (req: Request, res: Response) =
 });
 
 // Decline assignment
-router.patch('/:id/decline', authenticate, async (req: Request, res: Response) => {
+router.patch('/:id/decline', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const assignment = await assignmentService.declineAssignment(id);
 
@@ -292,15 +247,9 @@ router.patch('/:id/decline', authenticate, async (req: Request, res: Response) =
 });
 
 // Complete assignment
-router.patch('/:id/complete', authenticate, async (req: Request, res: Response) => {
+router.patch('/:id/complete', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid assignment ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const assignment = await assignmentService.completeAssignment(id);
     res.json({
@@ -322,15 +271,9 @@ router.patch('/:id/complete', authenticate, async (req: Request, res: Response) 
 });
 
 // Get available employees for shift
-router.get('/shift/:shiftId/available-employees', authenticate, async (req: Request, res: Response) => {
+router.get('/shift/:shiftId/available-employees', authenticate, validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   try {
-    const shiftId = parseInt(req.params.shiftId);
-    if (isNaN(shiftId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid shift ID' }
-      });
-    }
+    const { shiftId } = res.locals.params;
 
     const employees = await assignmentService.getAvailableEmployeesForShift(shiftId);
     res.json({ success: true, data: employees });
@@ -345,4 +288,3 @@ router.get('/shift/:shiftId/available-employees', authenticate, async (req: Requ
 
   return router;
 };
-

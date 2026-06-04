@@ -154,7 +154,7 @@ describe('assignments router (extended)', () => {
     (AssignmentService.prototype.createAssignment as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('boom'));
-    const res = await request(app()).post('/api/assignments').send({});
+    const res = await request(app()).post('/api/assignments').send({ shiftId: 1, userId: 1 });
     expect(res.status).toBe(500);
   });
 
@@ -270,7 +270,9 @@ describe('assignments router (extended)', () => {
     (AssignmentService.prototype.bulkCreateAssignments as jest.Mock) = jest
       .fn()
       .mockResolvedValue([{ id: 1 }, { id: 2 }]);
-    const res = await request(app()).post('/api/assignments/bulk').send({ assignments: [{}, {}] });
+    const res = await request(app()).post('/api/assignments/bulk').send({
+      assignments: [{ shiftId: 1, userId: 1 }, { shiftId: 2, userId: 2 }],
+    });
     expect(res.status).toBe(201);
     expect(res.body.data.count).toBe(2);
   });
@@ -279,7 +281,9 @@ describe('assignments router (extended)', () => {
     (AssignmentService.prototype.bulkCreateAssignments as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
-    const res = await request(app()).post('/api/assignments/bulk').send({ assignments: [] });
+    const res = await request(app()).post('/api/assignments/bulk').send({
+      assignments: [{ shiftId: 1, userId: 1 }],
+    });
     expect(res.status).toBe(500);
   });
 
@@ -402,7 +406,9 @@ describe('schedules router (extended)', () => {
     (ScheduleService.prototype.createSchedule as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
-    const res = await request(app()).post('/api/schedules').send({});
+    const res = await request(app()).post('/api/schedules').send({
+      name: 'Test', startDate: '2026-01-01', endDate: '2026-01-31', departmentId: 1,
+    });
     expect(res.status).toBe(500);
   });
 
@@ -681,7 +687,10 @@ describe('shifts router (extended)', () => {
 
   it('POST / 500 on error', async () => {
     (ShiftService.prototype.createShift as jest.Mock) = jest.fn().mockRejectedValue(new Error('x'));
-    const res = await request(app()).post('/api/shifts').send({});
+    const res = await request(app()).post('/api/shifts').send({
+      scheduleId: 1, departmentId: 1, date: '2026-06-01',
+      startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 5,
+    });
     expect(res.status).toBe(500);
   });
 
@@ -1044,14 +1053,14 @@ describe('departments router (extended)', () => {
 
   it('POST /:id/users 403/200/400/404/500', async () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
-    let res = await request(app()).post('/api/departments/1/users').send({});
+    let res = await request(app()).post('/api/departments/1/users').send({ userId: 9 });
     expect(res.status).toBe(403);
 
     currentUser = { id: 5, role: 'manager', email: 'm@x' };
     (DepartmentService.prototype.getDepartmentsForUser as jest.Mock) = jest
       .fn()
       .mockResolvedValue([]);
-    res = await request(app()).post('/api/departments/1/users').send({});
+    res = await request(app()).post('/api/departments/1/users').send({ userId: 9 });
     expect(res.status).toBe(403);
 
     currentUser = { id: 1, role: 'admin', email: 'a@x' };
