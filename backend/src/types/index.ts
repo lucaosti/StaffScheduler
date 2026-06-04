@@ -101,6 +101,48 @@ export interface CreateDelegationRequest {
   scopeOrgUnitId?: number | null;
 }
 
+export type ApproverScope =
+  | 'policy_owner'
+  | 'unit_manager'
+  | 'unit_manager_chain'
+  | 'company_role'
+  | 'company_user';
+
+export interface ApprovalStep {
+  id: number;
+  workflowId: number;
+  stepOrder: number;
+  approverScope: ApproverScope;
+  approverRoleId: number | null;
+  approverUserId: number | null;
+  autoApproveForOwner: boolean;
+  escalateAfterHours: number | null;
+}
+
+export interface ApprovalWorkflow {
+  id: number;
+  changeType: string;
+  requireAll: boolean;
+  description: string | null;
+  steps: ApprovalStep[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateApprovalWorkflowRequest {
+  changeType: string;
+  requireAll?: boolean;
+  description?: string;
+  steps: Array<{
+    stepOrder: number;
+    approverScope: ApproverScope;
+    approverRoleId?: number | null;
+    approverUserId?: number | null;
+    autoApproveForOwner?: boolean;
+    escalateAfterHours?: number | null;
+  }>;
+}
+
 interface UserDepartment {
   id: number;
   name: string;
