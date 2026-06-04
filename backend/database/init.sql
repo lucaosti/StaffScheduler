@@ -542,6 +542,24 @@ CREATE TABLE IF NOT EXISTS system_settings (
 );
 
 -- ================================================================
+-- MODULES TABLE - Runtime feature flags
+-- Each module has a unique code; is_enabled is the runtime flag that
+-- the requireModule(code) middleware checks. Changes persist across
+-- restarts because they live in the DB, not in environment variables.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS modules (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    code VARCHAR(60) NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    description TEXT,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_code (code)
+);
+
+-- ================================================================
 -- AUDIT LOGS TABLE - Track system activities
 -- ================================================================
 CREATE TABLE IF NOT EXISTS audit_logs (
@@ -858,6 +876,18 @@ INSERT IGNORE INTO skills (name, description, is_active) VALUES
 ('Customer Service', 'Customer interaction and support', TRUE),
 ('Team Leadership', 'Ability to lead teams', TRUE),
 ('Technical Skills', 'Technical and computer skills', TRUE);
+
+-- Default modules (all enabled by default)
+INSERT IGNORE INTO modules (code, name, description, is_enabled) VALUES
+('scheduling',    'Scheduling',     'Shift scheduling, optimizer, and calendar views', TRUE),
+('approvals',     'Approvals',      'Approval workflows for time-off, loans, and policy exceptions', TRUE),
+('notifications', 'Notifications',  'In-app and SSE notification delivery', TRUE),
+('reporting',     'Reporting',      'Reports, analytics dashboards, and data exports', TRUE),
+('analytics',     'Analytics',      'Advanced workforce analytics and KPIs', TRUE),
+('forecasting',   'Forecasting',    'Demand forecasting and headcount planning', TRUE),
+('integrations',  'Integrations',   'Third-party HR and payroll integrations', TRUE),
+('audit',         'Audit Log',      'Audit trail viewer for administrators', TRUE),
+('compliance',    'Compliance',     'Compliance rules, policy engine, and exception tracking', TRUE);
 
 -- Default system settings
 INSERT IGNORE INTO system_settings (category, `key`, value, type, default_value, description, is_editable) VALUES

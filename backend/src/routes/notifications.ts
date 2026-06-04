@@ -11,12 +11,14 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requireModule } from '../middleware/auth';
 import { NotificationService } from '../services/NotificationService';
 
 export const createNotificationsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new NotificationService(pool);
+
+  router.use(requireModule('notifications'));
 
   router.use(authenticate);
 

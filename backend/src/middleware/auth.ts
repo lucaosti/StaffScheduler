@@ -16,9 +16,17 @@ import jwt from 'jsonwebtoken';
 import { User } from '../types';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
+import { ModuleService } from '../services/ModuleService';
 import { config } from '../config';
 import { logger } from '../config/logger';
 import { database } from '../config/database';
+
+// Single ModuleService instance per process — shares the in-process cache.
+let _moduleService: ModuleService | null = null;
+const getModuleService = (): ModuleService => {
+  if (!_moduleService) _moduleService = new ModuleService(database.getPool());
+  return _moduleService;
+};
 
 // Extend Express Request to include user
 declare module 'express-serve-static-core' {
@@ -155,5 +163,34 @@ export const requirePermission = (code: string) => {
     }
 
     next();
+  };
+};
+
+/**
+ * Module-guard Middleware
+ *
+ * Returns 404 when the specified module is disabled so that consumers (both
+ * authenticated and unauthenticated) get no signal about the route's
+ * existence. Call this BEFORE `authenticate` on routes where the entire
+ * module should be invisible.
+ *
+ * @param code - Module code to check (e.g. `reporting`, `notifications`)
+ */
+export const requireModule = (code: string) => {
+  return async (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      const enabled = await getModuleService().isEnabled(code);
+      if (!enabled) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Not Found' },
+        });
+      }
+      next();
+    } catch (err) {
+      logger.error('requireModule check failed:', err);
+      // Fail open: let the request through if module status cannot be determined.
+      next();
+    }
   };
 };
