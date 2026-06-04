@@ -41,15 +41,11 @@ The "Out of scope" items are intentional design choices (this is an
 open-source self-hosted core, not a SaaS product). Pull requests
 addressing them are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
-## Canonical references
+## Documentation
 
-- API contract: [`backend/openapi/openapi.json`](./backend/openapi/openapi.json),
-  served at `http://localhost:3001/api/docs` (Swagger UI).
-- Architecture overview: [`TECHNICAL.md`](./TECHNICAL.md).
-- API reference (curated, human-readable): [`API_DOCUMENTATION.md`](./API_DOCUMENTATION.md).
-- Architecture conventions, coding standards, response envelope shape:
-  [`CLAUDE.md`](./CLAUDE.md).
-- Contribution guidelines: [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- Full technical reference: [`DOCUMENTATION.md`](./DOCUMENTATION.md) — architecture, API, RBAC, scheduling engine, module system, development guidelines, architectural decisions.
+- API contract (authoritative): [`backend/openapi/openapi.json`](./backend/openapi/openapi.json), served live at `http://localhost:3001/api/docs` (Swagger UI).
+- Tooling instructions for Claude Code: [`CLAUDE.md`](./CLAUDE.md).
 
 ## Quick start
 
@@ -246,8 +242,7 @@ cd backend  && npm run lint && npm run build && npm test
 cd frontend && npm run lint && CI=true npm test -- --watchAll=false && CI=true npm run build
 ```
 
-Optional headless e2e smoke tests (Playwright) live in
-[`frontend/e2e`](./frontend/e2e/README.md). They run against a locally
+Optional headless e2e smoke tests (Playwright) live in `frontend/e2e/`. They run against a locally
 running demo stack:
 
 ```bash
@@ -267,17 +262,9 @@ npm run test:e2e
 
 ## Project policies
 
-- **Contributing**: see [`CONTRIBUTING.md`](./CONTRIBUTING.md) for code
-  style, branching, review process, testing requirements, and the local
-  CI-parity commands.
-- **Code of Conduct**: contributors are expected to follow the
-  [Code of Conduct in `CONTRIBUTING.md`](./CONTRIBUTING.md#code-of-conduct).
-- **Security**: vulnerabilities must be reported privately — see the
-  [Security Policy in `CONTRIBUTING.md`](./CONTRIBUTING.md#security-policy).
-  Do not open public issues for security problems.
-- **Issue / PR templates**: structured templates live in
-  [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE) and
-  [`.github/pull_request_template.md`](./.github/pull_request_template.md).
+- **Contributing, code style, branching, review process**: see [`DOCUMENTATION.md` — §14](./DOCUMENTATION.md#14-contribution-and-review-process).
+- **Security**: vulnerabilities must be reported privately — see [`DOCUMENTATION.md` — §15](./DOCUMENTATION.md#15-security-policy). Do not open public issues for security problems.
+- **Issue / PR templates**: structured templates in [`.github/ISSUE_TEMPLATE/`](./.github/ISSUE_TEMPLATE) and [`.github/pull_request_template.md`](./.github/pull_request_template.md).
 
 ## Continuous integration
 

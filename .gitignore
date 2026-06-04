@@ -295,3 +295,7 @@ docs/.vitepress/dist/
 # - User data
 # - Backup files
 # - Log files with sensitive information
+
+# Playwright test artifacts
+frontend/test-results/
+frontend/playwright-report/
