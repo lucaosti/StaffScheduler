@@ -6,14 +6,14 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requirePermission } from '../middleware/auth';
+import { authenticate, requirePermission, requireModule } from '../middleware/auth';
 import { AuditLogService } from '../services/AuditLogService';
 
 export const createAuditLogsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new AuditLogService(pool);
 
-  router.use(authenticate, requirePermission('audit.read'));
+  router.use(requireModule('audit'), authenticate, requirePermission('audit.read'));
 
   router.get('/', async (req: Request, res: Response) => {
     const page = await service.list({

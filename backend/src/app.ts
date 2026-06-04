@@ -48,6 +48,7 @@ import { createPoliciesRouter } from './routes/policies';
 import { createRbacRouter } from './routes/rbac';
 import { createDelegationsRouter } from './routes/delegations';
 import { createApprovalWorkflowsRouter } from './routes/approvalWorkflows';
+import { createModulesRouter } from './routes/modules';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -126,6 +127,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use('/api/permissions', rbacRouters.permissions);
   app.use('/api/delegations', createDelegationsRouter(pool));
   app.use('/api/approval-workflows', createApprovalWorkflowsRouter(pool));
+  app.use('/api/modules', createModulesRouter(pool));
 
   app.use('*', (_req: express.Request, res: express.Response) => {
     res.status(404).json({

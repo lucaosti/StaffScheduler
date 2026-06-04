@@ -15,6 +15,7 @@ jest.mock('../middleware/auth', () => ({
     next();
   },
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  requireModule: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
