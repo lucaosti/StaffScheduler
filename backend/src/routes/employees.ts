@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
@@ -15,6 +16,11 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const employees = await employeeService.getAllEmployees(
       scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
     );
+    const pagination = parsePagination(req);
+    if (pagination) {
+      const sliced = employees.slice(pagination.offset, pagination.offset + pagination.pageSize);
+      return sendPaginated(res, sliced, employees.length, pagination);
+    }
     res.json({ success: true, data: employees });
   } catch (error) {
     logger.error('Error fetching employees:', error);
