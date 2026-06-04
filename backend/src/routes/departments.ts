@@ -3,7 +3,14 @@ import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { authenticate, userHasPermission } from '../middleware/auth';
-import { CreateDepartmentRequest, UpdateDepartmentRequest } from '../types';
+import { validateParams, validateBody } from '../middleware/validation';
+import {
+  idParam,
+  idAndUserIdParam,
+  createDepartmentBody,
+  addUserToDepartmentBody,
+} from '../schemas';
+import { UpdateDepartmentRequest } from '../types';
 import { logger } from '../config/logger';
 
 export const createDepartmentsRouter = (pool: Pool) => {
@@ -34,10 +41,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Get single department
-  router.get('/:id', authenticate, async (req, res) => {
+  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
+      const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
@@ -81,17 +88,20 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
-      const departmentData: CreateDepartmentRequest = req.body;
-
-      if (!departmentData.name) {
+      const parseResult = createDepartmentBody.safeParse(req.body);
+      if (!parseResult.success) {
         return res.status(400).json({
           success: false,
-          error: { code: 'INVALID_INPUT', message: 'Department name is required' }
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'Invalid request body',
+            details: parseResult.error.issues.map(e => ({ field: e.path.join('.') || 'value', message: e.message })),
+          },
         });
       }
 
-      // Any existing user may be designated as a department manager; the
-      // configurable role model no longer restricts this to specific roles.
+      const departmentData = parseResult.data;
+
       if (departmentData.managerId) {
         const manager = await userService.getUserById(departmentData.managerId);
         if (!manager) {
@@ -115,10 +125,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Update department
-  router.put('/:id', authenticate, async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
+      const departmentId = res.locals.params.id;
       const departmentData: UpdateDepartmentRequest = req.body;
 
       if (userHasPermission(user, 'settings.manage')) {
@@ -140,7 +150,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
-      // Any existing user may be designated as a department manager.
       if (departmentData.managerId) {
         const manager = await userService.getUserById(departmentData.managerId);
         if (!manager) {
@@ -164,10 +173,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Delete department
-  router.delete('/:id', authenticate, async (req, res) => {
+  router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
+      const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {
         return res.status(403).json({
@@ -197,11 +206,11 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Add user to department
-  router.post('/:id/users', authenticate, async (req, res) => {
+  router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
-      const { userId } = req.body;
+      const departmentId = res.locals.params.id;
+      const { userId } = res.locals.body;
 
       if (userHasPermission(user, 'settings.manage')) {
         // Full administrators can add users to any department
@@ -251,11 +260,11 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Remove user from department
-  router.delete('/:id/users/:userId', authenticate, async (req, res) => {
+  router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
-      const targetUserId = parseInt(req.params.userId);
+      const departmentId = res.locals.params.id;
+      const targetUserId = res.locals.params.userId;
 
       if (userHasPermission(user, 'settings.manage')) {
         // Full administrators can remove users from any department
@@ -289,10 +298,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Get department statistics
-  router.get('/:id/stats', authenticate, async (req, res) => {
+  router.get('/:id/stats', authenticate, validateParams(idParam), async (req, res) => {
     try {
       const user = (req as any).user;
-      const departmentId = parseInt(req.params.id);
+      const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);

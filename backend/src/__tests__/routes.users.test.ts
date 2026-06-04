@@ -112,14 +112,16 @@ describe('users router GET /', () => {
 describe('users router POST /', () => {
   it('returns 403 for employees', async () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
-    const res = await request(mountApp()).post('/api/users').send({});
+    const res = await request(mountApp()).post('/api/users').send({
+      email: 'new@x.com', password: 'pw', firstName: 'A', lastName: 'B',
+    });
     expect(res.status).toBe(403);
   });
 
   it('returns 400 when fields missing', async () => {
     const res = await request(mountApp()).post('/api/users').send({ email: 'a@x.com' });
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 201 when service creates', async () => {

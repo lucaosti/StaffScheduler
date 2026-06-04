@@ -77,7 +77,7 @@ describe('employees router happy paths', () => {
     const app = mountApp('/api/employees', createEmployeesRouter(fakePool));
     const res = await request(app).get('/api/employees/not-a-number');
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('GET /:id returns 404 when service returns null', async () => {
@@ -195,7 +195,15 @@ describe('shifts router happy paths', () => {
   it('POST / returns 201 on create', async () => {
     (ShiftService.prototype.createShift as jest.Mock) = jest.fn().mockResolvedValue({ id: 11 });
     const app = mountApp('/api/shifts', createShiftsRouter(fakePool));
-    const res = await request(app).post('/api/shifts').send({ scheduleId: 1 });
+    const res = await request(app).post('/api/shifts').send({
+      scheduleId: 1,
+      departmentId: 1,
+      date: '2026-06-01',
+      startTime: '08:00',
+      endTime: '16:00',
+      minStaff: 1,
+      maxStaff: 5,
+    });
     expect(res.status).toBe(201);
   });
 

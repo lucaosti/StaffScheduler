@@ -3,6 +3,8 @@ import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
+import { validateParams } from '../middleware/validation';
+import { idParam, departmentIdParam, idAndSkillIdParam } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
@@ -32,15 +34,9 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get employee by ID
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const employee = await employeeService.getEmployeeById(id);
     if (!employee) {
@@ -80,15 +76,9 @@ router.post('/', authenticate, requirePermission('employee.manage'), async (req:
 });
 
 // Update employee
-router.put('/:id', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const employee = await employeeService.updateEmployee(id, req.body);
     res.json({
@@ -110,15 +100,9 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), async (re
 });
 
 // Delete employee (soft delete)
-router.delete('/:id', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     await employeeService.deleteEmployee(id);
     res.json({
@@ -139,15 +123,9 @@ router.delete('/:id', authenticate, requirePermission('employee.manage'), async 
 });
 
 // Get employees by department
-router.get('/department/:departmentId', authenticate, async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   try {
-    const departmentId = parseInt(req.params.departmentId);
-    if (isNaN(departmentId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid department ID' }
-      });
-    }
+    const { departmentId } = res.locals.params;
 
     const employees = await employeeService.getEmployeesByDepartment(departmentId);
     res.json({ success: true, data: employees });
@@ -161,15 +139,9 @@ router.get('/department/:departmentId', authenticate, async (req: Request, res: 
 });
 
 // Get employee skills
-router.get('/:id/skills', authenticate, async (req: Request, res: Response) => {
+router.get('/:id/skills', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    if (isNaN(id)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid employee ID' }
-      });
-    }
+    const { id } = res.locals.params;
 
     const skills = await employeeService.getEmployeeSkills(id);
     res.json({ success: true, data: skills });
@@ -183,15 +155,15 @@ router.get('/:id/skills', authenticate, async (req: Request, res: Response) => {
 });
 
 // Add skill to employee
-router.post('/:id/skills', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
+router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
+    const { id } = res.locals.params;
     const { skillId, proficiencyLevel } = req.body;
 
-    if (isNaN(id) || !skillId || proficiencyLevel === undefined) {
+    if (!skillId || proficiencyLevel === undefined) {
       return res.status(400).json({
         success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid parameters' }
+        error: { code: 'VALIDATION_ERROR', message: 'skillId and proficiencyLevel are required' }
       });
     }
 
@@ -211,17 +183,9 @@ router.post('/:id/skills', authenticate, requirePermission('employee.manage'), a
 });
 
 // Remove skill from employee
-router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
+router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), async (_req: Request, res: Response) => {
   try {
-    const id = parseInt(req.params.id);
-    const skillId = parseInt(req.params.skillId);
-
-    if (isNaN(id) || isNaN(skillId)) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'Invalid parameters' }
-      });
-    }
+    const { id, skillId } = res.locals.params;
 
     await employeeService.removeEmployeeSkill(id, skillId);
 
@@ -240,4 +204,3 @@ router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.
 
   return router;
 };
-
