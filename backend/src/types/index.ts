@@ -81,6 +81,26 @@ export interface AssignRoleRequest {
   expiresAt?: string | null;
 }
 
+export interface Delegation {
+  id: number;
+  delegatorId: number;
+  delegateeId: number;
+  permissionCodes: string[];
+  scopeOrgUnitId?: number | null;
+  startsAt: Date;
+  expiresAt: Date;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CreateDelegationRequest {
+  delegateeId: number;
+  permissionCodes: string[];
+  expiresAt: string;
+  scopeOrgUnitId?: number | null;
+}
+
 interface UserDepartment {
   id: number;
   name: string;
