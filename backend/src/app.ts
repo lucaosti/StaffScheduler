@@ -58,7 +58,41 @@ interface BuildAppOptions {
 export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Express {
   const app = express();
 
-  app.use(helmet());
+  // HTTPS redirect for production deployments behind a reverse proxy.
+  if (config.server.env === 'production') {
+    app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+      if (req.headers['x-forwarded-proto'] === 'http') {
+        return res.redirect(301, `https://${req.headers.host}${req.url}`);
+      }
+      next();
+    });
+  }
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:'],
+          connectSrc: ["'self'"],
+          fontSrc: ["'self'"],
+          objectSrc: ["'none'"],
+          frameSrc: ["'none'"],
+          upgradeInsecureRequests: [],
+        },
+      },
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      frameguard: { action: 'deny' },
+      noSniff: true,
+      xssFilter: true,
+    })
+  );
 
   app.use(
     cors({
@@ -78,9 +112,16 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
 
   if (!options.silent) {
     const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 100,
-      message: 'Too many requests from this IP, please try again later.',
+      windowMs: config.security.rateLimitWindow,
+      max: config.security.rateLimitMax,
+      standardHeaders: true,
+      legacyHeaders: false,
+      handler: (_req, res) => {
+        res.status(429).json({
+          success: false,
+          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests, please try again later.' },
+        });
+      },
     });
     app.use(limiter);
 
@@ -92,6 +133,8 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   }
 
   app.use(compression());
+  // Body parser: 10 MB ceiling is intentional — bulk import CSVs and schedule payloads
+  // can be large, but we keep this well below the 50 MB nginx default to limit DoS surface.
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
