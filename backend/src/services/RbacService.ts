@@ -30,10 +30,10 @@ export class RbacService {
 
   /**
    * Returns the de-duplicated set of permission codes a user effectively holds,
-   * across all their (non-expired) role grants.
+   * merging both role-based permissions and any active delegations received.
    */
   async getEffectivePermissions(userId: number): Promise<string[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT DISTINCT p.code
          FROM user_roles ur
          JOIN role_permissions rp ON rp.role_id = ur.role_id
@@ -42,7 +42,25 @@ export class RbacService {
           AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
       [userId]
     );
-    return rows.map((r: any) => r.code as string);
+    const fromRoles = roleRows.map((r: any) => r.code as string);
+
+    // Merge active delegations received by this user.
+    const [delegRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT permission_codes
+         FROM delegations
+        WHERE delegatee_id = ?
+          AND is_active = TRUE
+          AND starts_at <= NOW()
+          AND expires_at > NOW()`,
+      [userId]
+    );
+    const fromDelegations: string[] = [];
+    for (const row of delegRows as any[]) {
+      const codes: string[] = JSON.parse(row.permission_codes as string);
+      codes.forEach((c) => fromDelegations.push(c));
+    }
+
+    return [...new Set([...fromRoles, ...fromDelegations])];
   }
 
   /**

@@ -828,6 +828,34 @@ INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role_i
 ('Membership.Update',     'unit_manager',       NULL, TRUE, 'User membership changes need the unit manager');
 
 -- ================================================================
+-- DELEGATIONS TABLE
+-- Allows user A (delegator) to grant user B (delegatee) a subset of their
+-- own permissions for a bounded time window. Rules enforced by the app:
+--   - permission_codes must be a subset of the delegator's own permissions
+--   - chained sub-delegation is not allowed
+--   - a delegation that has passed expires_at is ignored by getEffectivePermissions
+-- ================================================================
+CREATE TABLE IF NOT EXISTS delegations (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    delegator_id INT NOT NULL,
+    delegatee_id INT NOT NULL,
+    permission_codes JSON NOT NULL,
+    scope_org_unit_id INT NULL,
+    starts_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_delegatee (delegatee_id),
+    INDEX idx_delegator (delegator_id),
+    INDEX idx_active_expiry (is_active, expires_at),
+
+    FOREIGN KEY (delegator_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (delegatee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
 -- DEFERRED FOREIGN KEYS
 -- Added here because they reference tables defined later than the source table.
 -- ================================================================

@@ -46,6 +46,7 @@ import { createEventsRouter } from './routes/events';
 import { createOrgRouter } from './routes/org';
 import { createPoliciesRouter } from './routes/policies';
 import { createRbacRouter } from './routes/rbac';
+import { createDelegationsRouter } from './routes/delegations';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -122,6 +123,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   const rbacRouters = createRbacRouter(pool);
   app.use('/api/roles', rbacRouters.roles);
   app.use('/api/permissions', rbacRouters.permissions);
+  app.use('/api/delegations', createDelegationsRouter(pool));
 
   app.use('*', (_req: express.Request, res: express.Response) => {
     res.status(404).json({
