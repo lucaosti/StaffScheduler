@@ -59,7 +59,7 @@ router.get('/', async (_req: Request, res: Response) => {
       success: true,
       data: healthCheck
     });
-  } catch (error) {
+  } catch (_error) {
     res.status(503).json({
       success: false,
       error: {
