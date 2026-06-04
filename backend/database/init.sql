@@ -731,6 +731,54 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
 );
 
 -- ================================================================
+-- APPROVAL WORKFLOWS — multi-step, configurable approval chains
+--
+-- This replaces the single-step `approval_matrix` with an ordered list of
+-- steps. Each `approval_workflows` row corresponds to exactly one
+-- `change_type`; each `approval_steps` row is one step in that chain.
+--
+-- `require_all` = TRUE  → every step must approve before the request advances.
+-- `require_all` = FALSE → first step to approve is sufficient.
+-- `escalate_after_hours` → if non-null, a background job advances the
+--                          request to the next step after the timeout.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS approval_workflows (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    change_type VARCHAR(80) NOT NULL,
+    require_all BOOLEAN NOT NULL DEFAULT FALSE,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_change_type (change_type)
+);
+
+CREATE TABLE IF NOT EXISTS approval_steps (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    workflow_id INT NOT NULL,
+    step_order TINYINT NOT NULL,
+    approver_scope ENUM(
+        'policy_owner',
+        'unit_manager',
+        'unit_manager_chain',
+        'company_role',
+        'company_user'
+    ) NOT NULL,
+    approver_role_id INT NULL,
+    approver_user_id INT NULL,
+    auto_approve_for_owner BOOLEAN NOT NULL DEFAULT TRUE,
+    escalate_after_hours INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY unique_workflow_order (workflow_id, step_order),
+    INDEX idx_workflow (workflow_id),
+
+    FOREIGN KEY (workflow_id) REFERENCES approval_workflows(id) ON DELETE CASCADE,
+    FOREIGN KEY (approver_role_id) REFERENCES roles(id) ON DELETE SET NULL,
+    FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
 -- DEFAULT DATA INSERTION
 -- Minimal essential data - users and departments will be created by init-database.ts
 -- ================================================================
@@ -814,8 +862,7 @@ INSERT IGNORE INTO system_settings (category, `key`, value, type, default_value,
 ('scheduling', 'max_shifts_per_week', '5', 'number', '5', 'Maximum number of shifts an employee can work per week', TRUE),
 ('scheduling', 'min_hours_between_shifts', '8', 'number', '8', 'Minimum hours required between shifts for the same employee', TRUE);
 
--- Default approval matrix
--- These rows ensure the workflow has sane defaults from the very first run.
+-- Default approval matrix (legacy single-step rows — kept for backward compat)
 INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role_id, auto_approve_for_owner, description) VALUES
 ('Loan.Request',          'unit_manager',       NULL, TRUE, 'Cross-department employee loans approved by the receiving unit manager'),
 ('Loan.Cancel',           'unit_manager',       NULL, TRUE, 'Cancellation of an approved loan requires receiving unit manager approval'),
@@ -826,6 +873,41 @@ INSERT IGNORE INTO approval_matrix (change_type, approver_scope, approver_role_i
 ('Schedule.Override',     'unit_manager_chain', NULL, TRUE, 'Schedule overrides escalate up the org tree if needed'),
 ('OrgUnit.Update',        'company_role',       (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 'Org tree edits go through an administrator'),
 ('Membership.Update',     'unit_manager',       NULL, TRUE, 'User membership changes need the unit manager');
+
+-- ----------------------------------------------------------------
+-- Default approval workflows (multi-step engine)
+-- Mirrors the approval_matrix rows above as single-step workflows,
+-- plus TimeOff.Request and ShiftSwap.Request which were hardcoded.
+-- ----------------------------------------------------------------
+INSERT IGNORE INTO approval_workflows (change_type, require_all, description) VALUES
+('Loan.Request',      FALSE, 'Loan request — unit manager approval'),
+('Loan.Cancel',       FALSE, 'Loan cancellation — unit manager approval'),
+('Policy.Create',     FALSE, 'Policy creation — administrator approval'),
+('Policy.Update',     FALSE, 'Policy update — policy owner approval'),
+('Policy.Exception',  FALSE, 'Policy exception — policy owner approval'),
+('Schedule.Publish',  FALSE, 'Schedule publish — unit manager approval'),
+('Schedule.Override', FALSE, 'Schedule override — escalates up the org tree'),
+('OrgUnit.Update',    FALSE, 'Org tree edit — administrator approval'),
+('Membership.Update', FALSE, 'Membership change — unit manager approval'),
+('TimeOff.Request',   FALSE, 'Time-off request — unit manager approval'),
+('ShiftSwap.Request', FALSE, 'Shift swap — unit manager approval');
+
+-- Steps for each workflow (one step = same behavior as the old single-row matrix)
+INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
+SELECT w.id, 1, 'unit_manager', NULL, TRUE, 48
+FROM approval_workflows w WHERE w.change_type IN ('Loan.Request','Loan.Cancel','Schedule.Publish','Membership.Update','TimeOff.Request','ShiftSwap.Request');
+
+INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
+SELECT w.id, 1, 'company_role', (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 72
+FROM approval_workflows w WHERE w.change_type IN ('Policy.Create','OrgUnit.Update');
+
+INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
+SELECT w.id, 1, 'policy_owner', NULL, TRUE, 48
+FROM approval_workflows w WHERE w.change_type IN ('Policy.Update','Policy.Exception');
+
+INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
+SELECT w.id, 1, 'unit_manager_chain', NULL, TRUE, NULL
+FROM approval_workflows w WHERE w.change_type = 'Schedule.Override';
 
 -- ================================================================
 -- DELEGATIONS TABLE
