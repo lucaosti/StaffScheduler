@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ScheduleService } from '../services/ScheduleService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { logger } from '../config/logger';
 
 export const createSchedulesRouter = (pool: Pool) => {
@@ -12,9 +13,13 @@ export const createSchedulesRouter = (pool: Pool) => {
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
-    const schedules = await scheduleService.getAllSchedules(
-      scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
-    );
+    const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
+    const pagination = parsePagination(req);
+    const schedules = await scheduleService.getAllSchedules(filters);
+    if (pagination) {
+      const sliced = schedules.slice(pagination.offset, pagination.offset + pagination.pageSize);
+      return sendPaginated(res, sliced, schedules.length, pagination);
+    }
     res.json({ success: true, data: schedules });
   } catch (error) {
     logger.error('Error fetching schedules:', error);
