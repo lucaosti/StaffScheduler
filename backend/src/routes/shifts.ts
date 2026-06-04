@@ -17,6 +17,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { logger } from '../config/logger';
 
 export const createShiftsRouter = (pool: Pool) => {
@@ -162,6 +163,11 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const shifts = await shiftService.getAllShifts(
       scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
     );
+    const pagination = parsePagination(req);
+    if (pagination) {
+      const sliced = shifts.slice(pagination.offset, pagination.offset + pagination.pageSize);
+      return sendPaginated(res, sliced, shifts.length, pagination);
+    }
     res.json({ success: true, data: shifts });
   } catch (error) {
     logger.error('Error fetching shifts:', error);

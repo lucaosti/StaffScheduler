@@ -3,6 +3,7 @@ import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, userHasPermission } from '../middleware/auth';
+import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { CreateUserRequest, UpdateUserRequest, User } from '../types';
 import { logger } from '../config/logger';
 
@@ -63,6 +64,11 @@ export const createUsersRouter = (pool: Pool) => {
         }
       }
 
+      const pagination = parsePagination(req);
+      if (pagination) {
+        const sliced = users.slice(pagination.offset, pagination.offset + pagination.pageSize);
+        return sendPaginated(res, sliced, users.length, pagination);
+      }
       res.json({ success: true, data: users });
     } catch (error) {
       logger.error('Get users error:', error);

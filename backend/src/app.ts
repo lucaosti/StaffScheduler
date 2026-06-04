@@ -95,39 +95,46 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  app.use('/api/health', healthRoutes);
-  app.use('/api/system', createSystemRouter(pool));
-  app.use('/api/auth', createAuthRouter(pool));
-  app.use('/api/users', createUsersRouter(pool));
-  app.use('/api/dashboard', dashboardRoutes);
-  app.use('/api/employees', createEmployeesRouter(pool));
-  app.use('/api/departments', createDepartmentsRouter(pool));
-  app.use('/api/shifts', createShiftsRouter(pool));
-  app.use('/api/schedules', createSchedulesRouter(pool));
-  app.use('/api/assignments', createAssignmentsRouter(pool));
-  app.use('/api/settings', createSystemSettingsRouter(pool));
-  app.use('/api/time-off', createTimeOffRouter(pool));
-  app.use('/api/shift-swap', createShiftSwapRouter(pool));
-  app.use('/api/preferences', createPreferencesRouter(pool));
-  app.use('/api/audit-logs', createAuditLogsRouter(pool));
-  app.use('/api/calendar', createCalendarRouter(pool));
-  app.use('/api/auth/2fa', createTwoFactorRouter(pool));
-  app.use('/api', createOpenApiRouter());
-  app.use('/api/on-call', createOnCallRouter(pool));
-  app.use('/api/directory', createDirectoryRouter(pool));
-  app.use('/api/skill-gap', createSkillGapRouter(pool));
-  app.use('/api/reports', createReportsRouter(pool));
-  app.use('/api/notifications', createNotificationsRouter(pool));
-  app.use('/api/import', createBulkImportRouter(pool));
-  app.use('/api/events', createEventsRouter());
-  app.use('/api/org', createOrgRouter(pool));
-  app.use('/api/policies', createPoliciesRouter(pool));
+  // Mount all routers under both the legacy /api prefix and the canonical /api/v1 prefix.
+  // During the transition period both prefixes are active. A future PR will drop /api/* and
+  // install 308 redirects once all clients have migrated to /api/v1/*.
   const rbacRouters = createRbacRouter(pool);
-  app.use('/api/roles', rbacRouters.roles);
-  app.use('/api/permissions', rbacRouters.permissions);
-  app.use('/api/delegations', createDelegationsRouter(pool));
-  app.use('/api/approval-workflows', createApprovalWorkflowsRouter(pool));
-  app.use('/api/modules', createModulesRouter(pool));
+  const mountRoutes = (prefix: string) => {
+    app.use(`${prefix}/health`, healthRoutes);
+    app.use(`${prefix}/system`, createSystemRouter(pool));
+    app.use(`${prefix}/auth/2fa`, createTwoFactorRouter(pool));
+    app.use(`${prefix}/auth`, createAuthRouter(pool));
+    app.use(`${prefix}/users`, createUsersRouter(pool));
+    app.use(`${prefix}/dashboard`, dashboardRoutes);
+    app.use(`${prefix}/employees`, createEmployeesRouter(pool));
+    app.use(`${prefix}/departments`, createDepartmentsRouter(pool));
+    app.use(`${prefix}/shifts`, createShiftsRouter(pool));
+    app.use(`${prefix}/schedules`, createSchedulesRouter(pool));
+    app.use(`${prefix}/assignments`, createAssignmentsRouter(pool));
+    app.use(`${prefix}/settings`, createSystemSettingsRouter(pool));
+    app.use(`${prefix}/time-off`, createTimeOffRouter(pool));
+    app.use(`${prefix}/shift-swap`, createShiftSwapRouter(pool));
+    app.use(`${prefix}/preferences`, createPreferencesRouter(pool));
+    app.use(`${prefix}/audit-logs`, createAuditLogsRouter(pool));
+    app.use(`${prefix}/calendar`, createCalendarRouter(pool));
+    app.use(`${prefix}/on-call`, createOnCallRouter(pool));
+    app.use(`${prefix}/directory`, createDirectoryRouter(pool));
+    app.use(`${prefix}/skill-gap`, createSkillGapRouter(pool));
+    app.use(`${prefix}/reports`, createReportsRouter(pool));
+    app.use(`${prefix}/notifications`, createNotificationsRouter(pool));
+    app.use(`${prefix}/import`, createBulkImportRouter(pool));
+    app.use(`${prefix}/events`, createEventsRouter());
+    app.use(`${prefix}/org`, createOrgRouter(pool));
+    app.use(`${prefix}/policies`, createPoliciesRouter(pool));
+    app.use(`${prefix}/roles`, rbacRouters.roles);
+    app.use(`${prefix}/permissions`, rbacRouters.permissions);
+    app.use(`${prefix}/delegations`, createDelegationsRouter(pool));
+    app.use(`${prefix}/approval-workflows`, createApprovalWorkflowsRouter(pool));
+    app.use(`${prefix}/modules`, createModulesRouter(pool));
+  };
+  mountRoutes('/api/v1');
+  mountRoutes('/api');
+  app.use('/api', createOpenApiRouter());
 
   app.use('*', (_req: express.Request, res: express.Response) => {
     res.status(404).json({
