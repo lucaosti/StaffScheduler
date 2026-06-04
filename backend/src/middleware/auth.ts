@@ -76,7 +76,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     let decodedToken: JWTPayload;
     try {
       decodedToken = jwt.verify(token, config.jwt.secret) as JWTPayload;
-    } catch (error) {
+    } catch (_error) {
       return res.status(401).json({
         success: false,
         error: {
