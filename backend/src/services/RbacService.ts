@@ -250,6 +250,45 @@ export class RbacService {
     }
   }
 
+  // --------------------------------------------------------------------------
+  // Org-unit scoping
+  // --------------------------------------------------------------------------
+
+  /**
+   * Returns the given org-unit ID plus all descendant org-unit IDs using a
+   * single recursive CTE. O(tree depth) in DB round-trips (one query total).
+   */
+  async getDescendantOrgUnitIds(rootId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `WITH RECURSIVE subtree (id) AS (
+         SELECT id FROM org_units WHERE id = ?
+         UNION ALL
+         SELECT ou.id FROM org_units ou
+         JOIN subtree s ON ou.parent_id = s.id
+       )
+       SELECT id FROM subtree`,
+      [rootId]
+    );
+    return rows.map((r: any) => r.id as number);
+  }
+
+  /**
+   * Computes the set of allowed org-unit IDs for a user based on their role
+   * assignments. Returns `null` when the user has no scoped roles (full
+   * access). Returns a de-duplicated array when at least one scoped role
+   * exists (access restricted to those org-unit subtrees).
+   */
+  async computeAllowedOrgUnitIds(roles: UserRoleAssignment[]): Promise<number[] | null> {
+    const scopedRoots = roles
+      .map((r) => r.scopeOrgUnitId)
+      .filter((id): id is number => id !== null && id !== undefined);
+
+    if (scopedRoots.length === 0) return null;
+
+    const subtrees = await Promise.all(scopedRoots.map((id) => this.getDescendantOrgUnitIds(id)));
+    return [...new Set(subtrees.flat())];
+  }
+
   /** Resolves a role id from its (unique) name. Useful for seeding/import. */
   async getRoleIdByName(name: string): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

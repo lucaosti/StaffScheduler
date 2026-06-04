@@ -101,6 +101,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     user.permissions = permissions;
     user.roles = roles;
 
+    // Compute the org-unit scope for data filtering. For users with no scoped
+    // roles this is a no-op (null = full access, zero extra queries).
+    user.allowedOrgUnitIds = await rbac.computeAllowedOrgUnitIds(roles);
+
     req.user = user;
 
     logger.debug('User authenticated', { userId: user.id });

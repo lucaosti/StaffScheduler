@@ -9,9 +9,12 @@ export const createSchedulesRouter = (pool: Pool) => {
   const scheduleService = new ScheduleService(pool);
 
 // Get all schedules
-router.get('/', authenticate, async (_req: Request, res: Response) => {
+router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
-    const schedules = await scheduleService.getAllSchedules();
+    const scope = req.user?.allowedOrgUnitIds;
+    const schedules = await scheduleService.getAllSchedules(
+      scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
+    );
     res.json({ success: true, data: schedules });
   } catch (error) {
     logger.error('Error fetching schedules:', error);
@@ -39,6 +42,18 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
         success: false,
         error: { code: 'NOT_FOUND', message: 'Schedule not found' }
       });
+    }
+
+    const scope = req.user?.allowedOrgUnitIds;
+    if (scope !== null && scope !== undefined) {
+      const dept = schedule as any;
+      const deptOrgUnitId = dept.departmentOrgUnitId ?? null;
+      if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Access to this schedule is outside your scope' },
+        });
+      }
     }
 
     res.json({ success: true, data: schedule });
