@@ -10,9 +10,13 @@ import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { logger } from '../config/logger';
 import { config } from '../config';
+import { AuditLogService } from './AuditLogService';
 
 export class UserService {
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   async createUser(userData: CreateUserRequest): Promise<User> {
     const connection = await this.pool.getConnection();
@@ -53,6 +57,14 @@ export class UserService {
       logger.info('User created: ' + userId);
       const newUser = await this.getUserById(userId);
       if (!newUser) throw new Error('Failed to retrieve created user');
+      await this.audit.write({
+        actorId: null,
+        action: 'user.create',
+        entityType: 'user',
+        entityId: userId,
+        description: `User created: ${userData.email}`,
+        after: { email: userData.email, firstName: userData.firstName, lastName: userData.lastName },
+      });
       return newUser;
     } catch (error) {
       await connection.rollback();
@@ -227,6 +239,14 @@ export class UserService {
       logger.info('User updated: ' + id);
       const updatedUser = await this.getUserById(id);
       if (!updatedUser) throw new Error('User not found after update');
+      await this.audit.write({
+        actorId: null,
+        action: 'user.update',
+        entityType: 'user',
+        entityId: id,
+        description: `User updated: ${updatedUser.email}`,
+        after: { email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName, isActive: updatedUser.isActive },
+      });
       return updatedUser;
     } catch (error) {
       await connection.rollback();
@@ -244,6 +264,13 @@ export class UserService {
       await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
       await connection.commit();
       logger.info('User deleted: ' + id);
+      await this.audit.write({
+        actorId: null,
+        action: 'user.delete',
+        entityType: 'user',
+        entityId: id,
+        description: `User deactivated: ${id}`,
+      });
       return true;
     } catch (error) {
       await connection.rollback();

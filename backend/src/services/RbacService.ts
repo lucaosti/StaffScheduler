@@ -24,9 +24,13 @@ import {
   UpdateRoleRequest,
 } from '../types';
 import { logger } from '../config/logger';
+import { AuditLogService } from './AuditLogService';
 
 export class RbacService {
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   /**
    * Returns the de-duplicated set of permission codes a user effectively holds,
@@ -252,6 +256,14 @@ export class RbacService {
        ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)`,
       [userId, roleId, scopeOrgUnitId, expiresAt]
     );
+    await this.audit.write({
+      actorId: null,
+      action: 'role.grant',
+      entityType: 'user',
+      entityId: userId,
+      description: `Role ${roleId} granted to user ${userId}`,
+      after: { userId, roleId, scopeOrgUnitId, expiresAt },
+    });
   }
 
   async removeRole(userId: number, roleId: number, scopeOrgUnitId: number | null = null): Promise<void> {
@@ -266,6 +278,14 @@ export class RbacService {
         [userId, roleId, scopeOrgUnitId]
       );
     }
+    await this.audit.write({
+      actorId: null,
+      action: 'role.revoke',
+      entityType: 'user',
+      entityId: userId,
+      description: `Role ${roleId} revoked from user ${userId}`,
+      before: { userId, roleId, scopeOrgUnitId },
+    });
   }
 
   // --------------------------------------------------------------------------

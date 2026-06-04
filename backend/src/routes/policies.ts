@@ -26,6 +26,7 @@ import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
 import { PolicyValidator } from '../services/PolicyValidator';
+import { AuditLogService } from '../services/AuditLogService';
 import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -38,6 +39,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
   const exceptions = new PolicyExceptionService(pool);
   const matrix = new ApprovalMatrixService(pool);
   const validator = new PolicyValidator(pool);
+  const audit = new AuditLogService(pool);
 
   router.use(authenticate);
 
@@ -191,6 +193,11 @@ export const createPoliciesRouter = (pool: Pool): Router => {
         description: req.body?.description ?? null,
         imposedByUserId: req.user!.id,
       });
+      await audit.write({
+        actorId: req.user!.id, action: 'policy.create',
+        entityType: 'policy', entityId: created.id,
+        after: { key: created.policyKey, value: created.policyValue },
+      });
       res.status(201).json({ success: true, data: created });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
@@ -206,6 +213,12 @@ export const createPoliciesRouter = (pool: Pool): Router => {
         return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an administrator may edit this policy');
       }
       const updated = await policies.update(Number(req.params.id), req.body ?? {});
+      await audit.write({
+        actorId: req.user!.id, action: 'policy.update',
+        entityType: 'policy', entityId: updated.id,
+        before: { key: existing.policyKey, value: existing.policyValue },
+        after: { key: updated.policyKey, value: updated.policyValue },
+      });
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -222,6 +235,11 @@ export const createPoliciesRouter = (pool: Pool): Router => {
         return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an administrator may delete this policy');
       }
       await policies.remove(Number(req.params.id));
+      await audit.write({
+        actorId: req.user!.id, action: 'policy.delete',
+        entityType: 'policy', entityId: Number(req.params.id),
+        before: { key: existing.policyKey, value: existing.policyValue },
+      });
       res.json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

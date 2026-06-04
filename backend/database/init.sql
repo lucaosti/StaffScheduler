@@ -551,15 +551,19 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     entity_type VARCHAR(50),
     entity_id INT,
     description TEXT,
+    -- JSON snapshots of the entity state before and after a mutation.
+    -- Populated for sensitive changes: role grants, policy edits, user updates.
+    before_snapshot JSON NULL,
+    after_snapshot JSON NULL,
     ip_address VARCHAR(45),
     user_agent TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    
+
     INDEX idx_user (user_id),
     INDEX idx_action (action),
     INDEX idx_entity (entity_type, entity_id),
     INDEX idx_created (created_at),
-    
+
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
