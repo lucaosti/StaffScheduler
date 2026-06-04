@@ -252,7 +252,7 @@ export class SystemSettingsService {
   async getCurrency(): Promise<string> {
     try {
       return await this.getSetting('general', 'currency');
-    } catch (error) {
+    } catch (_error) {
       logger.warn('Currency setting not found, returning default EUR');
       return 'EUR';
     }
@@ -281,7 +281,7 @@ export class SystemSettingsService {
   async getTimePeriod(): Promise<string> {
     try {
       return await this.getSetting('general', 'time_period');
-    } catch (error) {
+    } catch (_error) {
       logger.warn('Time period setting not found, returning default monthly');
       return 'monthly';
     }
