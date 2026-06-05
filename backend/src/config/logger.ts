@@ -22,6 +22,13 @@
 
 import winston from 'winston';
 import { config } from '../config';
+import { getRequestId } from '../middleware/requestContext';
+
+const requestIdFormat = winston.format((info) => {
+  const id = getRequestId();
+  if (id) info.requestId = id;
+  return info;
+});
 
 /**
  * Main application logger instance with configured transports and formatting
@@ -46,6 +53,7 @@ const logger = winston.createLogger({
   level: config.logging.level,
   silent: isTest,
   format: winston.format.combine(
+    requestIdFormat(),
     winston.format.timestamp(),
     winston.format.errors({ stack: true }),
     winston.format.json()
