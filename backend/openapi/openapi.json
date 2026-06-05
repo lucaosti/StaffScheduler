@@ -3,15 +3,26 @@
   "info": {
     "title": "Staff Scheduler API",
     "version": "1.0.0",
-    "description": "Workforce management REST API. All non-public endpoints require a Bearer JWT obtained via /api/auth/login.",
-    "contact": { "name": "Luca Ostinelli", "email": "ostinelliluca2@gmail.com" }
+    "description": "Open-source workforce management REST API.\n\nAll non-public endpoints require a Bearer JWT obtained via `POST /api/v1/auth/login`.\n\nBase URLs:\n- Canonical: `http://localhost:3001/api/v1`\n- Legacy (will be removed): `http://localhost:3001/api`\n\nEvery response follows the envelope format:\n- Success: `{ \"success\": true, \"data\": <T> }`\n- Error:   `{ \"success\": false, \"error\": { \"code\": \"ERROR_CODE\", \"message\": \"...\" } }`\n\nValidation errors return `VALIDATION_ERROR` with a `details` array of field-level messages.\nRate-limit errors return HTTP 429 with code `RATE_LIMIT_EXCEEDED`.",
+    "contact": {
+      "name": "Luca Ostinelli",
+      "email": "ostinelliluca2@gmail.com",
+      "url": "https://github.com/lucaosti/StaffScheduler"
+    },
+    "license": { "name": "MIT" }
   },
   "servers": [
-    { "url": "http://localhost:3001", "description": "Local development" }
+    { "url": "http://localhost:3001/api/v1", "description": "Local development (canonical)" },
+    { "url": "http://localhost:3001/api", "description": "Local development (legacy — will be removed)" }
   ],
   "components": {
     "securitySchemes": {
-      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "JWT" }
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "JWT obtained from POST /auth/login. Pass as Authorization: Bearer <token>."
+      }
     },
     "schemas": {
       "ApiSuccess": {
@@ -32,10 +43,30 @@
             "type": "object",
             "required": ["code", "message"],
             "properties": {
-              "code": { "type": "string" },
-              "message": { "type": "string" }
+              "code": { "type": "string", "description": "Machine-readable error code, e.g. VALIDATION_ERROR, NOT_FOUND, UNAUTHORIZED." },
+              "message": { "type": "string" },
+              "details": {
+                "type": "array",
+                "description": "Field-level validation errors (present on VALIDATION_ERROR).",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "field": { "type": "string" },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
             }
           }
+        }
+      },
+      "PaginationMeta": {
+        "type": "object",
+        "properties": {
+          "total": { "type": "integer" },
+          "page": { "type": "integer" },
+          "limit": { "type": "integer" },
+          "totalPages": { "type": "integer" }
         }
       },
       "User": {
@@ -45,7 +76,91 @@
           "email": { "type": "string", "format": "email" },
           "firstName": { "type": "string" },
           "lastName": { "type": "string" },
-          "role": { "type": "string", "enum": ["admin", "manager", "employee"] },
+          "role": { "type": "string", "description": "Legacy role field. Use RBAC permissions for fine-grained access control." },
+          "isActive": { "type": "boolean" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Department": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "orgUnitId": { "type": "integer", "description": "Parent org-unit FK. Null if the department is not linked to an org unit." },
+          "isActive": { "type": "boolean" },
+          "memberCount": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Schedule": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "departmentId": { "type": "integer" },
+          "departmentName": { "type": "string" },
+          "startDate": { "type": "string", "format": "date" },
+          "endDate": { "type": "string", "format": "date" },
+          "status": { "type": "string", "enum": ["draft", "published", "archived"] },
+          "publishedAt": { "type": "string", "format": "date-time" },
+          "totalShifts": { "type": "integer" },
+          "totalAssignments": { "type": "integer" },
+          "notes": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Shift": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "scheduleId": { "type": "integer" },
+          "departmentId": { "type": "integer" },
+          "departmentName": { "type": "string" },
+          "date": { "type": "string", "format": "date" },
+          "startTime": { "type": "string", "description": "HH:MM" },
+          "endTime": { "type": "string", "description": "HH:MM" },
+          "minStaff": { "type": "integer" },
+          "maxStaff": { "type": "integer" },
+          "assignedStaff": { "type": "integer" },
+          "status": { "type": "string", "enum": ["open", "filled", "overstaffed"] },
+          "notes": { "type": "string" }
+        }
+      },
+      "Assignment": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "shiftId": { "type": "integer" },
+          "userId": { "type": "integer" },
+          "userName": { "type": "string" },
+          "userEmail": { "type": "string", "format": "email" },
+          "shiftDate": { "type": "string", "format": "date" },
+          "startTime": { "type": "string" },
+          "endTime": { "type": "string" },
+          "departmentId": { "type": "integer" },
+          "departmentName": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "confirmed", "cancelled", "completed"] },
+          "assignedAt": { "type": "string", "format": "date-time" },
+          "confirmedAt": { "type": "string", "format": "date-time" },
+          "notes": { "type": "string" }
+        }
+      },
+      "Employee": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "userId": { "type": "integer" },
+          "firstName": { "type": "string" },
+          "lastName": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "employeeNumber": { "type": "string" },
+          "position": { "type": "string" },
+          "departmentId": { "type": "integer" },
+          "departmentName": { "type": "string" },
+          "hourlyRate": { "type": "number" },
           "isActive": { "type": "boolean" }
         }
       },
@@ -57,7 +172,10 @@
           "startDate": { "type": "string", "format": "date" },
           "endDate": { "type": "string", "format": "date" },
           "type": { "type": "string", "enum": ["vacation", "sick", "personal", "other"] },
-          "status": { "type": "string", "enum": ["pending", "approved", "rejected", "cancelled"] }
+          "reason": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "approved", "rejected", "cancelled"] },
+          "reviewedBy": { "type": "integer" },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       },
       "ShiftSwapRequest": {
@@ -68,30 +186,153 @@
           "requesterAssignmentId": { "type": "integer" },
           "targetUserId": { "type": "integer" },
           "targetAssignmentId": { "type": "integer" },
-          "status": { "type": "string", "enum": ["pending", "approved", "declined", "cancelled"] }
+          "notes": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "approved", "declined", "cancelled"] },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "OrgUnit": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "parentId": { "type": "integer", "description": "Null for root units." },
+          "level": { "type": "integer" },
+          "path": { "type": "string", "description": "Materialized path, e.g. /1/4/9/" }
+        }
+      },
+      "Role": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "isBuiltin": { "type": "boolean" },
+          "permissions": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Permission keys assigned to this role, e.g. 'schedule.manage'."
+          }
+        }
+      },
+      "Permission": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string", "description": "Dot-notation key, e.g. 'schedule.manage'." },
+          "description": { "type": "string" },
+          "category": { "type": "string" }
+        }
+      },
+      "Policy": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "key": { "type": "string" },
+          "label": { "type": "string" },
+          "description": { "type": "string" },
+          "value": {},
+          "valueType": { "type": "string", "enum": ["integer", "float", "boolean", "string"] },
+          "category": { "type": "string" },
+          "isActive": { "type": "boolean" }
+        }
+      },
+      "AuditLogEntry": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "actorId": { "type": "integer" },
+          "actorEmail": { "type": "string" },
+          "action": { "type": "string", "description": "Dot-notation action, e.g. 'schedule.publish'." },
+          "entityType": { "type": "string" },
+          "entityId": { "type": "integer" },
+          "description": { "type": "string" },
+          "before": { "type": "object", "description": "State before the change (JSON)." },
+          "after": { "type": "object", "description": "State after the change (JSON)." },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid JWT.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "Forbidden": {
+        "description": "Authenticated but lacking the required permission.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "NotFound": {
+        "description": "Resource not found.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      },
+      "ValidationError": {
+        "description": "Request body or path parameter failed Zod validation.",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApiError" } } }
+      }
+    },
+    "parameters": {
+      "id": { "name": "id", "in": "path", "required": true, "schema": { "type": "integer", "minimum": 1 } },
+      "pageQuery": { "name": "page", "in": "query", "schema": { "type": "integer", "minimum": 1, "default": 1 } },
+      "limitQuery": { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 } }
     }
   },
   "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "Auth", "description": "Login, token management, and 2FA." },
+    { "name": "Users", "description": "User account management (admin)." },
+    { "name": "Employees", "description": "Employee profiles, skills, and department membership." },
+    { "name": "Departments", "description": "Department CRUD and member management." },
+    { "name": "Schedules", "description": "Schedule lifecycle: create, publish, archive, optimize." },
+    { "name": "Shifts", "description": "Individual shifts within a schedule, plus shift templates." },
+    { "name": "Assignments", "description": "Assign employees to shifts, confirm, decline, complete." },
+    { "name": "Time Off", "description": "Time-off requests and approvals." },
+    { "name": "Shift Swap", "description": "Peer shift-swap requests." },
+    { "name": "On Call", "description": "On-call periods and assignments." },
+    { "name": "Calendar", "description": "iCalendar feeds for personal and department schedules." },
+    { "name": "Directory", "description": "Employee directory, custom fields, and vCard export." },
+    { "name": "Preferences", "description": "Per-user scheduling preferences." },
+    { "name": "Dashboard", "description": "Aggregated statistics and activity feeds." },
+    { "name": "Reports", "description": "Hours-worked, cost-by-department, and fairness reports." },
+    { "name": "Audit Logs", "description": "Immutable audit trail for all sensitive actions." },
+    { "name": "RBAC", "description": "Roles and permissions management." },
+    { "name": "Policies", "description": "Configurable scheduling and compliance policies." },
+    { "name": "Org Units", "description": "Hierarchical organisational unit tree and employee loans." },
+    { "name": "Settings", "description": "System-wide settings (currency, time-period, arbitrary key/value)." },
+    { "name": "Skill Gap", "description": "Skill gap analysis and coverage reports." },
+    { "name": "Notifications", "description": "In-app notification inbox." },
+    { "name": "Modules", "description": "Runtime feature flag enable/disable." },
+    { "name": "Delegations", "description": "Temporary authority delegation between users." },
+    { "name": "Approval Workflows", "description": "Configurable multi-step approval workflow definitions." },
+    { "name": "Import", "description": "Bulk employee and shift import." },
+    { "name": "System", "description": "Health check and runtime metadata." }
+  ],
   "paths": {
-    "/api/health": {
+    "/health": {
       "get": {
+        "tags": ["System"],
         "summary": "Health check",
+        "description": "Returns database connectivity status. No authentication required.",
         "security": [],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": { "description": "Service healthy.", "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string", "const": "ok" }, "database": { "type": "string" }, "timestamp": { "type": "string" } } } } } },
+          "503": { "description": "Database unreachable." }
+        }
       }
     },
-    "/api/system/info": {
+    "/system/info": {
       "get": {
-        "summary": "Runtime metadata (mode = production | demo | development)",
+        "tags": ["System"],
+        "summary": "Runtime metadata",
+        "description": "Returns mode (production | demo | development), version, and active modules. No authentication required.",
         "security": [],
-        "responses": { "200": { "description": "OK" } }
+        "responses": { "200": { "description": "Runtime info." } }
       }
     },
-    "/api/auth/login": {
+    "/auth/login": {
       "post": {
-        "summary": "Authenticate with email + password",
+        "tags": ["Auth"],
+        "summary": "Login",
+        "description": "Authenticate with email and password. Returns a signed JWT valid for the period configured in `JWT_EXPIRES_IN` (default 24 h). The token must be passed as `Authorization: Bearer <token>` on subsequent requests.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -104,174 +345,587 @@
                   "email": { "type": "string", "format": "email" },
                   "password": { "type": "string" }
                 }
-              }
+              },
+              "example": { "email": "admin@example.com", "password": "secret" }
             }
           }
         },
         "responses": {
-          "200": { "description": "JWT issued" },
-          "401": { "description": "Invalid credentials" }
+          "200": { "description": "JWT issued.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "object", "properties": { "token": { "type": "string" }, "user": { "$ref": "#/components/schemas/User" } } } } } } } },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "description": "Invalid credentials." },
+          "429": { "description": "Login throttled — too many failed attempts." }
         }
       }
     },
-    "/api/auth/2fa/setup": {
+    "/auth/2fa/setup": {
       "post": {
-        "summary": "Begin TOTP setup; returns secret and otpauth URI",
-        "responses": { "200": { "description": "Setup payload" } }
+        "tags": ["Auth"],
+        "summary": "Begin TOTP 2FA setup",
+        "description": "Generates a TOTP secret and returns it plus an `otpauth://` URI. The caller must confirm the code via `/auth/2fa/enable` before 2FA is active.",
+        "responses": {
+          "200": { "description": "TOTP setup payload.", "content": { "application/json": { "schema": { "type": "object", "properties": { "secret": { "type": "string" }, "otpauthUrl": { "type": "string" }, "qrCodeUrl": { "type": "string" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
       }
     },
-    "/api/auth/2fa/enable": {
+    "/auth/2fa/enable": {
       "post": {
-        "summary": "Confirm a TOTP code and enable 2FA; returns recovery codes",
+        "tags": ["Auth"],
+        "summary": "Confirm and enable 2FA",
+        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.",
         "requestBody": {
           "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["code"],
-                "properties": { "code": { "type": "string", "pattern": "^[0-9]{6}$" } }
-              }
-            }
-          }
+          "content": { "application/json": { "schema": { "type": "object", "required": ["code"], "properties": { "code": { "type": "string", "pattern": "^[0-9]{6}$" } } } } }
         },
         "responses": {
-          "200": { "description": "Recovery codes" },
-          "400": { "description": "Invalid code or state" }
+          "200": { "description": "2FA enabled. Recovery codes returned." },
+          "400": { "description": "Invalid code or 2FA not in setup state." },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
-    "/api/auth/2fa/disable": {
+    "/auth/2fa/disable": {
       "post": {
-        "summary": "Disable 2FA for the current user",
-        "responses": { "200": { "description": "OK" } }
+        "tags": ["Auth"],
+        "summary": "Disable 2FA",
+        "responses": {
+          "200": { "description": "2FA disabled." },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
       }
     },
-    "/api/time-off": {
+    "/users": {
       "get": {
-        "summary": "List time-off requests",
+        "tags": ["Users"],
+        "summary": "List users",
+        "description": "Returns all users. Requires authentication; filter by role or active status.",
+        "parameters": [
+          { "name": "role", "in": "query", "schema": { "type": "string" } },
+          { "name": "isActive", "in": "query", "schema": { "type": "boolean" } },
+          { "$ref": "#/components/parameters/pageQuery" },
+          { "$ref": "#/components/parameters/limitQuery" }
+        ],
         "responses": {
-          "200": {
-            "description": "Array of TimeOffRequest",
-            "content": {
-              "application/json": {
-                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TimeOffRequest" } }
-              }
-            }
-          }
+          "200": { "description": "User list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/User" } }, "meta": { "$ref": "#/components/schemas/PaginationMeta" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "post": {
-        "summary": "Create a pending time-off request",
+        "tags": ["Users"],
+        "summary": "Create user",
+        "description": "Creates a new user account. Requires admin permissions.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["startDate", "endDate"],
+                "required": ["email", "password", "firstName", "lastName"],
                 "properties": {
-                  "startDate": { "type": "string", "format": "date" },
-                  "endDate": { "type": "string", "format": "date" },
-                  "type": { "type": "string", "enum": ["vacation", "sick", "personal", "other"] },
-                  "reason": { "type": "string" }
+                  "email": { "type": "string", "format": "email" },
+                  "password": { "type": "string", "minLength": 1 },
+                  "firstName": { "type": "string" },
+                  "lastName": { "type": "string" },
+                  "roleIds": { "type": "array", "items": { "type": "integer" } }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created" } }
+        "responses": {
+          "201": { "description": "User created." },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "description": "Email already registered." }
+        }
       }
     },
-    "/api/time-off/{id}/approve": {
-      "post": {
-        "summary": "Approve a pending time-off request (manager)",
-        "parameters": [
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
-        ],
-        "responses": { "200": { "description": "Approved" } }
-      }
-    },
-    "/api/shift-swap": {
-      "post": {
-        "summary": "Create a shift swap request",
+    "/users/{id}": {
+      "get": {
+        "tags": ["Users"],
+        "summary": "Get user by ID",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "User object." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Users"],
+        "summary": "Update user",
+        "description": "Update email, name, role, or active status. Admins can update any user; regular users can update themselves (limited fields).",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["requesterAssignmentId", "targetAssignmentId"],
                 "properties": {
-                  "requesterAssignmentId": { "type": "integer" },
-                  "targetAssignmentId": { "type": "integer" },
+                  "email": { "type": "string", "format": "email" },
+                  "firstName": { "type": "string" },
+                  "lastName": { "type": "string" },
+                  "isActive": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Updated user." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "delete": {
+        "tags": ["Users"],
+        "summary": "Delete user",
+        "description": "Permanently deletes a user. Admin only.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "User deleted." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/employees": {
+      "get": {
+        "tags": ["Employees"],
+        "summary": "List employees",
+        "parameters": [
+          { "name": "departmentId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "isActive", "in": "query", "schema": { "type": "boolean" } },
+          { "$ref": "#/components/parameters/pageQuery" },
+          { "$ref": "#/components/parameters/limitQuery" }
+        ],
+        "responses": {
+          "200": { "description": "Employee list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Employee" } } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Employees"],
+        "summary": "Create employee profile",
+        "description": "Creates the employee record for an existing user. Requires `employee.manage`.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["userId"],
+                "properties": {
+                  "userId": { "type": "integer" },
+                  "employeeNumber": { "type": "string" },
+                  "position": { "type": "string" },
+                  "departmentId": { "type": "integer" },
+                  "hourlyRate": { "type": "number", "minimum": 0 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Employee created." },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/employees/{id}": {
+      "get": {
+        "tags": ["Employees"],
+        "summary": "Get employee by ID",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Employee object." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Employees"],
+        "summary": "Update employee",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "position": { "type": "string" }, "hourlyRate": { "type": "number" }, "isActive": { "type": "boolean" } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["Employees"],
+        "summary": "Delete employee profile",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/employees/{id}/skills": {
+      "get": {
+        "tags": ["Employees"],
+        "summary": "List employee skills",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Skill list." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "post": {
+        "tags": ["Employees"],
+        "summary": "Add skill to employee",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["skillId"], "properties": { "skillId": { "type": "integer" } } } } } },
+        "responses": { "201": { "description": "Skill added." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/departments": {
+      "get": {
+        "tags": ["Departments"],
+        "summary": "List departments",
+        "parameters": [
+          { "name": "isActive", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "orgUnitId", "in": "query", "schema": { "type": "integer" }, "description": "Filter by parent org unit." }
+        ],
+        "responses": {
+          "200": { "description": "Department list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Department" } } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Departments"],
+        "summary": "Create department",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "orgUnitId": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "201": { "description": "Department created." }, "400": { "$ref": "#/components/responses/ValidationError" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/departments/{id}": {
+      "get": { "tags": ["Departments"], "summary": "Get department by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Department object." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "put": {
+        "tags": ["Departments"],
+        "summary": "Update department",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" }, "isActive": { "type": "boolean" }, "orgUnitId": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": { "tags": ["Departments"], "summary": "Delete department", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/departments/{id}/users": {
+      "post": {
+        "tags": ["Departments"],
+        "summary": "Add user to department",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "integer" }, "role": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "User added." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/departments/{id}/users/{userId}": {
+      "delete": {
+        "tags": ["Departments"],
+        "summary": "Remove user from department",
+        "parameters": [{ "$ref": "#/components/parameters/id" }, { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "responses": { "200": { "description": "User removed." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/departments/{id}/stats": {
+      "get": { "tags": ["Departments"], "summary": "Department statistics", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Staffing stats." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/schedules": {
+      "get": {
+        "tags": ["Schedules"],
+        "summary": "List schedules",
+        "parameters": [
+          { "name": "departmentId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["draft", "published", "archived"] } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "$ref": "#/components/parameters/pageQuery" },
+          { "$ref": "#/components/parameters/limitQuery" }
+        ],
+        "responses": {
+          "200": { "description": "Schedule list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Schedule" } } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "post": {
+        "tags": ["Schedules"],
+        "summary": "Create schedule",
+        "description": "Requires `schedule.manage`. Creates a draft schedule. A schedule cannot overlap with an existing draft or published schedule in the same department.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "departmentId", "startDate", "endDate"],
+                "properties": {
+                  "name": { "type": "string" },
+                  "departmentId": { "type": "integer" },
+                  "startDate": { "type": "string", "format": "date" },
+                  "endDate": { "type": "string", "format": "date" },
                   "notes": { "type": "string" }
                 }
               }
             }
           }
         },
-        "responses": { "201": { "description": "Created" } }
+        "responses": {
+          "201": { "description": "Schedule created." },
+          "400": { "$ref": "#/components/responses/ValidationError" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "description": "Overlapping schedule exists for this department and date range." }
+        }
       }
     },
-    "/api/preferences/me": {
-      "get": { "summary": "Read own scheduling preferences", "responses": { "200": { "description": "OK" } } },
+    "/schedules/{id}": {
+      "get": { "tags": ["Schedules"], "summary": "Get schedule by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Schedule object." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } },
       "put": {
-        "summary": "Upsert own scheduling preferences",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "maxHoursPerWeek": { "type": "integer" },
-                  "minHoursPerWeek": { "type": "integer" },
-                  "maxConsecutiveDays": { "type": "integer", "minimum": 1, "maximum": 14 }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "OK" } }
+        "tags": ["Schedules"],
+        "summary": "Update schedule",
+        "description": "Updates name, dates, notes, or status. Requires `schedule.manage`. Archived schedules cannot be modified.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "startDate": { "type": "string", "format": "date" }, "endDate": { "type": "string", "format": "date" }, "notes": { "type": "string" }, "status": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Updated." }, "400": { "$ref": "#/components/responses/ValidationError" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["Schedules"],
+        "summary": "Delete schedule",
+        "description": "Only draft schedules can be deleted. Cascades to shifts and assignments. Requires `schedule.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Deleted." }, "400": { "description": "Schedule is not in draft status." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
       }
     },
-    "/api/audit-logs": {
+    "/schedules/{id}/shifts": {
+      "get": { "tags": ["Schedules"], "summary": "List shifts in schedule", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Shift list with staffing counts." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/schedules/{id}/publish": {
+      "patch": {
+        "tags": ["Schedules"],
+        "summary": "Publish schedule",
+        "description": "Transitions status from `draft` to `published`. The schedule must have at least one shift. Requires `schedule.publish`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Published." }, "400": { "description": "No shifts or wrong status." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/schedules/{id}/archive": {
+      "patch": {
+        "tags": ["Schedules"],
+        "summary": "Archive schedule",
+        "description": "Transitions status to `archived`. Requires `schedule.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Archived." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/schedules/{id}/duplicate": {
+      "post": {
+        "tags": ["Schedules"],
+        "summary": "Duplicate schedule",
+        "description": "Clones the schedule and all its shifts to a new date range. Requires `schedule.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name", "startDate", "endDate"], "properties": { "name": { "type": "string" }, "startDate": { "type": "string", "format": "date" }, "endDate": { "type": "string", "format": "date" } } } } } },
+        "responses": { "201": { "description": "Cloned schedule." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/schedules/{id}/generate": {
+      "post": {
+        "tags": ["Schedules"],
+        "summary": "Auto-generate assignments",
+        "description": "Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) and creates pending assignments for all open shifts. Requires `schedule.optimize`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": {
+          "200": { "description": "Generation result.", "content": { "application/json": { "schema": { "type": "object", "properties": { "assignmentsCreated": { "type": "integer" }, "totalShifts": { "type": "integer" }, "coveragePercentage": { "type": "number" }, "status": { "type": "string" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/shifts/templates": {
+      "get": { "tags": ["Shifts"], "summary": "List shift templates", "responses": { "200": { "description": "Template list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": {
+        "tags": ["Shifts"],
+        "summary": "Create shift template",
+        "description": "Requires `shift.manage`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name", "startTime", "endTime"], "properties": { "name": { "type": "string" }, "startTime": { "type": "string" }, "endTime": { "type": "string" }, "minStaff": { "type": "integer" }, "maxStaff": { "type": "integer" } } } } } },
+        "responses": { "201": { "description": "Template created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/shifts": {
       "get": {
-        "summary": "List audit log entries (manager)",
+        "tags": ["Shifts"],
+        "summary": "List shifts",
         "parameters": [
-          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
-          { "name": "action", "in": "query", "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "schema": { "type": "integer", "maximum": 500 } },
-          { "name": "offset", "in": "query", "schema": { "type": "integer" } }
+          { "name": "scheduleId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "departmentId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "date", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "$ref": "#/components/parameters/pageQuery" },
+          { "$ref": "#/components/parameters/limitQuery" }
         ],
-        "responses": { "200": { "description": "Page of entries" } }
+        "responses": { "200": { "description": "Shift list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Shift" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      },
+      "post": {
+        "tags": ["Shifts"],
+        "summary": "Create shift",
+        "description": "Requires `shift.manage`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["scheduleId", "departmentId", "date", "startTime", "endTime"], "properties": { "scheduleId": { "type": "integer" }, "departmentId": { "type": "integer" }, "date": { "type": "string", "format": "date" }, "startTime": { "type": "string" }, "endTime": { "type": "string" }, "minStaff": { "type": "integer", "default": 1 }, "maxStaff": { "type": "integer", "default": 1 }, "notes": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Shift created." }, "400": { "$ref": "#/components/responses/ValidationError" }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
       }
     },
-    "/api/calendar/token": {
-      "post": { "summary": "Get or create the calendar feed token", "responses": { "200": { "description": "OK" } } }
+    "/shifts/{id}": {
+      "get": { "tags": ["Shifts"], "summary": "Get shift by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Shift object." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "put": { "tags": ["Shifts"], "summary": "Update shift", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "date": { "type": "string", "format": "date" }, "startTime": { "type": "string" }, "endTime": { "type": "string" }, "minStaff": { "type": "integer" }, "maxStaff": { "type": "integer" }, "notes": { "type": "string" } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "delete": { "tags": ["Shifts"], "summary": "Delete shift", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } }
     },
-    "/api/calendar/feed.ics": {
+    "/assignments": {
       "get": {
-        "summary": "iCalendar feed for the user identified by `token`. Lists colleagues working the same shift in DESCRIPTION; emits ETag and X-PUBLISHED-TTL/REFRESH-INTERVAL.",
+        "tags": ["Assignments"],
+        "summary": "List assignments",
+        "parameters": [
+          { "name": "shiftId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "scheduleId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "departmentId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "confirmed", "cancelled", "completed"] } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "Assignment list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Assignment" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      },
+      "post": {
+        "tags": ["Assignments"],
+        "summary": "Create assignment",
+        "description": "Assigns an employee to a shift. Validates: capacity, conflicts, availability, skills, compliance limits, and active policies. Requires `assignment.manage`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["shiftId", "userId"], "properties": { "shiftId": { "type": "integer" }, "userId": { "type": "integer" }, "notes": { "type": "string" } } } } } },
+        "responses": {
+          "201": { "description": "Assignment created with status `pending`.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "$ref": "#/components/schemas/Assignment" } } } } } },
+          "400": { "description": "Capacity exceeded, conflict, unavailability, or missing skills." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "description": "Compliance or policy violation." }
+        }
+      }
+    },
+    "/assignments/{id}": {
+      "get": { "tags": ["Assignments"], "summary": "Get assignment by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Assignment object." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "put": { "tags": ["Assignments"], "summary": "Update assignment status or notes", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "status": { "type": "string" }, "notes": { "type": "string" } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "delete": { "tags": ["Assignments"], "summary": "Delete assignment", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/assignments/{id}/confirm": {
+      "patch": { "tags": ["Assignments"], "summary": "Confirm assignment", "description": "Transitions from `pending` to `confirmed`.", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Confirmed." }, "400": { "description": "Not in pending status." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/assignments/{id}/decline": {
+      "patch": { "tags": ["Assignments"], "summary": "Decline assignment", "description": "Transitions from `pending` or `confirmed` to `cancelled`.", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Cancelled." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/assignments/{id}/complete": {
+      "patch": { "tags": ["Assignments"], "summary": "Complete assignment", "description": "Transitions from `confirmed` to `completed`.", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Completed." }, "400": { "description": "Assignment is not confirmed." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/assignments/bulk": {
+      "post": { "tags": ["Assignments"], "summary": "Bulk create assignments", "description": "Creates multiple assignments in one request. Failures are logged and skipped; the response contains only successfully created assignments. Requires `assignment.manage`.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["shiftId", "userIds"], "properties": { "shiftId": { "type": "integer" }, "userIds": { "type": "array", "items": { "type": "integer" } } } } } } }, "responses": { "201": { "description": "Created assignments." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/assignments/shift/{shiftId}/available-employees": {
+      "get": { "tags": ["Assignments"], "summary": "Available employees for shift", "description": "Returns users in the shift's department who have no conflicting assignment.", "parameters": [{ "name": "shiftId", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "List of available employees." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/time-off": {
+      "get": {
+        "tags": ["Time Off"],
+        "summary": "List time-off requests",
+        "description": "Employees see their own requests; managers see all requests in their departments.",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "approved", "rejected", "cancelled"] } },
+          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
+          { "$ref": "#/components/parameters/pageQuery" },
+          { "$ref": "#/components/parameters/limitQuery" }
+        ],
+        "responses": { "200": { "description": "Time-off request list." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      },
+      "post": {
+        "tags": ["Time Off"],
+        "summary": "Create time-off request",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["startDate", "endDate"], "properties": { "startDate": { "type": "string", "format": "date" }, "endDate": { "type": "string", "format": "date" }, "type": { "type": "string", "enum": ["vacation", "sick", "personal", "other"], "default": "other" }, "reason": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Request created with status `pending`." }, "400": { "$ref": "#/components/responses/ValidationError" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/time-off/{id}/approve": {
+      "post": { "tags": ["Time Off"], "summary": "Approve time-off request", "description": "Manager action.", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Approved." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/time-off/{id}/reject": {
+      "post": { "tags": ["Time Off"], "summary": "Reject time-off request", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": false, "content": { "application/json": { "schema": { "type": "object", "properties": { "reason": { "type": "string" } } } } } }, "responses": { "200": { "description": "Rejected." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/shift-swap": {
+      "get": { "tags": ["Shift Swap"], "summary": "List shift swap requests", "responses": { "200": { "description": "Swap request list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": {
+        "tags": ["Shift Swap"],
+        "summary": "Create shift swap request",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["requesterAssignmentId", "targetAssignmentId"], "properties": { "requesterAssignmentId": { "type": "integer" }, "targetAssignmentId": { "type": "integer" }, "notes": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Swap request created." }, "400": { "$ref": "#/components/responses/ValidationError" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/on-call/periods": {
+      "get": {
+        "tags": ["On Call"],
+        "summary": "List on-call periods",
+        "parameters": [
+          { "name": "departmentId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" } },
+          { "name": "start", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "end", "in": "query", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "On-call period list." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      },
+      "post": {
+        "tags": ["On Call"],
+        "summary": "Create on-call period",
+        "description": "Requires manager role.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["departmentId", "date", "startTime", "endTime"], "properties": { "departmentId": { "type": "integer" }, "scheduleId": { "type": "integer" }, "date": { "type": "string", "format": "date" }, "startTime": { "type": "string" }, "endTime": { "type": "string" }, "minStaff": { "type": "integer", "minimum": 1 }, "maxStaff": { "type": "integer", "minimum": 1 }, "notes": { "type": "string" } } } } } },
+        "responses": { "201": { "description": "Created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/on-call/periods/{id}/assign": {
+      "post": { "tags": ["On Call"], "summary": "Assign user to on-call period", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "integer" }, "notes": { "type": "string" } } } } } }, "responses": { "200": { "description": "Assigned." }, "404": { "$ref": "#/components/responses/NotFound" }, "409": { "description": "Period at max capacity." } } }
+    },
+    "/on-call/me": {
+      "get": { "tags": ["On Call"], "summary": "Caller's on-call schedule", "parameters": [{ "name": "start", "in": "query", "schema": { "type": "string", "format": "date" } }, { "name": "end", "in": "query", "schema": { "type": "string", "format": "date" } }], "responses": { "200": { "description": "On-call periods for the caller." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/calendar/token": {
+      "post": { "tags": ["Calendar"], "summary": "Get or create calendar feed token", "description": "Returns a stable token used to authenticate the iCalendar feed URL.", "responses": { "200": { "description": "Token." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/calendar/feed.ics": {
+      "get": {
+        "tags": ["Calendar"],
+        "summary": "Personal iCalendar feed",
+        "description": "Returns an iCal feed for the user identified by `token`. No JWT required — pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
         "security": [],
         "parameters": [
           { "name": "token", "in": "query", "required": true, "schema": { "type": "string" } },
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "iCalendar text",
-            "content": { "text/calendar": { "schema": { "type": "string" } } }
-          },
-          "304": { "description": "Not modified (ETag match)" },
-          "401": { "description": "Missing or invalid token" }
+          "200": { "description": "iCalendar text.", "content": { "text/calendar": { "schema": { "type": "string" } } } },
+          "304": { "description": "Not modified (ETag match)." },
+          "401": { "description": "Missing or invalid token." }
         }
       }
     },
-    "/api/calendar/department/{id}.ics": {
+    "/calendar/department/{id}.ics": {
       "get": {
-        "summary": "Aggregated iCal feed for an entire department (manager/admin only). Includes assignee names per shift.",
+        "tags": ["Calendar"],
+        "summary": "Department iCalendar feed",
+        "description": "Aggregated iCal for an entire department. Manager/admin only. Pass the manager's calendar token.",
         "security": [],
         "parameters": [
           { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } },
@@ -279,154 +933,158 @@
           { "name": "If-None-Match", "in": "header", "schema": { "type": "string" } }
         ],
         "responses": {
-          "200": {
-            "description": "iCalendar text",
-            "content": { "text/calendar": { "schema": { "type": "string" } } }
-          },
-          "304": { "description": "Not modified" },
-          "401": { "description": "Missing or invalid token" },
-          "403": { "description": "Caller is not a manager of this department" }
+          "200": { "description": "iCalendar text.", "content": { "text/calendar": { "schema": { "type": "string" } } } },
+          "304": { "description": "Not modified." },
+          "401": { "description": "Missing or invalid token." },
+          "403": { "description": "Caller is not a manager of this department." }
         }
       }
     },
-    "/api/on-call/periods": {
-      "get": { "summary": "List on-call periods (filters: departmentId, status, start, end)", "responses": { "200": { "description": "OK" } } },
-      "post": {
-        "summary": "Create an on-call period (manager)",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["departmentId", "date", "startTime", "endTime"],
-                "properties": {
-                  "departmentId": { "type": "integer" },
-                  "scheduleId": { "type": "integer" },
-                  "date": { "type": "string", "format": "date" },
-                  "startTime": { "type": "string" },
-                  "endTime": { "type": "string" },
-                  "minStaff": { "type": "integer", "minimum": 1 },
-                  "maxStaff": { "type": "integer", "minimum": 1 },
-                  "notes": { "type": "string" }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "201": { "description": "Created" } }
-      }
+    "/directory/me": {
+      "get": { "tags": ["Directory"], "summary": "Own directory profile", "description": "Returns the caller's profile plus any custom fields.", "responses": { "200": { "description": "Profile." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
     },
-    "/api/on-call/periods/{id}/assign": {
-      "post": {
-        "summary": "Assign a user to an on-call period (manager)",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": { "type": "object", "required": ["userId"], "properties": { "userId": { "type": "integer" }, "notes": { "type": "string" } } }
-            }
-          }
-        },
-        "responses": {
-          "200": { "description": "Assigned" },
-          "404": { "description": "Period not found" },
-          "409": { "description": "Period at max capacity" }
-        }
-      }
+    "/directory/users/{id}": {
+      "get": { "tags": ["Directory"], "summary": "User directory profile", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Profile." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } } }
     },
-    "/api/on-call/me": {
-      "get": {
-        "summary": "Caller's on-call schedule (filters: start, end)",
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/api/directory/me": {
-      "get": { "summary": "Caller's profile + custom fields", "responses": { "200": { "description": "OK" } } }
-    },
-    "/api/directory/users/{id}": {
-      "get": {
-        "summary": "Directory profile of another user (manager)",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
-        "responses": { "200": { "description": "OK" } }
-      }
-    },
-    "/api/directory/users/{id}/fields": {
+    "/directory/users/{id}/fields": {
       "put": {
-        "summary": "Bulk upsert custom fields on a user (manager)",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "required": ["fields"],
-                "properties": {
-                  "fields": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "required": ["key", "value"],
-                      "properties": {
-                        "key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
-                        "value": { "type": "string" },
-                        "isPublic": { "type": "boolean" }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Updated profile" } }
+        "tags": ["Directory"],
+        "summary": "Bulk upsert custom fields",
+        "description": "Replaces all custom fields for a user. Manager only.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["fields"], "properties": { "fields": { "type": "array", "items": { "type": "object", "required": ["key", "value"], "properties": { "key": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" }, "value": { "type": "string" }, "isPublic": { "type": "boolean" } } } } } } } } },
+        "responses": { "200": { "description": "Updated profile." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
       }
     },
-    "/api/directory/users/{id}/vcard": {
+    "/directory/users/{id}/vcard": {
+      "get": { "tags": ["Directory"], "summary": "Single-user vCard 4.0", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "vCard.", "content": { "text/vcard": { "schema": { "type": "string" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } }
+    },
+    "/directory/vcard.vcf": {
+      "get": { "tags": ["Directory"], "summary": "Multi-user vCard archive", "parameters": [{ "name": "ids", "in": "query", "required": true, "schema": { "type": "string", "description": "Comma-separated user IDs." } }], "responses": { "200": { "description": "vCard archive.", "content": { "text/vcard": { "schema": { "type": "string" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/directory/import-vcard": {
+      "post": { "tags": ["Directory"], "summary": "Bulk import from vCard", "description": "Admin only. Existing emails are skipped.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "vcf": { "type": "string", "description": "Raw .vcf text." }, "defaultPassword": { "type": "string" } } } } } }, "responses": { "200": { "description": "Inserted and skipped counts." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/preferences/me": {
+      "get": { "tags": ["Preferences"], "summary": "Read own scheduling preferences", "responses": { "200": { "description": "Preferences object." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "put": {
+        "tags": ["Preferences"],
+        "summary": "Upsert own scheduling preferences",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "maxHoursPerWeek": { "type": "integer" }, "minHoursPerWeek": { "type": "integer" }, "maxConsecutiveDays": { "type": "integer", "minimum": 1, "maximum": 14 } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/dashboard/stats": {
+      "get": { "tags": ["Dashboard"], "summary": "Aggregated dashboard statistics", "responses": { "200": { "description": "Stats (total staff, shifts today, coverage, etc.)." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/dashboard/activities": {
+      "get": { "tags": ["Dashboard"], "summary": "Recent activity feed", "parameters": [{ "$ref": "#/components/parameters/limitQuery" }], "responses": { "200": { "description": "Activity list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/dashboard/upcoming-shifts": {
+      "get": { "tags": ["Dashboard"], "summary": "Caller's upcoming shifts", "responses": { "200": { "description": "Shifts list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/reports/hours-worked": {
+      "get": { "tags": ["Reports"], "summary": "Hours worked report", "parameters": [{ "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } }, { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }, { "name": "departmentId", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "Hours per employee." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/reports/cost-by-department": {
+      "get": { "tags": ["Reports"], "summary": "Labour cost by department", "parameters": [{ "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } }, { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } }], "responses": { "200": { "description": "Cost breakdown." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/reports/fairness/{scheduleId}": {
+      "get": { "tags": ["Reports"], "summary": "Shift fairness report", "description": "Measures how evenly shifts are distributed across employees in a schedule.", "parameters": [{ "name": "scheduleId", "in": "path", "required": true, "schema": { "type": "integer" } }], "responses": { "200": { "description": "Fairness metrics." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/audit-logs": {
       "get": {
-        "summary": "Single-user vCard 4.0",
-        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }],
-        "responses": {
-          "200": {
-            "description": "vCard text",
-            "content": { "text/vcard": { "schema": { "type": "string" } } }
-          }
-        }
+        "tags": ["Audit Logs"],
+        "summary": "List audit log entries",
+        "description": "Manager or admin only. Immutable log of all sensitive actions.",
+        "parameters": [
+          { "name": "userId", "in": "query", "schema": { "type": "integer" } },
+          { "name": "action", "in": "query", "schema": { "type": "string" } },
+          { "name": "entityType", "in": "query", "schema": { "type": "string" } },
+          { "name": "startDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "endDate", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "maximum": 500, "default": 50 } },
+          { "name": "offset", "in": "query", "schema": { "type": "integer", "default": 0 } }
+        ],
+        "responses": { "200": { "description": "Audit entries.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/AuditLogEntry" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
       }
     },
-    "/api/directory/vcard.vcf": {
-      "get": {
-        "summary": "Multi-user vCard archive (manager)",
-        "parameters": [{ "name": "ids", "in": "query", "required": true, "schema": { "type": "string", "description": "Comma-separated user ids" } }],
-        "responses": {
-          "200": {
-            "description": "vCard archive",
-            "content": { "text/vcard": { "schema": { "type": "string" } } }
-          }
-        }
-      }
+    "/roles": {
+      "get": { "tags": ["RBAC"], "summary": "List roles", "responses": { "200": { "description": "Role list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Role" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["RBAC"], "summary": "Create role", "description": "Requires admin.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "description": { "type": "string" }, "permissionKeys": { "type": "array", "items": { "type": "string" } } } } } } }, "responses": { "201": { "description": "Role created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
     },
-    "/api/directory/import-vcard": {
-      "post": {
-        "summary": "Bulk import vCard 4.0 file (admin). Existing emails are skipped.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "vcf": { "type": "string", "description": "Raw .vcf text" },
-                  "defaultPassword": { "type": "string" }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Result with inserted + skipped counts" } }
-      }
+    "/roles/{id}": {
+      "get": { "tags": ["RBAC"], "summary": "Get role by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Role object." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "put": { "tags": ["RBAC"], "summary": "Update role", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" }, "permissionKeys": { "type": "array", "items": { "type": "string" } } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } },
+      "delete": { "tags": ["RBAC"], "summary": "Delete role", "description": "Cannot delete built-in roles.", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "400": { "description": "Cannot delete a built-in role." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/permissions": {
+      "get": { "tags": ["RBAC"], "summary": "List all permission keys", "responses": { "200": { "description": "Permission list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Permission" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/policies": {
+      "get": { "tags": ["Policies"], "summary": "List scheduling policies", "responses": { "200": { "description": "Policy list.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "array", "items": { "$ref": "#/components/schemas/Policy" } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Policies"], "summary": "Create policy", "description": "Requires `policy.manage`.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["key", "label", "value", "valueType"], "properties": { "key": { "type": "string" }, "label": { "type": "string" }, "description": { "type": "string" }, "value": {}, "valueType": { "type": "string", "enum": ["integer", "float", "boolean", "string"] }, "category": { "type": "string" } } } } } }, "responses": { "201": { "description": "Policy created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/policies/{id}": {
+      "get": { "tags": ["Policies"], "summary": "Get policy by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Policy object." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "put": { "tags": ["Policies"], "summary": "Update policy", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "label": { "type": "string" }, "value": {}, "isActive": { "type": "boolean" } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } },
+      "delete": { "tags": ["Policies"], "summary": "Delete policy", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/policies/validate/assignment": {
+      "post": { "tags": ["Policies"], "summary": "Validate assignment against policies", "description": "Dry-runs policy checks without creating an assignment. Returns violations.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["userId", "shiftId"], "properties": { "userId": { "type": "integer" }, "shiftId": { "type": "integer" } } } } } }, "responses": { "200": { "description": "Validation result with any violations." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/policies/exceptions": {
+      "get": { "tags": ["Policies"], "summary": "List policy exceptions", "responses": { "200": { "description": "Exception list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Policies"], "summary": "Request a policy exception", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["policyId", "reason"], "properties": { "policyId": { "type": "integer" }, "reason": { "type": "string" } } } } } }, "responses": { "201": { "description": "Exception requested." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/org/units": {
+      "get": { "tags": ["Org Units"], "summary": "List org units (flat)", "responses": { "200": { "description": "Flat list of org units." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Org Units"], "summary": "Create org unit", "description": "Requires `org_unit.manage`.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name"], "properties": { "name": { "type": "string" }, "parentId": { "type": "integer", "description": "Null for root units." } } } } } }, "responses": { "201": { "description": "Created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/org/units/tree": {
+      "get": { "tags": ["Org Units"], "summary": "Org unit tree", "description": "Returns the full hierarchy as a nested tree structure.", "responses": { "200": { "description": "Tree." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/org/units/{id}": {
+      "get": { "tags": ["Org Units"], "summary": "Get org unit by ID", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Org unit.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/OrgUnit" } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } } },
+      "put": { "tags": ["Org Units"], "summary": "Update org unit", "parameters": [{ "$ref": "#/components/parameters/id" }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "parentId": { "type": "integer" } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } },
+      "delete": { "tags": ["Org Units"], "summary": "Delete org unit", "parameters": [{ "$ref": "#/components/parameters/id" }], "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/org/loans": {
+      "get": { "tags": ["Org Units"], "summary": "List employee loans", "description": "Employee loans temporarily move a user to a different org unit.", "responses": { "200": { "description": "Loan list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Org Units"], "summary": "Request employee loan", "description": "Requires `loan.request`.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["userId", "targetOrgUnitId", "startDate", "endDate"], "properties": { "userId": { "type": "integer" }, "targetOrgUnitId": { "type": "integer" }, "startDate": { "type": "string", "format": "date" }, "endDate": { "type": "string", "format": "date" }, "reason": { "type": "string" } } } } } }, "responses": { "201": { "description": "Loan requested." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/skill-gap": {
+      "get": { "tags": ["Skill Gap"], "summary": "Skill gap analysis", "parameters": [{ "name": "departmentId", "in": "query", "schema": { "type": "integer" } }, { "name": "scheduleId", "in": "query", "schema": { "type": "integer" } }], "responses": { "200": { "description": "Gaps between required and available skills." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/settings": {
+      "get": { "tags": ["Settings"], "summary": "Get all system settings", "responses": { "200": { "description": "Settings object." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/settings/currency": {
+      "get": { "tags": ["Settings"], "summary": "Get currency setting", "responses": { "200": { "description": "Currency code." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "put": { "tags": ["Settings"], "summary": "Update currency setting", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["currency"], "properties": { "currency": { "type": "string", "pattern": "^[A-Z]{3}$" } } } } } }, "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/import/employees": {
+      "post": { "tags": ["Import"], "summary": "Bulk import employees from CSV/JSON", "description": "Admin only. Idempotent by email — existing employees are updated.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["employees"], "properties": { "employees": { "type": "array", "items": { "type": "object" } } } } } } }, "responses": { "200": { "description": "Import result." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/import/shifts": {
+      "post": { "tags": ["Import"], "summary": "Bulk import shifts", "description": "Admin/manager only.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["shifts"], "properties": { "shifts": { "type": "array", "items": { "type": "object" } } } } } } }, "responses": { "200": { "description": "Import result." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/modules": {
+      "get": { "tags": ["Modules"], "summary": "List feature modules and their status", "responses": { "200": { "description": "Module list with enabled/disabled state." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/modules/{name}/enable": {
+      "post": { "tags": ["Modules"], "summary": "Enable a feature module", "description": "Admin only.", "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Module enabled." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/modules/{name}/disable": {
+      "post": { "tags": ["Modules"], "summary": "Disable a feature module", "description": "Admin only.", "parameters": [{ "name": "name", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Module disabled." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/delegations": {
+      "get": { "tags": ["Delegations"], "summary": "List delegations", "description": "Returns delegations involving the caller (as delegator or delegate).", "responses": { "200": { "description": "Delegation list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Delegations"], "summary": "Create delegation", "description": "Grants a set of permissions to another user for a specified period.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["delegateUserId", "permissionKeys", "startDate", "endDate"], "properties": { "delegateUserId": { "type": "integer" }, "permissionKeys": { "type": "array", "items": { "type": "string" } }, "startDate": { "type": "string", "format": "date-time" }, "endDate": { "type": "string", "format": "date-time" }, "reason": { "type": "string" } } } } } }, "responses": { "201": { "description": "Delegation created." }, "401": { "$ref": "#/components/responses/Unauthorized" } } }
+    },
+    "/approval-workflows": {
+      "get": { "tags": ["Approval Workflows"], "summary": "List approval workflow definitions", "responses": { "200": { "description": "Workflow list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
+      "post": { "tags": ["Approval Workflows"], "summary": "Create approval workflow", "description": "Defines a multi-step approval chain for a specific change type.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name", "changeType", "steps"], "properties": { "name": { "type": "string" }, "changeType": { "type": "string" }, "steps": { "type": "array", "items": { "type": "object", "properties": { "order": { "type": "integer" }, "approverRole": { "type": "string" }, "timeoutHours": { "type": "integer" } } } } } } } } }, "responses": { "201": { "description": "Workflow created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
     }
   }
 }
