@@ -70,12 +70,13 @@ export class DepartmentService {
 
       // Insert department record
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO departments (name, description, manager_id, is_active)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO departments (name, description, manager_id, org_unit_id, is_active)
+         VALUES (?, ?, ?, ?, ?)`,
         [
           deptData.name,
           deptData.description || null,
           deptData.managerId || null,
+          deptData.orgUnitId || null,
           true
         ]
       );
@@ -116,8 +117,8 @@ export class DepartmentService {
   async getDepartmentById(id: number): Promise<Department | null> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT 
-          d.id, d.name, d.description, d.manager_id, d.is_active,
+        `SELECT
+          d.id, d.name, d.description, d.manager_id, d.org_unit_id, d.is_active,
           d.created_at, d.updated_at,
           u.first_name as manager_first_name,
           u.last_name as manager_last_name,
@@ -144,6 +145,7 @@ export class DepartmentService {
         managerName: row.manager_first_name && row.manager_last_name
           ? `${row.manager_first_name} ${row.manager_last_name}`
           : undefined,
+        orgUnitId: row.org_unit_id ?? undefined,
         isActive: Boolean(row.is_active),
         employeeCount: row.employee_count || 0,
         createdAt: row.created_at,
@@ -169,8 +171,8 @@ export class DepartmentService {
   }): Promise<Department[]> {
     try {
       let query = `
-        SELECT 
-          d.id, d.name, d.description, d.manager_id, d.is_active,
+        SELECT
+          d.id, d.name, d.description, d.manager_id, d.org_unit_id, d.is_active,
           d.created_at, d.updated_at,
           u.first_name as manager_first_name,
           u.last_name as manager_last_name,
@@ -210,6 +212,7 @@ export class DepartmentService {
         managerName: row.manager_first_name && row.manager_last_name
           ? `${row.manager_first_name} ${row.manager_last_name}`
           : undefined,
+        orgUnitId: row.org_unit_id ?? undefined,
         isActive: Boolean(row.is_active),
         employeeCount: row.employee_count || 0,
         createdAt: row.created_at,
@@ -274,6 +277,11 @@ export class DepartmentService {
         }
         updates.push('manager_id = ?');
         values.push(deptData.managerId);
+      }
+
+      if (deptData.orgUnitId !== undefined) {
+        updates.push('org_unit_id = ?');
+        values.push(deptData.orgUnitId);
       }
 
       if (deptData.isActive !== undefined) {
