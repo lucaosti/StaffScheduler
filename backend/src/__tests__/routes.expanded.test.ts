@@ -85,6 +85,7 @@ import { RbacService } from '../services/RbacService';
 const fakePool = {} as never;
 
 // Default RbacService stub so auth route tests that call RbacService don't fail.
+// Default AssignmentService.getAssignmentById stub for confirm/decline ownership checks.
 beforeEach(() => {
   if ((RbacService.prototype.getEffectivePermissions as jest.Mock)?.mockReset) {
     (RbacService.prototype.getEffectivePermissions as jest.Mock).mockReset();
@@ -93,6 +94,12 @@ beforeEach(() => {
   if ((RbacService.prototype.getUserRoles as jest.Mock)?.mockReset) {
     (RbacService.prototype.getUserRoles as jest.Mock).mockReset();
     (RbacService.prototype.getUserRoles as jest.Mock).mockResolvedValue([]);
+  }
+  // Confirm/decline now require a pre-flight getAssignmentById call. Default to
+  // returning an assignment owned by the test user (id=1) so existing tests pass
+  // without changes. Individual tests can override this stub as needed.
+  if ((AssignmentService.prototype.getAssignmentById as jest.Mock)?.mockResolvedValue) {
+    (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({ id: 1, userId: 1 });
   }
 });
 

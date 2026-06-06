@@ -35,6 +35,10 @@ export class RbacService {
   /**
    * Returns the de-duplicated set of permission codes a user effectively holds,
    * merging both role-based permissions and any active delegations received.
+   *
+   * Delegated permissions are capped to what the delegator currently holds at
+   * resolution time. If a delegator has had a permission revoked after the
+   * delegation was created, the delegatee no longer benefits from that code.
    */
   async getEffectivePermissions(userId: number): Promise<string[]> {
     const [roleRows] = await this.pool.execute<RowDataPacket[]>(
@@ -48,20 +52,36 @@ export class RbacService {
     );
     const fromRoles = roleRows.map((r: any) => r.code as string);
 
-    // Merge active delegations received by this user.
+    // Merge active delegations received by this user, capped to what the
+    // delegator currently holds to prevent privilege retention after revocation.
     const [delegRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT permission_codes
-         FROM delegations
-        WHERE delegatee_id = ?
-          AND is_active = TRUE
-          AND starts_at <= NOW()
-          AND expires_at > NOW()`,
+      `SELECT d.delegator_id, d.permission_codes
+         FROM delegations d
+        WHERE d.delegatee_id = ?
+          AND d.is_active = TRUE
+          AND d.starts_at <= NOW()
+          AND d.expires_at > NOW()`,
       [userId]
     );
+
     const fromDelegations: string[] = [];
     for (const row of delegRows as any[]) {
-      const codes: string[] = JSON.parse(row.permission_codes as string);
-      codes.forEach((c) => fromDelegations.push(c));
+      const delegatedCodes: string[] = JSON.parse(row.permission_codes as string);
+      // Resolve the delegator's current role-based permissions (no recursion:
+      // sub-delegation is not allowed by design).
+      const [delegatorRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT DISTINCT p.code
+           FROM user_roles ur
+           JOIN role_permissions rp ON rp.role_id = ur.role_id
+           JOIN permissions p ON p.id = rp.permission_id
+          WHERE ur.user_id = ?
+            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+        [row.delegator_id]
+      );
+      const delegatorPerms = new Set(delegatorRows.map((r: any) => r.code as string));
+      // Only grant codes the delegator still holds.
+      const safeCodes = delegatedCodes.filter((c) => delegatorPerms.has(c));
+      safeCodes.forEach((c) => fromDelegations.push(c));
     }
 
     return [...new Set([...fromRoles, ...fromDelegations])];

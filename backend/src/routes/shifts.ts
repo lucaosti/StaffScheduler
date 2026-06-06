@@ -168,7 +168,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get shift by ID
-router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -178,6 +178,18 @@ router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, 
         success: false,
         error: { code: 'NOT_FOUND', message: 'Shift not found' }
       });
+    }
+
+    // Enforce org-unit scope when the caller has a restricted scope.
+    const scope = req.user?.allowedOrgUnitIds;
+    if (scope !== null && scope !== undefined) {
+      const shiftOrgUnitId = (shift as any).orgUnitId ?? (shift as any).departmentOrgUnitId ?? null;
+      if (shiftOrgUnitId === null || !scope.includes(shiftOrgUnitId)) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Access to this shift is outside your scope' },
+        });
+      }
     }
 
     res.json({ success: true, data: shift });
