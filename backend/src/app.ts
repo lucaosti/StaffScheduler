@@ -18,6 +18,7 @@ import type { Pool } from 'mysql2/promise';
 import { config } from './config';
 import { logger } from './config/logger';
 import { requestId } from './middleware/requestContext';
+import { requestLogger } from './middleware/requestLogger';
 
 import { createAuthRouter } from './routes/auth';
 import { createUsersRouter } from './routes/users';
@@ -134,6 +135,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   }
 
   app.use(requestId);
+  app.use(requestLogger);
   app.use(compression());
   // Body parser: 10 MB ceiling is intentional — bulk import CSVs and schedule payloads
   // can be large, but we keep this well below the 50 MB nginx default to limit DoS surface.
