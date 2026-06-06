@@ -862,13 +862,13 @@ describe('employees router (extended)', () => {
     expect(res.status).toBe(500);
   });
 
-  it('POST /:id/skills 400/200/500', async () => {
+  it('POST /:id/skills 400/201/500', async () => {
     let res = await request(app()).post('/api/employees/abc/skills').send({});
     expect(res.status).toBe(400);
 
     (EmployeeService.prototype.addEmployeeSkill as jest.Mock) = jest.fn().mockResolvedValue(undefined);
     res = await request(app()).post('/api/employees/1/skills').send({ skillId: 1, proficiencyLevel: 3 });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
 
     (EmployeeService.prototype.addEmployeeSkill as jest.Mock) = jest
       .fn()
@@ -1080,7 +1080,7 @@ describe('departments router (extended)', () => {
       .fn()
       .mockResolvedValue(undefined);
     res = await request(app()).post('/api/departments/1/users').send({ userId: 9 });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
 
     (DepartmentService.prototype.addUserToDepartment as jest.Mock) = jest
       .fn()

@@ -249,7 +249,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
 
       await departmentService.addUserToDepartment(departmentId, userId);
 
-      res.json({ success: true, data: { message: 'User added to department successfully' } });
+      res.status(201).json({ success: true, data: { message: 'User added to department successfully' } });
     } catch (error) {
       logger.error('Add user to department error:', error);
       res.status(500).json({

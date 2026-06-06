@@ -325,9 +325,7 @@ describe('ScheduleService convenience helpers', () => {
   it('getSchedulesByUser returns mapped schedules; bubbles errors', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[{ id: 1 }, { id: 2 }], null] as Tuple) // user schedules
-      .mockResolvedValueOnce([[buildScheduleRow({ id: 1 })], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple) // null filtered
+      .mockResolvedValueOnce([[buildScheduleRow({ id: 1 })], null] as Tuple) // single batched query
       .mockRejectedValueOnce(new Error('boom'));
     const svc = new ScheduleService(pool);
     const out = await svc.getSchedulesByUser(7);
