@@ -44,7 +44,7 @@
     "@types/jsonwebtoken": "^9.0.2",
     "@types/morgan": "^1.9.4",
     "@types/node": "^20.4.5",
-    "@types/supertest": "^2.0.12",
+    "@types/supertest": "^7.2.0",
     "@typescript-eslint/eslint-plugin": "^8.60.1",
     "@typescript-eslint/parser": "^8.60.1",
     "eslint": "^8.45.0",
@@ -52,7 +52,7 @@
     "knip": "^6.7.0",
     "nodemon": "^3.0.1",
     "prettier": "^3.0.0",
-    "supertest": "^6.3.3",
+    "supertest": "^7.2.2",
     "ts-jest": "^29.1.1",
     "ts-node": "^10.9.1",
     "typescript": "^5.1.6"
