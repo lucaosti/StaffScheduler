@@ -288,22 +288,79 @@ Users cannot assign roles that contain permissions they do not themselves hold (
 
 ## 6. Scheduling engine
 
-The optimizer is optional. Set `OPTIMIZATION_ENGINE=or-tools` in `backend/.env` to enable.
+Two engines are available: a TypeScript greedy solver (always active) and a
+Python OR-Tools CP-SAT solver (opt-in). The system degrades gracefully —
+when Python is unavailable, the greedy solver runs automatically.
+
+### Engine selection
+
+| `OPTIMIZATION_ENGINE` env value | Effect |
+|---|---|
+| `javascript` (default) | Greedy TypeScript solver only |
+| `or-tools` | CP-SAT Python solver; greedy fallback on any failure |
+
+To enable OR-Tools:
 
 ```bash
 cd backend
 pip3 install -r optimization-scripts/requirements.txt
 python3 optimization-scripts/schedule_optimizer.py --help
+# Then set OPTIMIZATION_ENGINE=or-tools in backend/.env
 ```
 
-### CP-SAT formulation
+### Greedy TypeScript solver (`ScheduleOptimizer.generateGreedySchedule`)
+
+Entry point: `backend/src/optimization/ScheduleOptimizerORTools.ts`  
+Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.generateOptimizedSchedule`
+
+**Algorithm**: O(shifts × employees). Shifts are sorted earliest-first; for each shift the first employees that pass all constraints are selected up to `min_staff`.
+
+**Constraints enforced (in evaluation order inside `evaluateCandidate`)**:
+
+| # | Constraint | Source of truth |
+|---|---|---|
+| 1 | Staff cap | `shift.max_staff` — never exceeded |
+| 2 | No double-booking | Time-overlap check within the calendar day |
+| 3 | Declared unavailability | `user_unavailability` rows, expanded to per-day dates |
+| 4 | Skill requirements | `shift_skills` join; employee must hold every required skill |
+| 5 | Daily hours cap | `max(8, emp.max_hours_per_week / 5)` hours per employee per day |
+
+**How to add a new constraint**:
+
+1. Add any needed state tracking in `generateGreedySchedule` (e.g. a new `Map`).
+2. Add the check to `evaluateCandidate(emp, ctx)` — the method is pure; no DB calls allowed there.
+3. Update the state map after each successful assignment in `generateGreedySchedule`.
+4. Write a unit test in `backend/src/__tests__/scheduleOptimizer.test.ts` against `evaluateCandidate` directly (no DB needed).
+
+**Known limitations**:
+- No backtracking: a locally greedy choice can block a later shift from being staffed. The CP-SAT path solves this globally.
+- Weekly hours are not tracked across the full schedule period; only the per-day budget is enforced.
+- Employee ordering within the candidate list is deterministic (input order) but not optimized for fairness — workload balancing is a soft constraint in CP-SAT only.
+
+### Python CP-SAT solver (`schedule_optimizer.py`)
+
+Entry point: `backend/optimization-scripts/schedule_optimizer.py`  
+Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `python3` via `child_process.spawn`, and parses the JSON response from stdout.
+
+**Failure handling**:
+
+| Failure mode | Behaviour |
+|---|---|
+| `python3` not found (ENOENT) | `spawn` emits `error` → `optimize()` logs a warning and falls back to greedy |
+| Non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
+| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
+| Malformed JSON output | Parse error → `optimize()` falls back to greedy |
+
+The `optimize()` return status is `GREEDY_FALLBACK` when the Python solver was unavailable.
+
+**CP-SAT formulation**:
 
 - **Variables** — one boolean per `(employee, shift)` candidate assignment.
 - **Hard constraints** — coverage windows, no double-booking, declared availability, weekly hour caps, skill requirements.
-- **Soft constraints** — preferences, workload fairness, minimum rest, consecutive-day caps. Each has a configurable weight.
+- **Soft constraints** — preferences, workload fairness, minimum rest, consecutive-day caps. Each has a configurable weight (see `_getDefaultWeights()` in `ScheduleOptimizerORTools.ts`).
 - **Objective** — weighted sum to minimize.
 
-The Node bridge is `backend/src/optimization/ScheduleOptimizerORTools.ts`. It serializes input as JSON, spawns `schedule_optimizer.py` as a child process, and parses the JSON response. A pure-TypeScript fallback (`ScheduleOptimizer.ts`) is used when OR-Tools is not available.
+**Performance characteristics**: CP-SAT is branch-and-bound with propagation. Small problems (< 50 shifts, < 30 employees) typically solve in under 1 s. Large problems run until `timeLimitSeconds` (default 300 s for the Python call) then return the best feasible solution found.
 
 ---
 
