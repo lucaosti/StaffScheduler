@@ -1,0 +1,14 @@
+# docker-compose.override.yml.example
+# Copy to docker-compose.override.yml and customize for local development.
+# This file is gitignored — local overrides are not committed.
+# Usage: docker compose up  (Docker Compose merges overrides automatically)
+
+services:
+  backend:
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+
+  db:
+    ports:
+      - "3306:3306"
