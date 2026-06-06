@@ -24,7 +24,7 @@ import Settings from './Settings';
 describe('<Settings />', () => {
   it('renders all tabs (admin variant)', async () => {
     mockUseAuth.mockReturnValue({
-      user: { id: 1, email: 'admin@x', role: 'admin' },
+      user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['system.settings'] },
     });
 
     render(<Settings />);

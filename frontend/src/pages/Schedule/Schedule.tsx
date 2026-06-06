@@ -20,6 +20,10 @@ import * as shiftService from '../../services/shiftService';
 import * as departmentService from '../../services/departmentService';
 import type { Department } from '../../services/departmentService';
 import { ApiError } from '../../services/apiUtils';
+import ScheduleList from '../schedule/ScheduleList';
+import CreateScheduleModal from '../schedule/CreateScheduleModal';
+import StatsBadge from '../schedule/StatsBadge';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 const Schedule: React.FC = () => {
   const [schedules, setSchedules] = useState<ScheduleType[]>([]);
@@ -48,12 +52,13 @@ const Schedule: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      const [schedulesResponse, employeesResponse, shiftsResponse, departmentsResponse] = await Promise.all([
-        scheduleService.getSchedules(),
-        employeeService.getEmployees({}),
-        shiftService.getShifts({}),
-        departmentService.getDepartments(),
-      ]);
+      const [schedulesResponse, employeesResponse, shiftsResponse, departmentsResponse] =
+        await Promise.all([
+          scheduleService.getSchedules(),
+          employeeService.getEmployees({}),
+          shiftService.getShifts({}),
+          departmentService.getDepartments(),
+        ]);
 
       if (schedulesResponse.success && schedulesResponse.data) {
         setSchedules(schedulesResponse.data);
@@ -73,7 +78,11 @@ const Schedule: React.FC = () => {
         setDepartments(departmentsResponse.data);
       }
 
-      if (schedulesResponse.success && schedulesResponse.data && schedulesResponse.data.length > 0) {
+      if (
+        schedulesResponse.success &&
+        schedulesResponse.data &&
+        schedulesResponse.data.length > 0
+      ) {
         const firstSchedule = schedulesResponse.data[0];
         const scheduleDetails = await scheduleService.getScheduleWithShifts(firstSchedule.id);
         if (scheduleDetails.success && scheduleDetails.data) {
@@ -123,7 +132,12 @@ const Schedule: React.FC = () => {
   }, [departments]);
 
   const filteredShifts = useMemo(
-    () => shifts.filter((shift) => !selectedDepartment || String(shift.departmentId ?? shift.department) === selectedDepartment),
+    () =>
+      shifts.filter(
+        (shift) =>
+          !selectedDepartment ||
+          String(shift.departmentId ?? shift.department) === selectedDepartment
+      ),
     [shifts, selectedDepartment]
   );
 
@@ -259,12 +273,7 @@ const Schedule: React.FC = () => {
   if (loading) {
     return (
       <div className="container-fluid py-4">
-        <div className="text-center">
-          <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </div>
-          <p className="mt-2">Loading schedule data...</p>
-        </div>
+        <LoadingSpinner message="Loading schedule data..." />
       </div>
     );
   }
@@ -330,15 +339,26 @@ const Schedule: React.FC = () => {
       <div className="row mb-4">
         <div className="col-md-6">
           <div className="d-flex align-items-center gap-3">
-            <button className="btn btn-outline-secondary" type="button" onClick={() => navigateWeek('prev')}>
+            <button
+              className="btn btn-outline-secondary"
+              type="button"
+              onClick={() => navigateWeek('prev')}
+            >
               <i className="bi bi-chevron-left"></i>
             </button>
             <h5 className="mb-0">
               {viewMode === 'week'
                 ? `Week of ${weekDates[0].toLocaleDateString(undefined)}`
-                : selectedWeek.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+                : selectedWeek.toLocaleDateString(undefined, {
+                    month: 'long',
+                    year: 'numeric',
+                  })}
             </h5>
-            <button className="btn btn-outline-secondary" type="button" onClick={() => navigateWeek('next')}>
+            <button
+              className="btn btn-outline-secondary"
+              type="button"
+              onClick={() => navigateWeek('next')}
+            >
               <i className="bi bi-chevron-right"></i>
             </button>
           </div>
@@ -358,9 +378,7 @@ const Schedule: React.FC = () => {
           </select>
         </div>
         <div className="col-md-3">
-          <div className="text-muted">
-            {filteredShifts.length} shift{filteredShifts.length !== 1 ? 's' : ''} · {employees.length} employees
-          </div>
+          <StatsBadge shiftCount={filteredShifts.length} employeeCount={employees.length} />
         </div>
       </div>
 
@@ -401,10 +419,13 @@ const Schedule: React.FC = () => {
                     </tr>
                   ) : (
                     filteredShifts.map((shift) => {
-                      const deptName = shift.departmentName
-                        || shift.department
-                        || (shift.departmentId ? departmentNameById.get(Number(shift.departmentId)) : '')
-                        || '';
+                      const deptName =
+                        shift.departmentName ||
+                        shift.department ||
+                        (shift.departmentId
+                          ? departmentNameById.get(Number(shift.departmentId))
+                          : '') ||
+                        '';
                       return (
                         <tr key={shift.id}>
                           <td className="align-middle">
@@ -417,26 +438,40 @@ const Schedule: React.FC = () => {
                             </div>
                           </td>
                           {weekDates.map((date) => {
-                            const dayAssignments = getAssignmentsForDateAndShift(date, shift.id!);
+                            const dayAssignments = getAssignmentsForDateAndShift(
+                              date,
+                              shift.id!
+                            );
                             return (
-                              <td key={date.toISOString()} className="align-middle text-center">
+                              <td
+                                key={date.toISOString()}
+                                className="align-middle text-center"
+                              >
                                 {dayAssignments.length > 0 ? (
                                   <div className="d-flex flex-column gap-1">
                                     {dayAssignments.map((assignment) => {
-                                      const employee = getEmployeeById(assignment.userId ?? assignment.employeeId ?? '');
+                                      const employee = getEmployeeById(
+                                        assignment.userId ?? assignment.employeeId ?? ''
+                                      );
                                       return (
                                         <div
                                           key={assignment.id}
                                           className="badge bg-success text-wrap"
                                           style={{ fontSize: '0.75em' }}
                                         >
-                                          {employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown'}
+                                          {employee
+                                            ? `${employee.firstName} ${employee.lastName}`
+                                            : 'Unknown'}
                                         </div>
                                       );
                                     })}
-                                    {dayAssignments.length < (shift.minStaff ?? shift.minimumStaff ?? 0) && (
+                                    {dayAssignments.length <
+                                      (shift.minStaff ?? shift.minimumStaff ?? 0) && (
                                       <small className="text-danger">
-                                        Need {(shift.minStaff ?? shift.minimumStaff ?? 0) - dayAssignments.length} more
+                                        Need{' '}
+                                        {(shift.minStaff ?? shift.minimumStaff ?? 0) -
+                                          dayAssignments.length}{' '}
+                                        more
                                       </small>
                                     )}
                                   </div>
@@ -474,203 +509,31 @@ const Schedule: React.FC = () => {
       <div className="row mt-4">
         <div className="col-12">
           <h5 className="mb-3">Recent Schedules</h5>
-          {schedules.length === 0 ? (
-            <div className="alert alert-info">
-              No schedules yet. Click <strong>New Schedule</strong> to create one.
-            </div>
-          ) : (
-            <div className="row">
-              {schedules.map((schedule) => (
-                <div key={schedule.id} className="col-md-6 col-lg-4 mb-3">
-                  <div className="card h-100">
-                    <div className="card-body">
-                      <div className="d-flex justify-content-between align-items-start mb-2">
-                        <h6 className="card-title mb-0">{schedule.name}</h6>
-                        <span
-                          className={`badge ${
-                            schedule.status === 'published'
-                              ? 'bg-success'
-                              : schedule.status === 'draft'
-                              ? 'bg-warning text-dark'
-                              : 'bg-secondary'
-                          }`}
-                        >
-                          {schedule.status}
-                        </span>
-                      </div>
-                      <p className="card-text mb-2">
-                        <small className="text-muted">
-                          {`${String(schedule.startDate).slice(0, 10)} → ${String(schedule.endDate).slice(0, 10)}`}
-                        </small>
-                        {schedule.departmentName && (
-                          <>
-                            <br />
-                            <span className="badge bg-primary">{schedule.departmentName}</span>
-                          </>
-                        )}
-                      </p>
-                      <div className="d-flex flex-wrap gap-2">
-                        <button
-                          className="btn btn-sm btn-outline-success"
-                          type="button"
-                          onClick={() => {
-                            setSelectedScheduleId(schedule.id);
-                            setGenerateError(null);
-                            setShowGenerateModal(true);
-                          }}
-                        >
-                          <i className="bi bi-magic me-1"></i>Generate
-                        </button>
-                        {schedule.status === 'draft' && (
-                          <button
-                            className="btn btn-sm btn-outline-primary"
-                            type="button"
-                            onClick={() => handlePublish(schedule.id)}
-                          >
-                            <i className="bi bi-cloud-upload me-1"></i>Publish
-                          </button>
-                        )}
-                        {schedule.status !== 'archived' && (
-                          <button
-                            className="btn btn-sm btn-outline-secondary"
-                            type="button"
-                            onClick={() => handleArchive(schedule.id)}
-                          >
-                            <i className="bi bi-archive me-1"></i>Archive
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          <ScheduleList
+            schedules={schedules}
+            onGenerate={(schedule) => {
+              setSelectedScheduleId(schedule.id);
+              setGenerateError(null);
+              setShowGenerateModal(true);
+            }}
+            onPublish={handlePublish}
+            onArchive={handleArchive}
+            onCreateNew={() => {
+              setCreateError(null);
+              setShowCreateModal(true);
+            }}
+          />
         </div>
       </div>
 
-      {showCreateModal && (
-        <div
-          className="modal show d-block"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="create-schedule-title"
-          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
-        >
-          <div className="modal-dialog modal-lg">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title" id="create-schedule-title">Create Schedule</h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  aria-label="Close"
-                  disabled={isCreating}
-                  onClick={() => setShowCreateModal(false)}
-                ></button>
-              </div>
-              <form onSubmit={handleCreateSchedule}>
-                <div className="modal-body">
-                  {createError && (
-                    <div className="alert alert-danger" role="alert">
-                      {createError}
-                    </div>
-                  )}
-                  <div className="mb-3">
-                    <label htmlFor="schedule-name" className="form-label">Name *</label>
-                    <input
-                      id="schedule-name"
-                      name="name"
-                      type="text"
-                      className="form-control"
-                      placeholder="e.g. April 2026 — ER"
-                      required
-                      disabled={isCreating}
-                    />
-                  </div>
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="schedule-start" className="form-label">Start Date *</label>
-                      <input
-                        id="schedule-start"
-                        name="startDate"
-                        type="date"
-                        className="form-control"
-                        required
-                        disabled={isCreating}
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="schedule-end" className="form-label">End Date *</label>
-                      <input
-                        id="schedule-end"
-                        name="endDate"
-                        type="date"
-                        className="form-control"
-                        required
-                        disabled={isCreating}
-                      />
-                    </div>
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="schedule-department" className="form-label">Department *</label>
-                    <select
-                      id="schedule-department"
-                      name="departmentId"
-                      className="form-select"
-                      required
-                      disabled={isCreating || departments.length === 0}
-                      defaultValue=""
-                    >
-                      <option value="" disabled>
-                        {departments.length === 0 ? 'No departments available' : 'Select a department'}
-                      </option>
-                      {departments.map((d) => (
-                        <option key={d.id} value={String(d.id)}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="mb-3">
-                    <label htmlFor="schedule-description" className="form-label">Description</label>
-                    <textarea
-                      id="schedule-description"
-                      name="description"
-                      className="form-control"
-                      rows={2}
-                      placeholder="Optional notes about this schedule"
-                      disabled={isCreating}
-                    />
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setShowCreateModal(false)}
-                    disabled={isCreating}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-primary" disabled={isCreating}>
-                    {isCreating ? (
-                      <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status"></span>
-                        Creating...
-                      </>
-                    ) : (
-                      <>
-                        <i className="bi bi-plus-lg me-2"></i>Create Schedule
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
+      <CreateScheduleModal
+        show={showCreateModal}
+        departments={departments}
+        isCreating={isCreating}
+        createError={createError}
+        onClose={() => setShowCreateModal(false)}
+        onSubmit={handleCreateSchedule}
+      />
 
       {showGenerateModal && (
         <div
@@ -683,7 +546,9 @@ const Schedule: React.FC = () => {
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title" id="generate-schedule-title">Generate Schedule</h5>
+                <h5 className="modal-title" id="generate-schedule-title">
+                  Generate Schedule
+                </h5>
                 <button
                   type="button"
                   className="btn-close"
@@ -700,7 +565,9 @@ const Schedule: React.FC = () => {
                     </div>
                   )}
                   <div className="mb-3">
-                    <label htmlFor="generate-schedule-id" className="form-label">Schedule *</label>
+                    <label htmlFor="generate-schedule-id" className="form-label">
+                      Schedule *
+                    </label>
                     <select
                       id="generate-schedule-id"
                       className="form-select"
@@ -710,18 +577,21 @@ const Schedule: React.FC = () => {
                       disabled={isGenerating || schedules.length === 0}
                     >
                       <option value="" disabled>
-                        {schedules.length === 0 ? 'No schedules available' : 'Select a schedule'}
+                        {schedules.length === 0
+                          ? 'No schedules available'
+                          : 'Select a schedule'}
                       </option>
                       {schedules.map((s) => (
                         <option key={s.id} value={String(s.id)}>
-                          {s.name} ({String(s.startDate).slice(0, 10)} → {String(s.endDate).slice(0, 10)})
+                          {s.name} ({String(s.startDate).slice(0, 10)} →{' '}
+                          {String(s.endDate).slice(0, 10)})
                         </option>
                       ))}
                     </select>
                   </div>
                   <p className="text-muted small mb-0">
-                    Optimization runs against the existing shifts inside the schedule's date range
-                    and respects active policies.
+                    Optimization runs against the existing shifts inside the schedule's date
+                    range and respects active policies.
                   </p>
                 </div>
                 <div className="modal-footer">
@@ -733,10 +603,17 @@ const Schedule: React.FC = () => {
                   >
                     Cancel
                   </button>
-                  <button type="submit" className="btn btn-success" disabled={isGenerating}>
+                  <button
+                    type="submit"
+                    className="btn btn-success"
+                    disabled={isGenerating}
+                  >
                     {isGenerating ? (
                       <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status"></span>
+                        <span
+                          className="spinner-border spinner-border-sm me-2"
+                          role="status"
+                        ></span>
                         Generating...
                       </>
                     ) : (
