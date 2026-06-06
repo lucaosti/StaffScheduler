@@ -33,9 +33,19 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
 describe('<Shifts />', () => {
   beforeEach(() => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
-
-    mockGetSchedules.mockResolvedValue(ok([{ id: 1, name: 'S1', startDate: '2026-04-01', endDate: '2026-04-07', status: 'draft', createdAt: 'x', updatedAt: 'x' }]));
+    mockGetSchedules.mockResolvedValue(
+      ok([
+        {
+          id: 1,
+          name: 'S1',
+          startDate: '2026-04-01',
+          endDate: '2026-04-07',
+          status: 'draft',
+          createdAt: 'x',
+          updatedAt: 'x',
+        },
+      ])
+    );
     mockGetDepartments.mockResolvedValue(ok([{ id: 10, name: 'Emergency Medicine' }]));
     mockGetShifts.mockResolvedValue(
       ok([
@@ -104,19 +114,21 @@ describe('<Shifts />', () => {
     await userEvent.click(screen.getByRole('button', { name: /update shift/i }));
     expect(mockUpdateShift).toHaveBeenCalled();
 
-    // Delete existing shift
+    // Delete existing shift — now uses ConfirmModal; click Delete then Confirm
     await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
-    expect(window.confirm).toHaveBeenCalled();
+    const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
+    await userEvent.click(confirmBtn);
     expect(mockDeleteShift).toHaveBeenCalled();
   });
 
-  it('does not delete when user cancels confirm', async () => {
-    (window.confirm as jest.Mock).mockReturnValueOnce(false);
+  it('does not delete when user cancels the confirm modal', async () => {
     render(<Shifts />);
     await screen.findByText(/Night/i);
-    // Click any delete action; confirm=false must prevent calling the service.
+    // Click delete to open the ConfirmModal
     await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    // Click the Cancel button inside the modal instead of Confirm
+    const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
+    await userEvent.click(cancelBtn);
     expect(mockDeleteShift).not.toHaveBeenCalled();
   });
 });
-

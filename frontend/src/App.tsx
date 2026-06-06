@@ -26,6 +26,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 // Layout Components
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Page Components
 import Login from './pages/Auth/Login';
@@ -70,6 +71,7 @@ const App: React.FC = () => {
       <I18nProvider>
       <AuthProvider>
         <DemoBanner />
+        <ErrorBoundary>
         <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
@@ -97,6 +99,7 @@ const App: React.FC = () => {
           {/* Catch-all route - Redirect unknown paths to dashboard */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </ErrorBoundary>
       </AuthProvider>
       </I18nProvider>
     </ThemeProvider>

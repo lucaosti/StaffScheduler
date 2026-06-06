@@ -21,19 +21,41 @@ import type {
   UserOrgUnit,
   EmployeeLoan,
 } from '../../services/orgService';
+import OrgTree from '../orgManagement/OrgTree';
+import MemberList from '../orgManagement/MemberList';
+import ConfirmModal from '../../components/ConfirmModal';
+import LoadingSpinner from '../../components/LoadingSpinner';
+import EmptyState from '../../components/EmptyState';
 
 type Tab = 'tree' | 'members' | 'loans';
 
+interface ConfirmState {
+  show: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+}
+
 const OrgManagement: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const isManager = user?.role === 'admin' || user?.role === 'manager';
+  const isAdmin = user?.permissions?.includes('org.admin');
+  const isManager =
+    user?.permissions?.includes('org.admin') ||
+    user?.permissions?.includes('org.manage');
 
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [units, setUnits] = useState<OrgUnit[]>([]);
   const [tree, setTree] = useState<OrgUnitNode[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+
+  const [confirm, setConfirm] = useState<ConfirmState>({
+    show: false,
+    title: '',
+    message: '',
+    onConfirm: () => undefined,
+  });
 
   // Tree form
   const [newUnit, setNewUnit] = useState<{ name: string; parentId: string; managerUserId: string }>(
@@ -88,8 +110,8 @@ const OrgManagement: React.FC = () => {
   };
 
   useEffect(() => {
-    refreshUnits();
-    refreshLoans();
+    Promise.all([refreshUnits(), refreshLoans()]).finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -116,19 +138,26 @@ const OrgManagement: React.FC = () => {
     }
   };
 
-  const handleDeleteUnit = async (id: number) => {
+  const handleDeleteUnit = (id: number) => {
     if (!isAdmin) return;
-    if (!window.confirm('Delete this org unit?')) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await orgService.deleteUnit(id);
-      await refreshUnits();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    setConfirm({
+      show: true,
+      title: 'Delete org unit',
+      message: 'Are you sure you want to delete this org unit?',
+      onConfirm: async () => {
+        setConfirm((prev) => ({ ...prev, show: false }));
+        setBusy(true);
+        setError(null);
+        try {
+          await orgService.deleteUnit(id);
+          await refreshUnits();
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
 
   const handleAddMember = async (e: React.FormEvent) => {
@@ -137,11 +166,7 @@ const OrgManagement: React.FC = () => {
     setBusy(true);
     setError(null);
     try {
-      await orgService.addMember(
-        selectedUnitId,
-        Number(memberForm.userId),
-        memberForm.isPrimary
-      );
+      await orgService.addMember(selectedUnitId, Number(memberForm.userId), memberForm.isPrimary);
       setMemberForm({ userId: '', isPrimary: false });
       await refreshMembers(selectedUnitId);
     } catch (err) {
@@ -165,19 +190,26 @@ const OrgManagement: React.FC = () => {
     }
   };
 
-  const handleRemoveMember = async (userId: number) => {
+  const handleRemoveMember = (userId: number) => {
     if (!isManager || selectedUnitId === null) return;
-    if (!window.confirm('Remove this member?')) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await orgService.removeMember(selectedUnitId, userId);
-      await refreshMembers(selectedUnitId);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+    setConfirm({
+      show: true,
+      title: 'Remove member',
+      message: 'Are you sure you want to remove this member?',
+      onConfirm: async () => {
+        setConfirm((prev) => ({ ...prev, show: false }));
+        setBusy(true);
+        setError(null);
+        try {
+          await orgService.removeMember(selectedUnitId!, userId);
+          await refreshMembers(selectedUnitId!);
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
 
   const handleCreateLoan = async (e: React.FormEvent) => {
@@ -249,49 +281,13 @@ const OrgManagement: React.FC = () => {
     }
   };
 
-  const renderTree = (nodes: OrgUnitNode[], depth = 0): JSX.Element[] => {
-    const out: JSX.Element[] = [];
-    for (const n of nodes) {
-      out.push(
-        <tr key={n.id}>
-          <td>
-            <span style={{ paddingLeft: depth * 16 }}>
-              <i className="bi bi-diagram-3 me-2" />
-              {n.name}
-            </span>
-          </td>
-          <td>{n.managerUserId ?? '-'}</td>
-          <td>
-            <span className={`badge ${n.isActive ? 'bg-success' : 'bg-secondary'}`}>
-              {n.isActive ? 'active' : 'inactive'}
-            </span>
-          </td>
-          <td className="text-end">
-            <button
-              className="btn btn-sm btn-outline-primary me-1"
-              onClick={() => {
-                setSelectedUnitId(n.id);
-                setActiveTab('members');
-              }}
-            >
-              Members
-            </button>
-            {isAdmin && (
-              <button
-                className="btn btn-sm btn-outline-danger"
-                onClick={() => handleDeleteUnit(n.id)}
-                disabled={busy}
-              >
-                Delete
-              </button>
-            )}
-          </td>
-        </tr>
-      );
-      if (n.children?.length) out.push(...renderTree(n.children, depth + 1));
-    }
-    return out;
-  };
+  if (loading) {
+    return (
+      <div className="container-fluid py-3">
+        <LoadingSpinner message="Loading organization data..." />
+      </div>
+    );
+  }
 
   return (
     <div className="container-fluid py-3">
@@ -337,174 +333,36 @@ const OrgManagement: React.FC = () => {
       </ul>
 
       {activeTab === 'tree' && (
-        <div className="card">
-          <div className="card-body">
-            {isAdmin && (
-              <form className="row g-2 mb-3" onSubmit={handleCreateUnit}>
-                <div className="col-md-4">
-                  <input
-                    className="form-control"
-                    placeholder="Unit name"
-                    value={newUnit.name}
-                    onChange={(e) => setNewUnit({ ...newUnit, name: e.target.value })}
-                    required
-                  />
-                </div>
-                <div className="col-md-3">
-                  <select
-                    className="form-select"
-                    value={newUnit.parentId}
-                    onChange={(e) => setNewUnit({ ...newUnit, parentId: e.target.value })}
-                  >
-                    <option value="">No parent (root)</option>
-                    {units.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="col-md-3">
-                  <input
-                    type="number"
-                    className="form-control"
-                    placeholder="Manager user id"
-                    value={newUnit.managerUserId}
-                    onChange={(e) => setNewUnit({ ...newUnit, managerUserId: e.target.value })}
-                  />
-                </div>
-                <div className="col-md-2">
-                  <button className="btn btn-primary w-100" disabled={busy}>
-                    Create
-                  </button>
-                </div>
-              </form>
-            )}
-            <table className="table table-hover">
-              <thead>
-                <tr>
-                  <th>Unit</th>
-                  <th>Manager</th>
-                  <th>Status</th>
-                  <th className="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody>{renderTree(tree)}</tbody>
-            </table>
-          </div>
-        </div>
+        <OrgTree
+          units={units}
+          tree={tree}
+          busy={busy}
+          canAdmin={!!isAdmin}
+          newUnit={newUnit}
+          onNewUnitChange={setNewUnit}
+          onCreateUnit={handleCreateUnit}
+          onDeleteUnit={handleDeleteUnit}
+          onViewMembers={(id) => {
+            setSelectedUnitId(id);
+            setActiveTab('members');
+          }}
+        />
       )}
 
       {activeTab === 'members' && (
-        <div className="card">
-          <div className="card-body">
-            <div className="row g-2 mb-3">
-              <div className="col-md-6">
-                <label className="form-label">Org unit</label>
-                <select
-                  className="form-select"
-                  value={selectedUnitId ?? ''}
-                  onChange={(e) =>
-                    setSelectedUnitId(e.target.value ? Number(e.target.value) : null)
-                  }
-                >
-                  <option value="">Select…</option>
-                  {units.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            {selectedUnitId !== null && (
-              <>
-                {isManager && (
-                  <form className="row g-2 mb-3" onSubmit={handleAddMember}>
-                    <div className="col-md-3">
-                      <input
-                        type="number"
-                        className="form-control"
-                        placeholder="User id"
-                        value={memberForm.userId}
-                        onChange={(e) =>
-                          setMemberForm({ ...memberForm, userId: e.target.value })
-                        }
-                        required
-                      />
-                    </div>
-                    <div className="col-md-3 d-flex align-items-center">
-                      <div className="form-check">
-                        <input
-                          type="checkbox"
-                          id="memberPrimary"
-                          className="form-check-input"
-                          checked={memberForm.isPrimary}
-                          onChange={(e) =>
-                            setMemberForm({ ...memberForm, isPrimary: e.target.checked })
-                          }
-                        />
-                        <label className="form-check-label" htmlFor="memberPrimary">
-                          Primary
-                        </label>
-                      </div>
-                    </div>
-                    <div className="col-md-2">
-                      <button className="btn btn-primary w-100" disabled={busy}>
-                        Add member
-                      </button>
-                    </div>
-                  </form>
-                )}
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>User</th>
-                      <th>Primary</th>
-                      <th>Assigned</th>
-                      <th className="text-end">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {members.map((m) => (
-                      <tr key={m.id}>
-                        <td>{m.userId}</td>
-                        <td>
-                          {m.isPrimary ? (
-                            <span className="badge bg-primary">primary</span>
-                          ) : (
-                            '-'
-                          )}
-                        </td>
-                        <td>{m.assignedAt}</td>
-                        <td className="text-end">
-                          {!m.isPrimary && isManager && (
-                            <button
-                              className="btn btn-sm btn-outline-primary me-1"
-                              onClick={() => handleSetPrimary(m.userId)}
-                              disabled={busy}
-                            >
-                              Make primary
-                            </button>
-                          )}
-                          {isManager && (
-                            <button
-                              className="btn btn-sm btn-outline-danger"
-                              onClick={() => handleRemoveMember(m.userId)}
-                              disabled={busy}
-                            >
-                              Remove
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-          </div>
-        </div>
+        <MemberList
+          units={units}
+          selectedUnitId={selectedUnitId}
+          members={members}
+          busy={busy}
+          canManage={!!isManager}
+          memberForm={memberForm}
+          onUnitSelect={setSelectedUnitId}
+          onMemberFormChange={setMemberForm}
+          onAddMember={handleAddMember}
+          onSetPrimary={handleSetPrimary}
+          onRemoveMember={handleRemoveMember}
+        />
       )}
 
       {activeTab === 'loans' && (
@@ -589,75 +447,92 @@ const OrgManagement: React.FC = () => {
                 </div>
               </form>
             )}
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>From → To</th>
-                  <th>Range</th>
-                  <th>Status</th>
-                  <th className="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loans.map((l) => (
-                  <tr key={l.id}>
-                    <td>{l.userId}</td>
-                    <td>
-                      {l.fromOrgUnitId} → {l.toOrgUnitId}
-                    </td>
-                    <td>
-                      {l.startDate} – {l.endDate}
-                    </td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          l.status === 'approved'
-                            ? 'bg-success'
-                            : l.status === 'pending'
-                              ? 'bg-warning'
-                              : 'bg-secondary'
-                        }`}
-                      >
-                        {l.status}
-                      </span>
-                    </td>
-                    <td className="text-end">
-                      {l.status === 'pending' && isManager && (
-                        <>
-                          <button
-                            className="btn btn-sm btn-outline-success me-1"
-                            onClick={() => handleApproveLoan(l.id)}
-                            disabled={busy}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger me-1"
-                            onClick={() => handleRejectLoan(l.id)}
-                            disabled={busy}
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      {l.status === 'pending' && l.requestedBy === user?.id && (
-                        <button
-                          className="btn btn-sm btn-outline-secondary"
-                          onClick={() => handleCancelLoan(l.id)}
-                          disabled={busy}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </td>
+
+            {loans.length === 0 ? (
+              <EmptyState
+                icon="bi-arrow-left-right"
+                title="No loans"
+                message="No employee loan requests yet."
+              />
+            ) : (
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>From → To</th>
+                    <th>Range</th>
+                    <th>Status</th>
+                    <th className="text-end">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {loans.map((l) => (
+                    <tr key={l.id}>
+                      <td>{l.userId}</td>
+                      <td>
+                        {l.fromOrgUnitId} → {l.toOrgUnitId}
+                      </td>
+                      <td>
+                        {l.startDate} – {l.endDate}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            l.status === 'approved'
+                              ? 'bg-success'
+                              : l.status === 'pending'
+                                ? 'bg-warning'
+                                : 'bg-secondary'
+                          }`}
+                        >
+                          {l.status}
+                        </span>
+                      </td>
+                      <td className="text-end">
+                        {l.status === 'pending' && isManager && (
+                          <>
+                            <button
+                              className="btn btn-sm btn-outline-success me-1"
+                              onClick={() => handleApproveLoan(l.id)}
+                              disabled={busy}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="btn btn-sm btn-outline-danger me-1"
+                              onClick={() => handleRejectLoan(l.id)}
+                              disabled={busy}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {l.status === 'pending' && l.requestedBy === user?.id && (
+                          <button
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => handleCancelLoan(l.id)}
+                            disabled={busy}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        show={confirm.show}
+        title={confirm.title}
+        message={confirm.message}
+        onConfirm={confirm.onConfirm}
+        onCancel={() => setConfirm((prev) => ({ ...prev, show: false }))}
+      />
     </div>
   );
 };
