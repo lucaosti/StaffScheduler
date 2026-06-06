@@ -95,7 +95,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
         req.user!.id,
         req.body?.notes ?? null
       );
-      res.json({ success: true, data });
+      res.status(201).json({ success: true, data });
     } catch (err) {
       const msg = (err as Error).message;
       const status = msg.includes('not found') ? 404 : msg.includes('max capacity') ? 409 : 400;

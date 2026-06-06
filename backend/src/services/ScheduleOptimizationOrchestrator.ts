@@ -128,14 +128,41 @@ export class ScheduleOptimizationOrchestrator {
   async getSchedulesByUser(userId: number): Promise<Schedule[]> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT s.id FROM schedules s
-        JOIN shifts sh ON s.id = sh.schedule_id
-        JOIN shift_assignments sa ON sh.id = sa.shift_id
-        WHERE sa.user_id = ?`,
+        `SELECT
+          s.id, s.name, s.department_id, s.start_date, s.end_date,
+          s.status, s.published_at, s.notes, s.created_at, s.updated_at,
+          d.name as department_name,
+          COUNT(DISTINCT sh2.id) as total_shifts,
+          COUNT(DISTINCT sa2.id) as total_assignments
+        FROM schedules s
+        LEFT JOIN departments d ON s.department_id = d.id
+        LEFT JOIN shifts sh2 ON s.id = sh2.schedule_id
+        LEFT JOIN shift_assignments sa2 ON sh2.id = sa2.shift_id AND sa2.status IN ('pending', 'confirmed')
+        WHERE s.id IN (
+          SELECT DISTINCT sh.schedule_id
+          FROM shifts sh
+          JOIN shift_assignments sa ON sh.id = sa.shift_id
+          WHERE sa.user_id = ?
+        )
+        GROUP BY s.id
+        ORDER BY s.start_date DESC`,
         [userId]
       );
-      const schedules = await Promise.all(rows.map((row: any) => this.fetchScheduleById(row.id)));
-      return schedules.filter((s): s is Schedule => s !== null);
+      return rows.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        departmentId: row.department_id,
+        departmentName: row.department_name,
+        startDate: row.start_date,
+        endDate: row.end_date,
+        status: row.status,
+        publishedAt: row.published_at,
+        totalShifts: row.total_shifts || 0,
+        totalAssignments: row.total_assignments || 0,
+        notes: row.notes,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at
+      }));
     } catch (error) {
       logger.error('Failed to get schedules by user:', error);
       throw error;

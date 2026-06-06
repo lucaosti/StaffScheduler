@@ -78,10 +78,19 @@ describe('ApprovalEngineService.listWorkflows', () => {
 
   it('returns hydrated workflows with their steps', async () => {
     const { pool, execute } = makePool();
-    // list query
-    execute.mockResolvedValueOnce([[wfRow], null]);
-    // hydrateWorkflow — steps for workflow 1
-    execute.mockResolvedValueOnce([[stepRow], null]);
+    // Single JOIN query returns workflow columns + step columns merged
+    const joinedRow = {
+      ...wfRow,
+      step_id: stepRow.id,
+      step_workflow_id: stepRow.workflow_id,
+      step_order: stepRow.step_order,
+      approver_scope: stepRow.approver_scope,
+      approver_role_id: stepRow.approver_role_id,
+      approver_user_id: stepRow.approver_user_id,
+      auto_approve_for_owner: stepRow.auto_approve_for_owner,
+      escalate_after_hours: stepRow.escalate_after_hours,
+    };
+    execute.mockResolvedValueOnce([[joinedRow], null]);
 
     const svc = new ApprovalEngineService(pool);
     const result = await svc.listWorkflows();

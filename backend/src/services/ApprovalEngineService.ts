@@ -42,12 +42,43 @@ export class ApprovalEngineService {
   // --------------------------------------------------------------------------
 
   async listWorkflows(): Promise<ApprovalWorkflow[]> {
-    const [wRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, change_type, require_all, description, created_at, updated_at
-         FROM approval_workflows ORDER BY change_type ASC`
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT
+         w.id, w.change_type, w.require_all, w.description, w.created_at, w.updated_at,
+         s.id AS step_id, s.workflow_id AS step_workflow_id, s.step_order,
+         s.approver_scope, s.approver_role_id, s.approver_user_id,
+         s.auto_approve_for_owner, s.escalate_after_hours
+       FROM approval_workflows w
+       LEFT JOIN approval_steps s ON s.workflow_id = w.id
+       ORDER BY w.change_type ASC, s.step_order ASC`
     );
-    const workflows = await Promise.all(wRows.map((w: any) => this.hydrateWorkflow(w)));
-    return workflows;
+    const workflowMap = new Map<number, ApprovalWorkflow>();
+    for (const row of rows as any[]) {
+      if (!workflowMap.has(row.id)) {
+        workflowMap.set(row.id, {
+          id: row.id,
+          changeType: row.change_type,
+          requireAll: Boolean(row.require_all),
+          description: row.description ?? null,
+          steps: [],
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        });
+      }
+      if (row.step_id !== null) {
+        workflowMap.get(row.id)!.steps.push({
+          id: row.step_id,
+          workflowId: row.step_workflow_id,
+          stepOrder: row.step_order,
+          approverScope: row.approver_scope as ApproverScope,
+          approverRoleId: row.approver_role_id ?? null,
+          approverUserId: row.approver_user_id ?? null,
+          autoApproveForOwner: Boolean(row.auto_approve_for_owner),
+          escalateAfterHours: row.escalate_after_hours ?? null,
+        });
+      }
+    }
+    return Array.from(workflowMap.values());
   }
 
   async getWorkflowByChangeType(changeType: string): Promise<ApprovalWorkflow | null> {
