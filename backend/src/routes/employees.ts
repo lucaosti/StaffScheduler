@@ -169,7 +169,7 @@ router.post('/:id/skills', authenticate, requirePermission('employee.manage'), v
 
     await employeeService.addEmployeeSkill(id, skillId, proficiencyLevel);
 
-    res.json({
+    res.status(201).json({
       success: true,
       message: 'Skill added to employee successfully'
     });

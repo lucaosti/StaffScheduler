@@ -310,7 +310,7 @@ describe('on-call router', () => {
     const res = await request(mountApp('/api/on-call', createOnCallRouter(fakePool)))
       .post('/api/on-call/periods/1/assign')
       .send({ userId: 7 });
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it('DELETE /periods/:id/assign/:userId returns 200 when removed', async () => {

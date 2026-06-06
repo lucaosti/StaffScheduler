@@ -389,7 +389,7 @@ describe('departments router POST /:id/users', () => {
       .post('/api/departments/3/users')
       .send({ userId: 7 });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
   });
 });
