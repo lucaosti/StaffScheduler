@@ -563,8 +563,7 @@ const Policies: React.FC = () => {
                         value={row.approverRole ?? ''}
                         onChange={(e) =>
                           handleMatrixChange(row, {
-                            approverRole:
-                              (e.target.value as 'admin' | 'manager' | 'employee' | '') || null,
+                            approverRole: e.target.value || null,
                           })
                         }
                         disabled={busy}

@@ -25,7 +25,10 @@ export interface User {
   email: string;
   firstName: string;
   lastName: string;
-  role: 'admin' | 'manager' | 'employee';
+  // Role is a configurable string defined in the DB; do not compare against literals.
+  role: string;
+  // Permission keys granted to the user (populated by the RBAC layer).
+  permissions?: string[];
   employeeId?: string;
   phone?: string;
   isActive: boolean;

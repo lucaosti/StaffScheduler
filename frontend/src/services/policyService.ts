@@ -51,7 +51,8 @@ export interface ApprovalMatrixRow {
   id: number;
   changeType: string;
   approverScope: ApproverScope;
-  approverRole: 'admin' | 'manager' | 'employee' | null;
+  // Configurable role string from the DB; not restricted to a fixed set.
+  approverRole: string | null;
   approverUserId: number | null;
   autoApproveForOwner: boolean;
   description: string | null;
