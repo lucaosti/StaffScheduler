@@ -266,6 +266,10 @@ describe('assignments router happy paths', () => {
   });
 
   it('PATCH /:id/confirm returns the confirmed assignment', async () => {
+    // getAssignmentById is called first to verify ownership; stub it with userId matching the caller (id=1).
+    (AssignmentService.prototype.getAssignmentById as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 1, userId: 1 });
     (AssignmentService.prototype.confirmAssignment as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1, status: 'confirmed' });

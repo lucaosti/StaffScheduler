@@ -74,7 +74,7 @@ router.get('/:id', authenticate, validateParams(idParam), async (req: Request, r
 });
 
 // Get schedule with shifts
-router.get('/:id/shifts', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/shifts', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -84,6 +84,19 @@ router.get('/:id/shifts', authenticate, validateParams(idParam), async (_req: Re
         success: false,
         error: { code: 'NOT_FOUND', message: 'Schedule not found' }
       });
+    }
+
+    // Enforce org-unit scope — same rule as GET /:id.
+    const scope = req.user?.allowedOrgUnitIds;
+    if (scope !== null && scope !== undefined) {
+      const dept = schedule as any;
+      const deptOrgUnitId = dept.departmentOrgUnitId ?? null;
+      if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Access to this schedule is outside your scope' },
+        });
+      }
     }
 
     res.json({ success: true, data: schedule });
@@ -174,7 +187,7 @@ router.delete('/:id', authenticate, requirePermission('schedule.manage'), valida
 });
 
 // Get schedules by department
-router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   try {
     const { departmentId } = res.locals.params;
 
@@ -190,9 +203,19 @@ router.get('/department/:departmentId', authenticate, validateParams(departmentI
 });
 
 // Get schedules by user
-router.get('/user/:userId', authenticate, validateParams(userIdParam), async (_req: Request, res: Response) => {
+// Allowed when: the caller holds schedule.manage OR is querying their own schedules.
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
   try {
     const { userId } = res.locals.params;
+    const actor = req.user;
+
+    const canManage = actor?.permissions?.includes('schedule.manage') ?? false;
+    if (!canManage && actor?.id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Access denied' }
+      });
+    }
 
     const schedules = await scheduleService.getSchedulesByUser(userId);
     res.json({ success: true, data: schedules });
