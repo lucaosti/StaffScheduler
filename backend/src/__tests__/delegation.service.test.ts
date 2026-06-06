@@ -112,13 +112,15 @@ describe('DelegationService.revokeDelegation', () => {
 describe('RbacService.getEffectivePermissions — delegation merge', () => {
   it('includes delegated permissions alongside role permissions', async () => {
     const { pool, execute } = makePool();
-    // First call: role-based permissions
+    // First call: role-based permissions for the delegatee
     execute.mockResolvedValueOnce([[{ code: 'schedule.read' }], null]);
-    // Second call: active delegations
+    // Second call: active delegations (now includes delegator_id)
     execute.mockResolvedValueOnce([
-      [{ permission_codes: JSON.stringify(['timeoff.approve']) }],
+      [{ delegator_id: 99, permission_codes: JSON.stringify(['timeoff.approve']) }],
       null,
     ]);
+    // Third call: delegator's current role permissions (cap check)
+    execute.mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null]);
 
     const service = new RbacService(pool);
     const perms = await service.getEffectivePermissions(7);
@@ -144,11 +146,15 @@ describe('RbacService.getEffectivePermissions — delegation merge', () => {
 
   it('de-duplicates codes that appear in both role and delegation', async () => {
     const { pool, execute } = makePool();
+    // Delegatee role permissions
     execute.mockResolvedValueOnce([[{ code: 'schedule.read' }], null]);
+    // Active delegations (includes delegator_id)
     execute.mockResolvedValueOnce([
-      [{ permission_codes: JSON.stringify(['schedule.read', 'timeoff.approve']) }],
+      [{ delegator_id: 99, permission_codes: JSON.stringify(['schedule.read', 'timeoff.approve']) }],
       null,
     ]);
+    // Delegator's current role permissions (cap check) — delegator holds both
+    execute.mockResolvedValueOnce([[{ code: 'schedule.read' }, { code: 'timeoff.approve' }], null]);
 
     const service = new RbacService(pool);
     const perms = await service.getEffectivePermissions(7);

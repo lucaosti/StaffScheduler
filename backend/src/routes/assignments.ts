@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
-import { authenticate, requirePermission } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import {
   idParam,
@@ -11,6 +11,7 @@ import {
   createAssignmentBody,
   bulkCreateAssignmentsBody,
 } from '../schemas';
+import { User } from '../types';
 import { logger } from '../config/logger';
 
 export const createAssignmentsRouter = (pool: Pool) => {
@@ -18,7 +19,7 @@ export const createAssignmentsRouter = (pool: Pool) => {
   const assignmentService = new AssignmentService(pool);
 
 // Get all assignments
-router.get('/', authenticate, async (_req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('assignment.manage'), async (_req: Request, res: Response) => {
   try {
     const assignments = await assignmentService.getAllAssignments();
     res.json({ success: true, data: assignments });
@@ -32,15 +33,26 @@ router.get('/', authenticate, async (_req: Request, res: Response) => {
 });
 
 // Get assignment by ID
-router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+// Allowed when: the caller holds assignment.manage OR the assignment belongs to the caller.
+router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
+    const actor = req.user as User;
 
     const assignment = await assignmentService.getAssignmentById(id);
     if (!assignment) {
       return res.status(404).json({
         success: false,
         error: { code: 'NOT_FOUND', message: 'Assignment not found' }
+      });
+    }
+
+    const canManage = userHasPermission(actor, 'assignment.manage');
+    const isOwn = (assignment as any).userId === actor.id;
+    if (!canManage && !isOwn) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Access denied' }
       });
     }
 
@@ -122,9 +134,19 @@ router.delete('/:id', authenticate, requirePermission('assignment.manage'), vali
 });
 
 // Get assignments by user
-router.get('/user/:userId', authenticate, validateParams(userIdParam), async (_req: Request, res: Response) => {
+// Allowed when: the caller holds assignment.manage OR is requesting their own assignments.
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
   try {
     const { userId } = res.locals.params;
+    const actor = req.user as User;
+
+    const canManage = userHasPermission(actor, 'assignment.manage');
+    if (!canManage && actor.id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Access denied' }
+      });
+    }
 
     const assignments = await assignmentService.getAssignmentsByUser(userId);
     res.json({ success: true, data: assignments });
@@ -138,7 +160,7 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), async (_r
 });
 
 // Get assignments by shift
-router.get('/shift/:shiftId', authenticate, validateParams(shiftIdParam), async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   try {
     const { shiftId } = res.locals.params;
 
@@ -154,7 +176,7 @@ router.get('/shift/:shiftId', authenticate, validateParams(shiftIdParam), async 
 });
 
 // Get assignments by department
-router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), async (req: Request, res: Response) => {
   try {
     const { departmentId } = res.locals.params;
     const { status } = req.query;
@@ -195,9 +217,22 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
 });
 
 // Confirm assignment
-router.patch('/:id/confirm', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+// Only the assigned user or a manager (assignment.manage) may confirm.
+router.patch('/:id/confirm', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
+    const actor = req.user as User;
+
+    const existing = await assignmentService.getAssignmentById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Assignment not found' } });
+    }
+
+    const canManage = userHasPermission(actor, 'assignment.manage');
+    const isOwn = (existing as any).userId === actor.id;
+    if (!canManage && !isOwn) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    }
 
     const assignment = await assignmentService.confirmAssignment(id);
     res.json({
@@ -222,9 +257,22 @@ router.patch('/:id/confirm', authenticate, validateParams(idParam), async (_req:
 });
 
 // Decline assignment
-router.patch('/:id/decline', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+// Only the assigned user or a manager (assignment.manage) may decline.
+router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
+    const actor = req.user as User;
+
+    const existing = await assignmentService.getAssignmentById(id);
+    if (!existing) {
+      return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Assignment not found' } });
+    }
+
+    const canManage = userHasPermission(actor, 'assignment.manage');
+    const isOwn = (existing as any).userId === actor.id;
+    if (!canManage && !isOwn) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
+    }
 
     const assignment = await assignmentService.declineAssignment(id);
 
@@ -247,7 +295,8 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), async (_req:
 });
 
 // Complete assignment
-router.patch('/:id/complete', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+// Only a manager (assignment.manage) may mark an assignment complete.
+router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -271,7 +320,7 @@ router.patch('/:id/complete', authenticate, validateParams(idParam), async (_req
 });
 
 // Get available employees for shift
-router.get('/shift/:shiftId/available-employees', authenticate, validateParams(shiftIdParam), async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   try {
     const { shiftId } = res.locals.params;
 

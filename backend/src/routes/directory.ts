@@ -62,7 +62,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     }
   );
 
-  router.get('/users/:id/vcard', async (req: Request, res: Response) => {
+  router.get('/users/:id/vcard', requirePermission('user.read'), async (req: Request, res: Response) => {
     const profile = await service.getProfile(Number(req.params.id));
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     const vcf = await service.exportVcf([profile.id]);
