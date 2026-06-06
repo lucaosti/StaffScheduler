@@ -21,10 +21,14 @@ services:
       --collation-server=utf8mb4_unicode_ci
     networks:
       - staff_scheduler_network
+    mem_limit: 512m
+    cpus: 0.5
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 30s
       timeout: 20s
       retries: 10
+      start_period: 40s
 
   # Backend API Service
   backend:
@@ -56,6 +60,8 @@ services:
       - backend_uploads:/app/uploads
     networks:
       - staff_scheduler_network
+    mem_limit: 512m
+    cpus: 0.5
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
       interval: 30s
@@ -81,6 +87,8 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     networks:
       - staff_scheduler_network
+    mem_limit: 256m
+    cpus: 0.25
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
       interval: 30s
