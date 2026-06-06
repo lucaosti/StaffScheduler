@@ -23,6 +23,10 @@ This document is the single reference for architecture, domain model, database s
 15. [Security policy](#15-security-policy)
 16. [End-to-end tests](#16-end-to-end-tests)
 17. [Future roadmap](#17-future-roadmap)
+18. [Scalability analysis](#18-scalability-analysis)
+19. [Market benchmark](#19-market-benchmark)
+20. [Feature gap analysis](#20-feature-gap-analysis)
+21. [Recommended architecture evolution](#21-recommended-architecture-evolution)
 
 ---
 
@@ -633,3 +637,224 @@ The following capabilities are planned but not yet implemented. Pull requests fo
 | SSO / SAML / OAuth2 | Enterprise identity provider federation |
 | Bulk API | Batch endpoints for high-volume integrations |
 | Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in |
+
+---
+
+## 18. Scalability analysis
+
+This section evaluates how the current architecture behaves at four scale tiers and identifies the first bottlenecks at each level.
+
+### Current baseline
+
+- Single Node.js/Express process (stateless — JWT-based auth, no server-side session).
+- Single MySQL 8.0 instance, connection pool capped at **10 connections** (`connectionLimit: 10` in `config/database.ts`).
+- No caching layer (no Redis, no in-process TTL cache beyond the module flag cache in `ModuleService`).
+- Notifications delivered synchronously within the request handler via `NotificationService`.
+- Schedule optimization runs as a synchronous child process (`child_process.spawn`) inside the request lifecycle.
+- No message queue; no read replica.
+
+---
+
+### Tier 1 — 100 users / 1 org unit
+
+**What works without change**
+
+Everything. A single process with a pool of 10 connections is more than sufficient. The `WITH RECURSIVE` CTE for org-unit subtrees returns results in milliseconds on a shallow tree. Permission resolution (`RbacService.getEffectivePermissions`) involves two or three indexed queries and is negligible at this scale. MySQL single-instance handles all read and write traffic comfortably within the Docker memory limit (512 MB set in `docker-compose.yml`).
+
+**Adequate but worth noting**
+
+- The connection pool default of 10 is undersized relative to Express's default concurrency ceiling; it will never be saturated at this tier, but should be raised before leaving development.
+- OR-Tools optimization spawns a Python child process; at this scale a few concurrent optimization requests are unlikely, but there is no concurrency guard on simultaneous spawns.
+
+---
+
+### Tier 2 — 1,000 users / 10 departments
+
+**First bottlenecks**
+
+1. **Permission resolution on every request.** `authenticate` middleware calls `RbacService.getEffectivePermissions()` and `RbacService.getUserRoles()` on every authenticated request — two to three indexed queries per call. At ~1,000 concurrent users making frequent requests, this becomes a measurable fraction of total DB load. Permissions and role grants change infrequently; caching is safe.
+
+   Recommended fix: add a Redis (or in-process LRU) cache in `RbacService.getEffectivePermissions()` keyed by `userId`, with a 5-minute TTL. Invalidate on role grant/revoke and delegation create/revoke. This reduces per-request DB round-trips for auth from three to zero for cache hits.
+
+2. **Connection pool exhaustion under burst load.** With `connectionLimit: 10`, a burst of concurrent requests (e.g., all managers publishing schedules simultaneously) will queue on pool acquisition. Raise to 25–50 for this tier; tune `queueLimit` to reject rather than queue indefinitely.
+
+3. **Synchronous notification delivery.** `NotificationService` writes notification rows inside the main request transaction. For endpoints that trigger notifications to many users (e.g., publishing a schedule to 50+ employees), this adds latency proportional to the number of notifications and introduces a failure surface: a notification write error can roll back the business operation.
+
+   Recommended fix: collect notification payloads after the business transaction commits and dispatch them asynchronously (fire-and-forget at minimum; a proper queue at the next tier).
+
+**What still works**
+
+- Single MySQL instance handles this load. A schedule query joining `schedules → shifts → shift_assignments → users` with proper indexes (all join columns are indexed in `init.sql`) executes well under 100 ms.
+- Horizontal scaling is not yet needed; stateless JWT means it is possible at any point.
+- OR-Tools optimization is infrequent enough that serialized spawns are acceptable.
+
+---
+
+### Tier 3 — 10,000 users / 100 departments
+
+**Critical bottlenecks**
+
+1. **MySQL single instance becomes a bottleneck for reporting queries.** The reporting module (`ReportsService`) generates workforce analytics by joining schedules, shifts, assignments, and users across multiple departments. At 100 departments and thousands of assignments per period, these queries become multi-second operations. A single writer instance cannot absorb simultaneous heavy reads and the regular write traffic.
+
+   Recommended fix: add a MySQL read replica. Route all `SELECT` queries in `ReportsService`, `CalendarService`, and `AuditLogService` to the replica; keep write queries on the primary. This requires a connection abstraction that distinguishes read and write pools.
+
+2. **Permission cache is mandatory.** Without caching, `authenticate` generates 30,000+ DB queries per minute at moderate request rates. Redis with a 5-minute TTL (introduced at Tier 2) becomes a hard dependency at this scale, not an optimization.
+
+3. **Notification volume requires an async queue.** Publishing a schedule for a 1,000-person department triggers 1,000 notification inserts. Doing this synchronously in the request handler causes timeouts. Replace synchronous notification dispatch with a job queue (BullMQ + Redis is the natural choice given Redis is already required for caching). The queue worker processes notification batches independently.
+
+4. **Backend horizontal scaling becomes necessary.** A single Express process saturates at ~500–1,000 req/s on typical hardware. Multiple instances behind a load balancer (nginx or AWS ALB) are needed. The current architecture already supports this — sessions are JWT, no shared in-process state except the module flag cache. The module cache must move to Redis to be consistent across instances.
+
+5. **OR-Tools optimization concurrency.** With 100 departments, multiple simultaneous optimization requests are likely. The current model (unconstrained `child_process.spawn`) can exhaust CPU cores. A concurrency limiter (semaphore or BullMQ job queue with worker concurrency = CPU count - 1) is required.
+
+**What still works**
+
+- The org-unit `WITH RECURSIVE` CTE remains efficient (subtree queries are bounded by tree depth, typically under 10 levels).
+- Audit log writes (`AuditLogService.write` swallows errors) do not block business operations; the existing design holds.
+- The RBAC model (data-driven, no hardcoded roles) scales without change — permission resolution is a query pattern problem, not a model problem.
+
+---
+
+### Tier 4 — 100,000 users / 1,000 departments
+
+**Architecture changes required**
+
+At this scale the system is no longer a single-server application. The following structural changes are prerequisites:
+
+| Component | Required change |
+|---|---|
+| MySQL | Primary + multiple read replicas; consider partitioning `shift_assignments` and `audit_logs` by date range |
+| Cache | Redis Cluster (or Redis Sentinel with sharding) for permission cache, module flag cache, session metadata |
+| Notifications | BullMQ or equivalent message queue with dedicated worker processes; fanout for large-audience events |
+| Reporting / analytics | Separate OLAP layer (ClickHouse, Redshift, or Elasticsearch) fed by CDC from MySQL; complex aggregations must not run on the transactional primary |
+| Backend | Stateless horizontal fleet behind a load balancer; health checks already wired (`/api/health`) |
+| Rate limiting | Per-org-unit rate limits (not just per-IP); the current `express-rate-limit` on login is insufficient for multi-tenant API abuse prevention |
+| Audit log | Async write via queue; the current synchronous-but-swallowed pattern is acceptable at lower tiers but becomes a throughput limiter when every request generates an audit row |
+| Search | Full-text search on users, schedules, and audit logs requires a dedicated search index; MySQL `LIKE` queries do not scale |
+| Optimization | Dedicated worker pool; optimization jobs must be fully async with status polling via `GET /api/schedules/:id/optimization-status` |
+
+**What scales without change**
+
+- The permission-code-based RBAC model (no role names in application code) remains correct at any scale.
+- JWT stateless auth eliminates the need for a distributed session store.
+- The `WITH RECURSIVE` CTE for org-unit subtrees continues to perform well as long as tree depth remains bounded; index coverage is already in place.
+- The module system (in-process cache, Redis-backed at Tier 3+) is a minor concern compared to the above.
+
+---
+
+## 19. Market benchmark
+
+This section compares Staff Scheduler against the four most comparable market products: **Deputy**, **When I Work**, **Shiftboard**, and **UKG Ready** (the mid-market tier of UKG/Kronos). The comparison covers features relevant to the target segment (shift-based, multi-department SME to lower enterprise).
+
+Legend: ✅ Fully supported / ⚠️ Partial or limited / ❌ Not present
+
+| Feature | Staff Scheduler | Deputy | When I Work | Shiftboard | UKG Ready |
+|---|---|---|---|---|---|
+| **Shift scheduling UI** | ⚠️ (API complete, basic UI) | ✅ | ✅ | ✅ | ✅ |
+| **Employee availability management** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Time-off requests and approval** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Shift swap requests** | ✅ (managed) | ✅ | ✅ | ✅ | ✅ |
+| **Self-service shift swap marketplace** | ❌ | ✅ | ✅ | ✅ | ✅ |
+| **In-app notifications** | ✅ (SSE) | ✅ | ✅ | ✅ | ✅ |
+| **Mobile app (iOS/Android)** | ❌ | ✅ | ✅ | ✅ | ✅ |
+| **Configurable RBAC** | ✅ (full, data-driven) | ⚠️ | ⚠️ | ⚠️ | ✅ |
+| **Multi-department / multi-location** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **Org-unit hierarchy** | ✅ | ⚠️ | ❌ | ⚠️ | ✅ |
+| **Approval workflows (multi-step)** | ✅ | ⚠️ | ❌ | ⚠️ | ✅ |
+| **Delegation of authority** | ✅ | ❌ | ❌ | ❌ | ⚠️ |
+| **Module system (feature flags)** | ✅ | ❌ | ❌ | ❌ | ⚠️ |
+| **Audit trail** | ✅ | ✅ | ⚠️ | ✅ | ✅ |
+| **Compliance / labor law rules** | ⚠️ (engine present, rules thin) | ✅ | ⚠️ | ✅ | ✅ |
+| **Predictive demand forecasting** | ⚠️ (module defined, not built) | ✅ | ❌ | ✅ | ✅ |
+| **AI / automated schedule generation** | ✅ (OR-Tools CP-SAT) | ✅ | ⚠️ | ✅ | ✅ |
+| **Payroll integration** | ❌ | ✅ (ADP, Gusto, QuickBooks) | ✅ (Gusto, ADP) | ✅ (ADP, SAP, Oracle) | ✅ (native) |
+| **SSO / SAML** | ❌ | ✅ | ❌ | ✅ | ✅ |
+| **Webhook / event push** | ⚠️ (SSE stream only) | ✅ | ⚠️ | ✅ | ✅ |
+| **Bulk import (CSV)** | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **OpenAPI spec** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
+| **Geofencing clock-in** | ❌ | ✅ | ✅ | ⚠️ | ⚠️ |
+| **On-call roster** | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
+
+**Reading the table**: Staff Scheduler is ahead of all four competitors on RBAC expressiveness, org-unit hierarchy depth, approval workflow configurability, and delegation — capabilities that require significant engineering effort to retrofit. The main gaps are on the product surface: no mobile app, no payroll connectors, no SSO, and no self-service shift swap marketplace.
+
+---
+
+## 20. Feature gap analysis
+
+Features are grouped by category:
+
+- **Standard**: present in every commercial workforce scheduling product; buyers expect them by default.
+- **Enterprise**: required by enterprise procurement; absence blocks deals above ~200 seats.
+- **Innovative**: differentiators that drive switching decisions and premium positioning.
+
+| Feature | Category | Business Value | Complexity | Notes |
+|---|---|---|---|---|
+| Mobile app (iOS/Android or PWA) | Standard | High | High | The single highest-impact gap. Employees on shift floors do not have desktop access. A React PWA reuses the existing SPA; a native shell (React Native + Expo) gives push notifications but doubles the surface area. |
+| Self-service shift swap marketplace | Standard | High | Medium | Backend `ShiftSwapService` already handles managed swaps; the gap is employee-facing discovery (open shift board) and peer-to-peer offer/accept flow with compliance guardrails. |
+| Push notifications | Standard | High | Medium | Requires a mobile app or browser push (Web Push API). The current SSE stream is server-initiated but cannot wake a closed browser or mobile app. |
+| Geofencing / GPS clock-in | Standard | Medium | Medium | Requires mobile app or kiosk. Backend already has the `on-call` and `assignments` endpoints; clock-in payload just needs a `latitude`/`longitude` field validated against a configured geofence polygon. |
+| Time-clock / kiosk mode | Standard | Medium | Medium | A separate restricted-permission view on a shared tablet. Backend already supports role-scoped access. |
+| Reporting dashboard UI | Standard | Medium | Low | The `ReportsService` and `/api/reports` endpoints are complete. The frontend dashboard is a stub. Building charts (e.g., Recharts) on top of existing API responses is straightforward. |
+| SSO / SAML / OAuth2 | Enterprise | High | Medium | Blocks enterprise deals. Passport.js has SAML and OAuth2 strategies. `UserService` would need a federated-identity lookup path alongside local password auth. |
+| Payroll export (ADP, Gusto, Workday) | Enterprise | High | High | Requires per-provider data mapping, OAuth credentials management, and scheduled sync jobs. The `integrations` module is defined but empty. |
+| Webhooks (outbound event push) | Enterprise | High | Medium | Enterprise integrations poll or require push. The `EventBus.ts` service exists as an internal bus; exposing it as tenant-configured HTTP webhooks with retry and signature verification is the gap. |
+| Labor law compliance rules | Enterprise | High | Medium | The `ComplianceEngine.ts` service and `compliance` module exist; jurisdiction-specific rule sets (FLSA, Fair Workweek, EU Working Time Directive) need to be authored and wired. |
+| Per-org-unit rate limiting | Enterprise | Medium | Low | Current rate limiting applies only to the login endpoint. A per-tenant API quota is required for multi-tenant SaaS hardening. |
+| Multi-language / i18n | Enterprise | Medium | High | All UI strings are currently hardcoded in English in React components. Retrofitting i18n (react-i18next) requires extracting every string. |
+| Bulk API (batch endpoints) | Enterprise | Medium | Medium | High-volume integrations (HRIS sync, bulk assignment) require atomic batch operations. The `/api/import` CSV bulk import exists; REST batch endpoints for other resources do not. |
+| Two-factor authentication | Enterprise | Medium | Low | `TwoFactorService.ts` already exists in `backend/src/services/`. The gap is the frontend enrollment flow and enforcement policy per org unit. |
+| Predictive demand forecasting | Innovative | High | High | The `forecasting` module is registered; `ScheduleOptimizationOrchestrator` handles optimization. Demand forecasting requires a separate ML pipeline ingesting historical assignment data and external signals (sales, footfall). |
+| AI auto-schedule generation (production-ready) | Innovative | High | Medium | OR-Tools CP-SAT optimizer exists; gap is coverage rules refinement, forecast-input integration, and a manager review/override UX. |
+| Shift bidding / preference-based assignment | Innovative | Medium | Medium | Employees rank desired shifts; optimizer uses preferences as soft constraints. Preference weights exist in the CP-SAT model; the employee-facing bidding UI and ranking endpoint are missing. |
+| Fatigue / rest-period analytics | Innovative | Medium | Medium | Track consecutive shifts, rest gaps, and rolling hour windows per employee. Data is in `shift_assignments`; analytics surface and alerting are not built. |
+| Workforce cost simulation | Innovative | Medium | High | What-if cost modeling for different staffing scenarios. Requires a cost model (pay rates per role per time-of-day) and a simulation endpoint separate from the live optimizer. |
+
+---
+
+## 21. Recommended architecture evolution
+
+The roadmap below is organized in three phases. Each phase is independently deployable and leaves the system in a stable state.
+
+### Phase 1 — Quick wins (0–3 months)
+
+Target: eliminate the most impactful bottlenecks without infrastructure changes; deliver the highest-value missing product surface.
+
+| Item | What to do | Rationale |
+|---|---|---|
+| Permission cache (Redis or in-process LRU) | Add a 5-minute TTL cache in `RbacService.getEffectivePermissions()`. Invalidate on role grant/revoke and delegation events. | Eliminates 2–3 DB queries on every authenticated request. Required before Tier 2 load. |
+| Connection pool tuning | Raise `connectionLimit` from 10 to 30–50; configure `queueLimit` to reject after a bound. | Prevents pool exhaustion under moderate burst. Low-risk change. |
+| Fix N+1 in list endpoints | Audit `GET /employees`, `GET /shifts`, `GET /schedules` for per-row sub-queries. Replace with `JOIN` or a single `IN (...)` query. | Latency on list endpoints grows linearly with result set size without this fix. |
+| Add missing API filters | `GET /assignments`, `GET /audit-logs`, `GET /notifications` lack date-range and status filters that clients need for pagination. | Reduces over-fetching and improves frontend perceived performance. |
+| Two-factor authentication UI | Wire the existing `TwoFactorService.ts` to a frontend enrollment and challenge flow. | The backend is complete; the frontend gap prevents the feature from shipping. |
+| Reporting dashboard UI | Build chart components (Recharts) on top of the existing `/api/reports` responses. | High visible value; backend is already complete. |
+| Outbound webhooks (basic) | Add a `webhook_subscriptions` table and a delivery worker that POSTs to registered URLs on key events (schedule published, assignment confirmed). Use `EventBus.ts` as the event source. | Required by integrations; unblocks enterprise evaluation. |
+
+### Phase 2 — Infrastructure and enterprise hardening (3–12 months)
+
+Target: make the system production-ready for 10,000+ users and pass enterprise procurement requirements.
+
+| Item | What to do | Rationale |
+|---|---|---|
+| Redis for permission and module cache | Replace in-process LRU with Redis. Required when running multiple backend instances. | Tier 3 prerequisite; enables horizontal scaling. |
+| Async notification dispatch | Replace synchronous `NotificationService` calls in route handlers with a BullMQ job. The queue worker handles insert, SSE push, and future mobile push. | Removes notification latency from request path; required at Tier 3 notification volumes. |
+| MySQL read replica | Route `ReportsService`, `CalendarService`, and `AuditLogService` SELECTs to a replica pool. | Decouples heavy analytical reads from transactional writes; required at Tier 3 for report query performance. |
+| Horizontal backend scaling | Deploy 2–4 backend instances behind an nginx/ALB load balancer. Stateless by design; only the module cache must be Redis-backed first. | Required at Tier 3 request rates. |
+| OR-Tools optimization queue | Move optimization requests to a BullMQ job; respond immediately with a job ID; poll via `GET /api/schedules/:id/optimization-status`. | Prevents long-running child processes from blocking Express worker threads under concurrent load. |
+| SSO / SAML integration | Implement Passport.js SAML strategy in `createAuthRouter`; add `sso_providers` table for per-org config. | Enterprise deal blocker. |
+| Labor law compliance rules | Author FLSA, Fair Workweek, and EU Working Time Directive rule sets in `ComplianceEngine.ts`. Wire to the existing `compliance` module and approval workflow trigger. | Enterprise deal blocker in regulated industries. |
+| Per-org-unit rate limiting | Extend `express-rate-limit` with a custom store keyed by `req.user.allowedOrgUnitIds[0]` (or org identifier from JWT). | Required for multi-tenant hardening and fair-use enforcement. |
+| Self-service shift swap marketplace | Add an open-shift board endpoint (`GET /api/shift-swap/open`) and an employee claim endpoint. Wire compliance checks in `ShiftSwapService`. | Standard feature; high employee-satisfaction impact. |
+| Mobile PWA | Add `manifest.json`, service worker (Workbox), and offline-capable schedule view to the existing React SPA. Wire Web Push for notifications. | Highest-impact product gap; PWA path avoids native app complexity. |
+
+### Phase 3 — Full enterprise and innovation (12+ months)
+
+Target: position the product as a competitive enterprise platform with AI-driven differentiation.
+
+| Item | What to do | Rationale |
+|---|---|---|
+| Native mobile app (React Native / Expo) | Build a mobile shell using the existing REST API. Add push notifications, geofencing clock-in, biometric auth. | Full native experience; required for field-workforce segments. |
+| Payroll integrations | Build connectors for ADP Workforce Now, Gusto, and Workday. Use the existing `integrations` module toggle. Each connector is a scheduled BullMQ job that maps `shift_assignments` to payroll provider format. | Enterprise deal requirement; significant revenue enabler. |
+| Predictive demand forecasting | Build an ML pipeline (Python, scikit-learn or Prophet) that ingests historical `shift_assignments` and external signals. Expose results as forecast targets that feed into the OR-Tools optimizer as soft-constraint inputs. | Differentiator; reduces overstaffing cost and understaffing risk. |
+| OLAP reporting layer | Set up ClickHouse (or Redshift) fed by MySQL binlog CDC (Debezium). Move `ReportsService` complex aggregations to OLAP queries. | Required at Tier 4; allows ad-hoc analytics without impacting transactional DB. |
+| Workforce cost simulation | Add a cost model (pay rates, overtime multipliers per role) and a simulation endpoint that runs the optimizer against a hypothetical demand scenario without committing assignments. | Premium feature for budget planning and scenario modeling. |
+| Multi-language / i18n | Introduce react-i18next; extract all frontend UI strings; ship English and at least one additional locale. | Required for non-English-speaking markets and enterprise RFPs in the EU. |
+| Fatigue and rest-period analytics | Add a rolling-window analysis job that computes per-employee consecutive-shift counts, rest gaps, and weekly hours. Surface as alerts in the manager dashboard and as a compliance rule in `ComplianceEngine`. | Increasingly required by labor law; differentiator in healthcare and logistics. |
