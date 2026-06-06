@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS users (
     last_name VARCHAR(100) NOT NULL,
     employee_id VARCHAR(50) UNIQUE,
     position VARCHAR(100),
+    -- Note: there is no separate `employees` table; employee fields live here.
+    -- chk_hourly_rate is therefore placed on users instead of employees.
     hourly_rate DECIMAL(10, 2) DEFAULT 0,
     phone VARCHAR(20),
     is_active BOOLEAN DEFAULT TRUE,
@@ -42,6 +44,8 @@ CREATE TABLE IF NOT EXISTS users (
     totp_recovery_codes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_hourly_rate CHECK (hourly_rate >= 0),
 
     INDEX idx_email (email),
     INDEX idx_employee_id (employee_id),
@@ -197,10 +201,12 @@ CREATE TABLE IF NOT EXISTS shift_templates (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
+    CONSTRAINT chk_template_staff CHECK (max_staff >= min_staff AND min_staff >= 0),
+
     INDEX idx_department (department_id),
     INDEX idx_active (is_active),
-    
+
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
 );
 
@@ -266,7 +272,9 @@ CREATE TABLE IF NOT EXISTS shifts (
     status ENUM('open', 'assigned', 'confirmed', 'cancelled') DEFAULT 'open',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    
+
+    CONSTRAINT chk_shift_staff CHECK (max_staff >= min_staff AND min_staff >= 0),
+
     INDEX idx_schedule (schedule_id),
     INDEX idx_schedule_date (schedule_id, date),
     INDEX idx_department (department_id),
@@ -339,6 +347,8 @@ CREATE TABLE IF NOT EXISTS on_call_periods (
     status ENUM('open', 'assigned', 'cancelled') NOT NULL DEFAULT 'open',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT chk_on_call_staff CHECK (max_staff >= min_staff AND min_staff >= 0),
 
     INDEX idx_schedule (schedule_id),
     INDEX idx_department_date (department_id, date),
@@ -683,7 +693,7 @@ CREATE TABLE IF NOT EXISTS policies (
 
     INDEX idx_scope (scope_type, scope_id),
     INDEX idx_active (is_active),
-    INDEX idx_owner (imposed_by_user_id),
+    INDEX idx_policies_imposed_by (imposed_by_user_id),
 
     FOREIGN KEY (imposed_by_user_id) REFERENCES users(id) ON DELETE RESTRICT
 );
@@ -747,6 +757,7 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
     UNIQUE KEY unique_change_type (change_type),
+    INDEX idx_approval_matrix_approver_role (approver_role_id),
 
     FOREIGN KEY (approver_role_id) REFERENCES roles(id) ON DELETE SET NULL,
     FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
@@ -794,6 +805,7 @@ CREATE TABLE IF NOT EXISTS approval_steps (
 
     UNIQUE KEY unique_workflow_order (workflow_id, step_order),
     INDEX idx_workflow (workflow_id),
+    INDEX idx_approval_steps_approver (approver_role_id, approver_user_id),
 
     FOREIGN KEY (workflow_id) REFERENCES approval_workflows(id) ON DELETE CASCADE,
     FOREIGN KEY (approver_role_id) REFERENCES roles(id) ON DELETE SET NULL,
