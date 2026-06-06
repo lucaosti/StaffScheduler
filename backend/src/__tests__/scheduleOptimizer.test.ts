@@ -2,14 +2,19 @@
  * ScheduleOptimizer (OR-Tools wrapper + greedy fallback) tests.
  *
  * The Python path is mocked away — we only test the greedy fallback,
- * problem validation, and the helpers (_hasOverlappingShift,
- * _timesOverlap, _calculateShiftHours) via the public surface.
+ * evaluateCandidate(), problem validation, and the helpers
+ * (_hasOverlappingShift, _timesOverlap, _calculateShiftHours) via the
+ * public surface.
  */
 
 import { EventEmitter } from 'events';
 import { spawn } from 'child_process';
 import { config } from '../config';
-import { ScheduleOptimizer, OptimizationProblem } from '../optimization/ScheduleOptimizerORTools';
+import {
+  ScheduleOptimizer,
+  OptimizationProblem,
+  CandidateContext,
+} from '../optimization/ScheduleOptimizerORTools';
 
 jest.mock('child_process', () => ({
   spawn: jest.fn(),
@@ -141,6 +146,137 @@ describe('ScheduleOptimizer.generateGreedySchedule', () => {
   });
 });
 
+describe('ScheduleOptimizer — greedy constraint tests', () => {
+  it('does not assign more than max_staff employees to a shift', async () => {
+    const opt = new ScheduleOptimizer();
+    // Shift allows at most 2 employees but there are 4 available
+    const out = await opt.generateGreedySchedule(
+      buildProblem({
+        shifts: [buildShift({ id: 's1', min_staff: 4, max_staff: 2 })],
+        employees: [
+          buildEmployee({ id: 'e1' }),
+          buildEmployee({ id: 'e2' }),
+          buildEmployee({ id: 'e3' }),
+          buildEmployee({ id: 'e4' }),
+        ],
+      })
+    );
+    // max_staff=2 caps the assignments even though min_staff asks for 4
+    expect(out.length).toBeLessThanOrEqual(2);
+  });
+
+  it('blocks assignment when daily hours budget is exhausted', async () => {
+    const opt = new ScheduleOptimizer();
+    // Employee has max 8h/week => daily budget = max(8, 8/5=1.6) = 8h
+    // First shift is 8h; second shift on the same day would exceed budget
+    const out = await opt.generateGreedySchedule(
+      buildProblem({
+        shifts: [
+          buildShift({ id: 's1', date: '2026-05-01', start_time: '00:00', end_time: '08:00', min_staff: 1 }),
+          buildShift({ id: 's2', date: '2026-05-01', start_time: '10:00', end_time: '14:00', min_staff: 1 }),
+        ],
+        employees: [buildEmployee({ id: 'e1', max_hours_per_week: 8 })],
+      })
+    );
+    // Only the first shift should be assigned — daily budget exhausted after it
+    expect(out).toHaveLength(1);
+    expect(out[0].shiftId).toBe('s1');
+  });
+
+  it('respects min_staff requirement — assigns exactly min_staff when enough candidates', async () => {
+    const opt = new ScheduleOptimizer();
+    const out = await opt.generateGreedySchedule(
+      buildProblem({
+        shifts: [buildShift({ id: 's1', min_staff: 3, max_staff: 5 })],
+        employees: [
+          buildEmployee({ id: 'e1' }),
+          buildEmployee({ id: 'e2' }),
+          buildEmployee({ id: 'e3' }),
+          buildEmployee({ id: 'e4' }),
+          buildEmployee({ id: 'e5' }),
+        ],
+      })
+    );
+    expect(out).toHaveLength(3);
+  });
+
+  it('skips a fully-unavailable employee while assigning an available one', async () => {
+    const opt = new ScheduleOptimizer();
+    const out = await opt.generateGreedySchedule(
+      buildProblem({
+        shifts: [buildShift({ id: 's1', date: '2026-05-01', min_staff: 1 })],
+        employees: [
+          buildEmployee({ id: 'e1', unavailable_dates: ['2026-05-01'] }),
+          buildEmployee({ id: 'e2', unavailable_dates: [] }),
+        ],
+      })
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].employeeId).toBe('e2');
+  });
+
+  it('requires all skills — rejects employee missing any one required skill', async () => {
+    const opt = new ScheduleOptimizer();
+    const out = await opt.generateGreedySchedule(
+      buildProblem({
+        shifts: [
+          buildShift({ id: 's1', min_staff: 1, required_skills: ['Triage', 'CPR'] }),
+        ],
+        employees: [
+          buildEmployee({ id: 'e1', skills: ['Triage'] }),           // missing CPR
+          buildEmployee({ id: 'e2', skills: ['CPR'] }),              // missing Triage
+          buildEmployee({ id: 'e3', skills: ['Triage', 'CPR'] }),   // qualifies
+        ],
+      })
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].employeeId).toBe('e3');
+  });
+});
+
+describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
+  const buildCtx = (overrides: Partial<CandidateContext> = {}): CandidateContext => ({
+    shift: buildShift({ id: 's1', max_staff: 5 }) as any,
+    assignedShiftIds: new Set<string>(),
+    allShifts: [],
+    dailyHoursMap: new Map<string, number>(),
+    currentShiftAssignmentCount: 0,
+    ...overrides,
+  });
+
+  it('returns true for a clean, unconstrained candidate', () => {
+    const opt = new ScheduleOptimizer();
+    expect(opt.evaluateCandidate(buildEmployee() as any, buildCtx())).toBe(true);
+  });
+
+  it('returns false when max_staff is already reached', () => {
+    const opt = new ScheduleOptimizer();
+    const ctx = buildCtx({
+      shift: buildShift({ id: 's1', max_staff: 2 }) as any,
+      currentShiftAssignmentCount: 2,
+    });
+    expect(opt.evaluateCandidate(buildEmployee() as any, ctx)).toBe(false);
+  });
+
+  it('returns false when employee is marked unavailable on that date', () => {
+    const opt = new ScheduleOptimizer();
+    const emp = buildEmployee({ unavailable_dates: ['2026-05-01'] }) as any;
+    expect(opt.evaluateCandidate(emp, buildCtx())).toBe(false);
+  });
+
+  it('returns false when daily hours budget would be exceeded', () => {
+    const opt = new ScheduleOptimizer();
+    // budget = max(8, 16/5=3.2) = 8h; shift is 8h; already has 1h today → total 9h > 8h
+    const emp = buildEmployee({ id: 'e1', max_hours_per_week: 16 }) as any;
+    const dailyHoursMap = new Map([['e1|2026-05-01', 1]]);
+    const ctx = buildCtx({
+      shift: buildShift({ id: 's1', start_time: '08:00', end_time: '16:00' }) as any,
+      dailyHoursMap,
+    });
+    expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
+  });
+});
+
 describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavailable', () => {
   it('returns assignments via the fallback path', async () => {
     const opt = new ScheduleOptimizer();
@@ -154,6 +290,26 @@ describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavail
       })
     );
     expect(result).toHaveLength(1);
+  });
+
+  it('optimize() returns GREEDY_FALLBACK status when Python process fails', async () => {
+    // Simulate python3 not found by making spawn emit an error event
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const opt = new ScheduleOptimizer();
+    const problem = buildProblem({
+      shifts: [buildShift({ id: 's1', min_staff: 1 })],
+      employees: [buildEmployee({ id: 'e1' })],
+    });
+
+    // Start the optimize call, then immediately emit ENOENT to simulate missing python3
+    const resultPromise = opt.optimize(problem);
+    proc.emit('error', Object.assign(new Error('spawn python3 ENOENT'), { code: 'ENOENT' }));
+
+    const result = await resultPromise;
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.assignments.length).toBeGreaterThanOrEqual(1);
   });
 });
 
