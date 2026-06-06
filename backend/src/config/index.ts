@@ -30,6 +30,20 @@ function requireSecret(envVar: string, name: string): string {
   return value || `fallback-${name.toLowerCase().replace(/\s/g, '-')}`;
 }
 
+/**
+ * Returns the environment variable value, but throws at startup when running in
+ * production and the value matches the known insecure default.  In development
+ * and test environments the default is returned as-is so that local setup
+ * remains zero-configuration.
+ */
+function requireProductionSecret(envVar: string, insecureDefault: string): string {
+  const value = process.env[envVar] ?? insecureDefault;
+  if (isProduction && value === insecureDefault) {
+    throw new Error(`[config] ${envVar} must be set to a non-default value in production`);
+  }
+  return value;
+}
+
 export const config = {
   server: {
     port: parseInt(process.env.PORT || '3001'),
@@ -40,7 +54,7 @@ export const config = {
     port: parseInt(process.env.DB_PORT || '3306'),
     database: process.env.DB_NAME || 'staff_scheduler',
     user: process.env.DB_USER || 'scheduler_user',
-    password: process.env.DB_PASSWORD || 'scheduler_password',
+    password: requireProductionSecret('DB_PASSWORD', 'scheduler_password'),
     connectionLimit: 10,
     acquireTimeout: 60000,
     timeout: 60000,
