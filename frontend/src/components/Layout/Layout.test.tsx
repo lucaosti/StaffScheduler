@@ -17,14 +17,14 @@ import ProtectedRoute from '../Auth/ProtectedRoute';
 import { ThemeProvider } from '../../contexts/ThemeContext';
 
 const mockedAuth: {
-  user: { id: number; role: 'admin' | 'manager' | 'employee'; email: string } | null;
+  user: { id: number; role: string; email: string; permissions?: string[] } | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   login: jest.Mock;
   logout: jest.Mock;
   refreshToken: jest.Mock;
 } = {
-  user: { id: 1, role: 'admin', email: 'admin@example.com' },
+  user: { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['system.admin', 'employees.read', 'shifts.read', 'schedules.read', 'reports.read', 'org.read', 'policies.read'] },
   isAuthenticated: true,
   isLoading: false,
   login: jest.fn(),
@@ -44,7 +44,7 @@ const wrap = (ui: React.ReactNode, initial = ['/']) => (
 );
 
 beforeEach(() => {
-  mockedAuth.user = { id: 1, role: 'admin', email: 'admin@example.com' };
+  mockedAuth.user = { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['system.admin', 'employees.read', 'shifts.read', 'schedules.read', 'reports.read', 'org.read', 'policies.read'] };
   mockedAuth.isAuthenticated = true;
   mockedAuth.isLoading = false;
   jest.clearAllMocks();
@@ -66,8 +66,9 @@ describe('Sidebar', () => {
     expect(mockedAuth.logout).toHaveBeenCalled();
   });
 
-  it('hides admin-only items for employees', () => {
-    mockedAuth.user = { id: 2, role: 'employee', email: 'e@x' };
+  it('hides settings when user lacks system.admin permission', () => {
+    // Provide an explicit permission set that excludes system.admin
+    mockedAuth.user = { id: 2, role: 'staff', email: 'e@x', permissions: ['schedules.read', 'policies.read'] };
     render(
       wrap(
         <Routes>

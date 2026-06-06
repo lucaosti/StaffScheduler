@@ -15,8 +15,6 @@
     "eslint-plugin-react",
     "eslint-plugin-react-hooks",
     "jest-environment-jsdom",
-    "sass",
-    "web-vitals",
-    "whatwg-fetch"
+    "sass"
   ]
 }

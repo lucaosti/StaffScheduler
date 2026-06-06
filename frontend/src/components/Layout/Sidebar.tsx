@@ -44,59 +44,73 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     navigate('/login');
   };
 
+  // Each menu item declares the permission key required to see it.
+  // Items with no requiredPermission are visible to all authenticated users.
+  // When user.permissions is not populated (e.g. legacy tokens), fall back to
+  // showing all items so the UX degrades gracefully rather than hiding everything.
   const menuItems = [
     {
       path: '/dashboard',
       icon: 'bi-speedometer2',
       label: 'Dashboard',
-      roles: ['admin', 'manager', 'employee'],
+      requiredPermission: null,
     },
     {
       path: '/employees',
       icon: 'bi-people',
       label: 'Employees',
-      roles: ['admin', 'manager'],
+      requiredPermission: 'employees.read',
     },
     {
       path: '/shifts',
       icon: 'bi-clock',
       label: 'Shifts',
-      roles: ['admin', 'manager'],
+      requiredPermission: 'shifts.read',
     },
     {
       path: '/schedule',
       icon: 'bi-calendar3',
       label: 'Schedule',
-      roles: ['admin', 'manager', 'employee'],
+      requiredPermission: 'schedules.read',
     },
     {
       path: '/reports',
       icon: 'bi-graph-up',
       label: 'Reports',
-      roles: ['admin', 'manager'],
+      requiredPermission: 'reports.read',
     },
     {
       path: '/org',
       icon: 'bi-diagram-3',
       label: 'Organization',
-      roles: ['admin', 'manager'],
+      requiredPermission: 'org.read',
     },
     {
       path: '/policies',
       icon: 'bi-shield-check',
       label: 'Policies',
-      roles: ['admin', 'manager', 'employee'],
+      requiredPermission: 'policies.read',
     },
     {
       path: '/settings',
       icon: 'bi-gear',
       label: 'Settings',
-      roles: ['admin'],
+      requiredPermission: 'system.admin',
     },
   ];
 
+  const hasPermission = (requiredPermission: string | null): boolean => {
+    if (requiredPermission === null) return true;
+    // If the RBAC layer has populated permissions, use them.
+    if (user?.permissions) {
+      return user.permissions.includes(requiredPermission);
+    }
+    // Fallback: show all items when permissions have not been populated yet.
+    return true;
+  };
+
   const filteredMenuItems = menuItems.filter(item =>
-    user?.role && item.roles.includes(user.role)
+    user && hasPermission(item.requiredPermission)
   );
 
   return (
