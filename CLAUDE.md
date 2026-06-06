@@ -70,18 +70,35 @@ backend/src/
 │   ├── database.ts            # Singleton Database class (pool, query helpers, transactions)
 │   └── logger.ts              # Winston singleton — use this, never console.log/error
 ├── middleware/
-│   ├── auth.ts                # JWT verification → req.user; requireAdmin / requireManager guards
-│   └── validation.ts          # express-validator helpers
+│   ├── auth.ts                # JWT verification → req.user; authenticate, requirePermission, requireModule
+│   ├── validation.ts          # Zod-based validateBody / validateParams helpers
+│   └── requestContext.ts      # AsyncLocalStorage request IDs; X-Request-Id response header; getRequestId()
+├── schemas/                   # Zod schemas shared across routes (imported by validateBody/validateParams)
 ├── routes/                    # One file per resource; factory pattern createXxxRouter(pool)
 ├── services/                  # Stateless business logic classes, constructed with Pool
+│   ├── RbacService.ts         # Permission resolution, org-unit scoping, role grants
+│   ├── DelegationService.ts   # Temporary authority transfer between users
+│   ├── ApprovalEngineService.ts  # Multi-step configurable approval workflows, escalation
+│   ├── ModuleService.ts       # Runtime module enable/disable with in-process cache
+│   ├── AssignmentValidator.ts # Validation logic extracted from AssignmentService
+│   ├── AssignmentOrchestrator.ts  # Orchestration logic extracted from AssignmentService
+│   ├── ScheduleOptimizationOrchestrator.ts  # Optimization orchestration from ScheduleService
+│   └── (other per-domain services)
 └── optimization/
     ├── ScheduleOptimizerORTools.ts  # Spawns backend/optimization-scripts/schedule_optimizer.py
     └── ScheduleOptimizer.ts         # Pure-TypeScript fallback optimizer
 ```
 
-**Route → Service pattern**: Routes validate input, instantiate a service, call one method, and return JSON. Services own all SQL and business rules; they throw named errors on failure.
+**Route → Service pattern**: Routes validate input (via Zod middleware), instantiate a service, call one method, and return JSON. Services own all SQL and business rules; they throw named errors on failure.
 
-> **Note**: Authentication lives in `UserService.validatePassword` (`src/routes/auth.ts` → `createAuthRouter`). There are **no password-reset endpoints** yet; if you add password reset / token refresh, build it into `UserService` or a dedicated service and wire a route — there is no standalone `AuthService`.
+**Auth middleware** (`src/middleware/auth.ts`):
+
+- `authenticate` — Verifies JWT, loads the user from DB, resolves effective permissions via `RbacService.getEffectivePermissions()` (union of role grants + active delegations), computes `allowedOrgUnitIds` for org-unit scoping, and attaches the enriched `User` to `req.user`. Must be applied first on all protected routes.
+- `requirePermission(code)` — Authorization guard; returns 403 if the authenticated user does not hold the given permission code. Apply after `authenticate`. Example: `requirePermission('schedule.manage')`.
+- `requireModule(code)` — Feature-flag guard; returns 404 (not 401) for disabled modules. Apply before `authenticate` so the route is invisible to all callers when the module is off.
+- `userHasPermission(user, code)` — Helper for finer-grained in-handler authorization checks without adding a middleware layer.
+
+**Password reset**: implemented in `UserService`; the relevant route is wired through `createAuthRouter`.
 
 **Error detection in routes**: Services throw `Error('X not found')` for 404 cases and `Error('X already confirmed')` for conflict cases. Routes check `error.message.toLowerCase().includes('not found')` in catch blocks to return 404 vs 500.
 
@@ -120,14 +137,18 @@ The `code` field is required in all error responses.
 - **Logging**: Backend routes must use `logger.error(...)` (Winston). Never use `console.error`.
 - **Type safety**: No `@ts-ignore`. No local type duplicates — import from `types/index.ts` (frontend) or `src/types/index.ts` (backend).
 - **Database**: No ORM. Raw SQL with `mysql2/promise`. All schema changes go in `backend/database/init.sql`. The password column is `password_hash` (never `password`).
-- **Auth**: Protected routes apply `authenticate` middleware first, then `requireAdmin` or `requireManager` as needed. Permission gating is role-based via `requireRole`.
+- **Auth**: Protected routes apply `authenticate` middleware first, then `requirePermission('permission.key')` for the required permission code. Do not use `requireAdmin`, `requireManager`, or `requireRole` — these do not exist. Permission gating is always code-based.
+- **Validation**: Use `validateBody(schema)` / `validateParams(schema)` from `src/middleware/validation.ts` with Zod schemas defined in `src/schemas/`. Do not use `express-validator`.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
+- **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`). Do not create additional root-level `.md` files.
+- **Sync docs on every code change**: When adding or modifying an endpoint, update `backend/openapi/openapi.json` and the relevant sections of `DOCUMENTATION.md` in the same PR.
 
 ## Authoring Rules
 
 - **Single author**: All commits must be authored by `Luca Ostinelli <ostinelliluca2@gmail.com>`. No co-authors, no automated bot signatures.
 - **No AI references**: Do not include any reference to Claude, Anthropic, AI tooling, or "Generated with…" footers in commit messages, source code, or documentation. The only exception is this `CLAUDE.md` file itself.
 - **Verification before commit**: `git log --pretty='%an %ae %s' | grep -iE 'claude|anthropic|co-authored'` must return empty.
+- **Branch naming**: one branch per feature/fix. Prefixes: `feat/`, `fix/`, `refactor/`, `docs/`, `chore/`.
 
 ## Environment Setup
 

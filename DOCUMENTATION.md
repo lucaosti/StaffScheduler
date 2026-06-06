@@ -22,6 +22,7 @@ This document is the single reference for architecture, domain model, database s
 14. [Contribution and review process](#14-contribution-and-review-process)
 15. [Security policy](#15-security-policy)
 16. [End-to-end tests](#16-end-to-end-tests)
+17. [Future roadmap](#17-future-roadmap)
 
 ---
 
@@ -43,14 +44,32 @@ The frontend is a React SPA. The backend is a stateless Express REST API. State 
 ```
 backend/src/
 ├── config/           # env vars, database pool factory, Winston logger
-├── middleware/        # authenticate, requirePermission, requireModule, validation helpers
+├── middleware/        # authenticate, requirePermission, requireModule, validation helpers, requestContext
+├── schemas/          # Zod schemas shared across routes
 ├── routes/           # 30+ router factories; each is createXRouter(pool)
 ├── services/         # one class per domain; receives pool in constructor
 ├── optimization/     # Python OR-Tools bridge
 └── types/index.ts    # canonical TypeScript interfaces (single source of truth)
 ```
 
-**Route → Service pattern**: routes validate input, call one service method, return JSON. Services own all SQL and business rules; they throw named errors on failure. No global singletons (the `database` singleton in `config/database.ts` is an exception used only by the auth middleware and health checks).
+**Route → Service pattern**: routes validate input (via Zod middleware), call one service method, return JSON. Services own all SQL and business rules; they throw named errors on failure. No global singletons (the `database` singleton in `config/database.ts` is an exception used only by the auth middleware and health checks).
+
+### Split service architecture
+
+Two god-classes were broken up to keep service files under 500 lines:
+
+- `AssignmentService` → `AssignmentValidator` (validation and constraint checks) + `AssignmentOrchestrator` (creation, update, cancellation orchestration). `AssignmentService` remains as a thin facade used by legacy callers.
+- `ScheduleService` → `ScheduleOptimizationOrchestrator` (optimization request lifecycle, Python bridge, fallback). `ScheduleService` retains CRUD; the orchestrator handles the heavy optimization path.
+
+### Request correlation IDs
+
+`src/middleware/requestContext.ts` uses Node's `AsyncLocalStorage` to propagate a per-request UUID through the entire call stack without threading it through function arguments.
+
+- Every incoming request receives a `randomUUID()` request ID.
+- The ID is written to the `X-Request-Id` response header.
+- `getRequestId()` can be called anywhere in the call stack (services, utilities) to retrieve the current request's ID for structured logging.
+
+Apply the middleware early in `src/index.ts` before any route handlers.
 
 ### Frontend structure
 
@@ -191,13 +210,33 @@ JWT payload: `{ userId, email }` — no role. Permissions are resolved from the 
 
 ### Model
 
-The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts.
+The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
 
 ```
 permissions  — fixed catalog of capability codes (28 codes, cannot be added at runtime)
 roles        — configurable named bundles (Administrator, Manager, Employee + any custom)
 role_permissions — M:N, which permissions a role grants
 user_roles   — user ↔ role grant, optionally scoped to an org-unit subtree, optionally time-bound
+```
+
+`RbacService` owns all queries against these tables and is the only place where permission resolution logic lives.
+
+### Using requirePermission in routes
+
+```typescript
+import { authenticate, requirePermission } from '../middleware/auth';
+
+router.post('/', authenticate, requirePermission('schedule.manage'), handler);
+```
+
+The `requirePermission(code)` call must always come after `authenticate`. It returns 403 if the user's effective permissions (resolved at authentication time) do not include the code.
+
+For finer-grained checks inside a handler (when the required permission depends on request data), use the exported helper:
+
+```typescript
+import { userHasPermission } from '../middleware/auth';
+
+if (!userHasPermission(req.user, 'schedule.publish')) { ... }
 ```
 
 ### Permission resolution
@@ -362,6 +401,54 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 
 ## 12. Development guidelines
 
+### Prerequisites
+
+| Tool | Minimum version |
+|------|----------------|
+| Node.js | 18 |
+| npm | 8 |
+| MySQL | 8.0 |
+| Python (optional, for optimizer) | 3.8 |
+
+### Local setup
+
+```bash
+git clone https://github.com/lucaosti/StaffScheduler.git
+cd StaffScheduler
+
+# Backend
+cp backend/.env.example backend/.env
+# Edit backend/.env — set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET
+
+cd backend
+npm install
+npm run db:init          # creates schema (no data)
+npm run db:seed:demo     # optional: load realistic demo data
+npm run dev              # starts on http://localhost:3001
+
+# Frontend (new terminal)
+cd frontend
+npm install
+npm start                # starts on http://localhost:3000, proxies /api/* to 3001
+```
+
+Docker alternative:
+
+```bash
+./start-dev.sh           # spins up MySQL + backend + frontend in dev mode
+./stop.sh                # tear down
+```
+
+### Branch naming
+
+| Prefix | Use for |
+|--------|---------|
+| `feat/` | new feature |
+| `fix/` | bug fix |
+| `refactor/` | internal cleanup without behavior change |
+| `docs/` | documentation only |
+| `chore/` | dependency bumps, tooling |
+
 ### Language and code style
 
 - Code, comments, commit messages, and all documentation: **English**.
@@ -371,6 +458,7 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 - No fake async (`setTimeout` simulating an API call).
 - No backward-compatibility hacks for removed code.
 - Comments only when the **why** is non-obvious.
+- No service file should exceed 500 lines; extract sub-classes if needed.
 
 ### Testing
 
@@ -392,26 +480,50 @@ cd frontend && npm run lint && CI=true npm test -- --watchAll=false && npm run b
 
 Coverage gates are enforced in CI.
 
+Run a single suite:
+```bash
+npx jest src/__tests__/schedule.service.test.ts
+```
+
 ### Adding a test
 
-Route tests mock `../middleware/auth` with `authenticate`, `requirePermission`, and `requireModule` all set to pass-through. Service tests inject a `jest.fn()` pool.
+Route tests mock `../middleware/auth` with `authenticate`, `requirePermission`, and `requireModule` all set to pass-through. Service tests inject a `jest.fn()` pool. Do not mock the database at the driver level — mock `pool.execute`/`pool.getConnection` on the Pool object.
 
-### Local development
+### Adding a new API endpoint
 
-```bash
-# MySQL (Docker)
-docker compose --profile dev up -d
+1. Add the Zod schema to `backend/src/schemas/index.ts`.
+2. Add the business logic to an existing service or create a new one in `backend/src/services/`.
+3. Add the route handler to the appropriate file in `backend/src/routes/`, or create a new one and mount it in `backend/src/index.ts`.
+4. Update `backend/openapi/openapi.json` with the new path.
+5. Write tests in `backend/src/__tests__/`.
+6. Update the relevant section of `DOCUMENTATION.md` in the same PR.
 
-# Backend
-cd backend
-cp .env.example .env   # edit DB_*, JWT_SECRET, etc.
-npm run db:init        # schema only
-npm run dev            # port 3001
+### Adding a new frontend page
 
-# Frontend
-cd frontend
-npm start              # port 3000
-```
+1. Create the page component in `frontend/src/pages/`.
+2. Add the API client wrapper in `frontend/src/services/` (use `handleResponse` + `getAuthHeaders` from `apiUtils`).
+3. Add the route in `frontend/src/App.tsx`.
+4. Add types to `frontend/src/types/index.ts` (do not duplicate from backend — keep them in sync manually).
+
+### Database schema changes
+
+All schema changes go in `backend/database/init.sql`. This file is the single source of truth for the schema — it is run from scratch on CI.
+
+Guidelines:
+- Use `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` patterns where possible.
+- Add foreign key constraints and indexes for every join column.
+- If a migration changes existing data, add a note at the top of the PR describing the manual migration step needed for existing deployments.
+
+### Issue reporting
+
+Open a [GitHub issue](https://github.com/lucaosti/StaffScheduler/issues) with:
+
+- Steps to reproduce (for bugs)
+- Expected vs actual behavior
+- Backend/frontend version or commit hash
+- Relevant logs (redact credentials)
+
+Feature requests are welcome — describe the use case, not just the solution.
 
 ---
 
@@ -502,3 +614,22 @@ CI job: `Frontend e2e (Playwright)` in `.github/workflows/ci.yml`. Boots a `mysq
 | `auth.spec.ts` | Admin and manager sign in and reach the dashboard |
 | `schedule.spec.ts` | Admin creates a schedule via the UI |
 | `theme.spec.ts` | Theme toggle cycles between light and dark |
+
+---
+
+## 17. Future roadmap
+
+The following capabilities are planned but not yet implemented. Pull requests for any of these are welcome — open an issue first to coordinate.
+
+| Capability | Notes |
+|---|---|
+| Mobile app | Native or PWA for employees to view shifts and request swaps on mobile |
+| Real-time shift swap marketplace | Employees can post and claim swaps without manager intervention |
+| Geofencing | Clock-in/out gated by physical location |
+| Predictive demand forecasting | Historical data model to auto-suggest minimum staffing targets |
+| Compliance reporting | Jurisdiction-specific labor rule checks (rest periods, overtime, etc.) |
+| Payroll integration | Export to payroll providers (Gusto, ADP, Workday) |
+| Multi-language / RTL support | i18n for the frontend SPA |
+| SSO / SAML / OAuth2 | Enterprise identity provider federation |
+| Bulk API | Batch endpoints for high-volume integrations |
+| Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in |

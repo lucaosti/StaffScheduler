@@ -39,7 +39,7 @@ The Project exposes three custom fields used by the views:
 
 The "Out of scope" items are intentional design choices (this is an
 open-source self-hosted core, not a SaaS product). Pull requests
-addressing them are welcome — see [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+addressing them are welcome — see [§12 Development guidelines](./DOCUMENTATION.md#12-development-guidelines).
 
 ## Documentation
 
@@ -254,8 +254,7 @@ npm run test:e2e
 ## Technology stack
 
 - Backend: Node.js, Express 4, TypeScript 5, MySQL 8 (`mysql2/promise`),
-  JWT (`jsonwebtoken`), bcrypt, Winston, `express-validator`, Jest,
-  Supertest.
+  JWT (`jsonwebtoken`), bcrypt, Winston, Zod, Jest, Supertest.
 - Frontend: React 18, TypeScript, React Router v6, React Context, Bootstrap 5.
 - Optimizer: Python 3.8+, Google OR-Tools (CP-SAT).
 - Tooling: Docker Compose, GitHub Actions, Swagger UI, OpenAPI 3.1.
