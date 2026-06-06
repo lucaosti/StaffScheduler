@@ -330,6 +330,9 @@ export class ShiftService {
     try {
       await connection.beginTransaction();
 
+      // Every fragment pushed below is a hardcoded string literal, never derived from
+      // user-controlled input.  The UPDATE template is therefore not susceptible to
+      // SQL injection through column-name interpolation.
       const updates: string[] = [];
       const values: any[] = [];
 
@@ -754,6 +757,9 @@ export class ShiftService {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
+      // Every fragment pushed below is a hardcoded string literal, never derived from
+      // user-controlled input.  The UPDATE template is therefore not susceptible to
+      // SQL injection through column-name interpolation.
       const updates: string[] = [];
       const values: any[] = [];
       if (templateData.name !== undefined) {
