@@ -20,7 +20,7 @@ interface Props {
   policies: Policy[];
   busy: boolean;
   canManage: boolean;
-  currentUserId: number | undefined;
+  currentUserId: string | number | undefined;
   isAdmin: boolean;
   policyForm: PolicyFormState;
   onFormChange: (v: PolicyFormState) => void;
