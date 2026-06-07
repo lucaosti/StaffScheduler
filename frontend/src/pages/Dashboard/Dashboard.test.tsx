@@ -11,6 +11,7 @@
  */
 
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { rest } from 'msw';
 import { server } from '../../mocks/server';
@@ -37,12 +38,12 @@ describe('<Dashboard />', () => {
         res(() => new Promise(() => undefined) as never)
       )
     );
-    render(<Dashboard />);
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(screen.getByText(/loading dashboard/i)).toBeInTheDocument();
   });
 
   it('renders the totals returned by the API', async () => {
-    render(<Dashboard />);
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await waitFor(() =>
       expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
     );
@@ -60,7 +61,7 @@ describe('<Dashboard />', () => {
         res(ctx.status(500), ctx.json({ success: false, error: { code: 'BOOM', message: 'fail' } }))
       )
     );
-    render(<Dashboard />);
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
     expect(await screen.findByRole('alert')).toHaveTextContent(/failed to load/i);
 
     server.use(
