@@ -1,5 +1,5 @@
 # Multi-stage build for production optimization
-FROM node:18-alpine AS base
+FROM node:22-alpine AS base
 WORKDIR /app
 
 # Copy package files
