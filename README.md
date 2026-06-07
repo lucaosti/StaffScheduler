@@ -73,6 +73,9 @@ npm install
 npm start                  # http://localhost:3000
 ```
 
+> **Note**: `react-scripts@5.0.1` (Create React App) is unmaintained since October 2022.
+> `npm audit` reports 13 HIGH-severity findings — all in CRA's build toolchain (nth-check, serialize-javascript, svgo, etc.), none in the production JS bundle. They cannot be resolved without migrating to Vite. See DOCUMENTATION.md §Future Work.
+
 ### First admin user
 
 `npm run db:init` creates only the schema. There are no default
