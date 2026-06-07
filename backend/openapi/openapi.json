@@ -395,6 +395,101 @@
         }
       }
     },
+    "/auth/2fa/verify": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "verify2faCode",
+        "summary": "Verify a TOTP code",
+        "description": "Validates a 6-digit TOTP code against the caller's active 2FA secret.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["code"],
+                "properties": {
+                  "code": { "type": "string", "pattern": "^[0-9]{6}$", "description": "6-digit TOTP code." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Code verified." },
+          "400": { "description": "Invalid or expired code." },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/auth/verify": {
+      "get": {
+        "tags": ["Auth"],
+        "operationId": "verifyToken",
+        "summary": "Verify JWT",
+        "description": "Validates the incoming Bearer JWT and returns the authenticated user record (password fields stripped).",
+        "responses": {
+          "200": {
+            "description": "Token valid. User record returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": { "$ref": "#/components/schemas/User" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "refreshToken",
+        "summary": "Refresh JWT",
+        "description": "Issues a new JWT for the currently authenticated user. The existing token remains valid until it expires (no server-side blacklist). Requires a valid token in the `Authorization` header.",
+        "responses": {
+          "200": {
+            "description": "New token issued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean" },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "token": { "type": "string" },
+                        "user": { "$ref": "#/components/schemas/User" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "operationId": "logout",
+        "summary": "Logout",
+        "description": "Signals logout intent. With stateless JWTs this is informational — the client must discard the token. No server-side blacklisting is performed.",
+        "responses": {
+          "200": { "description": "Logged out.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "message": { "type": "string" } } } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
     "/users": {
       "get": {
         "tags": ["Users"],
@@ -455,7 +550,7 @@
       "put": {
         "tags": ["Users"],
         "summary": "Update user",
-        "description": "Update email, name, role, or active status. Admins can update any user; regular users can update themselves (limited fields).",
+        "description": "Update user profile fields. Users with `user.manage` can update any user; regular users can only update their own `firstName`, `lastName`, and `phone`. Password change is performed by passing `password` — requires `user.manage` or self-service on own account. Role changes require `user.manage` and are subject to the anti-privilege-escalation rule.",
         "parameters": [{ "$ref": "#/components/parameters/id" }],
         "requestBody": {
           "required": true,
@@ -464,10 +559,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "email": { "type": "string", "format": "email" },
+                  "email": { "type": "string", "format": "email", "description": "Requires `user.manage`." },
                   "firstName": { "type": "string" },
                   "lastName": { "type": "string" },
-                  "isActive": { "type": "boolean" }
+                  "phone": { "type": "string" },
+                  "password": { "type": "string", "minLength": 1, "description": "New password. Hashed with bcrypt before storage. Requires `user.manage` or self-service on own account." },
+                  "isActive": { "type": "boolean", "description": "Requires `user.manage`." },
+                  "roleIds": { "type": "array", "items": { "type": "integer" }, "description": "Requires `user.manage`. Subject to anti-privilege-escalation check. Cannot modify own roles." }
                 }
               }
             }
@@ -477,7 +575,8 @@
           "200": { "description": "Updated user." },
           "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": { "$ref": "#/components/responses/Forbidden" },
-          "404": { "$ref": "#/components/responses/NotFound" }
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "description": "Email or employee ID already in use." }
         }
       },
       "delete": {
@@ -1084,7 +1183,265 @@
     },
     "/approval-workflows": {
       "get": { "tags": ["Approval Workflows"], "summary": "List approval workflow definitions", "responses": { "200": { "description": "Workflow list." }, "401": { "$ref": "#/components/responses/Unauthorized" } } },
-      "post": { "tags": ["Approval Workflows"], "summary": "Create approval workflow", "description": "Defines a multi-step approval chain for a specific change type.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name", "changeType", "steps"], "properties": { "name": { "type": "string" }, "changeType": { "type": "string" }, "steps": { "type": "array", "items": { "type": "object", "properties": { "order": { "type": "integer" }, "approverRole": { "type": "string" }, "timeoutHours": { "type": "integer" } } } } } } } } }, "responses": { "201": { "description": "Workflow created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+      "post": { "tags": ["Approval Workflows"], "summary": "Create approval workflow", "description": "Defines a multi-step approval chain for a specific change type. Requires `approval.manage`.", "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["name", "changeType", "steps"], "properties": { "name": { "type": "string" }, "changeType": { "type": "string" }, "steps": { "type": "array", "items": { "type": "object", "properties": { "order": { "type": "integer" }, "approverRole": { "type": "string" }, "timeoutHours": { "type": "integer" } } } } } } } } }, "responses": { "201": { "description": "Workflow created." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } } }
+    },
+    "/approval-workflows/{id}": {
+      "get": {
+        "tags": ["Approval Workflows"],
+        "summary": "Get approval workflow by change type",
+        "description": "Returns the active workflow definition for a given change type (pass the type string as `id`). Requires `approval.manage`.",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Change-type string (e.g. `time_off_request`) or numeric workflow ID." }],
+        "responses": {
+          "200": { "description": "Workflow definition." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "put": {
+        "tags": ["Approval Workflows"],
+        "summary": "Update approval workflow",
+        "description": "Updates a workflow definition by numeric ID. Requires `approval.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "steps": { "type": "array", "items": { "type": "object" } } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["Approval Workflows"],
+        "summary": "Delete approval workflow",
+        "description": "Removes a workflow definition. Requires `approval.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/approval-workflows/escalate": {
+      "post": {
+        "tags": ["Approval Workflows"],
+        "summary": "Escalate a pending approval",
+        "description": "Manually escalates a stalled approval step to the next approver. Requires `approval.manage`.",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["instanceId"], "properties": { "instanceId": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Escalated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/roles/users/{userId}": {
+      "post": {
+        "tags": ["RBAC"],
+        "summary": "Assign role to user",
+        "description": "Grants the specified role to a user. Requires `role.manage`. Subject to the anti-privilege-escalation rule.",
+        "parameters": [{ "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["roleId"], "properties": { "roleId": { "type": "integer" } } } } } },
+        "responses": { "200": { "description": "Role assigned." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/roles/users/{userId}/{roleId}": {
+      "delete": {
+        "tags": ["RBAC"],
+        "summary": "Remove role from user",
+        "description": "Revokes the specified role from a user. Requires `role.manage`.",
+        "parameters": [
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } },
+          { "name": "roleId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Role removed." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/delegations/{id}": {
+      "delete": {
+        "tags": ["Delegations"],
+        "summary": "Revoke delegation",
+        "description": "Cancels an active delegation. The delegator or an admin can revoke.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Delegation revoked." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/shift-swap/{id}": {
+      "get": {
+        "tags": ["Shift Swap"],
+        "summary": "Get shift swap request by ID",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Swap request.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "$ref": "#/components/schemas/ShiftSwapRequest" } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["Shift Swap"],
+        "summary": "Cancel shift swap request",
+        "description": "Cancels a pending swap request. Only the requester can cancel.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Cancelled." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/shift-swap/{id}/approve": {
+      "post": {
+        "tags": ["Shift Swap"],
+        "summary": "Approve shift swap request",
+        "description": "Manager approves the swap. Requires `shiftswap.approve`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Approved." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/shift-swap/{id}/decline": {
+      "post": {
+        "tags": ["Shift Swap"],
+        "summary": "Decline shift swap request",
+        "description": "Manager declines the swap. Requires `shiftswap.approve`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Declined." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/shift-swap/{id}/cancel": {
+      "post": {
+        "tags": ["Shift Swap"],
+        "summary": "Cancel shift swap request (action endpoint)",
+        "description": "Alternative cancel endpoint for the requester.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Cancelled." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/on-call/periods/{id}": {
+      "get": {
+        "tags": ["On Call"],
+        "summary": "Get on-call period by ID",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "On-call period." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "put": {
+        "tags": ["On Call"],
+        "summary": "Update on-call period",
+        "description": "Requires `oncall.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "properties": { "date": { "type": "string", "format": "date" }, "startTime": { "type": "string" }, "endTime": { "type": "string" }, "notes": { "type": "string" } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "delete": {
+        "tags": ["On Call"],
+        "summary": "Delete on-call period",
+        "description": "Requires `oncall.manage`.",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Deleted." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/on-call/periods/{id}/assignments": {
+      "get": {
+        "tags": ["On Call"],
+        "summary": "List assignments for an on-call period",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Assignment list." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/on-call/periods/{id}/assign/{userId}": {
+      "delete": {
+        "tags": ["On Call"],
+        "summary": "Remove user from on-call period",
+        "description": "Requires `oncall.manage`.",
+        "parameters": [
+          { "$ref": "#/components/parameters/id" },
+          { "name": "userId", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "Removed." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/settings/category/{category}": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Get settings by category",
+        "parameters": [{ "name": "category", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Settings in the given category." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/settings/time-period": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Get time-period setting",
+        "responses": { "200": { "description": "Time period configuration." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      },
+      "put": {
+        "tags": ["Settings"],
+        "summary": "Update time-period setting",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["startDay"], "properties": { "startDay": { "type": "string", "description": "Day the week/period starts, e.g. 'monday'." } } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" } }
+      }
+    },
+    "/settings/{category}/{key}": {
+      "get": {
+        "tags": ["Settings"],
+        "summary": "Get a specific setting value",
+        "parameters": [
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Setting value." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      },
+      "put": {
+        "tags": ["Settings"],
+        "summary": "Update a specific setting value",
+        "description": "Requires admin.",
+        "parameters": [
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["value"], "properties": { "value": {} } } } } },
+        "responses": { "200": { "description": "Updated." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/settings/{category}/{key}/reset": {
+      "post": {
+        "tags": ["Settings"],
+        "summary": "Reset a setting to its default value",
+        "description": "Requires admin.",
+        "parameters": [
+          { "name": "category", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "key", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "Reset to default." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "403": { "$ref": "#/components/responses/Forbidden" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/notifications": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "List notifications for the current user",
+        "description": "Returns in-app notifications for the authenticated user. Requires the `notifications` module to be enabled.",
+        "responses": { "200": { "description": "Notification list." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "description": "Module disabled." } }
+      }
+    },
+    "/notifications/unread-count": {
+      "get": {
+        "tags": ["Notifications"],
+        "summary": "Count of unread notifications",
+        "description": "Returns the number of unread notifications for the current user. Requires the `notifications` module.",
+        "responses": { "200": { "description": "Count.", "content": { "application/json": { "schema": { "type": "object", "properties": { "success": { "type": "boolean" }, "data": { "type": "object", "properties": { "count": { "type": "integer" } } } } } } } }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/notifications/{id}/read": {
+      "patch": {
+        "tags": ["Notifications"],
+        "summary": "Mark a notification as read",
+        "parameters": [{ "$ref": "#/components/parameters/id" }],
+        "responses": { "200": { "description": "Marked as read." }, "401": { "$ref": "#/components/responses/Unauthorized" }, "404": { "$ref": "#/components/responses/NotFound" } }
+      }
+    },
+    "/notifications/read-all": {
+      "patch": {
+        "tags": ["Notifications"],
+        "summary": "Mark all notifications as read",
+        "responses": { "200": { "description": "All notifications marked as read." }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    },
+    "/events/stream": {
+      "get": {
+        "tags": ["System"],
+        "operationId": "sseStream",
+        "summary": "Server-Sent Events stream",
+        "description": "Opens a persistent SSE connection that pushes real-time events (schedule changes, notifications, etc.) to the client. Requires a valid JWT. The response MIME type is `text/event-stream`.",
+        "responses": {
+          "200": {
+            "description": "Event stream opened.",
+            "content": {
+              "text/event-stream": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
     }
   }
 }
