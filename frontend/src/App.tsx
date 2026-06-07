@@ -89,37 +89,37 @@ const App: React.FC = () => {
           {/* Main application pages */}
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="employees" element={
-            <PermissionRoute permission="employees.read">
+            <PermissionRoute permission="employee.read">
               <Employees />
             </PermissionRoute>
           } />
           <Route path="shifts" element={
-            <PermissionRoute permission="shifts.read">
+            <PermissionRoute permission="shift.manage">
               <Shifts />
             </PermissionRoute>
           } />
           <Route path="schedule" element={
-            <PermissionRoute permission="schedules.read">
+            <PermissionRoute permission="schedule.read">
               <Schedule />
             </PermissionRoute>
           } />
           <Route path="reports" element={
-            <PermissionRoute permission="reports.read">
+            <PermissionRoute permission="report.read">
               <Reports />
             </PermissionRoute>
           } />
           <Route path="org" element={
-            <PermissionRoute permission="org.read">
+            <PermissionRoute permission="org_unit.read">
               <OrgManagement />
             </PermissionRoute>
           } />
           <Route path="policies" element={
-            <PermissionRoute permission="policies.read">
+            <PermissionRoute permission="policy.read">
               <Policies />
             </PermissionRoute>
           } />
           <Route path="settings" element={
-            <PermissionRoute permission="system.admin">
+            <PermissionRoute permission="settings.manage">
               <Settings />
             </PermissionRoute>
           } />
