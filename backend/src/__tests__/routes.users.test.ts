@@ -279,6 +279,24 @@ describe('users router PUT /:id', () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it('returns 403 when a non-admin (manager) tries to assign the admin role to themselves', async () => {
+    // A user must never be able to elevate their own role — both the
+    // self-role-change guard and the anti-escalation check would block this.
+    currentUser = { id: 9, role: 'manager', email: 'm@x' };
+    const update = jest.fn().mockResolvedValue({ id: 9 });
+    (UserService.prototype.updateUser as jest.Mock) = update;
+    (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({
+      id: 1,
+      name: 'Administrator',
+      isSystem: true,
+      permissions: ['settings.manage', 'role.manage'],
+    });
+    const res = await request(mountApp()).put('/api/users/9').send({ roleIds: [1] });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('allows an admin to assign a role to another user', async () => {
     (UserService.prototype.updateUser as jest.Mock) = jest.fn().mockResolvedValue({ id: 9 });
     (RbacService.prototype.getRoleById as jest.Mock).mockResolvedValue({

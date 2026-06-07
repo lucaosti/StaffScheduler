@@ -313,6 +313,106 @@ describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavail
   });
 });
 
+/**
+ * Explicit tests for the TypeScript-only greedy path, covering the five
+ * scenarios requested by the task specification:
+ *   1. evaluateCandidate — available employee → true
+ *   2. evaluateCandidate — max weekly hours budget exhausted → false
+ *   3. evaluateCandidate — overlapping shift already assigned → false
+ *   4. generateGreedySchedule — 2 employees, 1 shift → assignments; optimize() wraps as GREEDY_FALLBACK
+ *   5. generateGreedySchedule — 0 eligible employees → empty result
+ */
+describe('Pure TS greedy fallback — specified scenarios', () => {
+  const buildCtxSimple = (overrides: Partial<CandidateContext> = {}): CandidateContext => ({
+    shift: buildShift({ id: 's1', date: '2026-05-01', start_time: '08:00', end_time: '16:00', max_staff: 5 }) as any,
+    assignedShiftIds: new Set<string>(),
+    allShifts: [],
+    dailyHoursMap: new Map<string, number>(),
+    currentShiftAssignmentCount: 0,
+    ...overrides,
+  });
+
+  it('scenario 1: evaluateCandidate returns true for an available, unconstrained employee', () => {
+    const opt = new ScheduleOptimizer();
+    const emp = buildEmployee({ id: 'e1', max_hours_per_week: 40, skills: [], unavailable_dates: [] }) as any;
+    expect(opt.evaluateCandidate(emp, buildCtxSimple())).toBe(true);
+  });
+
+  it('scenario 2: evaluateCandidate returns false when the daily hours budget is fully consumed', () => {
+    const opt = new ScheduleOptimizer();
+    // max_hours_per_week=8 → daily budget = max(8, 8/5) = 8h
+    // Shift is 8h; employee already has 8h logged today → adding more would exceed the cap
+    const emp = buildEmployee({ id: 'e1', max_hours_per_week: 8 }) as any;
+    const dailyHoursMap = new Map([['e1|2026-05-01', 8]]);
+    const ctx = buildCtxSimple({
+      shift: buildShift({ id: 's1', date: '2026-05-01', start_time: '08:00', end_time: '16:00' }) as any,
+      dailyHoursMap,
+    });
+    expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
+  });
+
+  it('scenario 3: evaluateCandidate returns false when employee already has an overlapping shift', () => {
+    const opt = new ScheduleOptimizer();
+    const assignedShift = buildShift({
+      id: 'assigned-s',
+      date: '2026-05-01',
+      start_time: '06:00',
+      end_time: '14:00',
+    });
+    const targetShift = buildShift({
+      id: 's-target',
+      date: '2026-05-01',
+      start_time: '12:00',
+      end_time: '20:00',
+    });
+    const emp = buildEmployee({ id: 'e1' }) as any;
+    const ctx = buildCtxSimple({
+      shift: targetShift as any,
+      assignedShiftIds: new Set(['assigned-s']),
+      allShifts: [assignedShift as any, targetShift as any],
+    });
+    expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
+  });
+
+  it('scenario 4: generateGreedySchedule with 2 employees and 1 shift returns assignments; optimize() wraps them as GREEDY_FALLBACK', async () => {
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const opt = new ScheduleOptimizer();
+    const problem = buildProblem({
+      shifts: [buildShift({ id: 's1', min_staff: 1, max_staff: 1 })],
+      employees: [buildEmployee({ id: 'e1' }), buildEmployee({ id: 'e2' })],
+    });
+
+    // generateGreedySchedule does not invoke spawn, so the mock above only
+    // applies to the optimize() call below. Both calls share the same opt
+    // instance; the direct greedy call is independent of Python.
+    const greedy = await opt.generateGreedySchedule(problem);
+    expect(greedy).toHaveLength(1);
+    expect(greedy[0].shiftId).toBe('s1');
+
+    // optimize() must return GREEDY_FALLBACK status when Python is unavailable
+    const optimizePromise = opt.optimize(problem);
+    proc.emit('error', Object.assign(new Error('spawn python3 ENOENT'), { code: 'ENOENT' }));
+    const result = await optimizePromise;
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.assignments).toHaveLength(1);
+  });
+
+  it('scenario 5: generateGreedySchedule returns an empty array when no employees are eligible', async () => {
+    const opt = new ScheduleOptimizer();
+    const problem = buildProblem({
+      shifts: [buildShift({ id: 's1', date: '2026-05-01', min_staff: 1 })],
+      employees: [
+        buildEmployee({ id: 'e1', unavailable_dates: ['2026-05-01'] }),
+        buildEmployee({ id: 'e2', unavailable_dates: ['2026-05-01'] }),
+      ],
+    });
+    const result = await opt.generateGreedySchedule(problem);
+    expect(result).toEqual([]);
+  });
+});
+
 describe('ScheduleOptimizer._callPythonOptimizer timeout', () => {
   const originalTimeout = config.optimization.timeout;
 
