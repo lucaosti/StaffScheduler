@@ -22,8 +22,9 @@ export async function startServer(): Promise<void> {
       password: config.database.password,
       database: config.database.database,
       waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0,
+      connectionLimit: config.database.connectionLimit,
+      queueLimit: config.database.queueLimit,
+      connectTimeout: config.database.connectTimeout,
     });
 
     try {
@@ -37,11 +38,26 @@ export async function startServer(): Promise<void> {
     const app = buildApp(pool);
     const port = config.server.port;
 
-    app.listen(port, () => {
+    const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
       logger.info(`Health check: http://localhost:${port}/api/health`);
       logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
     });
+
+    const shutdown = async (signal: string): Promise<void> => {
+      logger.info(`${signal} received — shutting down gracefully`);
+      server.close(async () => {
+        try { await pool.end(); } catch { /* ignore */ }
+        logger.info('Connection pool closed, process exiting');
+        process.exit(0);
+      });
+      setTimeout(() => {
+        logger.warn('Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+      }, 10_000).unref();
+    };
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGINT',  () => void shutdown('SIGINT'));
   } catch (error) {
     logger.error('Failed to start server:', error);
     process.exit(1);
