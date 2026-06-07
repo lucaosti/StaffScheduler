@@ -20,9 +20,9 @@ import * as shiftService from '../../services/shiftService';
 import * as departmentService from '../../services/departmentService';
 import type { Department } from '../../services/departmentService';
 import { ApiError } from '../../services/apiUtils';
-import ScheduleList from '../schedule/ScheduleList';
-import CreateScheduleModal from '../schedule/CreateScheduleModal';
-import StatsBadge from '../schedule/StatsBadge';
+import ScheduleList from './ScheduleList';
+import CreateScheduleModal from './CreateScheduleModal';
+import StatsBadge from './StatsBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 const Schedule: React.FC = () => {

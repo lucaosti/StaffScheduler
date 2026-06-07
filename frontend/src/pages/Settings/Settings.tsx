@@ -9,10 +9,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import PreferencesSection from '../settings/PreferencesSection';
-import ProfileSection from '../settings/ProfileSection';
-import SecuritySection, { HospitalHierarchy } from '../settings/SecuritySection';
-import SystemSection from '../settings/SystemSection';
+import PreferencesSection from './PreferencesSection';
+import ProfileSection from './ProfileSection';
+import SecuritySection, { HospitalHierarchy } from './SecuritySection';
+import SystemSection from './SystemSection';
 import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
 interface UserSettings {
