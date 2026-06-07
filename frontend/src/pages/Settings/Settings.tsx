@@ -7,13 +7,13 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import PreferencesSection from './PreferencesSection';
-import ProfileSection from './ProfileSection';
-import SecuritySection, { HospitalHierarchy } from './SecuritySection';
-import SystemSection from './SystemSection';
-import { updateMyPreferences } from '../../services/preferencesService';
+import PreferencesSection from '../settings/PreferencesSection';
+import ProfileSection from '../settings/ProfileSection';
+import SecuritySection, { HospitalHierarchy } from '../settings/SecuritySection';
+import SystemSection from '../settings/SystemSection';
+import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
 interface UserSettings {
   personalSettings: {
@@ -182,6 +182,25 @@ const Settings: React.FC = () => {
       },
     },
   });
+
+  // Load saved preferences on mount and hydrate work-settings state.
+  useEffect(() => {
+    getMyPreferences().then((res) => {
+      if (res.success && res.data) {
+        const prefs = res.data as UserPreferences;
+        setSettings((prev) => ({
+          ...prev,
+          workSettings: {
+            ...prev.workSettings,
+            maxHoursPerWeek: prefs.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
+            maxConsecutiveDays: prefs.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
+          },
+        }));
+      }
+    }).catch(() => {
+      // Non-fatal — keep default values if preferences endpoint is unavailable.
+    });
+  }, []);
 
   const handleUpdateHierarchyDefault = (
     roleKey: string,
