@@ -19,6 +19,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
+import ConfirmModal from '../../components/ConfirmModal';
 
 
 /**
@@ -33,6 +34,7 @@ const Employees: React.FC = () => {
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; employeeId: number | string | null }>({ open: false, employeeId: null });
 
   const loadEmployees = useCallback(async () => {
     try {
@@ -63,11 +65,14 @@ const Employees: React.FC = () => {
     loadEmployees();
   }, [loadEmployees]);
 
-  const handleDeleteEmployee = async (id: number | string) => {
-    if (!window.confirm('Are you sure you want to delete this employee?')) {
-      return;
-    }
+  const handleDeleteEmployee = (id: number | string) => {
+    setConfirmDelete({ open: true, employeeId: id });
+  };
 
+  const executeDelete = async () => {
+    if (confirmDelete.employeeId === null) return;
+    const id = confirmDelete.employeeId;
+    setConfirmDelete({ open: false, employeeId: null });
     try {
       await employeeService.deleteEmployee(id);
       await loadEmployees(); // Reload the list
@@ -279,6 +284,15 @@ const Employees: React.FC = () => {
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        show={confirmDelete.open}
+        title="Delete Employee"
+        message="Are you sure you want to delete this employee?"
+        confirmLabel="Delete"
+        onConfirm={executeDelete}
+        onCancel={() => setConfirmDelete({ open: false, employeeId: null })}
+      />
 
       {/* Add/Edit Modal Placeholder */}
       {(showAddModal || editingEmployee) && (
