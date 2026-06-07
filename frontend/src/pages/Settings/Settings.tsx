@@ -7,12 +7,13 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import PreferencesSection from '../settings/PreferencesSection';
 import ProfileSection from '../settings/ProfileSection';
 import SecuritySection, { HospitalHierarchy } from '../settings/SecuritySection';
 import SystemSection from '../settings/SystemSection';
+import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
 interface UserSettings {
   personalSettings: {
@@ -182,6 +183,29 @@ const Settings: React.FC = () => {
     },
   });
 
+  // Load saved preferences on mount and hydrate work-settings state.
+  useEffect(() => {
+    const loadPreferences = async () => {
+      try {
+        const res = await getMyPreferences();
+        if (res?.success && res?.data) {
+          const prefs = res.data as UserPreferences;
+          setSettings((prev) => ({
+            ...prev,
+            workSettings: {
+              ...prev.workSettings,
+              maxHoursPerWeek: prefs.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
+              maxConsecutiveDays: prefs.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
+            },
+          }));
+        }
+      } catch {
+        // Non-fatal — keep default values if preferences endpoint is unavailable.
+      }
+    };
+    void loadPreferences();
+  }, []);
+
   const handleUpdateHierarchyDefault = (
     roleKey: string,
     patch: Partial<HospitalHierarchy['defaultSettings']>
@@ -193,7 +217,33 @@ const Settings: React.FC = () => {
         defaultSettings: { ...prev[roleKey].defaultSettings, ...patch },
       },
     }));
-    // Hierarchy settings persistence is not yet implemented.
+    // Hierarchy settings are display-only; no dedicated backend endpoint exists yet.
+  };
+
+  // Serialise personal settings (theme, language, timezone, notifications) into
+  // the `notes` field of user_preferences until dedicated columns are added.
+  const handleSavePersonalSettings = async (): Promise<void> => {
+    const { personalSettings } = settings;
+    const notes = JSON.stringify({
+      theme: personalSettings.theme,
+      language: personalSettings.language,
+      timezone: personalSettings.timezone,
+      notifications: personalSettings.notifications,
+    });
+    await updateMyPreferences({ notes });
+  };
+
+  // Work scheduling constraints map directly to the preferences API fields.
+  // minRestHours and preferredShifts (string names) are not persisted here:
+  // minRestHours has no column in user_preferences yet, and preferredShifts
+  // requires shift template IDs rather than the display-name strings used in
+  // local state. Both will be wired once the schema is extended.
+  const handleSaveWorkSettings = async (): Promise<void> => {
+    const { workSettings } = settings;
+    await updateMyPreferences({
+      maxHoursPerWeek: workSettings.maxHoursPerWeek,
+      maxConsecutiveDays: workSettings.maxConsecutiveDays,
+    });
   };
 
   return (
@@ -205,16 +255,6 @@ const Settings: React.FC = () => {
           <p className="text-muted mb-0">
             Configure your preferences and manage hospital settings
           </p>
-        </div>
-      </div>
-
-      {/* TODO(settings-persist): wire save handlers to the preferences backend. */}
-      <div className="alert alert-warning d-flex align-items-center" role="status">
-        <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-        <div>
-          <strong>Saving settings is not yet wired to the backend.</strong> Changes you make on
-          this page will not persist across reloads. Save buttons are disabled until the settings
-          API is available.
         </div>
       </div>
 
@@ -266,9 +306,7 @@ const Settings: React.FC = () => {
           onChange={(updated) =>
             setSettings((prev) => ({ ...prev, personalSettings: updated }))
           }
-          onSave={() => {
-            // Settings persistence is not yet implemented.
-          }}
+          onSave={handleSavePersonalSettings}
         />
       )}
 
@@ -278,9 +316,7 @@ const Settings: React.FC = () => {
           onChange={(updated) =>
             setSettings((prev) => ({ ...prev, workSettings: updated }))
           }
-          onSave={() => {
-            // Settings persistence is not yet implemented.
-          }}
+          onSave={handleSaveWorkSettings}
         />
       )}
 
