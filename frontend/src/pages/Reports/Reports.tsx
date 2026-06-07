@@ -26,8 +26,8 @@ const isoFirstOfMonth = (): string => {
 };
 
 const Reports: React.FC = () => {
-  const [start, setStart] = useState(isoFirstOfMonth());
-  const [end, setEnd] = useState(isoToday());
+  const [start, setStart] = useState(() => isoFirstOfMonth());
+  const [end, setEnd] = useState(() => isoToday());
   const [hours, setHours] = useState<HoursWorkedRow[]>([]);
   const [cost, setCost] = useState<CostByDepartmentRow[]>([]);
   const [loading, setLoading] = useState(false);
