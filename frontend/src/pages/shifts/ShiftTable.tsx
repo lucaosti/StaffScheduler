@@ -85,6 +85,7 @@ const ShiftTable: React.FC<Props> = ({
                   <button
                     className="btn btn-sm btn-outline-secondary"
                     type="button"
+                    aria-label="Shift actions"
                     data-bs-toggle="dropdown"
                   >
                     <i className="bi bi-three-dots"></i>
