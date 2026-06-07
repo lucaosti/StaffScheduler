@@ -17,8 +17,8 @@ import * as scheduleService from '../../services/scheduleService';
 import * as departmentService from '../../services/departmentService';
 import type { Department } from '../../services/departmentService';
 import { ApiError } from '../../services/apiUtils';
-import ShiftTable from '../shifts/ShiftTable';
-import TemplateModal from '../shifts/TemplateModal';
+import ShiftTable from '../Shifts/ShiftTable';
+import TemplateModal from '../Shifts/TemplateModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
