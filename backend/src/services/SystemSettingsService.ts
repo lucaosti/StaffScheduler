@@ -233,7 +233,7 @@ export class SystemSettingsService {
 
       await connection.commit();
       
-      logger.info(`Setting ${category}.${key} reset to default: ${defaultValue}`);
+      logger.info(`Setting ${category}.${key} reset to default`);
       return updatedRows[0] as SystemSetting;
     } catch (error) {
       await connection.rollback();

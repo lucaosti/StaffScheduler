@@ -176,11 +176,9 @@ router.get('/verify', authenticate, async (req: Request, res: Response) => {
       });
     }
 
-    // Remove sensitive fields before sending response
-    const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
     res.json({
       success: true,
-      data: userWithoutPassword
+      data: req.user!
     });
   } catch (error) {
     res.status(500).json({

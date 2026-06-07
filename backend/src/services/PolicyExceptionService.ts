@@ -112,7 +112,7 @@ export class PolicyExceptionService {
     );
     if (status === 'pending' && resolved.approverUserId) {
       try {
-        await this.notifications.notify({
+        this.notifications.notifyAsync({
           userId: resolved.approverUserId,
           type: 'policy.exception.requested',
           title: 'Policy exception request',
@@ -197,7 +197,7 @@ export class PolicyExceptionService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
-    await this.notifications.notify({
+    this.notifications.notifyAsync({
       userId: refreshed.requestedByUserId,
       type: 'policy.exception.approved',
       title: 'Exception approved',
@@ -229,7 +229,7 @@ export class PolicyExceptionService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
-    await this.notifications.notify({
+    this.notifications.notifyAsync({
       userId: refreshed.requestedByUserId,
       type: 'policy.exception.rejected',
       title: 'Exception rejected',

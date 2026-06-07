@@ -77,20 +77,18 @@ export class UserService {
 
   async getUserById(id: number): Promise<User | null> {
     try {
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
+      const [userRows] = await this.pool.execute<RowDataPacket[]>(
         'SELECT id, email, first_name, last_name, employee_id, phone, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
         [id]
       );
-      if (rows.length === 0) return null;
-      const row = rows[0];
-      const [deptRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT d.id, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ?',
-        [id]
-      );
-      const [skillRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT s.id, s.name, s.description, s.is_active, s.created_at FROM skills s JOIN user_skills us ON s.id = us.skill_id WHERE us.user_id = ?',
-        [id]
-      );
+      if (userRows.length === 0) return null;
+      const row = userRows[0];
+      const [[dRows], [sRows]] = await Promise.all([
+        this.pool.execute<RowDataPacket[]>('SELECT d.id, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ?', [id]),
+        this.pool.execute<RowDataPacket[]>('SELECT s.id, s.name, s.description, s.is_active, s.created_at FROM skills s JOIN user_skills us ON s.id = us.skill_id WHERE us.user_id = ?', [id]),
+      ]);
+      const deptRows = dRows;
+      const skillRows = sRows;
       return {
         id: row.id,
         email: row.email,
@@ -161,7 +159,8 @@ export class UserService {
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' ORDER BY u.last_name ASC, u.first_name ASC';
+      // Hard cap: use pagination params for larger result sets.
+      query += ' ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000';
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
       return rows.map((row: any) => ({
         id: row.id,
