@@ -35,7 +35,9 @@ jest.mock('../../services/orgService', () => ({
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, email: 'admin@x', role: 'admin' } }),
+  useAuth: () => ({
+    user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['org.admin', 'org.manage'] },
+  }),
 }));
 
 const OrgManagement = require('./OrgManagement').default;
@@ -44,10 +46,8 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
 describe('<OrgManagement />', () => {
   beforeEach(() => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
-
     mockListUnits.mockResolvedValue(ok([{ id: 10, name: 'ER', parentId: null, managerUserId: 1 }]));
-    mockGetTree.mockResolvedValue(ok([{ id: 10, name: 'ER', children: [] }]));
+    mockGetTree.mockResolvedValue(ok([{ id: 10, name: 'ER', children: [], isActive: true }]));
     mockListLoans.mockResolvedValue(
       ok([
         {
@@ -92,7 +92,7 @@ describe('<OrgManagement />', () => {
     await userEvent.click(screen.getByRole('button', { name: /create/i }));
     expect(mockCreateUnit).toHaveBeenCalled();
 
-    // Tree: delete unit (scope to the tree table to avoid matching the <option>)
+    // Tree: delete unit — now uses ConfirmModal, so click Delete then Confirm
     const treeTable = screen.getByRole('table');
     const treeRow = within(treeTable)
       .getAllByRole('row')
@@ -100,6 +100,9 @@ describe('<OrgManagement />', () => {
     expect(treeRow).toBeTruthy();
     const deleteBtn = within(treeRow as HTMLElement).getByRole('button', { name: /delete/i });
     await userEvent.click(deleteBtn);
+    // ConfirmModal should appear; click the confirm (danger) button
+    const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
+    await userEvent.click(confirmBtn);
     expect(mockDeleteUnit).toHaveBeenCalled();
 
     // Members: switch tab, select unit, add member, set primary, remove
@@ -112,7 +115,10 @@ describe('<OrgManagement />', () => {
     await userEvent.click(await screen.findByRole('button', { name: /make primary/i }));
     expect(mockSetPrimary).toHaveBeenCalled();
 
+    // Remove member — ConfirmModal
     await userEvent.click(await screen.findByRole('button', { name: /remove/i }));
+    const removeCofirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
+    await userEvent.click(removeCofirmBtn);
     expect(mockRemoveMember).toHaveBeenCalled();
 
     // Loans: switch tab, create loan, approve/reject/cancel pending
@@ -145,4 +151,3 @@ describe('<OrgManagement />', () => {
     expect(mockCancelLoan).toHaveBeenCalled();
   });
 });
-

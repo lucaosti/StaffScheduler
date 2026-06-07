@@ -20,16 +20,30 @@ import type {
   ApprovalMatrixRow,
   PolicyScope,
 } from '../../services/policyService';
+import PolicyList from '../policies/PolicyList';
+import ExceptionList from '../policies/ExceptionList';
+import ConfirmModal from '../../components/ConfirmModal';
+import LoadingSpinner from '../../components/LoadingSpinner';
 
 type Tab = 'policies' | 'exceptions' | 'matrix';
 
+interface ConfirmState {
+  show: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+}
+
 const Policies: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const isManager = user?.role === 'admin' || user?.role === 'manager';
+  const isAdmin = user?.permissions?.includes('policy.admin');
+  const isManager =
+    user?.permissions?.includes('policy.admin') ||
+    user?.permissions?.includes('policy.manage');
 
   const [activeTab, setActiveTab] = useState<Tab>('policies');
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const [policies, setPolicies] = useState<Policy[]>([]);
@@ -51,12 +65,21 @@ const Policies: React.FC = () => {
     reason: '',
   });
 
+  const [confirm, setConfirm] = useState<ConfirmState>({
+    show: false,
+    title: '',
+    message: '',
+    onConfirm: () => undefined,
+  });
+
   const refresh = async () => {
     try {
       const [p, e, m] = await Promise.all([
         policyService.listPolicies(),
         policyService.listExceptions(),
-        isAdmin ? policyService.listMatrix() : Promise.resolve({ data: [] as ApprovalMatrixRow[] }),
+        isAdmin
+          ? policyService.listMatrix()
+          : Promise.resolve({ data: [] as ApprovalMatrixRow[] }),
       ]);
       setPolicies(p.data ?? []);
       setExceptions(e.data ?? []);
@@ -67,7 +90,7 @@ const Policies: React.FC = () => {
   };
 
   useEffect(() => {
-    refresh();
+    refresh().finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -118,18 +141,25 @@ const Policies: React.FC = () => {
     }
   };
 
-  const handleDeletePolicy = async (id: number) => {
-    if (!window.confirm('Delete this policy?')) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await policyService.deletePolicy(id);
-      await refresh();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
+  const handleDeletePolicy = (id: number) => {
+    setConfirm({
+      show: true,
+      title: 'Delete policy',
+      message: 'Are you sure you want to delete this policy?',
+      onConfirm: async () => {
+        setConfirm((prev) => ({ ...prev, show: false }));
+        setBusy(true);
+        setError(null);
+        try {
+          await policyService.deletePolicy(id);
+          await refresh();
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
   };
 
   const handleCreateException = async (e: React.FormEvent) => {
@@ -218,6 +248,14 @@ const Policies: React.FC = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="container-fluid py-3">
+        <LoadingSpinner message="Loading policies..." />
+      </div>
+    );
+  }
+
   return (
     <div className="container-fluid py-3">
       <h1 className="h3 mb-3">Policies & exceptions</h1>
@@ -264,258 +302,34 @@ const Policies: React.FC = () => {
       </ul>
 
       {activeTab === 'policies' && (
-        <div className="card">
-          <div className="card-body">
-            {isManager && (
-              <form className="row g-2 mb-3" onSubmit={handleCreatePolicy}>
-                <div className="col-md-2">
-                  <select
-                    className="form-select"
-                    value={policyForm.scopeType}
-                    onChange={(e) =>
-                      setPolicyForm({
-                        ...policyForm,
-                        scopeType: e.target.value as PolicyScope,
-                      })
-                    }
-                  >
-                    <option value="global">global</option>
-                    <option value="org_unit">org_unit</option>
-                    <option value="schedule">schedule</option>
-                    <option value="shift_template">shift_template</option>
-                  </select>
-                </div>
-                <div className="col-md-1">
-                  <input
-                    type="number"
-                    className="form-control"
-                    placeholder="Scope id"
-                    value={policyForm.scopeId}
-                    onChange={(e) =>
-                      setPolicyForm({ ...policyForm, scopeId: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="col-md-3">
-                  <input
-                    className="form-control"
-                    placeholder="policy key (e.g. min_rest_hours)"
-                    value={policyForm.policyKey}
-                    onChange={(e) =>
-                      setPolicyForm({ ...policyForm, policyKey: e.target.value })
-                    }
-                    required
-                  />
-                </div>
-                <div className="col-md-3">
-                  <input
-                    className="form-control font-monospace"
-                    placeholder='value JSON, e.g. {"hours":11}'
-                    value={policyForm.policyValue}
-                    onChange={(e) =>
-                      setPolicyForm({ ...policyForm, policyValue: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="col-md-2">
-                  <input
-                    className="form-control"
-                    placeholder="Description"
-                    value={policyForm.description}
-                    onChange={(e) =>
-                      setPolicyForm({ ...policyForm, description: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="col-md-1">
-                  <button className="btn btn-primary w-100" disabled={busy}>
-                    Add
-                  </button>
-                </div>
-              </form>
-            )}
-
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Scope</th>
-                  <th>Key</th>
-                  <th>Value</th>
-                  <th>Owner</th>
-                  <th>Status</th>
-                  <th className="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {policies.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      {p.scopeType}
-                      {p.scopeId !== null && `(${p.scopeId})`}
-                    </td>
-                    <td>{p.policyKey}</td>
-                    <td className="font-monospace small">{JSON.stringify(p.policyValue)}</td>
-                    <td>{p.imposedByUserId}</td>
-                    <td>
-                      <span className={`badge ${p.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                        {p.isActive ? 'active' : 'inactive'}
-                      </span>
-                    </td>
-                    <td className="text-end">
-                      {(p.imposedByUserId === user?.id || isAdmin) && (
-                        <>
-                          <button
-                            className="btn btn-sm btn-outline-secondary me-1"
-                            onClick={() => handleTogglePolicyActive(p)}
-                            disabled={busy}
-                          >
-                            {p.isActive ? 'Deactivate' : 'Activate'}
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => handleDeletePolicy(p.id)}
-                            disabled={busy}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <PolicyList
+          policies={policies}
+          busy={busy}
+          canManage={!!isManager}
+          currentUserId={user?.id}
+          isAdmin={!!isAdmin}
+          policyForm={policyForm}
+          onFormChange={setPolicyForm}
+          onCreatePolicy={handleCreatePolicy}
+          onToggleActive={handleTogglePolicyActive}
+          onDeletePolicy={handleDeletePolicy}
+        />
       )}
 
       {activeTab === 'exceptions' && (
-        <div className="card">
-          <div className="card-body">
-            <form className="row g-2 mb-3" onSubmit={handleCreateException}>
-              <div className="col-md-3">
-                <select
-                  className="form-select"
-                  value={exceptionForm.policyId}
-                  onChange={(e) =>
-                    setExceptionForm({ ...exceptionForm, policyId: e.target.value })
-                  }
-                  required
-                >
-                  <option value="">Pick a policy…</option>
-                  {policies.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      [{p.scopeType}] {p.policyKey} (owner {p.imposedByUserId})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="col-md-3">
-                <input
-                  className="form-control"
-                  placeholder="Target type (e.g. shift_assignment)"
-                  value={exceptionForm.targetType}
-                  onChange={(e) =>
-                    setExceptionForm({ ...exceptionForm, targetType: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div className="col-md-2">
-                <input
-                  type="number"
-                  className="form-control"
-                  placeholder="Target id"
-                  value={exceptionForm.targetId}
-                  onChange={(e) =>
-                    setExceptionForm({ ...exceptionForm, targetId: e.target.value })
-                  }
-                  required
-                />
-              </div>
-              <div className="col-md-3">
-                <input
-                  className="form-control"
-                  placeholder="Reason"
-                  value={exceptionForm.reason}
-                  onChange={(e) =>
-                    setExceptionForm({ ...exceptionForm, reason: e.target.value })
-                  }
-                />
-              </div>
-              <div className="col-md-1">
-                <button className="btn btn-primary w-100" disabled={busy}>
-                  Request
-                </button>
-              </div>
-            </form>
-
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Policy</th>
-                  <th>Target</th>
-                  <th>Requested by</th>
-                  <th>Status</th>
-                  <th className="text-end">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {exceptions.map((e) => (
-                  <tr key={e.id}>
-                    <td>{e.policyId}</td>
-                    <td>
-                      {e.targetType}#{e.targetId}
-                    </td>
-                    <td>{e.requestedByUserId}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          e.status === 'approved'
-                            ? 'bg-success'
-                            : e.status === 'pending'
-                              ? 'bg-warning'
-                              : 'bg-secondary'
-                        }`}
-                      >
-                        {e.status}
-                      </span>
-                    </td>
-                    <td className="text-end">
-                      {e.status === 'pending' && isManager && (
-                        <>
-                          <button
-                            className="btn btn-sm btn-outline-success me-1"
-                            onClick={() => handleApproveException(e.id)}
-                            disabled={busy}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            className="btn btn-sm btn-outline-danger me-1"
-                            onClick={() => handleRejectException(e.id)}
-                            disabled={busy}
-                          >
-                            Reject
-                          </button>
-                        </>
-                      )}
-                      {e.status === 'pending' && e.requestedByUserId === user?.id && (
-                        <button
-                          className="btn btn-sm btn-outline-secondary"
-                          onClick={() => handleCancelException(e.id)}
-                          disabled={busy}
-                        >
-                          Cancel
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ExceptionList
+          exceptions={exceptions}
+          policies={policies}
+          busy={busy}
+          isManager={!!isManager}
+          currentUserId={user?.id}
+          exceptionForm={exceptionForm}
+          onFormChange={setExceptionForm}
+          onCreateException={handleCreateException}
+          onApprove={handleApproveException}
+          onReject={handleRejectException}
+          onCancel={handleCancelException}
+        />
       )}
 
       {activeTab === 'matrix' && isAdmin && (
@@ -605,6 +419,14 @@ const Policies: React.FC = () => {
           </div>
         </div>
       )}
+
+      <ConfirmModal
+        show={confirm.show}
+        title={confirm.title}
+        message={confirm.message}
+        onConfirm={confirm.onConfirm}
+        onCancel={() => setConfirm((prev) => ({ ...prev, show: false }))}
+      />
     </div>
   );
 };
