@@ -61,6 +61,21 @@ export class NotificationService {
     return created;
   }
 
+  /**
+   * Fire-and-forget variant of notify(). Errors are logged but never propagate
+   * to the caller. Use in batch loops where a single failed notification should
+   * not abort the surrounding operation.
+   */
+  notifyAsync(input: CreateNotificationInput): void {
+    this.notify(input).catch((err) =>
+      logger.error('Background notification failed', {
+        error: (err as Error).message,
+        userId: input.userId,
+        type: input.type,
+      })
+    );
+  }
+
   async getById(id: number): Promise<Notification | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM notifications WHERE id = ? LIMIT 1`,
