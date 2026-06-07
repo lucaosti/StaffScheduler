@@ -16,7 +16,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -35,18 +35,20 @@ const Employees: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; employeeId: number | string | null }>({ open: false, employeeId: null });
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isInitialMount = useRef(true);
 
-  const loadEmployees = useCallback(async () => {
+  const loadEmployees = useCallback(async (search: string, department: string, showLoading = true) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       setError(null);
-      
+
       const response = await employeeService.getEmployees({
-        search: searchTerm || undefined,
-        department: selectedDepartment || undefined,
+        search: search || undefined,
+        department: department || undefined,
         limit: 50
       });
-      
+
       if (response.success && response.data) {
         setEmployees(response.data);
       } else {
@@ -57,13 +59,25 @@ const Employees: React.FC = () => {
       setError('Failed to load employees. Please check your connection and try again.');
       setEmployees([]);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  }, [searchTerm, selectedDepartment]);
+  }, []);
 
   useEffect(() => {
-    loadEmployees();
-  }, [loadEmployees]);
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      loadEmployees(searchTerm, selectedDepartment, true);
+      return;
+    }
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => {
+      loadEmployees(searchTerm, selectedDepartment, false);
+    }, 300);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchTerm, selectedDepartment, loadEmployees]);
 
   const handleDeleteEmployee = (id: number | string) => {
     setConfirmDelete({ open: true, employeeId: id });
@@ -75,24 +89,27 @@ const Employees: React.FC = () => {
     setConfirmDelete({ open: false, employeeId: null });
     try {
       await employeeService.deleteEmployee(id);
-      await loadEmployees(); // Reload the list
+      await loadEmployees(searchTerm, selectedDepartment); // Reload the list
     } catch (err) {
-      alert('Failed to delete employee');
+      setError('Failed to delete employee');
     }
   };
 
-  const filteredEmployees = employees.filter(employee => {
-    const matchesSearch = !searchTerm || 
+  const filteredEmployees = useMemo(() => employees.filter(employee => {
+    const matchesSearch = !searchTerm ||
       `${employee.firstName} ${employee.lastName}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
       employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (employee.employeeId || '').toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesDepartment = !selectedDepartment || employee.department === selectedDepartment;
-    
-    return matchesSearch && matchesDepartment;
-  });
 
-  const departments = Array.from(new Set(employees.map(emp => emp.department).filter(Boolean)));
+    const matchesDepartment = !selectedDepartment || employee.department === selectedDepartment;
+
+    return matchesSearch && matchesDepartment;
+  }), [employees, searchTerm, selectedDepartment]);
+
+  const departments = useMemo(
+    () => Array.from(new Set(employees.map(emp => emp.department).filter(Boolean))),
+    [employees]
+  );
 
   if (loading) {
     return (
@@ -141,6 +158,7 @@ const Employees: React.FC = () => {
               type="text"
               className="form-control"
               placeholder="Search employees..."
+              aria-label="Search employees"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -243,13 +261,15 @@ const Employees: React.FC = () => {
                           className="btn btn-outline-primary"
                           onClick={() => setEditingEmployee(employee)}
                           title="Edit Employee"
+                          aria-label="Edit employee"
                         >
                           <i className="bi bi-pencil"></i>
                         </button>
                         <button
                           className="btn btn-outline-danger"
-                            onClick={() => employee.id !== undefined && handleDeleteEmployee(employee.id)}
+                          onClick={() => employee.id !== undefined && handleDeleteEmployee(employee.id)}
                           title="Delete Employee"
+                          aria-label="Delete employee"
                         >
                           <i className="bi bi-trash"></i>
                         </button>
@@ -337,11 +357,11 @@ const Employees: React.FC = () => {
                     } else {
                       await employeeService.createEmployee(employeeData);
                     }
-                    await loadEmployees();
+                    await loadEmployees(searchTerm, selectedDepartment);
                     setShowAddModal(false);
                     setEditingEmployee(null);
                   } catch (err) {
-                    alert('Failed to save employee');
+                    setError('Failed to save employee');
                   }
                 }}>
                   <div className="row">
