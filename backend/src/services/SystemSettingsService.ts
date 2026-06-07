@@ -172,7 +172,7 @@ export class SystemSettingsService {
 
       await connection.commit();
       
-      logger.info(`Setting ${category}.${key} updated to: ${value}`);
+      logger.info(`Setting ${category}.${key} updated`);
       return updatedRows[0] as SystemSetting;
     } catch (error) {
       await connection.rollback();

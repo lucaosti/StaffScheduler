@@ -65,23 +65,37 @@ export class RbacService {
     );
 
     const fromDelegations: string[] = [];
-    for (const row of delegRows as any[]) {
-      const delegatedCodes: string[] = JSON.parse(row.permission_codes as string);
-      // Resolve the delegator's current role-based permissions (no recursion:
-      // sub-delegation is not allowed by design).
-      const [delegatorRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT p.code
+    const delegatorIds = (delegRows as any[]).map((r) => r.delegator_id as number);
+
+    if (delegatorIds.length > 0) {
+      // Batch-fetch all delegators' current permissions in a single query.
+      // No recursion: sub-delegation is not allowed by design.
+      const [batchRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT DISTINCT ur.user_id, p.code
            FROM user_roles ur
            JOIN role_permissions rp ON rp.role_id = ur.role_id
-           JOIN permissions p ON p.id = rp.permission_id
-          WHERE ur.user_id = ?
+           JOIN permissions p       ON p.id = rp.permission_id
+          WHERE ur.user_id IN (${delegatorIds.map(() => '?').join(',')})
             AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
-        [row.delegator_id]
+        delegatorIds
       );
-      const delegatorPerms = new Set(delegatorRows.map((r: any) => r.code as string));
-      // Only grant codes the delegator still holds.
-      const safeCodes = delegatedCodes.filter((c) => delegatorPerms.has(c));
-      safeCodes.forEach((c) => fromDelegations.push(c));
+
+      // Build a per-delegator permission set from the batch result.
+      const delegatorPerms = new Map<number, Set<string>>();
+      for (const br of batchRows as any[]) {
+        const uid = br.user_id as number;
+        if (!delegatorPerms.has(uid)) delegatorPerms.set(uid, new Set());
+        delegatorPerms.get(uid)!.add(br.code as string);
+      }
+
+      // For each active delegation, cap the granted codes to what the delegator still holds.
+      for (const row of delegRows as any[]) {
+        const delegatedCodes: string[] = JSON.parse(row.permission_codes as string);
+        const allowedCodes = delegatedCodes.filter(
+          (c) => (delegatorPerms.get(row.delegator_id) ?? new Set()).has(c)
+        );
+        allowedCodes.forEach((c) => fromDelegations.push(c));
+      }
     }
 
     return [...new Set([...fromRoles, ...fromDelegations])];
