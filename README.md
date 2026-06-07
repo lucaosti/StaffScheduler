@@ -103,6 +103,8 @@ cd backend && npm run db:seed:demo
 Login: `admin@demo.staffscheduler.local / demo1234` (plus a few seeded
 managers and employees in the same domain).
 
+**Note**: Demo credentials only — do not use for production or sensitive data.
+
 How to know you are in demo mode: a sticky orange banner ("Demo
 environment. Data may be reset at any time.") is rendered at the top of
 the SPA. It is gated on `GET /api/system/info → { mode: "demo" }`,
@@ -223,6 +225,10 @@ BCRYPT_ROUNDS=12
 CORS_ORIGIN=http://localhost:3000
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
+
+OPTIMIZATION_ENGINE=typescript   # Scheduler engine: typescript (default) or or-tools
+DB_POOL_LIMIT=30                 # MySQL connection pool size (default: 30)
+DB_QUEUE_LIMIT=100               # Max queued connection requests (default: 100)
 ```
 
 Frontend env vars:
