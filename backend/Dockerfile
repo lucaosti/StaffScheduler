@@ -1,5 +1,5 @@
 # Multi-stage build for production optimization
-FROM node:18-alpine AS base
+FROM node:22-alpine AS base
 WORKDIR /app
 
 # Copy package files
@@ -17,14 +17,14 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:22-alpine AS production
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
 # Install only production dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci --omit=dev && npm cache clean --force
 
 # Copy built application from build stage
 COPY --from=build /app/dist ./dist
