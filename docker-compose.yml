@@ -60,7 +60,7 @@ services:
       - backend_uploads:/app/uploads
     networks:
       - staff_scheduler_network
-    mem_limit: 512m
+    mem_limit: 1g
     cpus: 0.5
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
