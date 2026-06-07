@@ -697,6 +697,20 @@ The following capabilities are planned but not yet implemented. Pull requests fo
 | Bulk API | Batch endpoints for high-volume integrations |
 | Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in |
 
+### Future Work
+
+#### CRA → Vite migration
+
+`react-scripts@5.0.1` is the last Create React App release and is no longer maintained. The build toolchain carries 13 HIGH-severity transitive vulnerabilities that cannot be patched without replacing the build tool. Recommended path: migrate to Vite 5.x (drop `react-scripts`, add `vite` + `@vitejs/plugin-react`). No application code API changes are required; the migration affects only dev-server and build configuration.
+
+#### Express 4 → Express 5
+
+The backend runs Express 4.18.x. Express 5.0 was released in October 2024. Key improvements: native async error propagation (no more wrapping async handlers), updated `path-to-regexp`, and removal of deprecated 4.x APIs. Migration effort is low-to-medium. Recommended trigger: when Express 4 enters security-only maintenance.
+
+#### Dual API prefix cleanup
+
+All routes are mounted under both `/api/*` (legacy) and `/api/v1/*` (canonical) in `src/app.ts`. Once all clients have migrated to `/api/v1/*`, add HTTP 308 redirects from `/api/*` to `/api/v1/*` and drop the legacy prefix.
+
 ---
 
 ## 18. Scalability analysis
