@@ -33,7 +33,10 @@ describe('AuditLogService.list', () => {
     const page = await service.list({});
     expect(page.total).toBe(2);
     expect(page.items).toHaveLength(2);
-    expect(execute.mock.calls[1][0]).toMatch(/LIMIT 100 OFFSET 0/);
+    expect(execute.mock.calls[1][0]).toMatch(/LIMIT \? OFFSET \?/);
+    const listParams = execute.mock.calls[1][1] as unknown[];
+    expect(listParams.at(-2)).toBe(100);
+    expect(listParams.at(-1)).toBe(0);
   });
 
   it('clamps a huge limit to 500', async () => {
@@ -44,7 +47,9 @@ describe('AuditLogService.list', () => {
 
     const service = new AuditLogService(pool);
     await service.list({ limit: 9999 });
-    expect(execute.mock.calls[1][0]).toMatch(/LIMIT 500/);
+    expect(execute.mock.calls[1][0]).toMatch(/LIMIT \? OFFSET \?/);
+    const listParams = execute.mock.calls[1][1] as unknown[];
+    expect(listParams.at(-2)).toBe(500);
   });
 
   it('builds the WHERE clause from supplied filters', async () => {

@@ -122,8 +122,8 @@ export class AuditLogService {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where}
         ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}`,
-      params
+        LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
     );
 
     return { total, items: rows.map(mapRow) };

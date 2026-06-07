@@ -78,7 +78,7 @@ export class PolicyService {
   async list(activeOnly = false): Promise<Policy[]> {
     const where = activeOnly ? ' WHERE is_active = 1' : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM policies${where} ORDER BY scope_type ASC, policy_key ASC`
+      `SELECT * FROM policies${where} ORDER BY scope_type ASC, policy_key ASC LIMIT 500`
     );
     return rows.map(mapRow);
   }

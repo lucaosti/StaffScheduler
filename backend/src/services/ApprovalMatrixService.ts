@@ -70,7 +70,7 @@ export class ApprovalMatrixService {
 
   async list(): Promise<ApprovalMatrixRow[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM approval_matrix ORDER BY change_type ASC`
+      `SELECT * FROM approval_matrix ORDER BY change_type ASC LIMIT 200`
     );
     return rows.map(mapRow);
   }

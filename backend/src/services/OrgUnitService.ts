@@ -49,6 +49,9 @@ interface UpdateOrgUnitInput {
   isActive?: boolean;
 }
 
+// Module-level 60-second TTL cache for the org unit tree.
+let _treeCache: { data: OrgUnitNode[]; expiresAt: number } | null = null;
+
 const mapUnit = (row: RowDataPacket): OrgUnit => ({
   id: row.id as number,
   name: row.name as string,
@@ -86,8 +89,11 @@ export class OrgUnitService {
     return rows.length === 0 ? null : mapUnit(rows[0]);
   }
 
-  /** Returns the org tree as a forest of nodes (multiple roots are allowed). */
+  /** Returns the org tree as a forest of nodes (multiple roots are allowed). Cached for 60 s. */
   async tree(): Promise<OrgUnitNode[]> {
+    if (_treeCache !== null && Date.now() < _treeCache.expiresAt) {
+      return _treeCache.data;
+    }
     const all = await this.list();
     const byId = new Map<number, OrgUnitNode>();
     all.forEach((u) => byId.set(u.id, { ...u, children: [] }));
@@ -99,6 +105,7 @@ export class OrgUnitService {
         roots.push(node);
       }
     });
+    _treeCache = { data: roots, expiresAt: Date.now() + 60_000 };
     return roots;
   }
 
@@ -120,6 +127,7 @@ export class OrgUnitService {
     );
     const created = await this.getById(res.insertId);
     if (!created) throw new Error('Failed to create org unit');
+    _treeCache = null;
     logger.info(`Org unit created: id=${created.id} name="${created.name}"`);
     return created;
   }
@@ -169,6 +177,7 @@ export class OrgUnitService {
     );
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh org unit');
+    _treeCache = null;
     return refreshed;
   }
 
@@ -176,6 +185,7 @@ export class OrgUnitService {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Org unit not found');
     await this.pool.execute(`DELETE FROM org_units WHERE id = ?`, [id]);
+    _treeCache = null;
   }
 
   // -------- Memberships --------
