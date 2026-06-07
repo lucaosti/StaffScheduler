@@ -111,35 +111,53 @@ const isoDate = (raw: unknown): string =>
 export class CalendarService {
   constructor(private pool: Pool) {}
 
-  /** Returns the user's current token, creating one if none exists. */
-  async getOrCreateToken(userId: number): Promise<string> {
+  private sha256(raw: string): string {
+    return createHash('sha256').update(raw).digest('hex');
+  }
+
+  /**
+   * Returns a new raw token if none exists for the user, storing its SHA-256
+   * digest. Returns null if a token_hash is already stored — caller must use
+   * rotateToken to obtain a new raw value.
+   */
+  async getToken(userId: number): Promise<string | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT token FROM user_calendar_tokens WHERE user_id = ? LIMIT 1`,
+      `SELECT token_hash FROM user_calendar_tokens WHERE user_id = ? LIMIT 1`,
       [userId]
     );
-    if (rows.length > 0) return rows[0].token as string;
-    const token = randomBytes(24).toString('hex');
+    if (rows.length > 0) return null;
+    const raw = randomBytes(24).toString('hex');
     await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO user_calendar_tokens (user_id, token) VALUES (?, ?)`,
-      [userId, token]
+      `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)`,
+      [userId, this.sha256(raw)]
     );
-    return token;
+    return raw;
+  }
+
+  /**
+   * Returns the raw token on first call (creates it); on subsequent calls
+   * rotates and returns a new raw token. Kept for route backwards-compatibility.
+   */
+  async getOrCreateToken(userId: number): Promise<string> {
+    const raw = await this.getToken(userId);
+    if (raw !== null) return raw;
+    return this.rotateToken(userId);
   }
 
   async rotateToken(userId: number): Promise<string> {
-    const token = randomBytes(24).toString('hex');
+    const raw = randomBytes(24).toString('hex');
     await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO user_calendar_tokens (user_id, token) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE token = VALUES(token), created_at = CURRENT_TIMESTAMP`,
-      [userId, token]
+      `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)
+       ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), created_at = CURRENT_TIMESTAMP`,
+      [userId, this.sha256(raw)]
     );
-    return token;
+    return raw;
   }
 
   async resolveToken(token: string): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT user_id FROM user_calendar_tokens WHERE token = ? LIMIT 1`,
-      [token]
+      `SELECT user_id FROM user_calendar_tokens WHERE token_hash = ? LIMIT 1`,
+      [this.sha256(token)]
     );
     return rows.length === 0 ? null : (rows[0].user_id as number);
   }
