@@ -20,7 +20,7 @@ interface Props {
   policies: Policy[];
   busy: boolean;
   isManager: boolean;
-  currentUserId: number | undefined;
+  currentUserId: string | number | undefined;
   exceptionForm: ExceptionFormState;
   onFormChange: (v: ExceptionFormState) => void;
   onCreateException: (e: React.FormEvent) => void;
