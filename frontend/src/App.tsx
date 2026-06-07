@@ -26,6 +26,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 // Layout Components
 import Layout from './components/Layout/Layout';
 import ProtectedRoute from './components/Auth/ProtectedRoute';
+import PermissionRoute from './components/Auth/PermissionRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Page Components
@@ -87,13 +88,41 @@ const App: React.FC = () => {
           
           {/* Main application pages */}
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="employees" element={<Employees />} />
-          <Route path="shifts" element={<Shifts />} />
-          <Route path="schedule" element={<Schedule />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="org" element={<OrgManagement />} />
-          <Route path="policies" element={<Policies />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="employees" element={
+            <PermissionRoute permission="employee.read">
+              <Employees />
+            </PermissionRoute>
+          } />
+          <Route path="shifts" element={
+            <PermissionRoute permission="shift.manage">
+              <Shifts />
+            </PermissionRoute>
+          } />
+          <Route path="schedule" element={
+            <PermissionRoute permission="schedule.read">
+              <Schedule />
+            </PermissionRoute>
+          } />
+          <Route path="reports" element={
+            <PermissionRoute permission="report.read">
+              <Reports />
+            </PermissionRoute>
+          } />
+          <Route path="org" element={
+            <PermissionRoute permission="org_unit.read">
+              <OrgManagement />
+            </PermissionRoute>
+          } />
+          <Route path="policies" element={
+            <PermissionRoute permission="policy.read">
+              <Policies />
+            </PermissionRoute>
+          } />
+          <Route path="settings" element={
+            <PermissionRoute permission="settings.manage">
+              <Settings />
+            </PermissionRoute>
+          } />
         </Route>
         
           {/* Catch-all route - Redirect unknown paths to dashboard */}
