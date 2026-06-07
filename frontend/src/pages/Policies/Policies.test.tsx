@@ -29,7 +29,14 @@ jest.mock('../../services/policyService', () => ({
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { id: 1, email: 'admin@x', role: 'admin' } }),
+  useAuth: () => ({
+    user: {
+      id: 1,
+      email: 'admin@x',
+      role: 'admin',
+      permissions: ['policy.admin', 'policy.manage'],
+    },
+  }),
 }));
 
 const Policies = require('./Policies').default;
@@ -38,8 +45,6 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
 describe('<Policies />', () => {
   beforeEach(() => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
-
     mockListPolicies.mockResolvedValue(
       ok([
         {
@@ -50,6 +55,7 @@ describe('<Policies />', () => {
           policyValue: { minRestHours: 11 },
           description: 'Rest',
           isActive: true,
+          imposedByUserId: 1,
           createdAt: 'x',
         },
       ])
@@ -97,12 +103,11 @@ describe('<Policies />', () => {
   it('creates policy (string payload path), toggles active, deletes, creates & acts on exceptions, and edits matrix', async () => {
     render(<Policies />);
     expect(await screen.findByRole('heading', { name: /policies/i })).toBeInTheDocument();
+    // Wait for the policy list / form to appear (loading must be done first)
+    expect(await screen.findByPlaceholderText(/policy key/i)).toBeInTheDocument();
 
     // Create policy with invalid JSON -> keep string branch
-    await userEvent.type(
-      screen.getByPlaceholderText(/policy key/i),
-      'max_hours'
-    );
+    await userEvent.type(screen.getByPlaceholderText(/policy key/i), 'max_hours');
     await userEvent.clear(screen.getByPlaceholderText(/value json/i));
     fireEvent.change(screen.getByPlaceholderText(/value json/i), {
       target: { value: '{invalid' },
@@ -114,8 +119,10 @@ describe('<Policies />', () => {
     await userEvent.click(await screen.findByRole('button', { name: /deactivate/i }));
     expect(mockUpdatePolicy).toHaveBeenCalled();
 
-    // Delete policy
+    // Delete policy — now uses ConfirmModal
     await userEvent.click(await screen.findByRole('button', { name: /^delete$/i }));
+    const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
+    await userEvent.click(confirmBtn);
     expect(mockDeletePolicy).toHaveBeenCalled();
 
     // Exceptions tab + create exception + approve/reject/cancel
@@ -141,4 +148,3 @@ describe('<Policies />', () => {
     expect(mockUpdateMatrix).toHaveBeenCalled();
   });
 });
-
