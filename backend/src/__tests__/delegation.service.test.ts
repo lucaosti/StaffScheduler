@@ -119,8 +119,8 @@ describe('RbacService.getEffectivePermissions — delegation merge', () => {
       [{ delegator_id: 99, permission_codes: JSON.stringify(['timeoff.approve']) }],
       null,
     ]);
-    // Third call: delegator's current role permissions (cap check)
-    execute.mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null]);
+    // Third call: batch query for all delegators' current role permissions (cap check)
+    execute.mockResolvedValueOnce([[{ user_id: 99, code: 'timeoff.approve' }], null]);
 
     const service = new RbacService(pool);
     const perms = await service.getEffectivePermissions(7);
@@ -153,8 +153,11 @@ describe('RbacService.getEffectivePermissions — delegation merge', () => {
       [{ delegator_id: 99, permission_codes: JSON.stringify(['schedule.read', 'timeoff.approve']) }],
       null,
     ]);
-    // Delegator's current role permissions (cap check) — delegator holds both
-    execute.mockResolvedValueOnce([[{ code: 'schedule.read' }, { code: 'timeoff.approve' }], null]);
+    // Batch query for all delegators' current role permissions — delegator holds both
+    execute.mockResolvedValueOnce([
+      [{ user_id: 99, code: 'schedule.read' }, { user_id: 99, code: 'timeoff.approve' }],
+      null,
+    ]);
 
     const service = new RbacService(pool);
     const perms = await service.getEffectivePermissions(7);

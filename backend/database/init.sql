@@ -453,6 +453,8 @@ CREATE TABLE IF NOT EXISTS user_calendar_tokens (
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+-- SECURITY: The token column stores raw tokens. Future improvement: store SHA-256(token)
+--           and compare hashes on lookup to reduce exposure if the DB is compromised.
 
 -- ================================================================
 -- SHIFT SWAP REQUESTS TABLE - Employee-to-employee shift exchanges
@@ -996,3 +998,8 @@ ALTER TABLE departments
 -- ================================================================
 -- END OF SCHEMA
 -- ================================================================
+
+-- Performance indexes added for auth hot paths and assignment queries
+CREATE INDEX IF NOT EXISTS idx_user_roles_user_expires   ON user_roles(user_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_user_org_primary          ON user_org_units(user_id, is_primary);
+CREATE INDEX IF NOT EXISTS idx_assignment_user_status    ON shift_assignments(user_id, status);
