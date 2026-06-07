@@ -1,10 +1,16 @@
 /**
  * ProfileSection — Work preferences tab for the Settings page.
  *
+ * Persists scheduling constraints via PUT /api/preferences/me.
+ * The "preferred shifts" are stored as display-name strings in local state;
+ * only the numeric constraints (maxHoursPerWeek, maxConsecutiveDays) are sent
+ * to the preferences API because the API expects shift template IDs for
+ * preferredShifts which are not available in this UI yet.
+ *
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 
 interface WorkSettings {
   maxHoursPerWeek: number;
@@ -20,13 +26,27 @@ interface WorkSettings {
 interface Props {
   settings: WorkSettings;
   onChange: (updated: WorkSettings) => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
 }
 
 const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
-  const handleSubmit = (e: React.FormEvent) => {
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave();
+    setSaving(true);
+    setSuccess(null);
+    setError(null);
+    try {
+      await onSave();
+      setSuccess('Work preferences saved successfully.');
+    } catch (err) {
+      setError((err as Error).message || 'Failed to save work preferences.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const toggleShift = (shift: string, checked: boolean) => {
@@ -44,6 +64,18 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
             <h5 className="mb-0">Work Preferences</h5>
           </div>
           <div className="card-body">
+            {success && (
+              <div className="alert alert-success" role="status">
+                <i className="bi bi-check-circle me-2" aria-hidden="true"></i>
+                {success}
+              </div>
+            )}
+            {error && (
+              <div className="alert alert-danger" role="alert">
+                <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
+                {error}
+              </div>
+            )}
             <form onSubmit={handleSubmit}>
               <h6 className="mb-3">Schedule Constraints</h6>
               <div className="row">
@@ -140,12 +172,24 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
               <div className="mt-4">
                 <button
                   type="submit"
-                  className="btn btn-secondary"
-                  disabled
-                  title="Settings persistence not yet available"
+                  className="btn btn-primary"
+                  disabled={saving}
                 >
-                  <i className="bi bi-check me-2"></i>
-                  Save Work Settings
+                  {saving ? (
+                    <>
+                      <span
+                        className="spinner-border spinner-border-sm me-2"
+                        role="status"
+                        aria-hidden="true"
+                      ></span>
+                      Saving…
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-check me-2"></i>
+                      Save Work Settings
+                    </>
+                  )}
                 </button>
               </div>
             </form>

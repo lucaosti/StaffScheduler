@@ -1,10 +1,10 @@
 /**
  * Settings page smoke test.
  *
- * The settings page is local-state only (no API calls today). We render
- * it in both admin and non-admin variants, click through each tab, and
- * exercise the save handlers and a representative form change. This is
- * enough to drive the bulk of `Settings.tsx` lines through coverage.
+ * Renders the Settings page in both admin and non-admin variants, clicks
+ * through each tab, and exercises a representative form change.
+ *
+ * Service calls are mocked so the test does not require a running backend.
  *
  * @author Luca Ostinelli
  */
@@ -16,6 +16,17 @@ const mockUseAuth = jest.fn();
 
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => mockUseAuth(),
+}));
+
+jest.mock('../../services/settingsService', () => ({
+  getSystemSettings: jest.fn().mockResolvedValue({ success: true, data: [] }),
+  updateCurrency: jest.fn().mockResolvedValue({ success: true, data: { currency: 'EUR' } }),
+  updateTimePeriod: jest.fn().mockResolvedValue({ success: true, data: { timePeriod: 'monthly' } }),
+}));
+
+jest.mock('../../services/preferencesService', () => ({
+  getMyPreferences: jest.fn().mockResolvedValue({ success: true, data: null }),
+  updateMyPreferences: jest.fn().mockResolvedValue({ success: true, data: {} }),
 }));
 
 // eslint-disable-next-line import/first
