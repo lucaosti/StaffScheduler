@@ -210,7 +210,7 @@ export class EmployeeLoanService {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
     logger.info(`Loan approved: id=${id} reviewer=${reviewerId}`);
-    await this.notifications.notify({
+    this.notifications.notifyAsync({
       userId: refreshed.userId,
       type: 'loan.approved',
       title: 'Loan approved',
@@ -244,7 +244,7 @@ export class EmployeeLoanService {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
     logger.info(`Loan rejected: id=${id} reviewer=${reviewerId}`);
-    await this.notifications.notify({
+    this.notifications.notifyAsync({
       userId: refreshed.requestedBy,
       type: 'loan.rejected',
       title: 'Loan rejected',

@@ -30,6 +30,8 @@ function requireSecret(envVar: string, name: string): string {
   return value || `fallback-${name.toLowerCase().replace(/\s/g, '-')}`;
 }
 
+// requireProductionSecret: throws if value equals the insecure default in production.
+// requireSecret: throws if value is absent or contains known placeholder substrings.
 /**
  * Returns the environment variable value, but throws at startup when running in
  * production and the value matches the known insecure default.  In development
@@ -58,8 +60,6 @@ export const config = {
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '30'),
     queueLimit:      parseInt(process.env.DB_QUEUE_LIMIT || '100'),
     connectTimeout:  10_000,
-    acquireTimeout: 60000,
-    timeout: 60000,
   },
   session: {
     secret: requireSecret('SESSION_SECRET', 'SESSION_SECRET'),
