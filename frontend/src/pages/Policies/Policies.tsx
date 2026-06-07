@@ -20,8 +20,8 @@ import type {
   ApprovalMatrixRow,
   PolicyScope,
 } from '../../services/policyService';
-import PolicyList from '../policies/PolicyList';
-import ExceptionList from '../policies/ExceptionList';
+import PolicyList from '../Policies/PolicyList';
+import ExceptionList from '../Policies/ExceptionList';
 import ConfirmModal from '../../components/ConfirmModal';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
