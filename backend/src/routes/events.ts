@@ -40,7 +40,10 @@ export const createEventsRouter = (): Router => {
     }, HEARTBEAT_MS);
     if (typeof heartbeat.unref === 'function') heartbeat.unref();
 
+    let cleaned = false;
     const cleanup = (): void => {
+      if (cleaned) return;
+      cleaned = true;
       clearInterval(heartbeat);
       eventBus.unsubscribe(userId, res);
     };
