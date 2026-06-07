@@ -450,13 +450,11 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- ================================================================
 CREATE TABLE IF NOT EXISTS user_calendar_tokens (
     user_id INT PRIMARY KEY,
-    token VARCHAR(64) NOT NULL UNIQUE,
+    token_hash CHAR(64) NOT NULL UNIQUE,  -- SHA-256 hex digest of the raw bearer token
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
--- SECURITY: The token column stores raw tokens. Future improvement: store SHA-256(token)
---           and compare hashes on lookup to reduce exposure if the DB is compromised.
 
 -- ================================================================
 -- SHIFT SWAP REQUESTS TABLE - Employee-to-employee shift exchanges
