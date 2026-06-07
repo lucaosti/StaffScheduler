@@ -133,7 +133,7 @@ export class ShiftSwapService {
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM shift_swap_requests${where} ORDER BY created_at DESC`,
+      `SELECT * FROM shift_swap_requests${where} ORDER BY created_at DESC LIMIT 500`,
       params
     );
     return rows.map(mapRow);

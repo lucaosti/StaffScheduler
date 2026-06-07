@@ -129,7 +129,7 @@ export class TimeOffService {
 
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM time_off_requests${where} ORDER BY start_date DESC`,
+      `SELECT * FROM time_off_requests${where} ORDER BY start_date DESC LIMIT 500`,
       params
     );
     return rows.map(mapRow);

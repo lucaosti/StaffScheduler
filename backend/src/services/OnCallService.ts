@@ -183,7 +183,8 @@ export class OnCallService {
               AND a.status IN ('pending', 'confirmed')
          ${where}
         GROUP BY p.id
-        ORDER BY p.date ASC, p.start_time ASC`,
+        ORDER BY p.date ASC, p.start_time ASC
+        LIMIT 500`,
       params
     );
     return rows.map(mapPeriod);
@@ -327,7 +328,8 @@ export class OnCallService {
               AND a2.status IN ('pending', 'confirmed')
         WHERE ${conditions.join(' AND ')}
         GROUP BY p.id
-        ORDER BY p.date ASC, p.start_time ASC`,
+        ORDER BY p.date ASC, p.start_time ASC
+        LIMIT 500`,
       params
     );
     return rows.map((r) => ({

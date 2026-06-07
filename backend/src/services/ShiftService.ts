@@ -685,7 +685,7 @@ export class ShiftService {
   async getAllShiftTemplates(): Promise<any[]> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT * FROM shift_templates WHERE is_active = 1 ORDER BY name ASC'
+        'SELECT * FROM shift_templates WHERE is_active = 1 ORDER BY name ASC LIMIT 1000'
       );
       return rows.map((row: any) => ({
         id: row.id,
