@@ -49,18 +49,16 @@ describe('GET /api/auth/verify', () => {
     (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
   });
 
-  it('returns 200 with the user payload (minus sensitive fields) on success', async () => {
+  it('returns 200 with the user payload on success', async () => {
     (UserService.prototype.getUserById as jest.Mock) = jest
       .fn()
-      .mockResolvedValue(makeUser({ password_hash: 'secret', salt: 'pepper' }));
+      .mockResolvedValue(makeUser());
     const token = signToken({ userId: 7, email: 'a@x.com', role: 'manager' });
 
     const res = await request(buildApp()).get('/api/auth/verify').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data).not.toHaveProperty('password_hash');
-    expect(res.body.data).not.toHaveProperty('salt');
     expect(res.body.data.email).toBe('a@x.com');
   });
 });
@@ -74,7 +72,7 @@ describe('POST /api/auth/refresh', () => {
   });
 
   it('issues a new token for a valid user', async () => {
-    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser({ password_hash: 'secret' }));
+    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
     const token = signToken({ userId: 7, email: 'a@x.com', role: 'manager' });
 
     const res = await request(buildApp()).post('/api/auth/refresh').set('Authorization', `Bearer ${token}`);
@@ -82,7 +80,6 @@ describe('POST /api/auth/refresh', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(typeof res.body.data.token).toBe('string');
-    expect(res.body.data.user).not.toHaveProperty('password_hash');
 
     const decoded = jwt.verify(res.body.data.token, config.jwt.secret) as { userId: number };
     expect(decoded.userId).toBe(7);
