@@ -185,21 +185,25 @@ const Settings: React.FC = () => {
 
   // Load saved preferences on mount and hydrate work-settings state.
   useEffect(() => {
-    getMyPreferences().then((res) => {
-      if (res.success && res.data) {
-        const prefs = res.data as UserPreferences;
-        setSettings((prev) => ({
-          ...prev,
-          workSettings: {
-            ...prev.workSettings,
-            maxHoursPerWeek: prefs.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
-            maxConsecutiveDays: prefs.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
-          },
-        }));
+    const loadPreferences = async () => {
+      try {
+        const res = await getMyPreferences();
+        if (res?.success && res?.data) {
+          const prefs = res.data as UserPreferences;
+          setSettings((prev) => ({
+            ...prev,
+            workSettings: {
+              ...prev.workSettings,
+              maxHoursPerWeek: prefs.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
+              maxConsecutiveDays: prefs.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
+            },
+          }));
+        }
+      } catch {
+        // Non-fatal — keep default values if preferences endpoint is unavailable.
       }
-    }).catch(() => {
-      // Non-fatal — keep default values if preferences endpoint is unavailable.
-    });
+    };
+    void loadPreferences();
   }, []);
 
   const handleUpdateHierarchyDefault = (
