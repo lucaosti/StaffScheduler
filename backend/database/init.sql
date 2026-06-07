@@ -112,6 +112,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
     INDEX idx_user (user_id),
     INDEX idx_role (role_id),
     INDEX idx_scope (scope_org_unit_id),
+    INDEX idx_user_roles_user_expires (user_id, expires_at),
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE
     -- scope_org_unit_id intentionally has no FK: org_units is created later in
@@ -322,7 +323,8 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
     INDEX idx_shift (shift_id),
     INDEX idx_user (user_id),
     INDEX idx_status (status),
-    
+    INDEX idx_assignment_user_status (user_id, status),
+
     FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
@@ -453,6 +455,8 @@ CREATE TABLE IF NOT EXISTS user_calendar_tokens (
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+-- SECURITY: The token column stores raw tokens. Future improvement: store SHA-256(token)
+--           and compare hashes on lookup to reduce exposure if the DB is compromised.
 
 -- ================================================================
 -- SHIFT SWAP REQUESTS TABLE - Employee-to-employee shift exchanges
@@ -633,6 +637,7 @@ CREATE TABLE IF NOT EXISTS user_org_units (
     UNIQUE KEY unique_user_org_unit (user_id, org_unit_id),
     INDEX idx_user (user_id),
     INDEX idx_org_unit (org_unit_id),
+    INDEX idx_user_org_primary (user_id, is_primary),
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE
@@ -996,3 +1001,9 @@ ALTER TABLE departments
 -- ================================================================
 -- END OF SCHEMA
 -- ================================================================
+
+-- Composite indexes for auth hot paths and assignment queries are defined
+-- inline inside their respective CREATE TABLE IF NOT EXISTS statements above:
+--   user_roles:        idx_user_roles_user_expires  (user_id, expires_at)
+--   user_org_units:    idx_user_org_primary         (user_id, is_primary)
+--   shift_assignments: idx_assignment_user_status   (user_id, status)

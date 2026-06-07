@@ -54,8 +54,8 @@ describe('RbacService.getEffectivePermissions', () => {
       .mockResolvedValueOnce([[permRow('schedule.read'), permRow('employee.read')], null])
       // 2nd call: active delegations (includes delegator_id)
       .mockResolvedValueOnce([[{ delegator_id: 5, permission_codes: JSON.stringify(['timeoff.approve']) }], null])
-      // 3rd call: delegator's current role permissions (cap check)
-      .mockResolvedValueOnce([[permRow('timeoff.approve')], null]);
+      // 3rd call: batch query for all delegators' current role permissions (cap check)
+      .mockResolvedValueOnce([[{ user_id: 5, code: 'timeoff.approve' }], null]);
 
     const svc = new RbacService(pool);
     const perms = await svc.getEffectivePermissions(1);
@@ -72,8 +72,8 @@ describe('RbacService.getEffectivePermissions', () => {
       .mockResolvedValueOnce([[permRow('schedule.read')], null])
       // 2nd call: active delegations
       .mockResolvedValueOnce([[{ delegator_id: 5, permission_codes: JSON.stringify(['schedule.read']) }], null])
-      // 3rd call: delegator's current role permissions (cap check)
-      .mockResolvedValueOnce([[permRow('schedule.read')], null]);
+      // 3rd call: batch query for all delegators' current role permissions (cap check)
+      .mockResolvedValueOnce([[{ user_id: 5, code: 'schedule.read' }], null]);
 
     const svc = new RbacService(pool);
     const perms = await svc.getEffectivePermissions(1);
@@ -118,10 +118,15 @@ describe('RbacService.getEffectivePermissions', () => {
         ],
         null,
       ])
-      // 3rd call: delegator 10's current role permissions (cap check for first row)
-      .mockResolvedValueOnce([[permRow('timeoff.approve'), permRow('employee.read')], null])
-      // 4th call: delegator 11's current role permissions (cap check for second row)
-      .mockResolvedValueOnce([[permRow('shift.create')], null]);
+      // 3rd call: single batch query for all delegators' current role permissions
+      .mockResolvedValueOnce([
+        [
+          { user_id: 10, code: 'timeoff.approve' },
+          { user_id: 10, code: 'employee.read' },
+          { user_id: 11, code: 'shift.create' },
+        ],
+        null,
+      ]);
 
     const svc = new RbacService(pool);
     const perms = await svc.getEffectivePermissions(3);
