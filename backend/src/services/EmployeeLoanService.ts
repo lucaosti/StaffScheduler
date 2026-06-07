@@ -285,19 +285,15 @@ export class EmployeeLoanService {
     if (loan.approverUserId && loan.status === 'pending') targets.add(loan.approverUserId);
 
     for (const userId of targets) {
-      try {
-        await this.notifications.notify({
-          userId,
-          type: loan.status === 'approved' ? 'loan.created.auto-approved' : 'loan.created',
-          title:
-            loan.status === 'approved'
-              ? 'Loan auto-approved'
-              : 'New loan request',
-          body: `User ${loan.userId} for ${loan.startDate} to ${loan.endDate}.`,
-        });
-      } catch (err) {
-        logger.warn(`Notification dispatch failed for user=${userId}: ${(err as Error).message}`);
-      }
+      this.notifications.notifyAsync({
+        userId,
+        type: loan.status === 'approved' ? 'loan.created.auto-approved' : 'loan.created',
+        title:
+          loan.status === 'approved'
+            ? 'Loan auto-approved'
+            : 'New loan request',
+        body: `User ${loan.userId} for ${loan.startDate} to ${loan.endDate}.`,
+      });
     }
   }
 }
