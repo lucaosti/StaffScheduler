@@ -999,7 +999,12 @@ ALTER TABLE departments
 -- END OF SCHEMA
 -- ================================================================
 
--- Performance indexes added for auth hot paths and assignment queries
-CREATE INDEX IF NOT EXISTS idx_user_roles_user_expires   ON user_roles(user_id, expires_at);
-CREATE INDEX IF NOT EXISTS idx_user_org_primary          ON user_org_units(user_id, is_primary);
-CREATE INDEX IF NOT EXISTS idx_assignment_user_status    ON shift_assignments(user_id, status);
+-- Performance indexes added for auth hot paths and assignment queries.
+-- Use DROP + CREATE to remain idempotent on older MySQL 8.0 versions that
+-- do not support CREATE INDEX IF NOT EXISTS.
+DROP INDEX IF EXISTS idx_user_roles_user_expires   ON user_roles;
+CREATE INDEX idx_user_roles_user_expires            ON user_roles(user_id, expires_at);
+DROP INDEX IF EXISTS idx_user_org_primary           ON user_org_units;
+CREATE INDEX idx_user_org_primary                   ON user_org_units(user_id, is_primary);
+DROP INDEX IF EXISTS idx_assignment_user_status     ON shift_assignments;
+CREATE INDEX idx_assignment_user_status             ON shift_assignments(user_id, status);
