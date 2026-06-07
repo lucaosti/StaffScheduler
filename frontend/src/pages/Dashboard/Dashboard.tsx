@@ -23,6 +23,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { DashboardStats } from '../../types';
 
@@ -32,6 +33,8 @@ import { DashboardStats } from '../../types';
  */
 const Dashboard: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
+  const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,6 +123,20 @@ const Dashboard: React.FC = () => {
 
   return (
     <div className="container-fluid py-4">
+      {/* Permission denied banner — shown when redirected from a guarded route */}
+      {permissionDenied && (
+        <div className="alert alert-warning alert-dismissible fade show mb-4" role="alert">
+          <i className="bi bi-shield-exclamation me-2"></i>
+          <strong>Access denied.</strong> You do not have permission to view that page.
+          <button
+            type="button"
+            className="btn-close"
+            data-bs-dismiss="alert"
+            aria-label="Close"
+          ></button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="row mb-4">
         <div className="col">
