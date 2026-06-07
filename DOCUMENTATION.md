@@ -521,6 +521,8 @@ Docker alternative:
 - Comments only when the **why** is non-obvious.
 - No service file should exceed 500 lines; extract sub-classes if needed.
 
+**Input validation**: Use `validateBody(schema)` and `validateParams(schema)` from `src/middleware/validation.ts` with Zod schemas in `src/schemas/`. The `express-validator` library is not used in this codebase and must not be introduced in new code.
+
 ### Testing
 
 Each domain has tests at the layer where it lives:
@@ -727,13 +729,15 @@ Everything. A single process with a pool of 10 connections is more than sufficie
 
 ### Tier 2 — 1,000 users / 10 departments
 
+**Scale trigger**: P95 auth latency > 50 ms, or MySQL connection pool wait time > 10 ms on average.
+
 **First bottlenecks**
 
 1. **Permission resolution on every request.** `authenticate` middleware calls `RbacService.getEffectivePermissions()` and `RbacService.getUserRoles()` on every authenticated request — two to three indexed queries per call. At ~1,000 concurrent users making frequent requests, this becomes a measurable fraction of total DB load. Permissions and role grants change infrequently; caching is safe.
 
    Recommended fix: add a Redis (or in-process LRU) cache in `RbacService.getEffectivePermissions()` keyed by `userId`, with a 5-minute TTL. Invalidate on role grant/revoke and delegation create/revoke. This reduces per-request DB round-trips for auth from three to zero for cache hits.
 
-2. **Connection pool exhaustion under burst load.** With `connectionLimit: 10`, a burst of concurrent requests (e.g., all managers publishing schedules simultaneously) will queue on pool acquisition. Raise to 25–50 for this tier; tune `queueLimit` to reject rather than queue indefinitely.
+2. **Connection pool exhaustion under burst load.** With `connectionLimit: 10`, a burst of concurrent requests (e.g., all managers publishing schedules simultaneously) will queue on pool acquisition. Set `DB_POOL_LIMIT=30` (or higher) and `DB_QUEUE_LIMIT=50` in `backend/.env` to configure the pool and cap the queue for this tier.
 
 3. **Synchronous notification delivery.** `NotificationService` writes notification rows inside the main request transaction. For endpoints that trigger notifications to many users (e.g., publishing a schedule to 50+ employees), this adds latency proportional to the number of notifications and introduces a failure surface: a notification write error can roll back the business operation.
 
@@ -748,6 +752,8 @@ Everything. A single process with a pool of 10 connections is more than sufficie
 ---
 
 ### Tier 3 — 10,000 users / 100 departments
+
+**Scale trigger**: Report endpoint P95 > 2 s, or MySQL read IOPS > 80% of instance capacity, or pool utilization > 70%.
 
 **Critical bottlenecks**
 
@@ -878,7 +884,7 @@ Target: eliminate the most impactful bottlenecks without infrastructure changes;
 | Item | What to do | Rationale |
 |---|---|---|
 | Permission cache (Redis or in-process LRU) | Add a 5-minute TTL cache in `RbacService.getEffectivePermissions()`. Invalidate on role grant/revoke and delegation events. | Eliminates 2–3 DB queries on every authenticated request. Required before Tier 2 load. |
-| Connection pool tuning | Raise `connectionLimit` from 10 to 30–50; configure `queueLimit` to reject after a bound. | Prevents pool exhaustion under moderate burst. Low-risk change. |
+| Connection pool tuning | Set `DB_POOL_LIMIT` (controls `connectionLimit`, default 30) and `DB_QUEUE_LIMIT` (controls `queueLimit`, default 100) in `backend/.env`. Raise `DB_POOL_LIMIT` to 30–50 for Tier 2; set `DB_QUEUE_LIMIT` to reject rather than queue indefinitely. | Prevents pool exhaustion under moderate burst. Low-risk change. |
 | Fix N+1 in list endpoints | Audit `GET /employees`, `GET /shifts`, `GET /schedules` for per-row sub-queries. Replace with `JOIN` or a single `IN (...)` query. | Latency on list endpoints grows linearly with result set size without this fix. |
 | Add missing API filters | `GET /assignments`, `GET /audit-logs`, `GET /notifications` lack date-range and status filters that clients need for pagination. | Reduces over-fetching and improves frontend perceived performance. |
 | Two-factor authentication UI | Wire the existing `TwoFactorService.ts` to a frontend enrollment and challenge flow. | The backend is complete; the frontend gap prevents the feature from shipping. |
