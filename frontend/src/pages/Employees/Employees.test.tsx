@@ -25,7 +25,6 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
 describe('<Employees />', () => {
   beforeEach(() => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
     jest.spyOn(window, 'alert').mockImplementation(() => undefined);
 
     mockGetEmployees.mockResolvedValue(
@@ -116,10 +115,13 @@ describe('<Employees />', () => {
     await userEvent.click(screen.getByRole('button', { name: /create employee/i }));
     expect(mockCreateEmployee).toHaveBeenCalled();
 
-    // Delete flow (delete the currently visible row)
+    // Delete flow: click delete button, confirm via modal
     const delBtn = within(adaRow as HTMLElement).getByTitle(/delete employee/i);
     await userEvent.click(delBtn);
-    expect(window.confirm).toHaveBeenCalled();
+    // ConfirmModal should now be visible
+    const confirmModal = await screen.findByRole('dialog');
+    expect(confirmModal).toBeInTheDocument();
+    await userEvent.click(within(confirmModal).getByRole('button', { name: /^delete$/i }));
     expect(mockDeleteEmployee).toHaveBeenCalled();
   });
 
