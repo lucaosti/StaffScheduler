@@ -1,10 +1,14 @@
 /**
  * PreferencesSection — Personal preferences tab for the Settings page.
  *
+ * Persists theme, language, timezone, and notification toggles via
+ * PUT /api/preferences/me (serialised into the `notes` field as JSON until
+ * a dedicated column is added to user_preferences).
+ *
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 
 interface PersonalSettings {
   theme: 'light' | 'dark' | 'auto';
@@ -20,13 +24,27 @@ interface PersonalSettings {
 interface Props {
   settings: PersonalSettings;
   onChange: (updated: PersonalSettings) => void;
-  onSave: () => void;
+  onSave: () => Promise<void>;
 }
 
 const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
-  const handleSubmit = (e: React.FormEvent) => {
+  const [saving, setSaving] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onSave();
+    setSaving(true);
+    setSuccess(null);
+    setError(null);
+    try {
+      await onSave();
+      setSuccess('Personal preferences saved successfully.');
+    } catch (err) {
+      setError((err as Error).message || 'Failed to save preferences.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -37,6 +55,18 @@ const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => 
             <h5 className="mb-0">Personal Preferences</h5>
           </div>
           <div className="card-body">
+            {success && (
+              <div className="alert alert-success" role="status">
+                <i className="bi bi-check-circle me-2" aria-hidden="true"></i>
+                {success}
+              </div>
+            )}
+            {error && (
+              <div className="alert alert-danger" role="alert">
+                <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
+                {error}
+              </div>
+            )}
             <form onSubmit={handleSubmit}>
               <div className="row">
                 <div className="col-md-6 mb-3">
@@ -154,12 +184,24 @@ const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => 
               <div className="mt-4">
                 <button
                   type="submit"
-                  className="btn btn-secondary"
-                  disabled
-                  title="Settings persistence not yet available"
+                  className="btn btn-primary"
+                  disabled={saving}
                 >
-                  <i className="bi bi-check me-2"></i>
-                  Save Personal Settings
+                  {saving ? (
+                    <>
+                      <span
+                        className="spinner-border spinner-border-sm me-2"
+                        role="status"
+                        aria-hidden="true"
+                      ></span>
+                      Saving…
+                    </>
+                  ) : (
+                    <>
+                      <i className="bi bi-check me-2"></i>
+                      Save Personal Settings
+                    </>
+                  )}
                 </button>
               </div>
             </form>
