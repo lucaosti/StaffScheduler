@@ -12,7 +12,7 @@ import { getAuthHeaders, handleResponse } from './apiUtils';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
-export interface SystemSetting {
+interface SystemSetting {
   category: string;
   key: string;
   value: string;
@@ -47,17 +47,4 @@ export const updateTimePeriod = async (
     body: JSON.stringify({ timePeriod }),
   });
   return handleResponse<{ timePeriod: string }>(response);
-};
-
-export const updateSystemSetting = async (
-  category: string,
-  key: string,
-  value: string
-): Promise<ApiResponse<SystemSetting>> => {
-  const response = await fetch(`${API_BASE_URL}/settings/${category}/${key}`, {
-    method: 'PUT',
-    headers: getAuthHeaders(),
-    body: JSON.stringify({ value }),
-  });
-  return handleResponse<SystemSetting>(response);
 };
