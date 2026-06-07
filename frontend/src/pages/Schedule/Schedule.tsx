@@ -319,6 +319,7 @@ const Schedule: React.FC = () => {
                 <button
                   type="button"
                   className={`btn ${viewMode === 'week' ? 'btn-primary' : 'btn-outline-primary'}`}
+                  aria-label="Week view"
                   onClick={() => setViewMode('week')}
                 >
                   Week
@@ -326,6 +327,7 @@ const Schedule: React.FC = () => {
                 <button
                   type="button"
                   className={`btn ${viewMode === 'month' ? 'btn-primary' : 'btn-outline-primary'}`}
+                  aria-label="Month view"
                   onClick={() => setViewMode('month')}
                 >
                   Month

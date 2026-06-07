@@ -42,6 +42,14 @@ const Shifts: React.FC = () => {
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
   const [confirm, setConfirm] = useState<ConfirmState>({
     show: false,
@@ -115,14 +123,14 @@ const Shifts: React.FC = () => {
     });
   };
 
-  const filteredShifts = shifts.filter((shift) => {
+  const filteredShifts = useMemo(() => shifts.filter((shift) => {
     const matchesSearch =
-      !searchTerm ||
-      (shift.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      !debouncedSearch ||
+      (shift.name || '').toLowerCase().includes(debouncedSearch.toLowerCase()) ||
       (shift.departmentName || shift.department || '')
         .toLowerCase()
-        .includes(searchTerm.toLowerCase()) ||
-      (shift.notes && shift.notes.toLowerCase().includes(searchTerm.toLowerCase()));
+        .includes(debouncedSearch.toLowerCase()) ||
+      (shift.notes && shift.notes.toLowerCase().includes(debouncedSearch.toLowerCase()));
 
     const matchesDepartment =
       !selectedDepartment ||
@@ -131,7 +139,7 @@ const Shifts: React.FC = () => {
       shift.department === selectedDepartment;
 
     return matchesSearch && matchesDepartment;
-  });
+  }), [shifts, debouncedSearch, selectedDepartment]);
 
   const handleSubmitShift = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -231,6 +239,7 @@ const Shifts: React.FC = () => {
               type="text"
               className="form-control"
               placeholder="Search shifts..."
+              aria-label="Search shifts"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
