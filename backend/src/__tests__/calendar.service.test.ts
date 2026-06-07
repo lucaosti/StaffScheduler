@@ -6,12 +6,15 @@
  * the queueable pool fake.
  */
 
+import { createHash } from 'crypto';
 import {
   buildIcs,
   CalendarEvent,
   CalendarService,
   shiftToEventTimes,
 } from '../services/CalendarService';
+
+const sha256 = (s: string): string => createHash('sha256').update(s).digest('hex');
 
 const sampleEvent = (overrides: Partial<CalendarEvent> = {}): CalendarEvent => ({
   uid: 'assignment-1@staffscheduler',
@@ -71,13 +74,39 @@ const makePool = () => {
   return { pool: { execute } as never, execute };
 };
 
-describe('CalendarService.getOrCreateToken', () => {
-  it('returns the existing token if one is stored', async () => {
+describe('CalendarService.getToken', () => {
+  it('returns null when a token_hash is already stored', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[{ token: 'abc' }], null]);
+    execute.mockResolvedValueOnce([[{ token_hash: sha256('abc') }], null]);
     const service = new CalendarService(pool);
-    expect(await service.getOrCreateToken(7)).toBe('abc');
+    expect(await service.getToken(7)).toBeNull();
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates and returns a new 48-hex-char raw token when none is stored', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]);
+    const service = new CalendarService(pool);
+    const raw = await service.getToken(7);
+    expect(raw).toMatch(/^[a-f0-9]{48}$/);
+    // The stored value must be the SHA-256 of the returned raw token, not the raw token itself.
+    const insertCall = execute.mock.calls[1];
+    expect(insertCall[1][1]).toBe(sha256(raw!));
+  });
+});
+
+describe('CalendarService.getOrCreateToken', () => {
+  it('rotates and returns a raw token when one already exists', async () => {
+    const { pool, execute } = makePool();
+    // getToken: hash exists → returns null → falls through to rotateToken
+    execute
+      .mockResolvedValueOnce([[{ token_hash: sha256('existing') }], null])
+      .mockResolvedValueOnce([{ insertId: 0, affectedRows: 1 }, null]);
+    const service = new CalendarService(pool);
+    const token = await service.getOrCreateToken(7);
+    expect(token).toMatch(/^[a-f0-9]{48}$/);
   });
 
   it('creates a new 48-hex-char token when none is stored', async () => {
@@ -97,6 +126,8 @@ describe('CalendarService.resolveToken', () => {
     execute.mockResolvedValueOnce([[], null]);
     const service = new CalendarService(pool);
     expect(await service.resolveToken('nope')).toBeNull();
+    // Must query by hash, not by the raw token.
+    expect(execute.mock.calls[0][1][0]).toBe(sha256('nope'));
   });
 
   it('returns the user id on a known token', async () => {
@@ -104,6 +135,7 @@ describe('CalendarService.resolveToken', () => {
     execute.mockResolvedValueOnce([[{ user_id: 42 }], null]);
     const service = new CalendarService(pool);
     expect(await service.resolveToken('abc')).toBe(42);
+    expect(execute.mock.calls[0][1][0]).toBe(sha256('abc'));
   });
 });
 
