@@ -839,9 +839,9 @@ const insertCalendarTokens = async (
   for (const [, userId] of userIds) {
     counter += 1;
     const rawToken = `demo-${userId.toString().padStart(4, '0')}-${counter
-    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
       .toString(36)
       .padStart(6, '0')}`;
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     await conn.execute(
       `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)`,
       [userId, tokenHash]
