@@ -418,7 +418,7 @@ export class UserService {
          JOIN user_departments ud ON u.id = ud.user_id
          JOIN departments d ON ud.department_id = d.id
          WHERE d.manager_id = ?
-         ORDER BY u.last_name ASC, u.first_name ASC`,
+         ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000`, // Hard cap — use pagination for larger teams.
         [actor.id]
       );
 
