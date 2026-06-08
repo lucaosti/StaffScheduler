@@ -7,7 +7,10 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModule } from '../middleware/auth';
+import { validateParams } from '../middleware/validation';
+import { idParam } from '../schemas';
 import { AuditLogService } from '../services/AuditLogService';
+import { logger } from '../config/logger';
 
 export const createAuditLogsRouter = (pool: Pool): Router => {
   const router = Router();
@@ -52,15 +55,18 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/:id', async (req: Request, res: Response) => {
-    const item = await service.getById(Number(req.params.id));
-    if (!item) {
-      res
-        .status(404)
-        .json({ success: false, error: { code: 'NOT_FOUND', message: 'Audit log entry not found' } });
-      return;
+  router.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
+    try {
+      const id = res.locals.params.id;
+      const item = await service.getById(id);
+      if (!item) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Audit log entry not found' } });
+      }
+      res.json({ success: true, data: item });
+    } catch (error) {
+      logger.error('Get audit log error:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve audit log entry' } });
     }
-    res.json({ success: true, data: item });
   });
 
   return router;
