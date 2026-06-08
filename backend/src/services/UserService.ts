@@ -36,22 +36,25 @@ export class UserService {
       );
       const userId = result.insertId;
       if (userData.roleIds && userData.roleIds.length > 0) {
-        for (const roleId of userData.roleIds) {
-          await connection.execute(
-            'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
-            [userId, roleId]
-          );
-        }
+        const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
+        await connection.execute(
+          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
+          userData.roleIds.flatMap(roleId => [userId, roleId])
+        );
       }
       if (userData.departmentIds && userData.departmentIds.length > 0) {
-        for (const departmentId of userData.departmentIds) {
-          await connection.execute('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)', [userId, departmentId]);
-        }
+        const ph = userData.departmentIds.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
+          userData.departmentIds.flatMap(deptId => [userId, deptId])
+        );
       }
       if (userData.skillIds && userData.skillIds.length > 0) {
-        for (const skillId of userData.skillIds) {
-          await connection.execute('INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)', [userId, skillId]);
-        }
+        const ph = userData.skillIds.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
+          userData.skillIds.flatMap(skillId => [userId, skillId])
+        );
       }
       await connection.commit();
       logger.info('User created: ' + userId);
@@ -84,8 +87,8 @@ export class UserService {
       if (userRows.length === 0) return null;
       const row = userRows[0];
       const [[dRows], [sRows]] = await Promise.all([
-        this.pool.execute<RowDataPacket[]>('SELECT d.id, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ?', [id]),
-        this.pool.execute<RowDataPacket[]>('SELECT s.id, s.name, s.description, s.is_active, s.created_at FROM skills s JOIN user_skills us ON s.id = us.skill_id WHERE us.user_id = ?', [id]),
+        this.pool.execute<RowDataPacket[]>('SELECT d.id, d.name FROM departments d JOIN user_departments ud ON d.id = ud.department_id WHERE ud.user_id = ? LIMIT 1000', [id]),
+        this.pool.execute<RowDataPacket[]>('SELECT s.id, s.name, s.description, s.is_active, s.created_at FROM skills s JOIN user_skills us ON s.id = us.skill_id WHERE us.user_id = ? LIMIT 1000', [id]),
       ]);
       const deptRows = dRows;
       const skillRows = sRows;
@@ -230,10 +233,11 @@ export class UserService {
           'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
           [id]
         );
-        for (const roleId of userData.roleIds) {
+        if (userData.roleIds.length > 0) {
+          const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
           await connection.execute(
-            'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
-            [id, roleId]
+            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
+            userData.roleIds.flatMap(roleId => [id, roleId])
           );
         }
       }

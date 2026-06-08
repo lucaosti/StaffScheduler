@@ -160,7 +160,7 @@ export class ScheduleService {
       }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' GROUP BY s.id ORDER BY s.start_date DESC';
+      query += ' GROUP BY s.id ORDER BY s.start_date DESC LIMIT 1000'; // Bounded at 1000; use pagination for larger datasets.
 
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
 
