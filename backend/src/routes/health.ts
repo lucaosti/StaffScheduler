@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { config } from '../config';
 import { database } from '../config/database';
+import { logger } from '../config/logger';
 
 const router = Router();
 
@@ -59,7 +60,8 @@ router.get('/', async (_req: Request, res: Response) => {
       success: true,
       data: healthCheck
     });
-  } catch (_error) {
+  } catch (error) {
+    logger.error('Health check DB query failed:', error);
     res.status(503).json({
       success: false,
       error: {
