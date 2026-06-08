@@ -176,7 +176,12 @@ const Shifts: React.FC = () => {
     setSubmitting(true);
     try {
       if (editingShift) {
-        await shiftService.updateShift(editingShift.id!, payload);
+        if (!editingShift.id) {
+          setFormError('Cannot update shift: missing ID');
+          setSubmitting(false);
+          return;
+        }
+        await shiftService.updateShift(editingShift.id, payload);
         setInfo('Shift updated.');
       } else {
         await shiftService.createShift(payload);

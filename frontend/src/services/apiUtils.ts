@@ -38,13 +38,21 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
   const contentType = response.headers.get('content-type');
   const isJson = contentType && contentType.includes('application/json');
 
-  const data = isJson ? await response.json() : await response.text();
+  const data: unknown = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
-    throw new ApiError(
-      (data && data.error?.message) || data.message || `HTTP error! status: ${response.status}`,
-      response.status
-    );
+    let errorMessage = `HTTP error! status: ${response.status}`;
+    if (data !== null && typeof data === 'object') {
+      const dataObj = data as Record<string, unknown>;
+      const errField = dataObj['error'];
+      if (errField !== null && typeof errField === 'object') {
+        const msg = (errField as Record<string, unknown>)['message'];
+        if (typeof msg === 'string') errorMessage = msg;
+      } else if (typeof dataObj['message'] === 'string') {
+        errorMessage = dataObj['message'];
+      }
+    }
+    throw new ApiError(errorMessage, response.status);
   }
 
   return data as ApiResponse<T>;

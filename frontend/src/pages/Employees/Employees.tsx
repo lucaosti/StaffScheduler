@@ -76,7 +76,6 @@ const Employees: React.FC = () => {
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchTerm, selectedDepartment, loadEmployees]);
 
   const handleDeleteEmployee = (id: number | string) => {
@@ -353,7 +352,12 @@ const Employees: React.FC = () => {
 
                   try {
                     if (editingEmployee) {
-                      await employeeService.updateEmployee(editingEmployee.id!.toString(), employeeData);
+                      if (!editingEmployee.id) {
+                        // Guard: leave modal open so the user can see the error message.
+                        setError('Cannot update employee: missing ID');
+                        return;
+                      }
+                      await employeeService.updateEmployee(editingEmployee.id.toString(), employeeData);
                     } else {
                       await employeeService.createEmployee(employeeData);
                     }

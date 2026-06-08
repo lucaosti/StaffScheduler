@@ -46,8 +46,6 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
 
   // Each menu item declares the permission key required to see it.
   // Items with no requiredPermission are visible to all authenticated users.
-  // When user.permissions is not populated (e.g. legacy tokens), fall back to
-  // showing all items so the UX degrades gracefully rather than hiding everything.
   const menuItems = [
     {
       path: '/dashboard',
@@ -100,13 +98,11 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
   ];
 
   const hasPermission = (requiredPermission: string | null): boolean => {
-    if (requiredPermission === null) return true;
-    // If the RBAC layer has populated permissions, use them.
+    if (requiredPermission === null) return true; // no permission required
     if (user?.permissions) {
       return user.permissions.includes(requiredPermission);
     }
-    // Fallback: show all items when permissions have not been populated yet.
-    return true;
+    return false; // fail-closed: hide items until permissions are confirmed
   };
 
   const filteredMenuItems = menuItems.filter(item =>
