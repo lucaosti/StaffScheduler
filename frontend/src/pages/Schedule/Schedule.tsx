@@ -143,14 +143,28 @@ const Schedule: React.FC = () => {
 
   const weekDates = generateWeekDates(selectedWeek);
 
-  const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number) => {
+  // Pre-index assignments by "dateStr|shiftId" so each cell lookup is O(1)
+  // instead of scanning the full assignments array for every shift × date cell.
+  const assignmentIndex = useMemo(() => {
+    const index = new Map<string, Assignment[]>();
+    for (const a of assignments) {
+      const src = a.shiftDate || a.assignedAt;
+      if (!src) continue;
+      const dateStr = new Date(src).toISOString().split('T')[0];
+      const key = `${dateStr}|${String(a.shiftId)}`;
+      const bucket = index.get(key);
+      if (bucket) {
+        bucket.push(a);
+      } else {
+        index.set(key, [a]);
+      }
+    }
+    return index;
+  }, [assignments]);
+
+  const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number): Assignment[] => {
     const dateStr = date.toISOString().split('T')[0];
-    return assignments.filter((a) => {
-      const assignmentDateSource = a.shiftDate || a.assignedAt;
-      if (!assignmentDateSource) return false;
-      const assignedDate = new Date(assignmentDateSource).toISOString().split('T')[0];
-      return assignedDate === dateStr && String(a.shiftId) === String(shiftId);
-    });
+    return assignmentIndex.get(`${dateStr}|${String(shiftId)}`) ?? [];
   };
 
   const getEmployeeById = (employeeId: string | number) =>

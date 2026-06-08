@@ -71,9 +71,11 @@ describe('users router GET /', () => {
     expect(all).toHaveBeenCalledWith({ search: undefined, departmentId: undefined, roleId: undefined });
   });
 
-  it('manager lists only own scope and applies post-filtering', async () => {
+  it('manager lists only own scope with filters pushed to service', async () => {
     currentUser = { id: 9, role: 'manager', email: 'm@x' };
-    (UserService.prototype.getUsersForManager as jest.Mock) = jest.fn().mockResolvedValue([
+    // Filtering is delegated to the service (and ultimately to SQL).
+    // The mock returns only the already-filtered result, matching what the DB would return.
+    const forManager = jest.fn().mockResolvedValue([
       {
         id: 2,
         email: 'a@x.com',
@@ -83,22 +85,19 @@ describe('users router GET /', () => {
         employeeId: 'EMP01',
         departments: [{ departmentId: 5 }],
       },
-      {
-        id: 3,
-        email: 'b@x.com',
-        firstName: 'Luca',
-        lastName: 'Rossi',
-        role: 'employee',
-        employeeId: 'EMP02',
-        departments: [{ departmentId: 7 }],
-      },
     ]);
+    (UserService.prototype.getUsersForManager as jest.Mock) = forManager;
     const res = await request(mountApp()).get(
-      '/api/users?search=anna&department=5&role=employee'
+      '/api/users?search=anna&department=5'
     );
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].id).toBe(2);
+    // Verify that filters were forwarded to the service — not applied in-memory.
+    expect(forManager).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 9 }),
+      { search: 'anna', departmentId: 5 }
+    );
   });
 
   it('returns 500 when service throws', async () => {
