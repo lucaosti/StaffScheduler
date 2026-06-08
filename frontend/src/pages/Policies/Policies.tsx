@@ -79,7 +79,7 @@ const Policies: React.FC = () => {
         policyService.listExceptions(),
         isAdmin
           ? policyService.listMatrix()
-          : Promise.resolve({ data: [] as ApprovalMatrixRow[] }),
+          : Promise.resolve({ success: true as const, data: [] as ApprovalMatrixRow[] }),
       ]);
       setPolicies(p.data ?? []);
       setExceptions(e.data ?? []);
