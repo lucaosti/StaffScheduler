@@ -1,14 +1,14 @@
 services:
   # Database Service
   mysql:
-    image: mysql:8.0
+    image: mysql:8.0.42
     container_name: staff_scheduler_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-StrongRootPassword123!}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set in .env}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-staff_scheduler}
       MYSQL_USER: ${MYSQL_USER:-scheduler_user}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
     ports:
       - "${DB_PORT:-3306}:3306"
     volumes:
@@ -48,10 +48,13 @@ services:
       DB_PORT: 3306
       DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
       DB_USER: ${MYSQL_USER:-scheduler_user}
-      DB_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
       SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
+      DB_QUEUE_LIMIT: ${DB_QUEUE_LIMIT:-100}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
