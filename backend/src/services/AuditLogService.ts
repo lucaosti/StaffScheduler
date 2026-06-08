@@ -61,8 +61,12 @@ const mapRow = (row: RowDataPacket): AuditLogEntry => ({
   entityType: (row.entity_type as string | null) ?? null,
   entityId: (row.entity_id as number | null) ?? null,
   description: (row.description as string | null) ?? null,
-  beforeSnapshot: row.before_snapshot ? JSON.parse(row.before_snapshot as string) : null,
-  afterSnapshot: row.after_snapshot ? JSON.parse(row.after_snapshot as string) : null,
+  beforeSnapshot: row.before_snapshot
+    ? (() => { try { return JSON.parse(row.before_snapshot as string); } catch { return null; } })()
+    : null,
+  afterSnapshot: row.after_snapshot
+    ? (() => { try { return JSON.parse(row.after_snapshot as string); } catch { return null; } })()
+    : null,
   ipAddress: (row.ip_address as string | null) ?? null,
   userAgent: (row.user_agent as string | null) ?? null,
   createdAt: row.created_at as string,

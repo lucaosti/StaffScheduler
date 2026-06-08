@@ -382,7 +382,7 @@ describe('bulk-import router', () => {
       .mockResolvedValue({ inserted: 1, errors: [] });
     const res = await request(mountApp('/api/bulk-import', createBulkImportRouter(fakePool)))
       .post('/api/bulk-import/employees')
-      .send({ csv: 'email,firstName,lastName,role\nx@y.com,X,Y,employee\n' });
+      .send({ csv: 'email,firstName,lastName,role\nx@y.com,X,Y,employee\n', defaultPassword: 'Pass123!' });
     expect(res.status).toBe(200);
   });
 

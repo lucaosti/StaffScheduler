@@ -179,11 +179,18 @@ router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage
 router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), async (req: Request, res: Response) => {
   try {
     const { departmentId } = res.locals.params;
-    const { status } = req.query;
+    const rawStatus = req.query.status as string | undefined;
+    const VALID_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'];
+    if (rawStatus !== undefined && !VALID_STATUSES.includes(rawStatus)) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_STATUS', message: `status must be one of: ${VALID_STATUSES.join(', ')}` }
+      });
+    }
 
     const assignments = await assignmentService.getAssignmentsByDepartment(
       departmentId,
-      status as string
+      rawStatus
     );
     res.json({ success: true, data: assignments });
   } catch (error) {

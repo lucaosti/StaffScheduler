@@ -258,7 +258,7 @@ describe('assignments router (extended)', () => {
     (AssignmentService.prototype.getAssignmentsByDepartment as jest.Mock) = jest
       .fn()
       .mockResolvedValue([]);
-    res = await request(app()).get('/api/assignments/department/1?status=open');
+    res = await request(app()).get('/api/assignments/department/1?status=pending');
     expect(res.status).toBe(200);
 
     (AssignmentService.prototype.getAssignmentsByDepartment as jest.Mock) = jest
@@ -1684,7 +1684,7 @@ describe('bulk-import router (extended)', () => {
     (BulkImportService.prototype.importEmployees as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
-    const res = await request(app()).post('/api/import/employees').send({ csv: 'x' });
+    const res = await request(app()).post('/api/import/employees').send({ csv: 'x', defaultPassword: 'Pass123!' });
     expect(res.status).toBe(500);
   });
 

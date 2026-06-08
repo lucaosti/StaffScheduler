@@ -21,9 +21,16 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
+import { z } from 'zod';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { RbacService } from '../services/RbacService';
 import { logger } from '../config/logger';
+
+const assignRoleBody = z.object({
+  roleId: z.number().int().positive(),
+  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+});
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -115,13 +122,20 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
 
   roles.post('/users/:userId', async (req: Request, res: Response) => {
     try {
-      const roleId = Number(req.body?.roleId);
-      if (!roleId) return respondError(res, 400, 'VALIDATION_ERROR', 'roleId is required');
+      const userId = parseInt(req.params.userId, 10);
+      if (isNaN(userId) || userId <= 0) {
+        return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
+      }
+      const parseResult = assignRoleBody.safeParse(req.body);
+      if (!parseResult.success) {
+        return respondError(res, 400, 'VALIDATION_ERROR', 'roleId must be a positive integer');
+      }
+      const { roleId, scopeOrgUnitId, expiresAt } = parseResult.data;
       await rbac.assignRole(
-        Number(req.params.userId),
+        userId,
         roleId,
-        req.body?.scopeOrgUnitId ?? null,
-        req.body?.expiresAt ?? null
+        scopeOrgUnitId ?? null,
+        expiresAt ?? null
       );
       res.status(201).json({ success: true });
     } catch (err) {
