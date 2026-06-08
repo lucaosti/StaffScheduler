@@ -48,7 +48,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
 
       if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
+        const hasAccess = userDepartments.some((d) => d.id === departmentId);
 
         if (!hasAccess) {
           return res.status(403).json({
@@ -135,7 +135,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         // Full administrators can update any department
       } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
 
         if (!canManage) {
           return res.status(403).json({
@@ -216,7 +216,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         // Full administrators can add users to any department
       } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
 
         if (!canManage) {
           return res.status(403).json({
@@ -270,7 +270,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         // Full administrators can remove users from any department
       } else if (userHasPermission(user, 'department.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d: any) => d.id === departmentId && d.managerId === user.id);
+        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
 
         if (!canManage) {
           return res.status(403).json({
@@ -305,7 +305,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
 
       if (!userHasPermission(user, 'settings.manage')) {
         const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d: any) => d.id === departmentId);
+        const hasAccess = userDepartments.some((d) => d.id === departmentId);
 
         if (!hasAccess) {
           return res.status(403).json({

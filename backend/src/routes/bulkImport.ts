@@ -1,7 +1,7 @@
 /**
  * Bulk import routes (F16). Manager only.
  *
- *   POST /api/import/employees  body: { csv: string, defaultPassword?: string }
+ *   POST /api/import/employees  body: { csv: string, defaultPassword: string }
  *   POST /api/import/shifts     body: { csv: string }
  *
  * Body is plain JSON with the CSV text inside (multipart upload would add
@@ -27,9 +27,12 @@ export const createBulkImportRouter = (pool: Pool): Router => {
 
   router.post('/employees', async (req: Request, res: Response) => {
     const csv = req.body?.csv as string | undefined;
-    const password = (req.body?.defaultPassword as string | undefined) || 'ChangeMe1!';
+    const password = req.body?.defaultPassword as string | undefined;
     if (!csv) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'csv body is required');
+    }
+    if (!password) {
+      return respondError(res, 400, 'MISSING_FIELD', 'defaultPassword is required for bulk import');
     }
     try {
       const result = await service.importEmployees(csv, password);

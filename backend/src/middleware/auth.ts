@@ -88,7 +88,14 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     const pool = database.getPool();
     const userService = new UserService(pool);
-    const userId = parseInt(decodedToken.userId.toString());
+    const rawUserId = decodedToken.userId;
+    if (typeof rawUserId !== 'string' && typeof rawUserId !== 'number') {
+      return res.status(401).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'Invalid token payload' } });
+    }
+    const userId = parseInt(String(rawUserId), 10);
+    if (isNaN(userId) || userId <= 0) {
+      return res.status(401).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'Invalid token payload' } });
+    }
     const user = await userService.getUserById(userId);
     if (!user || !user.isActive) {
       return res.status(401).json({

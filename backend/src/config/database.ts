@@ -41,7 +41,7 @@ class Database {
       database: config.database.database,
       waitForConnections: true,
       connectionLimit: config.database.connectionLimit,
-      queueLimit: 0,
+      queueLimit: config.database.queueLimit,
     });
   }
 
