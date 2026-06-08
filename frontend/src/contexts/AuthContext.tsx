@@ -188,7 +188,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           payload: { user, token },
         });
       } else {
-        throw new Error((response.error as any)?.message || 'Login failed');
+        throw new Error(response.error?.message || 'Login failed');
       }
     } catch (error) {
       dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
