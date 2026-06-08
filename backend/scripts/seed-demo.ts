@@ -22,6 +22,7 @@
 import dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import mysql from 'mysql2/promise';
 import { logger } from '../src/config/logger';
@@ -837,12 +838,13 @@ const insertCalendarTokens = async (
   let counter = 0;
   for (const [, userId] of userIds) {
     counter += 1;
-    const token = `demo-${userId.toString().padStart(4, '0')}-${counter
+    const rawToken = `demo-${userId.toString().padStart(4, '0')}-${counter
       .toString(36)
       .padStart(6, '0')}`;
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
     await conn.execute(
-      `INSERT INTO user_calendar_tokens (user_id, token) VALUES (?, ?)`,
-      [userId, token]
+      `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)`,
+      [userId, tokenHash]
     );
   }
 };
