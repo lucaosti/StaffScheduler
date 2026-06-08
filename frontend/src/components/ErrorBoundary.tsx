@@ -29,11 +29,13 @@ class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
-    // console.error is intentional here: this is a class-based error boundary and
-    // React's error lifecycle methods have no hook equivalent, so the Winston logger
-    // (a module-level singleton) cannot be reached from this context.
-    // eslint-disable-next-line no-console
-    console.error('[ErrorBoundary]', error, info.componentStack);
+    if (process.env.NODE_ENV !== 'production') {
+      // console.error is intentional here: this is a class-based error boundary and
+      // React's error lifecycle methods have no hook equivalent, so the Winston logger
+      // (a module-level singleton) cannot be reached from this context.
+      // eslint-disable-next-line no-console
+      console.error('[ErrorBoundary]', error, info.componentStack);
+    }
   }
 
   handleReload = (): void => {

@@ -22,12 +22,15 @@ interface I18nValue {
 
 const I18nContext = createContext<I18nValue | null>(null);
 
+const isSupportedLocale = (value: string): value is Locale =>
+  (SUPPORTED as readonly string[]).includes(value);
+
 const detectInitialLocale = (): Locale => {
   if (typeof window === 'undefined') return 'en';
   const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === 'en' || stored === 'it') return stored;
-  const nav = window.navigator?.language?.slice(0, 2);
-  if (nav && (SUPPORTED as string[]).includes(nav)) return nav as Locale;
+  if (stored && isSupportedLocale(stored)) return stored;
+  const nav = window.navigator?.language?.slice(0, 2) ?? '';
+  if (nav && isSupportedLocale(nav)) return nav;
   return 'en';
 };
 
