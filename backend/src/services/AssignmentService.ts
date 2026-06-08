@@ -70,14 +70,18 @@ export class AssignmentService {
         [assignmentData.shiftId]
       );
 
-      if (requiredSkills.length > 0) {
+      // If the shift requires skills, verify the user holds all of them.
+      // execute() uses prepared statements that do not expand arrays, so
+      // placeholders are built manually. When skillIds is empty the check
+      // is skipped entirely — no skills required means no restriction.
+      const skillIds = requiredSkills.map((rs: any) => rs.skill_id);
+      if (skillIds.length > 0) {
+        const placeholders = skillIds.map(() => '?').join(', ');
         const [userSkills] = await connection.execute<RowDataPacket[]>(
-          `SELECT skill_id FROM user_skills
-          WHERE user_id = ? AND skill_id IN (?)`,
-          [assignmentData.userId, requiredSkills.map((rs: any) => rs.skill_id)]
+          `SELECT skill_id FROM user_skills WHERE user_id = ? AND skill_id IN (${placeholders})`,
+          [assignmentData.userId, ...skillIds]
         );
-
-        if (userSkills.length < requiredSkills.length) {
+        if ((userSkills as RowDataPacket[]).length < requiredSkills.length) {
           throw new Error('User does not have all required skills for this shift');
         }
       }

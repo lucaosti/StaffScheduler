@@ -90,12 +90,11 @@ export class ShiftService {
 
       // Add required skills if provided
       if (shiftData.requiredSkillIds && shiftData.requiredSkillIds.length > 0) {
-        for (const skillId of shiftData.requiredSkillIds) {
-          await connection.execute(
-            'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
-            [shiftId, skillId]
-          );
-        }
+        const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
+          shiftData.requiredSkillIds.flatMap(skillId => [shiftId, skillId])
+        );
       }
 
       await connection.commit();
@@ -287,7 +286,7 @@ export class ShiftService {
         query += ' WHERE ' + conditions.join(' AND ');
       }
 
-      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC';
+      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC LIMIT 2000'; // Bounded at 2000; use pagination for larger datasets.
 
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
 
@@ -382,14 +381,12 @@ export class ShiftService {
       // Update required skills if provided
       if (shiftData.requiredSkillIds !== undefined) {
         await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
-        
         if (shiftData.requiredSkillIds.length > 0) {
-          for (const skillId of shiftData.requiredSkillIds) {
-            await connection.execute(
-              'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
-              [id, skillId]
-            );
-          }
+          const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
+            shiftData.requiredSkillIds.flatMap(skillId => [id, skillId])
+          );
         }
       }
 
