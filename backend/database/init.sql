@@ -417,8 +417,8 @@ CREATE TABLE IF NOT EXISTS user_unavailability (
     reason TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
+    UNIQUE KEY unique_user_unavailability_period (user_id, start_date, end_date),
     INDEX idx_user (user_id),
-    INDEX idx_user_dates (user_id, start_date, end_date),
 
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
@@ -1005,3 +1005,8 @@ ALTER TABLE departments
 --   user_roles:        idx_user_roles_user_expires  (user_id, expires_at)
 --   user_org_units:    idx_user_org_primary         (user_id, is_primary)
 --   shift_assignments: idx_assignment_user_status   (user_id, status)
+
+-- Additional composite indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_shift_assignments_schedule_status ON shift_assignments(schedule_id, status);
+CREATE INDEX IF NOT EXISTS idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at);

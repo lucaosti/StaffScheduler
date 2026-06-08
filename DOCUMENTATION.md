@@ -300,7 +300,7 @@ when Python is unavailable, the greedy solver runs automatically.
 
 | `OPTIMIZATION_ENGINE` env value | Effect |
 |---|---|
-| `javascript` (default) | Greedy TypeScript solver only |
+| `typescript` (default) | Greedy TypeScript solver only |
 | `or-tools` | CP-SAT Python solver; greedy fallback on any failure |
 
 To enable OR-Tools:
@@ -387,6 +387,8 @@ Runtime feature flags persisted in the `modules` table. All 9 default modules ar
 `requireModule(code)` middleware returns **404** (not 401) for disabled modules so consumers cannot infer the route's existence. It runs before `authenticate`.
 
 Admin API: `GET /api/modules`, `PUT /api/modules/:code` (requires `settings.manage`).
+
+> **Note (Tier 3+):** The module-enabled cache is in-process only. With multiple backend instances, cache invalidation is not propagated across instances — one node may serve stale enabled/disabled state. At Tier 3+, replace the in-process cache with a Redis-backed store or add a background job that broadcasts cache invalidation to all instances.
 
 ---
 
