@@ -408,23 +408,40 @@ export class UserService {
    * all resources is tracked as a follow-up (hierarchical access scoping).
    *
    * Implemented as a single query (no per-user round-trip) so the listing
-   * stays O(1) in DB calls regardless of the team size.
+   * stays O(1) in DB calls regardless of the team size. Optional search and
+   * departmentId filters are pushed into SQL to avoid in-memory filtering on
+   * the full result set.
    */
-  async getUsersForManager(actor: User): Promise<User[]> {
+  async getUsersForManager(
+    actor: User,
+    filters: { search?: string; departmentId?: number } = {}
+  ): Promise<User[]> {
     try {
-      if (actor.permissions?.includes('settings.manage')) return this.getAllUsers();
+      if (actor.permissions?.includes('settings.manage')) return this.getAllUsers(filters);
 
-      const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name,
+      const params: (string | number)[] = [actor.id];
+      let sql = `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name,
                 u.employee_id, u.phone, u.is_active, u.last_login,
                 u.created_at, u.updated_at
          FROM users u
          JOIN user_departments ud ON u.id = ud.user_id
          JOIN departments d ON ud.department_id = d.id
-         WHERE d.manager_id = ?
-         ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000`, // Hard cap — use pagination for larger teams.
-        [actor.id]
-      );
+         WHERE d.manager_id = ?`;
+
+      if (filters.search) {
+        sql += ` AND (u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.employee_id LIKE ?)`;
+        const term = `%${filters.search}%`;
+        params.push(term, term, term, term);
+      }
+
+      if (filters.departmentId) {
+        sql += ` AND ud.department_id = ?`;
+        params.push(filters.departmentId);
+      }
+
+      sql += ` ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000`; // Hard cap — use pagination for larger teams.
+
+      const [userRows] = await this.pool.execute<RowDataPacket[]>(sql, params);
 
       return userRows.map((row: any) => ({
         id: row.id,
