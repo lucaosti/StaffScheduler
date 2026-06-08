@@ -21,7 +21,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get all departments
   router.get('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
 
       let departments;
       if (userHasPermission(user, 'settings.manage')) {
@@ -43,7 +43,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get single department
   router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {
@@ -79,7 +79,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Create new department
   router.post('/', authenticate, async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
 
       if (!userHasPermission(user, 'department.manage')) {
         return res.status(403).json({
@@ -127,7 +127,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Update department
   router.put('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
       const departmentData: UpdateDepartmentRequest = req.body;
 
@@ -175,7 +175,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Delete department
   router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {
@@ -208,7 +208,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Add user to department
   router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
       const { userId } = res.locals.body;
 
@@ -262,7 +262,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Remove user from department
   router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
       const targetUserId = res.locals.params.userId;
 
@@ -300,7 +300,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // Get department statistics
   router.get('/:id/stats', authenticate, validateParams(idParam), async (req, res) => {
     try {
-      const user = (req as any).user;
+      const user = req.user;
       const departmentId = res.locals.params.id;
 
       if (!userHasPermission(user, 'settings.manage')) {

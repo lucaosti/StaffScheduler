@@ -244,6 +244,7 @@ export interface Schedule {
   status: 'draft' | 'published' | 'archived';
   departmentId?: number;
   departmentName?: string;
+  departmentOrgUnitId?: number | null;
   createdBy?: number;
   createdByName?: string;
   publishedBy?: number;

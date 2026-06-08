@@ -135,8 +135,10 @@ export class CalendarService {
   }
 
   /**
-   * Returns the raw token on first call (creates it); on subsequent calls
-   * rotates and returns a new raw token. Kept for route backwards-compatibility.
+   * Returns the raw token on first call (creates and stores its SHA-256 hash).
+   * On subsequent calls rotates: generates a new token, overwrites the stored hash,
+   * and returns the new raw value — the old subscription URL is invalidated.
+   * Kept for route backwards-compatibility with GET /api/calendar/token.
    */
   async getOrCreateToken(userId: number): Promise<string> {
     const raw = await this.getToken(userId);
