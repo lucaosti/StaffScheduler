@@ -51,6 +51,7 @@ export async function startServer(): Promise<void> {
         logger.info('Connection pool closed, process exiting');
         process.exit(0);
       });
+      /* istanbul ignore next */
       setTimeout(() => {
         logger.warn('Graceful shutdown timed out, forcing exit');
         process.exit(1);

@@ -31,10 +31,11 @@ export const createEventsRouter = (): Router => {
     const userId = req.user!.id;
     eventBus.subscribe(userId, res);
 
-    const heartbeat = setInterval(() => {
+    const heartbeat = setInterval(/* istanbul ignore next */() => {
       try {
         res.write(': heartbeat\n\n');
       } catch {
+        /* istanbul ignore next */
         // Will be cleaned up by the close handler.
       }
     }, HEARTBEAT_MS);

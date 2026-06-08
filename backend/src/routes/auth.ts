@@ -163,32 +163,23 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
  * @middleware authenticate
  * @returns    {Object} `{ success, data: <user> }`
  */
-router.get('/verify', authenticate, async (req: Request, res: Response) => {
-  try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'User not found'
-        }
-      });
-    }
-
-    res.json({
-      success: true,
-      data: req.user!
-    });
-  } catch (error) {
-    res.status(500).json({
+router.get('/verify', authenticate, (req: Request, res: Response) => {
+  const user = req.user;
+  if (!user) {
+    res.status(401).json({
       success: false,
       error: {
-        code: 'VERIFICATION_ERROR',
-        message: (error as Error).message
+        code: 'UNAUTHORIZED',
+        message: 'User not found'
       }
     });
+    return;
   }
+
+  res.json({
+    success: true,
+    data: req.user!
+  });
 });
 
 /**
@@ -250,25 +241,14 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
  * @middleware authenticate
  * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, async (_req: Request, res: Response) => {
-  try {
-    // In JWT-based authentication, logout is primarily client-side
-    // The client removes the token from storage
-    // For enhanced security, implement server-side token blacklisting
-    
-    res.json({
-      success: true,
-      message: 'Logged out successfully'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: {
-        code: 'LOGOUT_ERROR',
-        message: (error as Error).message
-      }
-    });
-  }
+router.post('/logout', authenticate, (_req: Request, res: Response) => {
+  // In JWT-based authentication, logout is primarily client-side.
+  // The client removes the token from storage.
+  // For enhanced security, implement server-side token blacklisting.
+  res.json({
+    success: true,
+    message: 'Logged out successfully'
+  });
 });
 
   return router;
