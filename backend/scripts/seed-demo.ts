@@ -20,9 +20,9 @@
  */
 
 import dotenv from 'dotenv';
-import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import mysql from 'mysql2/promise';
 import { logger } from '../src/config/logger';
