@@ -47,23 +47,11 @@ export const createUsersRouter = (pool: Pool) => {
           roleId: roleId ? parseInt(roleId as string) : undefined
         });
       } else {
-        users = await userService.getUsersForManager(user);
-
-        if (search) {
-          const searchTerm = (search as string).toLowerCase();
-          users = users.filter((u: User) =>
-            u.firstName.toLowerCase().includes(searchTerm) ||
-            u.lastName.toLowerCase().includes(searchTerm) ||
-            u.email.toLowerCase().includes(searchTerm) ||
-            (u.employeeId && u.employeeId.toLowerCase().includes(searchTerm))
-          );
-        }
-
-        if (department) {
-          users = users.filter((u: User) =>
-            u.departments?.some((d: any) => d.departmentId === parseInt(department as string))
-          );
-        }
+        // Filters are pushed into SQL — no in-memory post-filtering needed.
+        users = await userService.getUsersForManager(user, {
+          search: search as string | undefined,
+          departmentId: department ? parseInt(department as string) : undefined,
+        });
       }
 
       const pagination = parsePagination(req);
