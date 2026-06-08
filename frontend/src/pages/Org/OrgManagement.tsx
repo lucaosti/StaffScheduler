@@ -110,7 +110,9 @@ const OrgManagement: React.FC = () => {
   };
 
   useEffect(() => {
-    Promise.all([refreshUnits(), refreshLoans()]).finally(() => setLoading(false));
+    Promise.all([refreshUnits(), refreshLoans()])
+      .catch(err => setError(err instanceof Error ? err.message : 'Failed to refresh data'))
+      .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -507,7 +509,7 @@ const OrgManagement: React.FC = () => {
                             </button>
                           </>
                         )}
-                        {l.status === 'pending' && l.requestedBy === user?.id && (
+                        {l.status === 'pending' && user !== null && l.requestedBy === Number(user.id) && (
                           <button
                             className="btn btn-sm btn-outline-secondary"
                             onClick={() => handleCancelLoan(l.id)}

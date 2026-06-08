@@ -26,6 +26,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { DashboardStats } from '../../types';
+import { getDashboardStats } from '../../services/dashboardService';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -52,13 +53,8 @@ const Dashboard: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      // Import dashboard service to get real data
-      const { getDashboardStats } = await import('../../services/dashboardService');
-      // (Optional) If you later want cross-checks, re-add employee/shift calls here.
-      
-      // Load data from multiple sources
-      const [dashboardResponse] = await Promise.all([getDashboardStats()]);
-      
+      const dashboardResponse = await getDashboardStats();
+
       if (dashboardResponse.success && dashboardResponse.data) {
         setStats(dashboardResponse.data);
       } else {
