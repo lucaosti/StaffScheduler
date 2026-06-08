@@ -1007,6 +1007,8 @@ ALTER TABLE departments
 --   shift_assignments: idx_assignment_user_status   (user_id, status)
 
 -- Additional composite indexes for common query patterns
-CREATE INDEX IF NOT EXISTS idx_shift_assignments_schedule_status ON shift_assignments(schedule_id, status);
-CREATE INDEX IF NOT EXISTS idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_user_created ON audit_logs(user_id, created_at);
+-- Note: MySQL does not support CREATE INDEX IF NOT EXISTS as a standalone statement;
+-- these run once on a fresh schema (init.sql is never applied to an existing DB).
+CREATE INDEX idx_shift_assignments_schedule_status ON shift_assignments(schedule_id, status);
+CREATE INDEX idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);
+CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at);
