@@ -200,7 +200,7 @@ export class DepartmentService {
         query += ' WHERE ' + conditions.join(' AND ');
       }
 
-      query += ' GROUP BY d.id ORDER BY d.name ASC';
+      query += ' GROUP BY d.id ORDER BY d.name ASC LIMIT 1000'; // Bounded at 1000.
 
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
 
@@ -544,7 +544,8 @@ export class DepartmentService {
         LEFT JOIN user_departments ud ON d.id = ud.department_id
         WHERE d.manager_id = ? AND d.is_active = 1
         GROUP BY d.id
-        ORDER BY d.name ASC`,
+        ORDER BY d.name ASC
+        LIMIT 1000`, // Bounded at 1000.
         [managerId]
       );
 
@@ -594,7 +595,8 @@ export class DepartmentService {
         LEFT JOIN users u ON d.manager_id = u.id
         WHERE ud2.user_id = ?
         GROUP BY d.id
-        ORDER BY d.name`,
+        ORDER BY d.name
+        LIMIT 1000`, // Bounded at 1000.
         [userId]
       );
 
