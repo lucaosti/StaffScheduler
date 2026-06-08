@@ -102,7 +102,7 @@ export class ScheduleService {
       if (rows.length === 0) return null;
 
       const row = rows[0];
-      const schedule: Schedule & { departmentOrgUnitId?: number | null } = {
+      const schedule: Schedule = {
         id: row.id,
         name: row.name,
         departmentId: row.department_id,

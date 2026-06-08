@@ -53,8 +53,7 @@ router.get('/:id', authenticate, validateParams(idParam), async (req: Request, r
 
     const scope = req.user?.allowedOrgUnitIds;
     if (scope !== null && scope !== undefined) {
-      const dept = schedule as any;
-      const deptOrgUnitId = dept.departmentOrgUnitId ?? null;
+      const deptOrgUnitId = schedule.departmentOrgUnitId ?? null;
       if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
         return res.status(403).json({
           success: false,
@@ -89,8 +88,7 @@ router.get('/:id/shifts', authenticate, validateParams(idParam), async (req: Req
     // Enforce org-unit scope — same rule as GET /:id.
     const scope = req.user?.allowedOrgUnitIds;
     if (scope !== null && scope !== undefined) {
-      const dept = schedule as any;
-      const deptOrgUnitId = dept.departmentOrgUnitId ?? null;
+      const deptOrgUnitId = schedule.departmentOrgUnitId ?? null;
       if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
         return res.status(403).json({
           success: false,
