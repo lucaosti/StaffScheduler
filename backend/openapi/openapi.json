@@ -1212,6 +1212,31 @@
                     "items": {
                       "type": "integer"
                     }
+                  },
+                  "employeeId": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "position": {
+                    "type": "string"
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "departmentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
+                  },
+                  "skillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    }
                   }
                 }
               }
