@@ -39,26 +39,35 @@ export const createUsersRouter = (pool: Pool) => {
       const user = req.user as User;
       const { search, department, roleId } = req.query;
 
-      let users;
+      const filters = {
+        search: search as string | undefined,
+        departmentId: department ? parseInt(department as string) : undefined,
+        roleId: roleId ? parseInt(roleId as string) : undefined,
+      };
+      const pagination = parsePagination(req);
+
       if (userHasPermission(user, 'settings.manage')) {
-        users = await userService.getAllUsers({
-          search: search as string,
-          departmentId: department ? parseInt(department as string) : undefined,
-          roleId: roleId ? parseInt(roleId as string) : undefined
-        });
-      } else {
-        // Filters are pushed into SQL — no in-memory post-filtering needed.
-        users = await userService.getUsersForManager(user, {
-          search: search as string | undefined,
-          departmentId: department ? parseInt(department as string) : undefined,
-        });
+        if (pagination) {
+          const [total, users] = await Promise.all([
+            userService.countUsers(filters),
+            userService.getAllUsers(filters, { limit: pagination.pageSize, offset: pagination.offset }),
+          ]);
+          return sendPaginated(res, users, total, pagination);
+        }
+        const users = await userService.getAllUsers(filters);
+        return res.json({ success: true, data: users });
       }
 
-      const pagination = parsePagination(req);
+      // Manager path — scoped to departments managed by this user.
+      const managerFilters = { search: filters.search, departmentId: filters.departmentId };
       if (pagination) {
-        const sliced = users.slice(pagination.offset, pagination.offset + pagination.pageSize);
-        return sendPaginated(res, sliced, users.length, pagination);
+        const [total, users] = await Promise.all([
+          userService.countUsersForManager(user, managerFilters),
+          userService.getUsersForManager(user, managerFilters, { limit: pagination.pageSize, offset: pagination.offset }),
+        ]);
+        return sendPaginated(res, users, total, pagination);
       }
+      const users = await userService.getUsersForManager(user, managerFilters);
       res.json({ success: true, data: users });
     } catch (error) {
       logger.error('Get users error:', error);

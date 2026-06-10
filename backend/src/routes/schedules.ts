@@ -23,11 +23,14 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const scope = req.user?.allowedOrgUnitIds;
     const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
     const pagination = parsePagination(req);
-    const schedules = await scheduleService.getAllSchedules(filters);
     if (pagination) {
-      const sliced = schedules.slice(pagination.offset, pagination.offset + pagination.pageSize);
-      return sendPaginated(res, sliced, schedules.length, pagination);
+      const [total, schedules] = await Promise.all([
+        scheduleService.countSchedules(filters),
+        scheduleService.getAllSchedules(filters, { limit: pagination.pageSize, offset: pagination.offset }),
+      ]);
+      return sendPaginated(res, schedules, total, pagination);
     }
+    const schedules = await scheduleService.getAllSchedules(filters);
     res.json({ success: true, data: schedules });
   } catch (error) {
     logger.error('Error fetching schedules:', error);

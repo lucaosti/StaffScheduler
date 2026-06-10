@@ -504,14 +504,15 @@ export class UserService {
    */
   async getUsersForManager(
     actor: User,
-    filters: { search?: string; departmentId?: number } = {}
+    filters: { search?: string; departmentId?: number } = {},
+    pagination?: { limit: number; offset: number }
   ): Promise<User[]> {
     try {
-      if (actor.permissions?.includes('settings.manage')) return this.getAllUsers(filters);
+      if (actor.permissions?.includes('settings.manage')) return this.getAllUsers(filters, pagination);
 
       const params: (string | number)[] = [actor.id];
       let sql = `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name,
-                u.employee_id, u.phone, u.is_active, u.last_login,
+                u.employee_id, u.phone, u.position, u.hourly_rate, u.is_active, u.last_login,
                 u.created_at, u.updated_at,
                 d.name AS department_name
          FROM users u
@@ -530,7 +531,13 @@ export class UserService {
         params.push(filters.departmentId);
       }
 
-      sql += ` ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000`; // Hard cap — use pagination for larger teams.
+      sql += ` ORDER BY u.last_name ASC, u.first_name ASC`;
+      if (pagination) {
+        sql += ` LIMIT ? OFFSET ?`;
+        params.push(pagination.limit, pagination.offset);
+      } else {
+        sql += ` LIMIT 1000`;
+      }
 
       const [userRows] = await this.pool.execute<RowDataPacket[]>(sql, params);
 
@@ -541,6 +548,8 @@ export class UserService {
         lastName: row.last_name,
         employeeId: row.employee_id,
         phone: row.phone,
+        position: row.position ?? undefined,
+        hourlyRate: row.hourly_rate != null ? Number(row.hourly_rate) : undefined,
         isActive: Boolean(row.is_active),
         lastLogin: row.last_login,
         department: row.department_name ?? undefined,
@@ -549,6 +558,38 @@ export class UserService {
       }));
     } catch (error) {
       logger.error('Failed to get users for manager:', error);
+      throw error;
+    }
+  }
+
+  async countUsersForManager(
+    actor: User,
+    filters: { search?: string; departmentId?: number } = {}
+  ): Promise<number> {
+    if (actor.permissions?.includes('settings.manage')) return this.countUsers(filters);
+    try {
+      const params: (string | number)[] = [actor.id];
+      let sql = `SELECT COUNT(DISTINCT u.id) AS total
+         FROM users u
+         JOIN user_departments ud ON u.id = ud.user_id
+         JOIN departments d ON ud.department_id = d.id
+         WHERE d.manager_id = ?`;
+
+      if (filters.search) {
+        sql += ` AND (u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.employee_id LIKE ?)`;
+        const term = `%${filters.search}%`;
+        params.push(term, term, term, term);
+      }
+
+      if (filters.departmentId) {
+        sql += ` AND ud.department_id = ?`;
+        params.push(filters.departmentId);
+      }
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(sql, params);
+      return Number(rows[0]?.total ?? 0);
+    } catch (error) {
+      logger.error('Failed to count users for manager:', error);
       throw error;
     }
   }
