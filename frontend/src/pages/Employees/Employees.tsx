@@ -220,7 +220,6 @@ const Employees: React.FC = () => {
                   <th>Employee</th>
                   <th>Department</th>
                   <th>Position</th>
-                  <th>Type</th>
                   <th>Hourly Rate</th>
                   <th>Max Hours/Week</th>
                   <th>Status</th>
@@ -248,16 +247,7 @@ const Employees: React.FC = () => {
                     <td>{employee.department || '-'}</td>
                     <td>{employee.position || '-'}</td>
                     <td>
-                      <span className={`badge ${
-                        employee.employeeType === 'full-time' ? 'bg-success' :
-                        employee.employeeType === 'part-time' ? 'bg-warning' :
-                        'bg-info'
-                      }`}>
-                        {employee.employeeType}
-                      </span>
-                    </td>
-                    <td>
-                      {employee.hourlyRate ? `$${employee.hourlyRate.toFixed(2)}` : '-'}
+                      {employee.hourlyRate ? `€${employee.hourlyRate.toFixed(2)}` : '-'}
                     </td>
                     <td>{employee.maxHoursPerWeek}</td>
                     <td>
