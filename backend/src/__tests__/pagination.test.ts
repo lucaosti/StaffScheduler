@@ -120,10 +120,11 @@ describe('GET /api/v1/schedules', () => {
   });
 
   it('returns meta envelope when page and pageSize are provided', async () => {
+    // countSchedules provides the true total; getAllSchedules returns only the requested page.
+    (ScheduleService.prototype.countSchedules as jest.Mock).mockResolvedValue(3);
     (ScheduleService.prototype.getAllSchedules as jest.Mock).mockResolvedValue([
       { id: 1, name: 'S1' },
       { id: 2, name: 'S2' },
-      { id: 3, name: 'S3' },
     ]);
 
     const app = buildApp({} as never, { silent: true });

@@ -149,14 +149,16 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
-    const shifts = await shiftService.getAllShifts(
-      scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
-    );
+    const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
     const pagination = parsePagination(req);
     if (pagination) {
-      const sliced = shifts.slice(pagination.offset, pagination.offset + pagination.pageSize);
-      return sendPaginated(res, sliced, shifts.length, pagination);
+      const [total, shifts] = await Promise.all([
+        shiftService.countShifts(filters),
+        shiftService.getAllShifts(filters, { limit: pagination.pageSize, offset: pagination.offset }),
+      ]);
+      return sendPaginated(res, shifts, total, pagination);
     }
+    const shifts = await shiftService.getAllShifts(filters);
     res.json({ success: true, data: shifts });
   } catch (error) {
     logger.error('Error fetching shifts:', error);
