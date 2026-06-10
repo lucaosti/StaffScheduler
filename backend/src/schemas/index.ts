@@ -22,6 +22,8 @@ export const createUserBody = z.object({
   roleIds: z.array(z.number().int().positive()).optional(),
   employeeId: z.string().optional(),
   phone: z.string().optional(),
+  position: z.string().optional(),
+  hourlyRate: z.number().nonnegative().optional(),
   departmentIds: z.array(z.number().int().positive()).optional(),
   skillIds: z.array(z.number().int().positive()).optional(),
 });

@@ -3,7 +3,7 @@
  *
  * Pure parsing functions plus a DB-aware importer. Today we accept CSV text
  * for two entity types:
- *   - employees: email,firstName,lastName,role,employeeId,phone
+ *   - employees: email,firstName,lastName,role,employeeId,phone,position,hourlyRate
  *       (the `role` column holds a role NAME, e.g. "Manager", resolved against
  *        the configurable `roles` table at import time)
  *   - shifts:    scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff
@@ -38,6 +38,8 @@ interface EmployeeRow {
   roleName: string;
   employeeId?: string;
   phone?: string;
+  position?: string;
+  hourlyRate?: number;
 }
 
 interface ShiftRow {
@@ -112,6 +114,8 @@ export const mapEmployeeRows = (rows: string[][]): { rows: EmployeeRow[]; errors
   const roleIdx = headerIndex(header, 'role');
   const employeeIdIdx = headerIndex(header, 'employeeId');
   const phoneIdx = headerIndex(header, 'phone');
+  const positionIdx = headerIndex(header, 'position');
+  const hourlyRateIdx = headerIndex(header, 'hourlyRate');
 
   if (emailIdx < 0 || firstIdx < 0 || lastIdx < 0 || roleIdx < 0) {
     return {
@@ -134,6 +138,8 @@ export const mapEmployeeRows = (rows: string[][]): { rows: EmployeeRow[]; errors
       errors.push({ row: i + 1, message: `Invalid email '${email}'` });
       continue;
     }
+    const hourlyRateRaw = hourlyRateIdx >= 0 ? (r[hourlyRateIdx] || '').trim() : '';
+    const hourlyRate = hourlyRateRaw ? parseFloat(hourlyRateRaw) : undefined;
     out.push({
       email,
       firstName: (r[firstIdx] || '').trim(),
@@ -141,6 +147,8 @@ export const mapEmployeeRows = (rows: string[][]): { rows: EmployeeRow[]; errors
       roleName,
       employeeId: employeeIdIdx >= 0 ? (r[employeeIdIdx] || '').trim() || undefined : undefined,
       phone: phoneIdx >= 0 ? (r[phoneIdx] || '').trim() || undefined : undefined,
+      position: positionIdx >= 0 ? (r[positionIdx] || '').trim() || undefined : undefined,
+      hourlyRate: hourlyRate !== undefined && !isNaN(hourlyRate) ? hourlyRate : undefined,
     });
   }
   return { rows: out, errors };
@@ -232,8 +240,8 @@ export class BulkImportService {
         }
         const roleId = (roleRows[0] as any).id as number;
         const [userRes] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, phone, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, 1)`,
+          `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, phone, position, hourly_rate, is_active)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
           [
             r.email,
             passwordHash,
@@ -241,6 +249,8 @@ export class BulkImportService {
             r.lastName,
             r.employeeId ?? null,
             r.phone ?? null,
+            r.position ?? null,
+            r.hourlyRate ?? null,
           ]
         );
         await conn.execute(
