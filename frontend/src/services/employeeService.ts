@@ -54,8 +54,10 @@ interface CreateEmployeeData {
   phone?: string;
   /** Employee's address (optional) */
   address?: string;
-  /** Department assignment (optional) */
+  /** Department assignment (optional, display name) */
   department?: string;
+  /** Department IDs for server-side assignment */
+  departmentIds?: number[];
   /** Job position/role (optional) */
   position?: string;
   /** Date of hire in ISO format (optional) */

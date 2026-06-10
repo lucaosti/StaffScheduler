@@ -17,9 +17,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Employee, Department } from '../../types';
+import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
-import { getDepartments } from '../../services/departmentService';
+import { getDepartments, Department } from '../../services/departmentService';
 import ConfirmModal from '../../components/ConfirmModal';
 
 
@@ -352,17 +352,17 @@ const Employees: React.FC = () => {
                   const rawDeptId = formData.get('departmentId') as string;
                   const deptId = rawDeptId ? parseInt(rawDeptId, 10) : NaN;
                   const rawHourlyRate = formData.get('hourlyRate') as string;
-                  const hourlyRate = rawHourlyRate ? parseFloat(rawHourlyRate) : NaN;
-                  const employeeData: Record<string, unknown> = {
+                  const parsedHourlyRate = rawHourlyRate ? parseFloat(rawHourlyRate) : NaN;
+                  const employeeData: Parameters<typeof employeeService.createEmployee>[0] = {
                     employeeId: formData.get('employeeId') as string,
                     firstName: formData.get('firstName') as string,
                     lastName: formData.get('lastName') as string,
                     email: formData.get('email') as string,
-                    phone: formData.get('phone') as string || undefined,
+                    phone: (formData.get('phone') as string) || undefined,
                     position: (formData.get('position') as string) || undefined,
+                    departmentIds: !isNaN(deptId) && deptId > 0 ? [deptId] : undefined,
+                    hourlyRate: !isNaN(parsedHourlyRate) && parsedHourlyRate >= 0 ? parsedHourlyRate : undefined,
                   };
-                  if (!isNaN(deptId) && deptId > 0) employeeData.departmentIds = [deptId];
-                  if (!isNaN(hourlyRate) && hourlyRate >= 0) employeeData.hourlyRate = hourlyRate;
 
                   try {
                     if (editingEmployee) {
@@ -450,7 +450,9 @@ const Employees: React.FC = () => {
                         id="departmentId"
                         name="departmentId"
                         defaultValue={
-                          editingEmployee?.departments?.[0]?.id?.toString() ?? ''
+                          editingEmployee?.department
+                            ? (allDepartments.find((d) => d.name === editingEmployee.department)?.id?.toString() ?? '')
+                            : ''
                         }
                       >
                         <option value="">— none —</option>
