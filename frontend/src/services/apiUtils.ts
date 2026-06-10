@@ -13,6 +13,8 @@
 
 import { ApiResponse } from '../types';
 
+export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+
 /**
  * Custom error class for API-related errors.
  * Carries the HTTP status code alongside the message so callers

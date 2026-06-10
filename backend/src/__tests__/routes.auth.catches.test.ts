@@ -75,6 +75,6 @@ describe('POST /api/auth/refresh — jwt.sign throws', () => {
     expect(res.status).toBe(500);
     expect(res.body.success).toBe(false);
     expect(res.body.error.code).toBe('REFRESH_ERROR');
-    expect(res.body.error.message).toBe('sign failure');
+    expect(res.body.error.message).toBe('Token refresh failed');
   });
 });

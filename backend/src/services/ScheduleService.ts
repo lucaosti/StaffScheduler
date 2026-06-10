@@ -285,7 +285,7 @@ export class ScheduleService {
     }
   }
 
-  async publishSchedule(id: number): Promise<Schedule> {
+  async publishSchedule(id: number, actorId?: number | null): Promise<Schedule> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -310,7 +310,7 @@ export class ScheduleService {
       if (!publishedSchedule) throw new Error('Schedule not found after publishing');
 
       await this.audit.write({
-        actorId: null,
+        actorId: actorId ?? null,
         action: 'schedule.publish',
         entityType: 'schedule',
         entityId: id,
@@ -328,7 +328,7 @@ export class ScheduleService {
     }
   }
 
-  async archiveSchedule(id: number): Promise<Schedule> {
+  async archiveSchedule(id: number, actorId?: number | null): Promise<Schedule> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -347,7 +347,7 @@ export class ScheduleService {
       if (!archivedSchedule) throw new Error('Schedule not found after archiving');
 
       await this.audit.write({
-        actorId: null,
+        actorId: actorId ?? null,
         action: 'schedule.archive',
         entityType: 'schedule',
         entityId: id,

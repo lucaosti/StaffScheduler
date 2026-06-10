@@ -13,6 +13,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireModule } from '../middleware/auth';
 import { NotificationService } from '../services/NotificationService';
+import { logger } from '../config/logger';
 
 export const createNotificationsRouter = (pool: Pool): Router => {
   const router = Router();
@@ -23,33 +24,53 @@ export const createNotificationsRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   router.get('/', async (req: Request, res: Response) => {
-    const list = await service.listForUser(req.user!.id, {
-      unreadOnly: req.query.unreadOnly === '1',
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
-    });
-    res.json({ success: true, data: list });
+    try {
+      const list = await service.listForUser(req.user!.id, {
+        unreadOnly: req.query.unreadOnly === '1',
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      });
+      res.json({ success: true, data: list });
+    } catch (err) {
+      logger.error('notifications list error:', err);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to list notifications' } });
+    }
   });
 
   router.get('/unread-count', async (req: Request, res: Response) => {
-    const count = await service.unreadCount(req.user!.id);
-    res.json({ success: true, data: { count } });
+    try {
+      const count = await service.unreadCount(req.user!.id);
+      res.json({ success: true, data: { count } });
+    } catch (err) {
+      logger.error('notifications unread-count error:', err);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to get unread count' } });
+    }
   });
 
   router.patch('/:id/read', async (req: Request, res: Response) => {
-    const ok = await service.markRead(Number(req.params.id), req.user!.id);
-    if (!ok) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Notification not found or already read' },
-      });
-      return;
+    try {
+      const ok = await service.markRead(Number(req.params.id), req.user!.id);
+      if (!ok) {
+        res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Notification not found or already read' },
+        });
+        return;
+      }
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('notifications mark-read error:', err);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to mark notification as read' } });
     }
-    res.json({ success: true });
   });
 
   router.patch('/read-all', async (req: Request, res: Response) => {
-    const updated = await service.markAllRead(req.user!.id);
-    res.json({ success: true, data: { updated } });
+    try {
+      const updated = await service.markAllRead(req.user!.id);
+      res.json({ success: true, data: { updated } });
+    } catch (err) {
+      logger.error('notifications read-all error:', err);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to mark all notifications as read' } });
+    }
   });
 
   return router;

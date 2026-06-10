@@ -196,8 +196,10 @@ export const requireModule = (code: string) => {
       next();
     } catch (err) {
       logger.error('requireModule check failed:', err);
-      // Fail open: let the request through if module status cannot be determined.
-      next();
+      return res.status(503).json({
+        success: false,
+        error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+      });
     }
   };
 };

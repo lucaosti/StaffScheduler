@@ -34,6 +34,9 @@ export const createBulkImportRouter = (pool: Pool): Router => {
     if (!password) {
       return respondError(res, 400, 'MISSING_FIELD', 'defaultPassword is required for bulk import');
     }
+    if (password.length < 8) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'defaultPassword must be at least 8 characters');
+    }
     try {
       const result = await service.importEmployees(csv, password);
       const status = result.errors.length > 0 ? 400 : 200;

@@ -42,17 +42,15 @@ describe('<Settings />', () => {
     expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
     const personalTab = screen.getByRole('button', { name: /^Personal$/ });
     const workTab = screen.getByRole('button', { name: /^Work Preferences$/ });
-    const hierarchyTab = screen.getByRole('button', { name: /^Hierarchy Settings$/ });
     const systemTab = screen.getByRole('button', { name: /^System$/ });
     expect(personalTab).toBeInTheDocument();
     expect(workTab).toBeInTheDocument();
-    expect(hierarchyTab).toBeInTheDocument();
     expect(systemTab).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Hierarchy Settings$/ })).not.toBeInTheDocument();
 
     await userEvent.click(workTab);
     expect(screen.getByLabelText(/max hours per week/i)).toBeInTheDocument();
 
-    await userEvent.click(hierarchyTab);
     await userEvent.click(systemTab);
     await userEvent.click(personalTab);
 

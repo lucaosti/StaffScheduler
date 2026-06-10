@@ -282,7 +282,8 @@ export class RbacService {
     userId: number,
     roleId: number,
     scopeOrgUnitId: number | null = null,
-    expiresAt: string | null = null
+    expiresAt: string | null = null,
+    actorId?: number | null
   ): Promise<void> {
     await this.pool.execute(
       `INSERT INTO user_roles (user_id, role_id, scope_org_unit_id, expires_at)
@@ -291,7 +292,7 @@ export class RbacService {
       [userId, roleId, scopeOrgUnitId, expiresAt]
     );
     await this.audit.write({
-      actorId: null,
+      actorId: actorId ?? null,
       action: 'role.grant',
       entityType: 'user',
       entityId: userId,
@@ -300,7 +301,7 @@ export class RbacService {
     });
   }
 
-  async removeRole(userId: number, roleId: number, scopeOrgUnitId: number | null = null): Promise<void> {
+  async removeRole(userId: number, roleId: number, scopeOrgUnitId: number | null = null, actorId?: number | null): Promise<void> {
     if (scopeOrgUnitId === null) {
       await this.pool.execute(
         'DELETE FROM user_roles WHERE user_id = ? AND role_id = ? AND scope_org_unit_id IS NULL',
@@ -313,7 +314,7 @@ export class RbacService {
       );
     }
     await this.audit.write({
-      actorId: null,
+      actorId: actorId ?? null,
       action: 'role.revoke',
       entityType: 'user',
       entityId: userId,

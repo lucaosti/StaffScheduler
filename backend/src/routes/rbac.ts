@@ -135,7 +135,8 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
         userId,
         roleId,
         scopeOrgUnitId ?? null,
-        expiresAt ?? null
+        expiresAt ?? null,
+        req.user?.id
       );
       res.status(201).json({ success: true });
     } catch (err) {
@@ -146,7 +147,7 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
   roles.delete('/users/:userId/:roleId', async (req: Request, res: Response) => {
     try {
       const scope = req.query.scopeOrgUnitId ? Number(req.query.scopeOrgUnitId) : null;
-      await rbac.removeRole(Number(req.params.userId), Number(req.params.roleId), scope);
+      await rbac.removeRole(Number(req.params.userId), Number(req.params.roleId), scope, req.user?.id);
       res.json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

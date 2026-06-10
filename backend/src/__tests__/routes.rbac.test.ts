@@ -319,7 +319,7 @@ describe('rbac POST /roles/users/:userId', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
-    expect(RbacService.prototype.assignRole).toHaveBeenCalledWith(7, 2, null, null);
+    expect(RbacService.prototype.assignRole).toHaveBeenCalledWith(7, 2, null, null, 1);
   });
 
   it('returns 201 with optional scope and expiry', async () => {
@@ -332,7 +332,7 @@ describe('rbac POST /roles/users/:userId', () => {
       .send({ roleId: 3, scopeOrgUnitId: 5, expiresAt: '2027-01-01T00:00:00Z' });
 
     expect(res.status).toBe(201);
-    expect(RbacService.prototype.assignRole).toHaveBeenCalledWith(7, 3, 5, '2027-01-01T00:00:00Z');
+    expect(RbacService.prototype.assignRole).toHaveBeenCalledWith(7, 3, 5, '2027-01-01T00:00:00Z', 1);
   });
 
   it('returns 400 when roleId is missing', async () => {
@@ -369,7 +369,7 @@ describe('rbac DELETE /roles/users/:userId/:roleId', () => {
     const res = await request(mountApp()).delete('/api/roles/users/7/2');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(RbacService.prototype.removeRole).toHaveBeenCalledWith(7, 2, null);
+    expect(RbacService.prototype.removeRole).toHaveBeenCalledWith(7, 2, null, 1);
   });
 
   it('returns 200 when scope query param is provided', async () => {
@@ -379,7 +379,7 @@ describe('rbac DELETE /roles/users/:userId/:roleId', () => {
 
     const res = await request(mountApp()).delete('/api/roles/users/7/2?scopeOrgUnitId=5');
     expect(res.status).toBe(200);
-    expect(RbacService.prototype.removeRole).toHaveBeenCalledWith(7, 2, 5);
+    expect(RbacService.prototype.removeRole).toHaveBeenCalledWith(7, 2, 5, 1);
   });
 
   it('returns 400 on service error', async () => {
