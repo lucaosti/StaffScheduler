@@ -118,7 +118,6 @@ export const config = {
   },
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
-    credentials: process.env.CORS_CREDENTIALS === 'true',
   },
   notifications: {
     enabled: process.env.NOTIFICATIONS_ENABLED === 'true',

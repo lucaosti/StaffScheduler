@@ -74,7 +74,7 @@ describe('validateBody', () => {
   it('passes a valid user body and exposes it on res.locals.body', async () => {
     const res = await request(makeApp()).post('/').send({
       email: 'test@example.com',
-      password: 'secret',
+      password: 'secret123',
       firstName: 'Alice',
       lastName: 'Smith',
     });

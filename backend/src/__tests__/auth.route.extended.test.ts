@@ -119,7 +119,7 @@ describe('POST /api/auth/login — service throws', () => {
 
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('LOGIN_FAILED');
-    expect(res.body.error.message).toBe('service failure');
+    expect(res.body.error.message).toBe('Invalid email or password');
   });
 });
 

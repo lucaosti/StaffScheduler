@@ -41,7 +41,7 @@ describe('EmployeeService', () => {
   it('getAllEmployees forwards filters without forcing a role', async () => {
     mockUserService.getAllUsers = jest.fn().mockResolvedValue([buildUser()]);
     await service.getAllEmployees({ departmentId: 5 });
-    expect(mockUserService.getAllUsers).toHaveBeenCalledWith({ departmentId: 5 });
+    expect(mockUserService.getAllUsers).toHaveBeenCalledWith({ departmentId: 5 }, undefined);
   });
 
   it('getEmployeeById returns the user regardless of their roles', async () => {

@@ -18,7 +18,7 @@ export class UserService {
     this.audit = new AuditLogService(pool);
   }
 
-  async createUser(userData: CreateUserRequest): Promise<User> {
+  async createUser(userData: CreateUserRequest, actorId?: number | null): Promise<User> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -31,8 +31,8 @@ export class UserService {
       }
       const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
       const [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO users (email, password_hash, first_name, last_name, phone, employee_id) VALUES (?, ?, ?, ?, ?, ?)',
-        [userData.email, passwordHash, userData.firstName, userData.lastName, userData.phone || null, userData.employeeId || null]
+        'INSERT INTO users (email, password_hash, first_name, last_name, phone, employee_id, position, hourly_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [userData.email, passwordHash, userData.firstName, userData.lastName, userData.phone || null, userData.employeeId || null, userData.position || null, userData.hourlyRate ?? null]
       );
       const userId = result.insertId;
       if (userData.roleIds && userData.roleIds.length > 0) {
@@ -61,7 +61,7 @@ export class UserService {
       const newUser = await this.getUserById(userId);
       if (!newUser) throw new Error('Failed to retrieve created user');
       await this.audit.write({
-        actorId: null,
+        actorId: actorId ?? null,
         action: 'user.create',
         entityType: 'user',
         entityId: userId,
@@ -81,7 +81,7 @@ export class UserService {
   async getUserById(id: number): Promise<User | null> {
     try {
       const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT id, email, first_name, last_name, employee_id, phone, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, employee_id, phone, position, hourly_rate, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
         [id]
       );
       if (userRows.length === 0) return null;
@@ -99,6 +99,8 @@ export class UserService {
         lastName: row.last_name,
         employeeId: row.employee_id,
         phone: row.phone,
+        position: row.position ?? undefined,
+        hourlyRate: row.hourly_rate != null ? Number(row.hourly_rate) : undefined,
         isActive: Boolean(row.is_active),
         lastLogin: row.last_login,
         departments: deptRows.map((d: any) => ({ id: d.id, name: d.name })),
@@ -126,20 +128,35 @@ export class UserService {
   async getAllUsers(filters?: {
     roleId?: number;
     departmentId?: number;
+    /** Filter by department name (case-insensitive exact match). */
+    departmentName?: string;
     isActive?: boolean;
     search?: string;
     /** When set, restricts results to users whose primary org-unit membership
      *  falls within the provided set. Pass `null` or omit for full access. */
     orgUnitIds?: number[];
-  }): Promise<User[]> {
+  }, pagination?: { limit: number; offset: number }): Promise<User[]> {
     try {
-      let query = 'SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.employee_id, u.phone, u.is_active, u.last_login, u.created_at, u.updated_at FROM users u';
+      let query = `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name, u.employee_id, u.phone,
+        u.position, u.hourly_rate, u.is_active, u.last_login, u.created_at, u.updated_at,
+        (SELECT d.name FROM departments d
+         JOIN user_departments ud2 ON d.id = ud2.department_id
+         WHERE ud2.user_id = u.id ORDER BY d.name ASC LIMIT 1) AS department_name
+        FROM users u`;
       const conditions: string[] = [];
       const params: any[] = [];
       if (filters?.departmentId) {
         query += ' JOIN user_departments ud ON u.id = ud.user_id';
         conditions.push('ud.department_id = ?');
         params.push(filters.departmentId);
+      }
+      if (filters?.departmentName) {
+        query += filters?.departmentId
+          ? ''
+          : ' JOIN user_departments ud ON u.id = ud.user_id';
+        query += ' JOIN departments dept_f ON ud.department_id = dept_f.id';
+        conditions.push('dept_f.name = ?');
+        params.push(filters.departmentName);
       }
       if (filters?.roleId) {
         query += ' JOIN user_roles ur ON u.id = ur.user_id';
@@ -162,8 +179,13 @@ export class UserService {
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      // Hard cap: use pagination params for larger result sets.
-      query += ' ORDER BY u.last_name ASC, u.first_name ASC LIMIT 1000';
+      query += ' ORDER BY u.last_name ASC, u.first_name ASC';
+      if (pagination) {
+        query += ' LIMIT ? OFFSET ?';
+        params.push(pagination.limit, pagination.offset);
+      } else {
+        query += ' LIMIT 1000';
+      }
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
       return rows.map((row: any) => ({
         id: row.id,
@@ -172,8 +194,11 @@ export class UserService {
         lastName: row.last_name,
         employeeId: row.employee_id,
         phone: row.phone,
+        position: row.position ?? undefined,
+        hourlyRate: row.hourly_rate != null ? Number(row.hourly_rate) : undefined,
         isActive: Boolean(row.is_active),
         lastLogin: row.last_login,
+        department: row.department_name ?? undefined,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       }));
@@ -183,7 +208,59 @@ export class UserService {
     }
   }
 
-  async updateUser(id: number, userData: UpdateUserRequest): Promise<User> {
+  async countUsers(filters?: {
+    roleId?: number;
+    departmentId?: number;
+    departmentName?: string;
+    isActive?: boolean;
+    search?: string;
+    orgUnitIds?: number[];
+  }): Promise<number> {
+    try {
+      let query = 'SELECT COUNT(DISTINCT u.id) AS total FROM users u';
+      const conditions: string[] = [];
+      const params: any[] = [];
+      if (filters?.departmentId) {
+        query += ' JOIN user_departments ud ON u.id = ud.user_id';
+        conditions.push('ud.department_id = ?');
+        params.push(filters.departmentId);
+      }
+      if (filters?.departmentName) {
+        query += filters?.departmentId ? '' : ' JOIN user_departments ud ON u.id = ud.user_id';
+        query += ' JOIN departments dept_f ON ud.department_id = dept_f.id';
+        conditions.push('dept_f.name = ?');
+        params.push(filters.departmentName);
+      }
+      if (filters?.roleId) {
+        query += ' JOIN user_roles ur ON u.id = ur.user_id';
+        conditions.push('ur.role_id = ?');
+        params.push(filters.roleId);
+      }
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        query += ' JOIN user_org_units uou ON u.id = uou.user_id';
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`uou.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
+      }
+      if (filters?.isActive !== undefined) {
+        conditions.push('u.is_active = ?');
+        params.push(filters.isActive ? 1 : 0);
+      }
+      if (filters?.search) {
+        conditions.push('(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.employee_id LIKE ?)');
+        const searchPattern = `%${filters.search}%`;
+        params.push(searchPattern, searchPattern, searchPattern, searchPattern);
+      }
+      if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+      const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+      return Number(rows[0]?.total ?? 0);
+    } catch (error) {
+      logger.error('Failed to count users:', error);
+      throw error;
+    }
+  }
+
+  async updateUser(id: number, userData: UpdateUserRequest, actorId?: number | null): Promise<User> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -219,6 +296,14 @@ export class UserService {
         updates.push('phone = ?');
         values.push(userData.phone);
       }
+      if (userData.position !== undefined) {
+        updates.push('position = ?');
+        values.push(userData.position || null);
+      }
+      if (userData.hourlyRate !== undefined) {
+        updates.push('hourly_rate = ?');
+        values.push(userData.hourlyRate);
+      }
       if (userData.isActive !== undefined) {
         updates.push('is_active = ?');
         values.push(userData.isActive ? 1 : 0);
@@ -246,7 +331,7 @@ export class UserService {
       const updatedUser = await this.getUserById(id);
       if (!updatedUser) throw new Error('User not found after update');
       await this.audit.write({
-        actorId: null,
+        actorId: actorId ?? null,
         action: 'user.update',
         entityType: 'user',
         entityId: id,
@@ -263,15 +348,17 @@ export class UserService {
     }
   }
 
-  async deleteUser(id: number): Promise<boolean> {
+  async deleteUser(id: number, actorId?: number | null): Promise<boolean> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
+      const [exists] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
+      if ((exists as RowDataPacket[]).length === 0) throw new Error('User not found');
       await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
       await connection.commit();
       logger.info('User deleted: ' + id);
       await this.audit.write({
-        actorId: null,
+        actorId: actorId ?? null,
         action: 'user.delete',
         entityType: 'user',
         entityId: id,
@@ -292,8 +379,12 @@ export class UserService {
     try {
       await connection.beginTransaction();
       await connection.execute('DELETE FROM user_departments WHERE user_id = ?', [userId]);
-      for (const departmentId of departmentIds) {
-        await connection.execute('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)', [userId, departmentId]);
+      if (departmentIds.length > 0) {
+        const ph = departmentIds.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
+          departmentIds.flatMap(d => [userId, d])
+        );
       }
       await connection.commit();
       logger.info('User departments updated: ' + userId);
@@ -312,8 +403,12 @@ export class UserService {
     try {
       await connection.beginTransaction();
       await connection.execute('DELETE FROM user_skills WHERE user_id = ?', [userId]);
-      for (const skillId of skillIds) {
-        await connection.execute('INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)', [userId, skillId]);
+      if (skillIds.length > 0) {
+        const ph = skillIds.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
+          skillIds.flatMap(s => [userId, s])
+        );
       }
       await connection.commit();
       logger.info('User skills updated: ' + userId);
@@ -352,18 +447,13 @@ export class UserService {
   }
 
   async validatePassword(email: string, password: string): Promise<User | null> {
-    try {
-      const user = await this.getUserByEmail(email);
-      if (!user || !user.isActive) return null;
-      const isValid = await this.verifyPassword(user.id, password);
-      if (!isValid) return null;
-      await this.pool.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
-      logger.info('User logged in: ' + email);
-      return user;
-    } catch (error) {
-      logger.error('Failed to validate password:', error);
-      return null;
-    }
+    const user = await this.getUserByEmail(email);
+    if (!user || !user.isActive) return null;
+    const isValid = await this.verifyPassword(user.id, password);
+    if (!isValid) return null;
+    await this.pool.execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+    logger.info('User logged in: ' + email);
+    return user;
   }
 
   async getUsersByDepartment(departmentId: number): Promise<User[]> {
@@ -422,7 +512,8 @@ export class UserService {
       const params: (string | number)[] = [actor.id];
       let sql = `SELECT DISTINCT u.id, u.email, u.first_name, u.last_name,
                 u.employee_id, u.phone, u.is_active, u.last_login,
-                u.created_at, u.updated_at
+                u.created_at, u.updated_at,
+                d.name AS department_name
          FROM users u
          JOIN user_departments ud ON u.id = ud.user_id
          JOIN departments d ON ud.department_id = d.id
@@ -452,6 +543,7 @@ export class UserService {
         phone: row.phone,
         isActive: Boolean(row.is_active),
         lastLogin: row.last_login,
+        department: row.department_name ?? undefined,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       }));

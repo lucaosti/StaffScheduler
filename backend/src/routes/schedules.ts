@@ -227,11 +227,11 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), async (re
 });
 
 // Publish schedule
-router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const schedule = await scheduleService.publishSchedule(id);
+    const schedule = await scheduleService.publishSchedule(id, req.user!.id);
     res.json({
       success: true,
       data: schedule,
@@ -251,11 +251,11 @@ router.patch('/:id/publish', authenticate, requirePermission('schedule.publish')
 });
 
 // Archive schedule
-router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const schedule = await scheduleService.archiveSchedule(id);
+    const schedule = await scheduleService.archiveSchedule(id, req.user!.id);
     res.json({
       success: true,
       data: schedule,

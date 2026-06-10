@@ -16,9 +16,8 @@
  */
 
 import { ApiResponse, Shift } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
+import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 interface ShiftFilters {
   department?: string;

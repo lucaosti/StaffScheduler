@@ -41,14 +41,30 @@ export class EmployeeService {
    */
   async getAllEmployees(filters?: {
     departmentId?: number;
+    departmentName?: string;
     isActive?: boolean;
     search?: string;
     orgUnitIds?: number[];
-  }): Promise<User[]> {
+  }, pagination?: { limit: number; offset: number }): Promise<User[]> {
     try {
-      return await this.userService.getAllUsers({ ...filters });
+      return await this.userService.getAllUsers({ ...filters }, pagination);
     } catch (error) {
       logger.error('Error getting all employees:', error);
+      throw error;
+    }
+  }
+
+  async countEmployees(filters?: {
+    departmentId?: number;
+    departmentName?: string;
+    isActive?: boolean;
+    search?: string;
+    orgUnitIds?: number[];
+  }): Promise<number> {
+    try {
+      return await this.userService.countUsers({ ...filters });
+    } catch (error) {
+      logger.error('Error counting employees:', error);
       throw error;
     }
   }
@@ -183,13 +199,13 @@ export class EmployeeService {
    * @param id - Employee ID
    * @returns Promise resolving to success boolean
    */
-  async deleteEmployee(id: number): Promise<boolean> {
+  async deleteEmployee(id: number, actorId?: number | null): Promise<boolean> {
     try {
       const employee = await this.getEmployeeById(id);
       if (!employee) {
         throw new Error('Employee not found');
       }
-      return await this.userService.deleteUser(id);
+      return await this.userService.deleteUser(id, actorId);
     } catch (error) {
       logger.error('Error deleting employee:', error);
       throw error;

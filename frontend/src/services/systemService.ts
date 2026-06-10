@@ -8,9 +8,8 @@
  */
 
 import { ApiResponse } from '../types';
-import { getAuthHeaders, handleResponse } from './apiUtils';
+import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 export type RuntimeMode = 'production' | 'demo' | 'development';
 

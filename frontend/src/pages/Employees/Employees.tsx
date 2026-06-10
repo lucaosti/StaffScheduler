@@ -17,8 +17,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Employee } from '../../types';
+import { Employee, Department } from '../../types';
 import * as employeeService from '../../services/employeeService';
+import { getDepartments } from '../../services/departmentService';
 import ConfirmModal from '../../components/ConfirmModal';
 
 
@@ -28,6 +29,7 @@ import ConfirmModal from '../../components/ConfirmModal';
  */
 const Employees: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -77,6 +79,17 @@ const Employees: React.FC = () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
   }, [searchTerm, selectedDepartment, loadEmployees]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await getDepartments();
+        if (res?.success && res?.data) setAllDepartments(res.data);
+      } catch {
+        // non-fatal — form will show no department options
+      }
+    })();
+  }, []);
 
   const handleDeleteEmployee = (id: number | string) => {
     setConfirmDelete({ open: true, employeeId: id });
@@ -336,19 +349,20 @@ const Employees: React.FC = () => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
                   
-                  const employeeData = {
+                  const rawDeptId = formData.get('departmentId') as string;
+                  const deptId = rawDeptId ? parseInt(rawDeptId, 10) : NaN;
+                  const rawHourlyRate = formData.get('hourlyRate') as string;
+                  const hourlyRate = rawHourlyRate ? parseFloat(rawHourlyRate) : NaN;
+                  const employeeData: Record<string, unknown> = {
                     employeeId: formData.get('employeeId') as string,
                     firstName: formData.get('firstName') as string,
                     lastName: formData.get('lastName') as string,
                     email: formData.get('email') as string,
-                    phone: formData.get('phone') as string,
-                    department: formData.get('department') as string,
-                    position: formData.get('position') as string,
-                    employeeType: formData.get('employeeType') as 'full-time' | 'part-time' | 'contractor',
-                    hourlyRate: parseFloat(formData.get('hourlyRate') as string),
-                    maxHoursPerWeek: parseInt(formData.get('maxHoursPerWeek') as string),
-                    skills: (formData.get('skills') as string).split(',').map(s => s.trim()).filter(s => s.length > 0),
+                    phone: formData.get('phone') as string || undefined,
+                    position: (formData.get('position') as string) || undefined,
                   };
+                  if (!isNaN(deptId) && deptId > 0) employeeData.departmentIds = [deptId];
+                  if (!isNaN(hourlyRate) && hourlyRate >= 0) employeeData.hourlyRate = hourlyRate;
 
                   try {
                     if (editingEmployee) {
@@ -430,71 +444,35 @@ const Employees: React.FC = () => {
                       />
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="department" className="form-label">Department *</label>
+                      <label htmlFor="departmentId" className="form-label">Department</label>
                       <select
                         className="form-select"
-                        id="department"
-                        name="department"
-                        defaultValue={editingEmployee?.department || ''}
-                        required
+                        id="departmentId"
+                        name="departmentId"
+                        defaultValue={
+                          editingEmployee?.departments?.[0]?.id?.toString() ?? ''
+                        }
                       >
-                        <option value="">Select Department</option>
-                        <option value="Emergency Medicine">Emergency Medicine</option>
-                        <option value="Intensive Care">Intensive Care</option>
-                        <option value="Surgery">Surgery</option>
-                        <option value="Cardiology">Cardiology</option>
-                        <option value="Oncology">Oncology</option>
-                        <option value="Pediatrics">Pediatrics</option>
-                        <option value="Nursing">Nursing</option>
-                        <option value="Radiology">Radiology</option>
-                        <option value="Laboratory">Laboratory</option>
-                        <option value="Administration">Administration</option>
+                        <option value="">— none —</option>
+                        {allDepartments.map((d) => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
 
                   <div className="row">
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="position" className="form-label">Position *</label>
-                      <select
-                        className="form-select"
+                      <label htmlFor="position" className="form-label">Position</label>
+                      <input
+                        type="text"
+                        className="form-control"
                         id="position"
                         name="position"
                         defaultValue={editingEmployee?.position || ''}
-                        required
-                      >
-                        <option value="">Select Position</option>
-                        <option value="General Director">General Director</option>
-                        <option value="Medical Director">Medical Director</option>
-                        <option value="Department Chief">Department Chief</option>
-                        <option value="Head Nurse">Head Nurse</option>
-                        <option value="Senior Physician">Senior Physician</option>
-                        <option value="Resident Physician">Resident Physician</option>
-                        <option value="Coordinating Nurse">Coordinating Nurse</option>
-                        <option value="Nurse">Nurse</option>
-                        <option value="Healthcare Assistant">Healthcare Assistant (OSS)</option>
-                        <option value="Radiology Technician">Radiology Technician</option>
-                        <option value="Laboratory Technician">Laboratory Technician</option>
-                      </select>
+                        placeholder="e.g. Engineer, Manager"
+                      />
                     </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="employeeType" className="form-label">Employment Type *</label>
-                      <select
-                        className="form-select"
-                        id="employeeType"
-                        name="employeeType"
-                        defaultValue={editingEmployee?.employeeType || 'full-time'}
-                        required
-                      >
-                        <option value="full-time">Full Time</option>
-                        <option value="part-time">Part Time</option>
-                        <option value="contract">Contract</option>
-                        <option value="temporary">Temporary</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="row">
                     <div className="col-md-6 mb-3">
                       <label htmlFor="hourlyRate" className="form-label">Hourly Rate (€)</label>
                       <input
@@ -504,34 +482,9 @@ const Employees: React.FC = () => {
                         className="form-control"
                         id="hourlyRate"
                         name="hourlyRate"
-                        defaultValue={editingEmployee?.hourlyRate || ''}
+                        defaultValue={editingEmployee?.hourlyRate ?? ''}
                       />
                     </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="maxHoursPerWeek" className="form-label">Max Hours Per Week</label>
-                      <input
-                        type="number"
-                        min="1"
-                        max="168"
-                        className="form-control"
-                        id="maxHoursPerWeek"
-                        name="maxHoursPerWeek"
-                        defaultValue={editingEmployee?.maxHoursPerWeek || 40}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mb-3">
-                    <label htmlFor="skills" className="form-label">Skills (comma separated)</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      id="skills"
-                      name="skills"
-                      defaultValue={editingEmployee?.skills?.join(', ') || ''}
-                      placeholder="e.g. Patient Care, IV Therapy, Emergency Response"
-                    />
-                    <div className="form-text">Enter skills separated by commas</div>
                   </div>
 
                   <div className="modal-footer">

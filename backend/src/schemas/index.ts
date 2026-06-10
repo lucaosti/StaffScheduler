@@ -16,7 +16,7 @@ export const idAndUserIdParam = z.object({ id: positiveInt, userId: positiveInt 
 
 export const createUserBody = z.object({
   email: z.string().email(),
-  password: z.string().min(1, 'Password is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
   firstName: z.string().min(1, 'First name is required'),
   lastName: z.string().min(1, 'Last name is required'),
   roleIds: z.array(z.number().int().positive()).optional(),

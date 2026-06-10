@@ -20,13 +20,6 @@ import { authenticate, userHasPermission } from '../middleware/auth';
 import { UpdateSystemSettingRequest } from '../types';
 import { logger } from '../config/logger';
 
-// Extend Express Request to include user
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: import('../types').User;
-  }
-}
-
 export const createSystemSettingsRouter = (pool: Pool) => {
   const router = Router();
   const settingsService = new SystemSettingsService(pool);

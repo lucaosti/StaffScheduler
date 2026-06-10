@@ -112,7 +112,7 @@ describe('users router POST /', () => {
   it('returns 403 for employees', async () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
     const res = await request(mountApp()).post('/api/users').send({
-      email: 'new@x.com', password: 'pw', firstName: 'A', lastName: 'B',
+      email: 'new@x.com', password: 'password1', firstName: 'A', lastName: 'B',
     });
     expect(res.status).toBe(403);
   });
@@ -129,7 +129,7 @@ describe('users router POST /', () => {
       .post('/api/users')
       .send({
         email: 'a@x.com',
-        password: 'pw1234',
+        password: 'password1',
         firstName: 'A',
         lastName: 'B',
         role: 'employee',
@@ -151,7 +151,7 @@ describe('users router POST /', () => {
     });
     const res = await request(mountApp())
       .post('/api/users')
-      .send({ email: 'a@x.com', password: 'pw1234', firstName: 'A', lastName: 'B', roleIds: [99] });
+      .send({ email: 'a@x.com', password: 'password1', firstName: 'A', lastName: 'B', roleIds: [99] });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
     expect(create).not.toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('users router POST /', () => {
     });
     const res = await request(mountApp())
       .post('/api/users')
-      .send({ email: 'a@x.com', password: 'pw1234', firstName: 'A', lastName: 'B', roleIds: [99] });
+      .send({ email: 'a@x.com', password: 'password1', firstName: 'A', lastName: 'B', roleIds: [99] });
     expect(res.status).toBe(201);
     expect(res.body.data.id).toBe(12);
   });
@@ -180,7 +180,7 @@ describe('users router POST /', () => {
       .post('/api/users')
       .send({
         email: 'a@x.com',
-        password: 'pw1234',
+        password: 'password1',
         firstName: 'A',
         lastName: 'B',
         role: 'employee',
@@ -194,7 +194,7 @@ describe('users router POST /', () => {
       .post('/api/users')
       .send({
         email: 'a@x.com',
-        password: 'pw1234',
+        password: 'password1',
         firstName: 'A',
         lastName: 'B',
         role: 'employee',
