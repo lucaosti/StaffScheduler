@@ -11,7 +11,6 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import PreferencesSection from '../Settings/PreferencesSection';
 import ProfileSection from '../Settings/ProfileSection';
-import SecuritySection, { HospitalHierarchy } from '../Settings/SecuritySection';
 import SystemSection from '../Settings/SystemSection';
 import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
@@ -42,9 +41,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('system.settings');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'hierarchy' | 'system'>(
-    'personal'
-  );
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'system'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -65,120 +62,6 @@ const Settings: React.FC = () => {
       availabilitySettings: {
         unavailableDates: [],
         preferredDepartments: [],
-      },
-    },
-  });
-
-  const [hierarchySettings, setHierarchySettings] = useState<Record<string, HospitalHierarchy>>({
-    'general-director': {
-      level: 1,
-      role: 'General Director',
-      permissions: ['manage-all', 'system-admin', 'reports', 'budget'],
-      canManageRoles: [
-        'medical-director',
-        'department-chief',
-        'head-nurse',
-        'senior-physician',
-        'nurse',
-        'healthcare-assistant',
-      ],
-      defaultSettings: {
-        maxHoursPerWeek: 40,
-        maxConsecutiveDays: 5,
-        minRestHours: 11,
-        preferredShifts: [],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: true },
-      },
-    },
-    'medical-director': {
-      level: 2,
-      role: 'Medical Director',
-      permissions: ['manage-medical', 'quality-control', 'protocols'],
-      canManageRoles: ['department-chief', 'head-nurse', 'senior-physician', 'nurse'],
-      defaultSettings: {
-        maxHoursPerWeek: 40,
-        maxConsecutiveDays: 5,
-        minRestHours: 11,
-        preferredShifts: [],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: true },
-      },
-    },
-    'department-chief': {
-      level: 3,
-      role: 'Department Chief',
-      permissions: ['manage-department', 'schedule-department', 'evaluate-staff'],
-      canManageRoles: ['head-nurse', 'senior-physician', 'resident-physician'],
-      defaultSettings: {
-        maxHoursPerWeek: 48,
-        maxConsecutiveDays: 6,
-        minRestHours: 11,
-        preferredShifts: ['day-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: true },
-      },
-    },
-    'head-nurse': {
-      level: 4,
-      role: 'Head Nurse',
-      permissions: ['manage-nursing', 'schedule-nurses', 'quality-nursing'],
-      canManageRoles: ['coordinating-nurse', 'nurse', 'healthcare-assistant'],
-      defaultSettings: {
-        maxHoursPerWeek: 36,
-        maxConsecutiveDays: 5,
-        minRestHours: 11,
-        preferredShifts: ['day-shift', 'afternoon-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: true },
-      },
-    },
-    'senior-physician': {
-      level: 5,
-      role: 'Senior Physician',
-      permissions: ['patient-care', 'procedures', 'consultation'],
-      canManageRoles: ['resident-physician'],
-      defaultSettings: {
-        maxHoursPerWeek: 38,
-        maxConsecutiveDays: 5,
-        minRestHours: 11,
-        preferredShifts: ['day-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: false },
-      },
-    },
-    'coordinating-nurse': {
-      level: 6,
-      role: 'Coordinating Nurse',
-      permissions: ['coordinate-nursing', 'patient-care', 'training'],
-      canManageRoles: ['nurse', 'healthcare-assistant'],
-      defaultSettings: {
-        maxHoursPerWeek: 36,
-        maxConsecutiveDays: 4,
-        minRestHours: 11,
-        preferredShifts: ['day-shift', 'afternoon-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: true },
-      },
-    },
-    nurse: {
-      level: 7,
-      role: 'Nurse',
-      permissions: ['patient-care', 'medication', 'documentation'],
-      canManageRoles: [],
-      defaultSettings: {
-        maxHoursPerWeek: 36,
-        maxConsecutiveDays: 4,
-        minRestHours: 11,
-        preferredShifts: ['day-shift', 'afternoon-shift', 'night-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: false },
-      },
-    },
-    'healthcare-assistant': {
-      level: 8,
-      role: 'Healthcare Assistant (OSS)',
-      permissions: ['basic-care', 'assistance', 'hygiene'],
-      canManageRoles: [],
-      defaultSettings: {
-        maxHoursPerWeek: 36,
-        maxConsecutiveDays: 5,
-        minRestHours: 11,
-        preferredShifts: ['day-shift', 'afternoon-shift'],
-        notifications: { scheduleChanges: true, shiftReminders: true, overtimeAlerts: false },
       },
     },
   });
@@ -205,20 +88,6 @@ const Settings: React.FC = () => {
     };
     void loadPreferences();
   }, []);
-
-  const handleUpdateHierarchyDefault = (
-    roleKey: string,
-    patch: Partial<HospitalHierarchy['defaultSettings']>
-  ) => {
-    setHierarchySettings((prev) => ({
-      ...prev,
-      [roleKey]: {
-        ...prev[roleKey],
-        defaultSettings: { ...prev[roleKey].defaultSettings, ...patch },
-      },
-    }));
-    // Hierarchy settings are display-only; no dedicated backend endpoint exists yet.
-  };
 
   // Serialise personal settings (theme, language, timezone, notifications) into
   // the `notes` field of user_preferences until dedicated columns are added.
@@ -278,14 +147,6 @@ const Settings: React.FC = () => {
                 <i className="bi bi-briefcase me-2"></i>Work Preferences
               </button>
             </li>
-            <li className="nav-item">
-              <button
-                className={`nav-link ${activeTab === 'hierarchy' ? 'active' : ''}`}
-                onClick={() => setActiveTab('hierarchy')}
-              >
-                <i className="bi bi-diagram-3 me-2"></i>Hierarchy Settings
-              </button>
-            </li>
             {isAdmin && (
               <li className="nav-item">
                 <button
@@ -317,15 +178,6 @@ const Settings: React.FC = () => {
             setSettings((prev) => ({ ...prev, workSettings: updated }))
           }
           onSave={handleSaveWorkSettings}
-        />
-      )}
-
-      {activeTab === 'hierarchy' && (
-        <SecuritySection
-          hierarchySettings={hierarchySettings}
-          currentUserRole={user?.role}
-          canManageAll={!!isAdmin}
-          onUpdateDefault={handleUpdateHierarchyDefault}
         />
       )}
 

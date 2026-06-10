@@ -18,6 +18,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { OnCallService } from '../services/OnCallService';
+import { logger } from '../config/logger';
 
 const error = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -30,21 +31,31 @@ export const createOnCallRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   router.get('/me', async (req: Request, res: Response) => {
-    const data = await service.listForUser(req.user!.id, {
-      rangeStart: req.query.start as string | undefined,
-      rangeEnd: req.query.end as string | undefined,
-    });
-    res.json({ success: true, data });
+    try {
+      const data = await service.listForUser(req.user!.id, {
+        rangeStart: req.query.start as string | undefined,
+        rangeEnd: req.query.end as string | undefined,
+      });
+      res.json({ success: true, data });
+    } catch (err) {
+      logger.error('on-call me error:', err);
+      error(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve on-call schedule');
+    }
   });
 
   router.get('/periods', async (req: Request, res: Response) => {
-    const data = await service.listPeriods({
-      departmentId: req.query.departmentId ? Number(req.query.departmentId) : undefined,
-      status: req.query.status as never,
-      rangeStart: req.query.start as string | undefined,
-      rangeEnd: req.query.end as string | undefined,
-    });
-    res.json({ success: true, data });
+    try {
+      const data = await service.listPeriods({
+        departmentId: req.query.departmentId ? Number(req.query.departmentId) : undefined,
+        status: req.query.status as never,
+        rangeStart: req.query.start as string | undefined,
+        rangeEnd: req.query.end as string | undefined,
+      });
+      res.json({ success: true, data });
+    } catch (err) {
+      logger.error('on-call periods list error:', err);
+      error(res, 500, 'INTERNAL_ERROR', 'Failed to list on-call periods');
+    }
   });
 
   router.post('/periods', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
@@ -57,9 +68,14 @@ export const createOnCallRouter = (pool: Pool): Router => {
   });
 
   router.get('/periods/:id', async (req: Request, res: Response) => {
-    const period = await service.getPeriodById(Number(req.params.id));
-    if (!period) return error(res, 404, 'NOT_FOUND', 'On-call period not found');
-    res.json({ success: true, data: period });
+    try {
+      const period = await service.getPeriodById(Number(req.params.id));
+      if (!period) return error(res, 404, 'NOT_FOUND', 'On-call period not found');
+      res.json({ success: true, data: period });
+    } catch (err) {
+      logger.error('on-call period get error:', err);
+      error(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve on-call period');
+    }
   });
 
   router.put('/periods/:id', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
@@ -83,8 +99,13 @@ export const createOnCallRouter = (pool: Pool): Router => {
   });
 
   router.get('/periods/:id/assignments', async (req: Request, res: Response) => {
-    const data = await service.listAssignments(Number(req.params.id));
-    res.json({ success: true, data });
+    try {
+      const data = await service.listAssignments(Number(req.params.id));
+      res.json({ success: true, data });
+    } catch (err) {
+      logger.error('on-call assignments list error:', err);
+      error(res, 500, 'INTERNAL_ERROR', 'Failed to list on-call assignments');
+    }
   });
 
   router.post('/periods/:id/assign', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
@@ -105,9 +126,14 @@ export const createOnCallRouter = (pool: Pool): Router => {
   });
 
   router.delete('/periods/:id/assign/:userId', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
-    const ok = await service.unassign(Number(req.params.id), Number(req.params.userId));
-    if (!ok) return error(res, 404, 'NOT_FOUND', 'Assignment not found');
-    res.json({ success: true });
+    try {
+      const ok = await service.unassign(Number(req.params.id), Number(req.params.userId));
+      if (!ok) return error(res, 404, 'NOT_FOUND', 'Assignment not found');
+      res.json({ success: true });
+    } catch (err) {
+      logger.error('on-call unassign error:', err);
+      error(res, 500, 'INTERNAL_ERROR', 'Failed to remove on-call assignment');
+    }
   });
 
   return router;

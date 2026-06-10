@@ -148,10 +148,20 @@ describe('UserService.updateUser', () => {
 describe('UserService.deleteUser', () => {
   it('soft-deletes by flipping is_active', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    // First call: existence check (SELECT), second call: soft-delete (UPDATE).
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     const service = new UserService(pool);
     expect(await service.deleteUser(7)).toBe(true);
-    expect(conn.execute.mock.calls[0][0]).toMatch(/UPDATE users SET is_active = 0/);
+    expect(conn.execute.mock.calls[1][0]).toMatch(/UPDATE users SET is_active = 0/);
+  });
+
+  it('throws User not found when the user does not exist', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([[], null]);
+    const service = new UserService(pool);
+    await expect(service.deleteUser(99)).rejects.toThrow('User not found');
   });
 });
 

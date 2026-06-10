@@ -14,6 +14,8 @@ export interface User {
   lastName: string;
   employeeId?: string;
   phone?: string;
+  position?: string;
+  hourlyRate?: number;
   isActive: boolean;
   lastLogin?: Date;
   /** Roles assigned to the user, each optionally scoped to an org unit. */
@@ -28,6 +30,8 @@ export interface User {
    */
   allowedOrgUnitIds?: number[] | null;
   departments?: UserDepartment[];
+  /** Convenience field: name of the user's primary department (populated by list queries). */
+  department?: string;
   skills?: Skill[];
   preferences?: UserPreferences;
   createdAt: Date;
@@ -159,6 +163,8 @@ export interface CreateUserRequest {
   roleIds?: number[];
   employeeId?: string;
   phone?: string;
+  position?: string;
+  hourlyRate?: number;
   departmentIds?: number[];
   skillIds?: number[];
 }
@@ -172,6 +178,8 @@ export interface UpdateUserRequest {
   roleIds?: number[];
   employeeId?: string;
   phone?: string;
+  position?: string;
+  hourlyRate?: number;
   isActive?: boolean;
 }
 

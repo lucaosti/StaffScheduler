@@ -15,14 +15,28 @@ export const createEmployeesRouter = (pool: Pool) => {
 router.get('/', authenticate, async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
-    const employees = await employeeService.getAllEmployees(
-      scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined
-    );
+    const { search, department } = req.query;
+    const filters: { orgUnitIds?: number[]; search?: string; departmentId?: number; departmentName?: string } = {};
+    if (scope !== null && scope !== undefined) filters.orgUnitIds = scope;
+    if (typeof search === 'string' && search.length > 0) filters.search = search;
+    if (typeof department === 'string' && department.length > 0) {
+      const deptId = parseInt(department, 10);
+      if (!isNaN(deptId) && deptId > 0) {
+        filters.departmentId = deptId;
+      } else {
+        filters.departmentName = department;
+      }
+    }
+    const activeFilters = Object.keys(filters).length > 0 ? filters : undefined;
     const pagination = parsePagination(req);
     if (pagination) {
-      const sliced = employees.slice(pagination.offset, pagination.offset + pagination.pageSize);
-      return sendPaginated(res, sliced, employees.length, pagination);
+      const [total, employees] = await Promise.all([
+        employeeService.countEmployees(activeFilters),
+        employeeService.getAllEmployees(activeFilters, { limit: pagination.pageSize, offset: pagination.offset }),
+      ]);
+      return sendPaginated(res, employees, total, pagination);
     }
+    const employees = await employeeService.getAllEmployees(activeFilters);
     res.json({ success: true, data: employees });
   } catch (error) {
     logger.error('Error fetching employees:', error);
@@ -100,11 +114,11 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), validateP
 });
 
 // Delete employee (soft delete)
-router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    await employeeService.deleteEmployee(id);
+    await employeeService.deleteEmployee(id, req.user?.id ?? null);
     res.json({
       success: true,
       message: 'Employee deleted successfully'

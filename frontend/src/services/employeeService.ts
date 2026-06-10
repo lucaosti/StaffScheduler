@@ -15,9 +15,8 @@
  */
 
 import { ApiResponse, Employee } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
+import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 /**
  * Interface for employee filtering and pagination options
@@ -55,8 +54,10 @@ interface CreateEmployeeData {
   phone?: string;
   /** Employee's address (optional) */
   address?: string;
-  /** Department assignment (optional) */
+  /** Department assignment (optional, display name) */
   department?: string;
+  /** Department IDs for server-side assignment */
+  departmentIds?: number[];
   /** Job position/role (optional) */
   position?: string;
   /** Date of hire in ISO format (optional) */

@@ -26,7 +26,8 @@ export interface User {
   firstName: string;
   lastName: string;
   // Role is a configurable string defined in the DB; do not compare against literals.
-  role: string;
+  // Optional: the backend returns roles[] via the RBAC model, not a single role string.
+  role?: string;
   // Permission keys granted to the user (populated by the RBAC layer).
   permissions?: string[];
   employeeId?: string;
@@ -200,4 +201,15 @@ export interface DashboardStats {
   monthlyCost: number;
   coverageRate: number;
   employeeSatisfaction: number;
+}
+
+export interface AuditLogEntry {
+  id: number;
+  actorId: number | null;
+  actorEmail?: string;
+  action: string;
+  entityType: string;
+  entityId?: number | null;
+  description?: string;
+  createdAt: string;
 }

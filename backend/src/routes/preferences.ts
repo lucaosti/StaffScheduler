@@ -13,6 +13,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { PreferencesService } from '../services/PreferencesService';
+import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -25,8 +26,13 @@ export const createPreferencesRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   router.get('/me', async (req: Request, res: Response) => {
-    const data = await service.getByUserId(req.user!.id);
-    res.json({ success: true, data });
+    try {
+      const data = await service.getByUserId(req.user!.id);
+      res.json({ success: true, data });
+    } catch (err) {
+      logger.error('preferences get error:', err);
+      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve preferences');
+    }
   });
 
   router.put('/me', async (req: Request, res: Response) => {
@@ -39,9 +45,14 @@ export const createPreferencesRouter = (pool: Pool): Router => {
   });
 
   router.get('/:userId', requirePermission('preferences.manage'), async (req: Request, res: Response) => {
-    const userId = Number(req.params.userId);
-    const data = await service.getByUserId(userId);
-    res.json({ success: true, data });
+    try {
+      const userId = Number(req.params.userId);
+      const data = await service.getByUserId(userId);
+      res.json({ success: true, data });
+    } catch (err) {
+      logger.error('preferences get error:', err);
+      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve preferences');
+    }
   });
 
   router.put('/:userId', requirePermission('preferences.manage'), async (req: Request, res: Response) => {

@@ -20,13 +20,8 @@ import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { authenticate } from '../middleware/auth';
 import jwt, { SignOptions } from 'jsonwebtoken';
+import { logger } from '../config/logger';
 
-// Extend Express Request to include user
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: import('../types').User;
-  }
-}
 import { config } from '../config';
 
 export const createAuthRouter = (pool: Pool) => {
@@ -144,11 +139,12 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
+    logger.error('Login error:', error);
     res.status(401).json({
       success: false,
       error: {
         code: 'LOGIN_FAILED',
-        message: (error as Error).message
+        message: 'Invalid email or password'
       }
     });
   }
@@ -220,11 +216,12 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
       }
     });
   } catch (error) {
+    logger.error('Token refresh error:', error);
     res.status(500).json({
       success: false,
       error: {
         code: 'REFRESH_ERROR',
-        message: (error as Error).message
+        message: 'Token refresh failed'
       }
     });
   }

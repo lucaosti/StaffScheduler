@@ -92,7 +92,7 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      const createdUser = await userService.createUser(userData);
+      const createdUser = await userService.createUser(userData, user.id);
 
       res.status(201).json({ success: true, data: createdUser });
     } catch (error) {
@@ -195,7 +195,7 @@ export const createUsersRouter = (pool: Pool) => {
         }
       }
 
-      const updatedUser = await userService.updateUser(userId, updateData);
+      const updatedUser = await userService.updateUser(userId, updateData, user.id);
 
       if (!updatedUser) {
         return res.status(404).json({
@@ -243,7 +243,7 @@ export const createUsersRouter = (pool: Pool) => {
       }
 
       try {
-        await userService.deleteUser(userId);
+        await userService.deleteUser(userId, user.id);
 
         res.json({ success: true, message: 'User deleted successfully' });
       } catch (deleteError: any) {

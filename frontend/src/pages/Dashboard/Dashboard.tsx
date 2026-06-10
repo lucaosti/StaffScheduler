@@ -25,8 +25,9 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { DashboardStats } from '../../types';
-import { getDashboardStats } from '../../services/dashboardService';
+import { DashboardStats, AuditLogEntry } from '../../types';
+import { getDashboardStats, getRecentActivity } from '../../services/dashboardService';
+import { formatCurrency, formatPercentage as fmtPct } from '../../utils/format';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -37,6 +38,7 @@ const Dashboard: React.FC = () => {
   const location = useLocation();
   const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [recentActivity, setRecentActivity] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,13 +55,17 @@ const Dashboard: React.FC = () => {
       setLoading(true);
       setError(null);
       
-      const dashboardResponse = await getDashboardStats();
+      const [dashboardResponse, activity] = await Promise.all([
+        getDashboardStats(),
+        getRecentActivity(5),
+      ]);
 
       if (dashboardResponse.success && dashboardResponse.data) {
         setStats(dashboardResponse.data);
       } else {
         throw new Error('Failed to load dashboard statistics');
       }
+      setRecentActivity(activity);
     } catch (err) {
       setError('Failed to load dashboard data. Please ensure the backend is running and database is populated.');
       
@@ -79,16 +85,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
-    }).format(amount);
-  };
-
-  const formatPercentage = (value: number) => {
-    return `${value.toFixed(1)}%`;
-  };
+  const formatPct = (value: number) => fmtPct(value / 100);
 
   if (loading) {
     return (
@@ -256,7 +253,7 @@ const Dashboard: React.FC = () => {
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body text-center">
                 <h6 className="card-title text-muted mb-3">Coverage Rate</h6>
-                <h2 className="text-info mb-0">{formatPercentage(stats.coverageRate)}</h2>
+                <h2 className="text-info mb-0">{formatPct(stats.coverageRate)}</h2>
                 <small className="text-muted">shifts covered</small>
               </div>
             </div>
@@ -266,7 +263,7 @@ const Dashboard: React.FC = () => {
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body text-center">
                 <h6 className="card-title text-muted mb-3">Employee Satisfaction</h6>
-                <h2 className="text-warning mb-0">{formatPercentage(stats.employeeSatisfaction)}</h2>
+                <h2 className="text-warning mb-0">{formatPct(stats.employeeSatisfaction)}</h2>
                 <small className="text-muted">satisfaction rate</small>
               </div>
             </div>
@@ -309,45 +306,31 @@ const Dashboard: React.FC = () => {
             <div className="card-header bg-transparent border-bottom">
               <h5 className="card-title mb-0">Recent Activity</h5>
             </div>
-            <div className="card-body">
-              <div className="list-group list-group-flush">
-                <div className="list-group-item px-0 border-0">
-                  <div className="d-flex align-items-center">
-                    <div className="bg-success bg-opacity-10 rounded-circle p-2 me-3">
-                      <i className="bi bi-check-circle text-success"></i>
-                    </div>
-                    <div className="flex-grow-1">
-                      <h6 className="mb-1">Schedule published</h6>
-                      <small className="text-muted">Week of March 15-21</small>
-                    </div>
-                    <small className="text-muted">2h ago</small>
+            <div className="card-body p-0">
+              {recentActivity.length === 0 ? (
+                <div className="d-flex align-items-center justify-content-center text-center py-5 text-muted">
+                  <div>
+                    <i className="bi bi-clock-history fs-3 mb-2 d-block"></i>
+                    <p className="mb-0">No recent activity.</p>
                   </div>
                 </div>
-                <div className="list-group-item px-0 border-0">
-                  <div className="d-flex align-items-center">
-                    <div className="bg-primary bg-opacity-10 rounded-circle p-2 me-3">
-                      <i className="bi bi-person-plus text-primary"></i>
-                    </div>
-                    <div className="flex-grow-1">
-                      <h6 className="mb-1">New employee added</h6>
-                      <small className="text-muted">Sarah Johnson - Nurse</small>
-                    </div>
-                    <small className="text-muted">4h ago</small>
-                  </div>
-                </div>
-                <div className="list-group-item px-0 border-0">
-                  <div className="d-flex align-items-center">
-                    <div className="bg-warning bg-opacity-10 rounded-circle p-2 me-3">
-                      <i className="bi bi-exclamation-triangle text-warning"></i>
-                    </div>
-                    <div className="flex-grow-1">
-                      <h6 className="mb-1">Shift needs approval</h6>
-                      <small className="text-muted">Night shift - ICU</small>
-                    </div>
-                    <small className="text-muted">6h ago</small>
-                  </div>
-                </div>
-              </div>
+              ) : (
+                <ul className="list-group list-group-flush">
+                  {recentActivity.map((entry) => (
+                    <li key={entry.id} className="list-group-item px-3 py-2">
+                      <div className="d-flex justify-content-between align-items-start">
+                        <div>
+                          <span className="badge bg-secondary me-2">{entry.entityType}</span>
+                          <small>{entry.description ?? entry.action}</small>
+                        </div>
+                        <small className="text-muted text-nowrap ms-2">
+                          {new Date(entry.createdAt).toLocaleString()}
+                        </small>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         </div>

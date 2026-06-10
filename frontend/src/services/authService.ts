@@ -14,9 +14,8 @@
  */
 
 import { ApiResponse, LoginRequest, LoginResponse, User } from '../types';
-import { handleResponse } from './apiUtils';
+import { handleResponse, API_BASE_URL } from './apiUtils';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 /**
  * Authenticates user with username and password

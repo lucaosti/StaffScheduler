@@ -312,11 +312,11 @@ describe('UserService.verifyPassword / validatePassword', () => {
     expect(out?.id).toBe(1);
   });
 
-  it('validatePassword swallows internal errors and returns null', async () => {
+  it('validatePassword propagates internal errors', async () => {
     const { pool, execute } = makePool();
     execute.mockRejectedValueOnce(new Error('boom'));
     const svc = new UserService(pool);
-    expect(await svc.validatePassword('a@b', 'p')).toBeNull();
+    await expect(svc.validatePassword('a@b', 'p')).rejects.toThrow('boom');
   });
 
   it('validatePassword returns null when user inactive', async () => {

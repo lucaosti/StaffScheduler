@@ -15,10 +15,9 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, DashboardStats } from '../types';
-import { handleResponse, getAuthHeaders } from './apiUtils';
+import { ApiResponse, DashboardStats, AuditLogEntry } from '../types';
+import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> => {
   const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
@@ -27,4 +26,19 @@ export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> 
   });
 
   return handleResponse<DashboardStats>(response);
+};
+
+export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
+  try {
+    const response = await fetch(`${API_BASE_URL}/audit-logs?limit=${limit}`, {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) return [];
+    const body = await response.json();
+    const items = body?.data?.items ?? body?.data ?? [];
+    return Array.isArray(items) ? items : [];
+  } catch {
+    return [];
+  }
 };

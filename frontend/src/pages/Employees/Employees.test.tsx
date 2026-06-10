@@ -5,6 +5,7 @@ const mockGetEmployees = jest.fn();
 const mockCreateEmployee = jest.fn();
 const mockUpdateEmployee = jest.fn();
 const mockDeleteEmployee = jest.fn();
+const mockGetDepartments = jest.fn();
 
 jest.mock('../../services/employeeService', () => ({
   __esModule: true,
@@ -12,6 +13,11 @@ jest.mock('../../services/employeeService', () => ({
   createEmployee: (...args: unknown[]) => mockCreateEmployee(...args),
   updateEmployee: (...args: unknown[]) => mockUpdateEmployee(...args),
   deleteEmployee: (...args: unknown[]) => mockDeleteEmployee(...args),
+}));
+
+jest.mock('../../services/departmentService', () => ({
+  __esModule: true,
+  getDepartments: (...args: unknown[]) => mockGetDepartments(...args),
 }));
 
 // Always allow page render for role-gated UI.
@@ -61,6 +67,10 @@ describe('<Employees />', () => {
         },
       ])
     );
+    mockGetDepartments.mockResolvedValue(ok([
+      { id: 1, name: 'Emergency Medicine', isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+      { id: 2, name: 'Radiology', isActive: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+    ]));
     mockCreateEmployee.mockResolvedValue(ok({ id: 99 }));
     mockUpdateEmployee.mockResolvedValue(ok({ id: 1 }));
     mockDeleteEmployee.mockResolvedValue(ok(undefined));
@@ -80,8 +90,9 @@ describe('<Employees />', () => {
     expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
     // The page also refetches on every searchTerm change; we only assert the matching row is present.
 
-    // Department filter should keep one row
-    const deptSelect = screen.getByRole('combobox');
+    // Department filter should keep one row (the filter combobox in the toolbar uses employee department names)
+    const comboboxes = screen.getAllByRole('combobox');
+    const deptSelect = comboboxes[0]; // first combobox is the department filter
     await userEvent.selectOptions(deptSelect, 'Emergency Medicine');
     expect(screen.getByText(/Ada Lovelace/)).toBeInTheDocument();
     expect(screen.queryByText(/Grace Hopper/)).not.toBeInTheDocument();
@@ -89,6 +100,7 @@ describe('<Employees />', () => {
     // Clear search so we can operate on the full table again.
     fireEvent.change(search, { target: { value: '' } });
     await userEvent.selectOptions(deptSelect, '');
+
 
     // Edit flow opens modal with defaults and submits update
     const rows = screen.getAllByRole('row');
@@ -109,9 +121,8 @@ describe('<Employees />', () => {
     await userEvent.type(screen.getByLabelText(/^email \*/i), 'new@example.com');
     await userEvent.type(screen.getByLabelText(/first name/i), 'New');
     await userEvent.type(screen.getByLabelText(/last name/i), 'Person');
-    await userEvent.selectOptions(screen.getByLabelText(/department \*/i), 'Emergency Medicine');
-    await userEvent.selectOptions(screen.getByLabelText(/position \*/i), 'Nurse');
-    await userEvent.selectOptions(screen.getByLabelText(/employment type/i), 'full-time');
+    await userEvent.selectOptions(screen.getByLabelText(/^department$/i), '1');
+    await userEvent.type(screen.getByLabelText(/^position$/i), 'Engineer');
     await userEvent.click(screen.getByRole('button', { name: /create employee/i }));
     expect(mockCreateEmployee).toHaveBeenCalled();
 
