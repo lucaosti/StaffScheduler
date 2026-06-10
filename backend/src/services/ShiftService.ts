@@ -232,7 +232,7 @@ export class ShiftService {
     endDate?: string;
     status?: string;
     orgUnitIds?: number[];
-  }): Promise<Shift[]> {
+  }, pagination?: { limit: number; offset: number }): Promise<Shift[]> {
     try {
       let query = `
         SELECT 
@@ -286,7 +286,13 @@ export class ShiftService {
         query += ' WHERE ' + conditions.join(' AND ');
       }
 
-      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC LIMIT 2000'; // Bounded at 2000; use pagination for larger datasets.
+      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC';
+      if (pagination) {
+        query += ' LIMIT ? OFFSET ?';
+        params.push(pagination.limit, pagination.offset);
+      } else {
+        query += ' LIMIT 2000';
+      }
 
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
 
@@ -312,6 +318,40 @@ export class ShiftService {
       return shifts;
     } catch (error) {
       logger.error('Failed to get all shifts:', error);
+      throw error;
+    }
+  }
+
+  async countShifts(filters?: {
+    scheduleId?: number;
+    departmentId?: number;
+    startDate?: string;
+    endDate?: string;
+    status?: string;
+    orgUnitIds?: number[];
+  }): Promise<number> {
+    try {
+      let query = `SELECT COUNT(DISTINCT s.id) AS total FROM shifts s LEFT JOIN departments d ON s.department_id = d.id`;
+      const conditions: string[] = [];
+      const params: any[] = [];
+
+      if (filters?.scheduleId) { conditions.push('s.schedule_id = ?'); params.push(filters.scheduleId); }
+      if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
+      if (filters?.startDate) { conditions.push('s.date >= ?'); params.push(filters.startDate); }
+      if (filters?.endDate) { conditions.push('s.date <= ?'); params.push(filters.endDate); }
+      if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`d.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
+      }
+
+      if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+      return Number(rows[0]?.total ?? 0);
+    } catch (error) {
+      logger.error('Failed to count shifts:', error);
       throw error;
     }
   }

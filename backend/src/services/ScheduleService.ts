@@ -131,7 +131,7 @@ export class ScheduleService {
     startDate?: string;
     endDate?: string;
     orgUnitIds?: number[];
-  }): Promise<Schedule[]> {
+  }, pagination?: { limit: number; offset: number }): Promise<Schedule[]> {
     try {
       let query = `
         SELECT
@@ -160,7 +160,13 @@ export class ScheduleService {
       }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' GROUP BY s.id ORDER BY s.start_date DESC LIMIT 1000'; // Bounded at 1000; use pagination for larger datasets.
+      query += ' GROUP BY s.id ORDER BY s.start_date DESC';
+      if (pagination) {
+        query += ' LIMIT ? OFFSET ?';
+        params.push(pagination.limit, pagination.offset);
+      } else {
+        query += ' LIMIT 1000';
+      }
 
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
 
@@ -181,6 +187,38 @@ export class ScheduleService {
       }));
     } catch (error) {
       logger.error('Failed to get all schedules:', error);
+      throw error;
+    }
+  }
+
+  async countSchedules(filters?: {
+    departmentId?: number;
+    status?: string;
+    startDate?: string;
+    endDate?: string;
+    orgUnitIds?: number[];
+  }): Promise<number> {
+    try {
+      let query = `SELECT COUNT(DISTINCT s.id) AS total FROM schedules s LEFT JOIN departments d ON s.department_id = d.id`;
+      const conditions: string[] = [];
+      const params: any[] = [];
+
+      if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
+      if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
+      if (filters?.startDate) { conditions.push('s.end_date >= ?'); params.push(filters.startDate); }
+      if (filters?.endDate) { conditions.push('s.start_date <= ?'); params.push(filters.endDate); }
+      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
+        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
+        conditions.push(`d.org_unit_id IN (${placeholders})`);
+        params.push(...filters.orgUnitIds);
+      }
+
+      if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+
+      const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+      return Number(rows[0]?.total ?? 0);
+    } catch (error) {
+      logger.error('Failed to count schedules:', error);
       throw error;
     }
   }
