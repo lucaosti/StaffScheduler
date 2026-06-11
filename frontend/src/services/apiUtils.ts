@@ -17,11 +17,12 @@ export const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3
 
 /**
  * Custom error class for API-related errors.
- * Carries the HTTP status code alongside the message so callers
- * can distinguish 401 / 403 / 404 / 5xx without parsing strings.
+ * Carries the HTTP status code and the backend error code alongside the
+ * message so callers can distinguish 401 / 403 / 404 / 5xx — and specific
+ * conditions such as TOTP_REQUIRED — without parsing strings.
  */
 export class ApiError extends Error {
-  constructor(message: string, public status?: number) {
+  constructor(message: string, public status?: number, public code?: string) {
     super(message);
     this.name = 'ApiError';
   }
@@ -44,17 +45,20 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
 
   if (!response.ok) {
     let errorMessage = `HTTP error! status: ${response.status}`;
+    let errorCode: string | undefined;
     if (data !== null && typeof data === 'object') {
       const dataObj = data as Record<string, unknown>;
       const errField = dataObj['error'];
       if (errField !== null && typeof errField === 'object') {
         const msg = (errField as Record<string, unknown>)['message'];
         if (typeof msg === 'string') errorMessage = msg;
+        const code = (errField as Record<string, unknown>)['code'];
+        if (typeof code === 'string') errorCode = code;
       } else if (typeof dataObj['message'] === 'string') {
         errorMessage = dataObj['message'];
       }
     }
-    throw new ApiError(errorMessage, response.status);
+    throw new ApiError(errorMessage, response.status, errorCode);
   }
 
   return data as ApiResponse<T>;

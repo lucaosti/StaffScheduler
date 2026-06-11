@@ -3,8 +3,8 @@
  *
  *   POST /api/auth/2fa/setup    start setup, returns secret + otpauth uri
  *   POST /api/auth/2fa/enable   verify code, returns recovery codes
- *   POST /api/auth/2fa/disable  turn 2FA off
- *   POST /api/auth/2fa/verify   verify a code (used by future login flow)
+ *   POST /api/auth/2fa/disable  turn 2FA off (requires a valid TOTP or recovery code)
+ *   POST /api/auth/2fa/verify   verify a code
  *
  * @author Luca Ostinelli
  */
@@ -47,9 +47,19 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/disable', async (req: Request, res: Response) => {
+  router.post('/disable', validateBody(twoFactorCodeBody), async (req: Request, res: Response) => {
     try {
-      await service.disable(req.user!.id);
+      const code = res.locals.body.code as string;
+      const userId = req.user!.id;
+      // Disabling 2FA weakens the account, so it demands the same proof of
+      // possession as login: a current TOTP code or an unused recovery code.
+      const valid =
+        (await service.verifyCode(userId, code)) ||
+        (await service.consumeRecoveryCode(userId, code));
+      if (!valid) {
+        return respondError(res, 401, 'TOTP_INVALID', 'Invalid two-factor authentication code');
+      }
+      await service.disable(userId);
       res.json({ success: true });
     } catch (err) {
       logger.error('2fa disable error:', err);

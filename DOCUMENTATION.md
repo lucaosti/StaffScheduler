@@ -157,13 +157,15 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 ### Authentication
 
 ```
-POST /api/auth/login       { email, password } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
+POST /api/auth/login       { email, password, totpCode? } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
 GET  /api/auth/verify      (cookie) → { user }
 POST /api/auth/refresh     (cookie) → rotates cookie; body: { user }
 POST /api/auth/logout      blacklists the JTI and clears the cookie
 ```
 
-JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry.
+JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry. The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
+
+**Two-factor authentication**: when an account has TOTP enabled (`POST /api/auth/2fa/setup` + `/enable`), login additionally requires `totpCode` — a current TOTP code or an unused recovery code. A password-valid login without the code answers 401 `TOTP_REQUIRED`; a wrong code answers 401 `TOTP_INVALID`. Disabling 2FA (`POST /api/auth/2fa/disable`) likewise requires a valid code.
 
 ### Core endpoints (summary)
 
@@ -200,8 +202,10 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 
 | Code | HTTP | Meaning |
 |---|---|---|
-| `MISSING_TOKEN` | 401 | No `Authorization` header |
+| `MISSING_TOKEN` | 401 | No `token` cookie and no `Authorization` header |
 | `INVALID_TOKEN` | 401 | JWT invalid or expired |
+| `TOTP_REQUIRED` | 401 | Account has 2FA enabled; login needs `totpCode` |
+| `TOTP_INVALID` | 401 | Wrong TOTP or recovery code |
 | `FORBIDDEN` | 403 | Permission not held |
 | `NOT_FOUND` | 404 | Resource missing or module disabled |
 | `CONFLICT` | 409 | Duplicate resource |
@@ -880,7 +884,7 @@ Features are grouped by category:
 | Per-org-unit rate limiting | Enterprise | Medium | Low | Current rate limiting applies only to the login endpoint. A per-tenant API quota is required for multi-tenant SaaS hardening. |
 | Multi-language / i18n | Enterprise | Medium | High | All UI strings are currently hardcoded in English in React components. Retrofitting i18n (react-i18next) requires extracting every string. |
 | Bulk API (batch endpoints) | Enterprise | Medium | Medium | High-volume integrations (HRIS sync, bulk assignment) require atomic batch operations. The `/api/import` CSV bulk import exists; REST batch endpoints for other resources do not. |
-| Two-factor authentication | Enterprise | Medium | Low | `TwoFactorService.ts` already exists in `backend/src/services/`. The gap is the frontend enrollment flow and enforcement policy per org unit. |
+| Two-factor authentication | Enterprise | Medium | Low | Backend enforcement at login and the frontend challenge step are implemented. The gap is the frontend enrollment flow (QR/secret display, recovery code presentation) and enforcement policy per org unit. |
 | Predictive demand forecasting | Innovative | High | High | The `forecasting` module is registered; `ScheduleOptimizationOrchestrator` handles optimization. Demand forecasting requires a separate ML pipeline ingesting historical assignment data and external signals (sales, footfall). |
 | AI auto-schedule generation (production-ready) | Innovative | High | Medium | OR-Tools CP-SAT optimizer exists; gap is coverage rules refinement, forecast-input integration, and a manager review/override UX. |
 | Shift bidding / preference-based assignment | Innovative | Medium | Medium | Employees rank desired shifts; optimizer uses preferences as soft constraints. Preference weights exist in the CP-SAT model; the employee-facing bidding UI and ranking endpoint are missing. |
@@ -903,7 +907,7 @@ Target: eliminate the most impactful bottlenecks without infrastructure changes;
 | Connection pool tuning | Set `DB_POOL_LIMIT` (controls `connectionLimit`, default 30) and `DB_QUEUE_LIMIT` (controls `queueLimit`, default 100) in `backend/.env`. Raise `DB_POOL_LIMIT` to 30–50 for Tier 2; set `DB_QUEUE_LIMIT` to reject rather than queue indefinitely. | Prevents pool exhaustion under moderate burst. Low-risk change. |
 | Fix N+1 in list endpoints | Audit `GET /employees`, `GET /shifts`, `GET /schedules` for per-row sub-queries. Replace with `JOIN` or a single `IN (...)` query. | Latency on list endpoints grows linearly with result set size without this fix. |
 | Add missing API filters | `GET /assignments`, `GET /audit-logs`, `GET /notifications` lack date-range and status filters that clients need for pagination. | Reduces over-fetching and improves frontend perceived performance. |
-| Two-factor authentication UI | Wire the existing `TwoFactorService.ts` to a frontend enrollment and challenge flow. | The backend is complete; the frontend gap prevents the feature from shipping. |
+| Two-factor authentication UI | Build the frontend enrollment flow (QR/secret display, recovery code presentation) on top of the existing `/api/auth/2fa` endpoints. | Backend enforcement and the login challenge step exist; enrollment still requires calling the API manually. |
 | Reporting dashboard UI | Build chart components (Recharts) on top of the existing `/api/reports` responses. | High visible value; backend is already complete. |
 | Outbound webhooks (basic) | Add a `webhook_subscriptions` table and a delivery worker that POSTs to registered URLs on key events (schedule published, assignment confirmed). Use `EventBus.ts` as the event source. | Required by integrations; unblocks enterprise evaluation. |
 
