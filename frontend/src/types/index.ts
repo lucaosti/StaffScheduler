@@ -188,6 +188,8 @@ export interface ApiResponse<T = unknown> {
 export interface LoginRequest {
   email: string;
   password: string;
+  /** TOTP or recovery code; required when the account has 2FA enabled. */
+  totpCode?: string;
   rememberMe?: boolean;
 }
 

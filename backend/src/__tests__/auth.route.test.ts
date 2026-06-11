@@ -11,11 +11,13 @@ import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
+import { TwoFactorService } from '../services/TwoFactorService';
 import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
 jest.mock('../services/RbacService');
+jest.mock('../services/TwoFactorService');
 
 const buildApp = (): express.Express => {
   const app = express();
@@ -52,6 +54,7 @@ describe('POST /api/auth/login', () => {
       firstName: 'A',
       lastName: 'B',
     });
+    (TwoFactorService.prototype.isEnabled as jest.Mock) = jest.fn().mockResolvedValue(false);
     (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest
       .fn()
       .mockResolvedValue(['schedule.manage', 'schedule.read']);
@@ -71,6 +74,64 @@ describe('POST /api/auth/login', () => {
     const cookieToken = tokenCookie!.split(';')[0].split('=')[1];
     const decoded = jwt.verify(cookieToken, config.jwt.secret) as { userId: number };
     expect(decoded.userId).toBe(7);
+  });
+});
+
+describe('POST /api/auth/login — two-factor enforcement', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 7,
+      email: 'a@x.com',
+      firstName: 'A',
+      lastName: 'B',
+    });
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (TwoFactorService.prototype.isEnabled as jest.Mock) = jest.fn().mockResolvedValue(true);
+  });
+
+  it('returns 401 TOTP_REQUIRED when 2FA is enabled and no code is supplied', async () => {
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('TOTP_REQUIRED');
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('returns 401 TOTP_INVALID when the code is wrong', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(false);
+    (TwoFactorService.prototype.consumeRecoveryCode as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue(false);
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw', totpCode: '000000' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('TOTP_INVALID');
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+
+  it('logs in when a valid TOTP code is supplied', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw', totpCode: '123456' });
+    expect(res.status).toBe(200);
+    const cookies = res.headers['set-cookie'] as unknown as string[];
+    expect(cookies?.some((c: string) => c.startsWith('token='))).toBe(true);
+  });
+
+  it('logs in when a valid recovery code is supplied', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(false);
+    (TwoFactorService.prototype.consumeRecoveryCode as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue(true);
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw', totpCode: 'RECOVERY-1234' });
+    expect(res.status).toBe(200);
   });
 });
 

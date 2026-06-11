@@ -43,6 +43,18 @@ describe('buildApp CORS callback', () => {
     // The response should simply succeed (not be rejected).
   });
 
+  it('allows requests with no origin in production (container healthchecks, curl)', async () => {
+    const original = config.server.env;
+    (config.server as any).env = 'production';
+    try {
+      const app = buildApp(fakePool, { silent: true });
+      const res = await request(app).get('/api/health');
+      expect([200, 503]).toContain(res.status);
+    } finally {
+      (config.server as any).env = original;
+    }
+  });
+
   it('allows the configured CORS_ORIGIN', async () => {
     const app = buildApp(fakePool, { silent: true });
     const res = await request(app).get('/api/health').set('Origin', config.cors.origin);
@@ -57,11 +69,14 @@ describe('buildApp CORS callback', () => {
     try {
       const app = buildApp(fakePool, { silent: true });
       const res = await request(app).get('/api/health').set('Origin', foreignOrigin);
-      // Express/cors send a 500 with 'Not allowed by CORS' when the callback
-      // passes an Error, or just omit the Allow-Origin header.
+      // Express/cors send a 500 when the callback passes an Error (the body
+      // is the masked production envelope), or just omit the Allow-Origin header.
       expect([500, 200, 503]).toContain(res.status);
       if (res.status === 500) {
-        expect(res.text).toContain('Not allowed by CORS');
+        expect(res.body).toEqual({
+          success: false,
+          error: { code: 'INTERNAL_ERROR', message: 'An internal error occurred' },
+        });
       } else {
         expect(res.headers['access-control-allow-origin']).toBeUndefined();
       }

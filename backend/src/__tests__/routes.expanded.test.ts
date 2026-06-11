@@ -1795,13 +1795,19 @@ describe('directory router (extended)', () => {
     const bad = await request(app()).post('/api/directory/import-vcard').send({});
     expect(bad.status).toBe(400);
 
+    const weakPassword = await request(app())
+      .post('/api/directory/import-vcard')
+      .set('Content-Type', 'application/json')
+      .send({ vcf: 'BEGIN:VCARD\nEND:VCARD', defaultPassword: 'pw' });
+    expect(weakPassword.status).toBe(400);
+
     (UserDirectoryService.prototype.importVcf as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ created: 1, updated: 0 });
     const ok = await request(app())
       .post('/api/directory/import-vcard')
       .set('Content-Type', 'application/json')
-      .send({ vcf: 'BEGIN:VCARD\nEND:VCARD', defaultPassword: 'pw' });
+      .send({ vcf: 'BEGIN:VCARD\nEND:VCARD', defaultPassword: 'initial-password-1' });
     expect(ok.status).toBe(200);
   });
 });
