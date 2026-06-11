@@ -10,6 +10,7 @@
 
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import morgan from 'morgan';
 import helmet from 'helmet';
@@ -76,7 +77,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
         directives: {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'"],
           imgSrc: ["'self'", 'data:'],
           connectSrc: ["'self'"],
           fontSrc: ["'self'"],
@@ -99,7 +100,10 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
+        if (!origin) {
+          if (config.server.env !== 'production') return callback(null, true);
+          return callback(new Error('Not allowed by CORS'));
+        }
         if (config.server.env === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
           return callback(null, true);
         }
@@ -111,6 +115,8 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
       allowedHeaders: ['Content-Type', 'Authorization'],
     })
   );
+
+  app.use(cookieParser());
 
   if (!options.silent) {
     const limiter = rateLimit({

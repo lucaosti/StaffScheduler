@@ -16,6 +16,8 @@ import { Pool } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { directoryFieldsBody } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -41,9 +43,9 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     res.json({ success: true, data: profile });
   });
 
-  router.put('/users/:id/fields', requirePermission('user.manage'), async (req: Request, res: Response) => {
+  router.put('/users/:id/fields', requirePermission('user.manage'), validateBody(directoryFieldsBody), async (req: Request, res: Response) => {
     try {
-      const fields = Array.isArray(req.body?.fields) ? req.body.fields : [];
+      const fields = res.locals.body.fields;
       await service.setFields(Number(req.params.id), fields);
       const profile = await service.getProfile(Number(req.params.id));
       res.json({ success: true, data: profile });

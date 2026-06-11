@@ -113,7 +113,7 @@ export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiRe
 
   const response = await fetch(`${API_BASE_URL}/employees?${queryParams}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   
   return handleResponse<Employee[]>(response);
@@ -134,7 +134,7 @@ export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiRe
 export const getEmployee = async (id: number | string): Promise<ApiResponse<Employee>> => {
   const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   
   return handleResponse<Employee>(response);
@@ -161,7 +161,7 @@ export const getEmployee = async (id: number | string): Promise<ApiResponse<Empl
 export const createEmployee = async (employeeData: CreateEmployeeData): Promise<ApiResponse<Employee>> => {
   const response = await fetch(`${API_BASE_URL}/employees`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify(employeeData),
   });
   
@@ -186,7 +186,7 @@ export const createEmployee = async (employeeData: CreateEmployeeData): Promise<
 export const updateEmployee = async (id: number | string, employeeData: UpdateEmployeeData): Promise<ApiResponse<Employee>> => {
   const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify(employeeData),
   });
   
@@ -208,7 +208,7 @@ export const updateEmployee = async (id: number | string, employeeData: UpdateEm
 export const deleteEmployee = async (id: number | string): Promise<ApiResponse<void>> => {
   const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   
   return handleResponse<void>(response);

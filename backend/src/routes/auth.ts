@@ -13,16 +13,27 @@
  * @author Luca Ostinelli
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
-import { authenticate } from '../middleware/auth';
+import { authenticate, addToBlacklist } from '../middleware/auth';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { logger } from '../config/logger';
 
 import { config } from '../config';
+
+const isProduction = process.env.NODE_ENV === 'production';
+
+const JWT_COOKIE_NAME = 'token';
+const JWT_COOKIE_OPTIONS = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: 'lax' as const,
+  maxAge: 24 * 60 * 60 * 1000, // 24 hours
+};
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
@@ -118,12 +129,14 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
 
     // Generate JWT token. Only the user id is embedded; permissions are
     // resolved from the database on every request by the auth middleware.
+    const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, jti },
       config.jwt.secret,
       jwtSignOptions
     );
 
+    res.cookie(JWT_COOKIE_NAME, token, JWT_COOKIE_OPTIONS);
     res.json({
       success: true,
       data: {
@@ -202,12 +215,14 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
 
     const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
 
+    const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user.id, email: user.email, jti },
       config.jwt.secret,
       jwtSignOptions
     );
-    
+
+    res.cookie(JWT_COOKIE_NAME, token, JWT_COOKIE_OPTIONS);
     res.json({
       success: true,
       data: {
@@ -238,10 +253,11 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
  * @middleware authenticate
  * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, (_req: Request, res: Response) => {
-  // In JWT-based authentication, logout is primarily client-side.
-  // The client removes the token from storage.
-  // For enhanced security, implement server-side token blacklisting.
+router.post('/logout', authenticate, (req: Request, res: Response) => {
+  if (req.tokenJti) {
+    addToBlacklist(req.tokenJti);
+  }
+  res.clearCookie(JWT_COOKIE_NAME);
   res.json({
     success: true,
     message: 'Logged out successfully'

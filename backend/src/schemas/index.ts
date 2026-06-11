@@ -283,3 +283,56 @@ export const updatePolicyBody = z.object({
   description: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
 });
+
+export const escalateBody = z.object({
+  now: z.string().optional(),
+});
+
+export const twoFactorCodeBody = z.object({
+  code: z.string().min(1, 'code is required'),
+});
+
+export const upsertPreferencesBody = z.object({
+  maxHoursPerWeek: z.number().positive().optional(),
+  minHoursPerWeek: z.number().nonnegative().optional(),
+  maxConsecutiveDays: z.number().int().min(1).max(14).optional(),
+  preferredShifts: z.array(z.number().int().positive()).optional(),
+  avoidShifts: z.array(z.number().int().positive()).optional(),
+  notes: z.string().nullable().optional(),
+});
+
+export const moduleEnabledBody = z.object({
+  isEnabled: z.boolean(),
+});
+
+export const directoryFieldsBody = z.object({
+  fields: z.array(z.object({
+    key: z.string().min(1),
+    value: z.unknown(),
+  })),
+});
+
+export const validateAssignmentBody = z.object({
+  userId: z.number().int().positive(),
+  shiftId: z.number().int().positive(),
+});
+
+export const updateApprovalMatrixBody = z.object({
+  approverScope: z.enum(['policy_owner', 'unit_manager', 'unit_manager_chain', 'company_role', 'company_user']).optional(),
+  approverRoleId: z.number().int().positive().nullable().optional(),
+  approverUserId: z.number().int().positive().nullable().optional(),
+  autoApproveForOwner: z.boolean().optional(),
+  description: z.string().nullable().optional(),
+});
+
+export const updateCurrencyBody = z.object({
+  currency: z.enum(['EUR', 'USD']),
+});
+
+export const updateTimePeriodBody = z.object({
+  timePeriod: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+});
+
+export const updateSettingValueBody = z.object({
+  value: z.string(),
+});

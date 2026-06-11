@@ -28,10 +28,15 @@ const getModuleService = (): ModuleService => {
   return _moduleService;
 };
 
-// Extend Express Request to include user
+// In-memory JTI blacklist for server-side token revocation on logout.
+const _jtiBlacklist = new Set<string>();
+export const addToBlacklist = (jti: string): void => { _jtiBlacklist.add(jti); };
+
+// Extend Express Request to include user and token JTI
 declare module 'express-serve-static-core' {
   interface Request {
     user?: User;
+    tokenJti?: string;
   }
 }
 
@@ -41,6 +46,7 @@ declare module 'express-serve-static-core' {
 interface JWTPayload {
   userId: string;
   email: string;
+  jti?: string;
   iat?: number;
   exp?: number;
 }
@@ -60,8 +66,13 @@ export const userHasPermission = (user: User | undefined, code: string): boolean
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    // Accept token from httpOnly cookie first, then Authorization header.
+    const cookieToken: string | undefined = req.cookies?.token;
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+    const token = cookieToken || bearerToken;
+
+    if (!token) {
       return res.status(401).json({
         success: false,
         error: {
@@ -70,8 +81,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         }
       });
     }
-
-    const token = authHeader.substring(7); // Remove 'Bearer ' prefix
 
     let decodedToken: JWTPayload;
     try {
@@ -85,6 +94,18 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
         }
       });
     }
+
+    if (decodedToken.jti && _jtiBlacklist.has(decodedToken.jti)) {
+      return res.status(401).json({
+        success: false,
+        error: {
+          code: 'TOKEN_REVOKED',
+          message: 'Token has been revoked'
+        }
+      });
+    }
+
+    if (decodedToken.jti) req.tokenJti = decodedToken.jti;
 
     const pool = database.getPool();
     const userService = new UserService(pool);

@@ -37,20 +37,20 @@ describe('handleResponse', () => {
 });
 
 describe('getAuthHeaders', () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
-
   it('always sets Content-Type', () => {
-    const headers = getAuthHeaders() as Record<string, string>;
+    const init = getAuthHeaders();
+    const headers = init.headers as Record<string, string>;
     expect(headers['Content-Type']).toBe('application/json');
   });
 
-  it('attaches a Bearer token only when one is in localStorage', () => {
-    expect((getAuthHeaders() as Record<string, string>).Authorization).toBeUndefined();
+  it('includes credentials: include for cookie-based auth', () => {
+    const init = getAuthHeaders();
+    expect(init.credentials).toBe('include');
+  });
 
-    localStorage.setItem('token', 'abc.def.ghi');
-    const headers = getAuthHeaders() as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer abc.def.ghi');
+  it('does not include an Authorization header', () => {
+    const init = getAuthHeaders();
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Authorization']).toBeUndefined();
   });
 });

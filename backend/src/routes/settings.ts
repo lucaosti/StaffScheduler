@@ -17,7 +17,8 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
 import { authenticate, userHasPermission } from '../middleware/auth';
-import { UpdateSystemSettingRequest } from '../types';
+import { validateBody } from '../middleware/validation';
+import { updateCurrencyBody, updateTimePeriodBody, updateSettingValueBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createSystemSettingsRouter = (pool: Pool) => {
@@ -79,7 +80,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Update currency (admin only)
-  router.put('/currency', authenticate, async (req, res) => {
+  router.put('/currency', authenticate, validateBody(updateCurrencyBody), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -90,14 +91,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         });
       }
 
-      const { currency } = req.body;
-
-      if (!['EUR', 'USD'].includes(currency)) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Currency must be EUR or USD' }
-        });
-      }
+      const { currency } = res.locals.body;
 
       await settingsService.setCurrency(currency);
 
@@ -133,7 +127,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Update time period (admin only)
-  router.put('/time-period', authenticate, async (req, res) => {
+  router.put('/time-period', authenticate, validateBody(updateTimePeriodBody), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -144,14 +138,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         });
       }
 
-      const { timePeriod } = req.body;
-
-      if (!['daily', 'weekly', 'monthly', 'yearly'].includes(timePeriod)) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Time period must be daily, weekly, monthly, or yearly' }
-        });
-      }
+      const { timePeriod } = res.locals.body;
 
       await settingsService.setTimePeriod(timePeriod);
 
@@ -196,7 +183,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Update setting value (admin only)
-  router.put('/:category/:key', authenticate, async (req, res) => {
+  router.put('/:category/:key', authenticate, validateBody(updateSettingValueBody), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -209,14 +196,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       }
 
       const { category, key } = req.params;
-      const { value }: UpdateSystemSettingRequest = req.body;
-
-      if (!value && value !== '') {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'Setting value is required' }
-        });
-      }
+      const { value } = res.locals.body;
 
       // Validate specific settings
       if (category === 'general' && key === 'currency') {

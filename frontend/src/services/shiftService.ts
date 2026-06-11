@@ -65,7 +65,7 @@ export const getShifts = async (filters: ShiftFilters = {}): Promise<ApiResponse
 
   const response = await fetch(`${API_BASE_URL}/shifts?${queryParams}`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   
   return handleResponse<Shift[]>(response);
@@ -75,7 +75,7 @@ export const getShifts = async (filters: ShiftFilters = {}): Promise<ApiResponse
 export const createShift = async (shiftData: CreateShiftData): Promise<ApiResponse<Shift>> => {
   const response = await fetch(`${API_BASE_URL}/shifts`, {
     method: 'POST',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify(shiftData),
   });
   
@@ -85,7 +85,7 @@ export const createShift = async (shiftData: CreateShiftData): Promise<ApiRespon
 export const updateShift = async (shiftId: string | number, shiftData: UpdateShiftData): Promise<ApiResponse<Shift>> => {
   const response = await fetch(`${API_BASE_URL}/shifts/${shiftId}`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify(shiftData),
   });
   
@@ -95,7 +95,7 @@ export const updateShift = async (shiftId: string | number, shiftData: UpdateShi
 export const deleteShift = async (shiftId: string | number): Promise<ApiResponse<void>> => {
   const response = await fetch(`${API_BASE_URL}/shifts/${shiftId}`, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   
   return handleResponse<void>(response);

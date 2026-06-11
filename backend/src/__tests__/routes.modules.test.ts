@@ -188,21 +188,21 @@ describe('modules router PUT /:code', () => {
     const res = await request(mountApp()).put('/api/modules/delegation').send({});
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when isEnabled is not a boolean', async () => {
     const res = await request(mountApp()).put('/api/modules/delegation').send({ isEnabled: 'yes' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when isEnabled is a number instead of boolean', async () => {
     const res = await request(mountApp()).put('/api/modules/delegation').send({ isEnabled: 1 });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 404 when module code does not exist', async () => {

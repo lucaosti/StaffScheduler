@@ -1,89 +1,55 @@
 /**
  * Authentication Service for Staff Scheduler Frontend
- * 
+ *
  * Handles all authentication-related API calls including login, logout,
  * token management, and user profile operations.
- * 
- * Features:
- * - JWT token management with localStorage
- * - Error handling with custom ApiError
- * - Automatic header management for authenticated requests
- * - Response parsing and type safety
- * 
+ *
  * @author Luca Ostinelli
  */
 
 import { ApiResponse, LoginRequest, LoginResponse, User } from '../types';
 import { handleResponse, API_BASE_URL } from './apiUtils';
 
-
-/**
- * Authenticates user with username and password
- * @param credentials - User login credentials
- * @returns Promise resolving to login response with token and user data
- * @throws {ApiError} When authentication fails or network error occurs
- * 
- * @example
- * ```typescript
- * const result = await login({ username: 'admin', password: 'password123' });
- * localStorage.setItem('token', result.data.token);
- * ```
- */
 export const login = async (credentials: LoginRequest): Promise<ApiResponse<LoginResponse>> => {
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(credentials),
   });
-  
   return handleResponse<LoginResponse>(response);
 };
 
-/**
- * Verifies JWT token validity and returns user information
- * @param token - JWT token to verify
- * @returns Promise resolving to user data if token is valid
- * @throws {ApiError} When token is invalid or expired
- * 
- * @example
- * ```typescript
- * const user = await verifyToken(storedToken);
- * console.log('Current user:', user.data);
- * ```
- */
-export const verifyToken = async (token: string): Promise<ApiResponse<User>> => {
+export const verifyToken = async (): Promise<ApiResponse<User>> => {
   const response = await fetch(`${API_BASE_URL}/auth/verify`, {
     method: 'GET',
+    credentials: 'include',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
   });
-  
   return handleResponse<User>(response);
 };
 
-/**
- * Refreshes an existing JWT token
- * @param token - Current JWT token to refresh
- * @returns Promise resolving to new token and user data
- * @throws {ApiError} When token refresh fails or token is invalid
- * 
- * @example
- * ```typescript
- * const refreshed = await refreshToken(currentToken);
- * localStorage.setItem('token', refreshed.data.token);
- * ```
- */
-export const refreshToken = async (token: string): Promise<ApiResponse<LoginResponse>> => {
+export const refreshToken = async (): Promise<ApiResponse<LoginResponse>> => {
   const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
     method: 'POST',
+    credentials: 'include',
     headers: {
-      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
   });
-  
   return handleResponse<LoginResponse>(response);
 };
 
+export const logout = async (): Promise<void> => {
+  await fetch(`${API_BASE_URL}/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  });
+};

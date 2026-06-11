@@ -1,12 +1,10 @@
 /**
  * AuthContext unit tests covering:
  *   - useAuth must throw outside provider
- *   - bootstrap with no token marks loading=false / unauth
- *   - bootstrap with token + verify success → authenticated
- *   - bootstrap with token + verify failure → token cleared
+ *   - bootstrap via verifyToken (cookie-based, no localStorage)
  *   - login success / failure
  *   - refresh success / failure
- *   - logout clears the token
+ *   - logout calls server and clears state
  */
 
 import React from 'react';
@@ -23,7 +21,6 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 );
 
 beforeEach(() => {
-  localStorage.clear();
   jest.clearAllMocks();
 });
 
@@ -40,14 +37,14 @@ describe('useAuth', () => {
 });
 
 describe('AuthProvider bootstrap', () => {
-  it('finishes loading=false when no token', async () => {
+  it('finishes loading=false when verify fails', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isAuthenticated).toBe(false);
   });
 
   it('authenticates when verify succeeds', async () => {
-    localStorage.setItem('token', 't');
     mockedAuthService.verifyToken.mockResolvedValue({
       success: true,
       data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' } as never,
@@ -56,25 +53,24 @@ describe('AuthProvider bootstrap', () => {
     await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
   });
 
-  it('clears token when verify fails', async () => {
-    localStorage.setItem('token', 't');
+  it('sets loading=false when verify returns success:false', async () => {
     mockedAuthService.verifyToken.mockResolvedValue({ success: false } as never);
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(localStorage.getItem('token')).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('clears token when verify rejects', async () => {
-    localStorage.setItem('token', 't');
+  it('sets loading=false when verify rejects', async () => {
     mockedAuthService.verifyToken.mockRejectedValue(new Error('boom'));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(localStorage.getItem('token')).toBeNull();
+    expect(result.current.isAuthenticated).toBe(false);
   });
 });
 
 describe('AuthProvider actions', () => {
-  it('login success persists token + sets user', async () => {
+  it('login success sets user and isAuthenticated', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
     mockedAuthService.login.mockResolvedValue({
       success: true,
       data: {
@@ -87,11 +83,12 @@ describe('AuthProvider actions', () => {
     await act(async () => {
       await result.current.login({ email: 'a@x', password: 'pw' } as never);
     });
-    expect(localStorage.getItem('token')).toBe('t');
     expect(result.current.isAuthenticated).toBe(true);
+    expect(result.current.user?.email).toBe('a@x');
   });
 
   it('login failure dispatches LOGIN_FAILURE', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
     mockedAuthService.login.mockResolvedValue({ success: false, error: { message: 'no' } } as never);
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
@@ -106,30 +103,19 @@ describe('AuthProvider actions', () => {
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('logout removes token + sets unauthenticated', async () => {
-    localStorage.setItem('token', 't');
+  it('logout calls authService.logout and sets unauthenticated', async () => {
     mockedAuthService.verifyToken.mockResolvedValue({
       success: true,
       data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' } as never,
     });
+    mockedAuthService.logout.mockResolvedValue();
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
     act(() => result.current.logout());
-    expect(localStorage.getItem('token')).toBeNull();
     expect(result.current.isAuthenticated).toBe(false);
   });
 
-  it('refreshToken without a stored token logs out', async () => {
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await act(async () => {
-      await result.current.refreshToken();
-    });
-    expect(result.current.isAuthenticated).toBe(false);
-  });
-
-  it('refreshToken happy path swaps the token', async () => {
-    localStorage.setItem('token', 'old');
+  it('refreshToken happy path updates state', async () => {
     mockedAuthService.verifyToken.mockResolvedValue({
       success: true,
       data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' } as never,
@@ -146,10 +132,26 @@ describe('AuthProvider actions', () => {
     await act(async () => {
       await result.current.refreshToken();
     });
-    expect(localStorage.getItem('token')).toBe('new');
+    expect(result.current.isAuthenticated).toBe(true);
+  });
+
+  it('refreshToken failure logs out', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({
+      success: true,
+      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' } as never,
+    });
+    mockedAuthService.logout.mockResolvedValue();
+    mockedAuthService.refreshToken.mockResolvedValue({ success: false } as never);
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    await act(async () => {
+      await result.current.refreshToken();
+    });
+    expect(result.current.isAuthenticated).toBe(false);
   });
 
   it('keeps callback identities stable across renders', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
     const { result, rerender } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     const first = {
@@ -161,20 +163,5 @@ describe('AuthProvider actions', () => {
     expect(result.current.login).toBe(first.login);
     expect(result.current.logout).toBe(first.logout);
     expect(result.current.refreshToken).toBe(first.refreshToken);
-  });
-
-  it('refreshToken failure logs out', async () => {
-    localStorage.setItem('token', 'old');
-    mockedAuthService.verifyToken.mockResolvedValue({
-      success: true,
-      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' } as never,
-    });
-    mockedAuthService.refreshToken.mockResolvedValue({ success: false } as never);
-    const { result } = renderHook(() => useAuth(), { wrapper });
-    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
-    await act(async () => {
-      await result.current.refreshToken();
-    });
-    expect(result.current.isAuthenticated).toBe(false);
   });
 });

@@ -70,6 +70,7 @@ export const config = {
       secure: process.env.SESSION_COOKIE_SECURE === 'true',
       httpOnly: true,
       maxAge: parseInt(process.env.SESSION_COOKIE_MAX_AGE || '86400000'), // 24 hours
+      sameSite: 'lax' as const,
     },
   },
   jwt: {
@@ -112,7 +113,7 @@ export const config = {
     maxFiles: parseInt(process.env.LOG_MAX_FILES || '5'),
   },
   security: {
-    bcryptRounds: parseInt(process.env.BCRYPT_ROUNDS || '12'),
+    bcryptRounds: Math.max(10, parseInt(process.env.BCRYPT_ROUNDS || '12')),
     rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'), // 1 minute
     rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '200'),
   },

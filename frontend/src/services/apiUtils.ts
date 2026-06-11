@@ -4,7 +4,7 @@
  * Provides common helpers used across all service modules:
  * - ApiError: typed error class carrying the HTTP status code
  * - handleResponse: parses fetch responses and surfaces errors uniformly
- * - getAuthHeaders: builds the Authorization + Content-Type headers from localStorage
+ * - getAuthHeaders: builds the base request init for authenticated calls
  *
  * All service files must import from here instead of defining their own copies.
  *
@@ -61,14 +61,18 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
 };
 
 /**
- * Builds fetch headers including the JWT bearer token if present in localStorage.
- *
- * @returns HeadersInit object with Content-Type and optional Authorization header
+ * Base headers for authenticated API requests.
+ * Used internally by getAuthHeaders.
  */
-export const getAuthHeaders = (): HeadersInit => {
-  const token = localStorage.getItem('token');
-  return {
-    'Content-Type': 'application/json',
-    ...(token && { Authorization: `Bearer ${token}` }),
-  };
+export const AUTH_HEADERS: Record<string, string> = {
+  'Content-Type': 'application/json',
 };
+
+/**
+ * Returns a RequestInit object for authenticated fetch calls.
+ * Uses credentials: 'include' so the httpOnly auth cookie is sent automatically.
+ */
+export const getAuthHeaders = (): RequestInit => ({
+  credentials: 'include',
+  headers: { ...AUTH_HEADERS },
+});
