@@ -24,6 +24,7 @@ import {
   scheduleIdParam,
   departmentIdParam,
   createShiftBody,
+  updateShiftBody,
   createShiftTemplateBody,
   updateShiftTemplateBody,
 } from '../schemas';
@@ -73,9 +74,9 @@ router.get('/templates/:id', authenticate, validateParams(idParam), async (_req:
 });
 
 // Create new shift template
-router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (req: Request, res: Response) => {
+router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (_req: Request, res: Response) => {
   try {
-    const template = await shiftService.createShiftTemplate(req.body);
+    const template = await shiftService.createShiftTemplate(res.locals.body);
 
     res.status(201).json({
       success: true,
@@ -92,11 +93,11 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), valid
 });
 
 // Update shift template
-router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const template = await shiftService.updateShiftTemplate(id, req.body);
+    const template = await shiftService.updateShiftTemplate(id, res.locals.body);
     if (!template) {
       return res.status(404).json({
         success: false,
@@ -225,11 +226,11 @@ router.post('/', authenticate, requirePermission('shift.manage'), validateBody(c
 });
 
 // Update shift
-router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const shift = await shiftService.updateShift(id, req.body);
+    const shift = await shiftService.updateShift(id, res.locals.body);
     res.json({
       success: true,
       data: shift,

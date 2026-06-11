@@ -139,11 +139,11 @@ router.post('/', authenticate, requirePermission('schedule.manage'), validateBod
 });
 
 // Update schedule
-router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const schedule = await scheduleService.updateSchedule(id, req.body);
+    const schedule = await scheduleService.updateSchedule(id, res.locals.body);
     res.json({
       success: true,
       data: schedule,

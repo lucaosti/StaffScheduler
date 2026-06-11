@@ -23,7 +23,9 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { z } from 'zod';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateParams, validateBody } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
+import { idParam, createRoleBody, updateRoleBody } from '../schemas';
 import { logger } from '../config/logger';
 
 const assignRoleBody = z.object({
@@ -71,12 +73,12 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.post('/', async (req: Request, res: Response) => {
+  roles.post('/', validateBody(createRoleBody), async (_req: Request, res: Response) => {
     try {
       const created = await rbac.createRole({
-        name: req.body?.name,
-        description: req.body?.description,
-        permissionCodes: req.body?.permissionCodes,
+        name: res.locals.body.name,
+        description: res.locals.body.description,
+        permissionCodes: res.locals.body.permissionCodes,
       });
       res.status(201).json({ success: true, data: created });
     } catch (err) {
@@ -96,12 +98,12 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.put('/:id', async (req: Request, res: Response) => {
+  roles.put('/:id', validateParams(idParam), validateBody(updateRoleBody), async (_req: Request, res: Response) => {
     try {
-      const updated = await rbac.updateRole(Number(req.params.id), {
-        name: req.body?.name,
-        description: req.body?.description,
-        permissionCodes: req.body?.permissionCodes,
+      const updated = await rbac.updateRole(res.locals.params.id, {
+        name: res.locals.body.name,
+        description: res.locals.body.description,
+        permissionCodes: res.locals.body.permissionCodes,
       });
       res.json({ success: true, data: updated });
     } catch (err) {

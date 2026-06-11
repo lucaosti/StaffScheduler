@@ -23,6 +23,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
@@ -71,13 +73,13 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/units', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
+  router.post('/units', requirePermission('org_unit.manage'), validateBody(createOrgUnitBody), async (req: Request, res: Response) => {
     try {
       const created = await units.create({
-        name: req.body?.name,
-        description: req.body?.description,
-        parentId: req.body?.parentId ?? null,
-        managerUserId: req.body?.managerUserId ?? null,
+        name: res.locals.body.name,
+        description: res.locals.body.description,
+        parentId: res.locals.body.parentId ?? null,
+        managerUserId: res.locals.body.managerUserId ?? null,
       });
       await audit.write({
         actorId: req.user!.id, action: 'org_unit.create',
@@ -90,13 +92,13 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
+  router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), async (req: Request, res: Response) => {
     try {
-      const updated = await units.update(Number(req.params.id), req.body ?? {});
+      const updated = await units.update(res.locals.params.id, res.locals.body);
       await audit.write({
         actorId: req.user!.id, action: 'org_unit.update',
-        entityType: 'org_unit', entityId: Number(req.params.id),
-        after: req.body ?? {},
+        entityType: 'org_unit', entityId: res.locals.params.id,
+        after: res.locals.body,
       });
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -132,14 +134,12 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/units/:id/members', requirePermission('employee.manage'), async (req: Request, res: Response) => {
+  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
     try {
-      const userId = Number(req.body?.userId);
-      if (!userId) return respondError(res, 400, 'VALIDATION_ERROR', 'userId is required');
       const created = await units.addMember(
-        userId,
-        Number(req.params.id),
-        Boolean(req.body?.isPrimary)
+        res.locals.body.userId,
+        res.locals.params.id,
+        Boolean(res.locals.body.isPrimary)
       );
       res.status(201).json({ success: true, data: created });
     } catch (err) {
@@ -195,15 +195,15 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans', requirePermission('loan.request'), async (req: Request, res: Response) => {
+  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), async (req: Request, res: Response) => {
     try {
       const created = await loans.create({
-        userId: Number(req.body?.userId),
-        fromOrgUnitId: Number(req.body?.fromOrgUnitId),
-        toOrgUnitId: Number(req.body?.toOrgUnitId),
-        startDate: req.body?.startDate,
-        endDate: req.body?.endDate,
-        reason: req.body?.reason,
+        userId: res.locals.body.userId,
+        fromOrgUnitId: res.locals.body.fromOrgUnitId,
+        toOrgUnitId: res.locals.body.toOrgUnitId,
+        startDate: res.locals.body.startDate,
+        endDate: res.locals.body.endDate,
+        reason: res.locals.body.reason,
         requestedBy: req.user!.id,
       });
       res.status(201).json({ success: true, data: created });

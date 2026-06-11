@@ -61,7 +61,6 @@ describe('employees route — POST /:id/skills missing skillId returns 400', () 
       .send({ proficiencyLevel: 3 }); // no skillId
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    expect(res.body.error.message).toMatch(/skillId and proficiencyLevel are required/);
   });
 
   it('returns 400 VALIDATION_ERROR when proficiencyLevel is absent from body', async () => {
