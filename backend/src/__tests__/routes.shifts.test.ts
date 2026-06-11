@@ -119,17 +119,23 @@ describe('shifts router GET /templates/:id', () => {
 });
 
 describe('shifts router POST /templates', () => {
+  const validTemplateBody = {
+    name: 'Night',
+    departmentId: 1,
+    startTime: '22:00',
+    endTime: '06:00',
+    minStaff: 1,
+    maxStaff: 3,
+  };
+
   it('returns 201 on successful creation', async () => {
     (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest
-      .fn()
-      .mockResolvedValue(10);
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 10, name: 'Night' });
 
     const res = await request(mountApp())
       .post('/api/shifts/templates')
-      .send({ name: 'Night', startTime: '22:00', endTime: '06:00' });
+      .send(validTemplateBody);
 
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
@@ -143,7 +149,7 @@ describe('shifts router POST /templates', () => {
 
     const res = await request(mountApp())
       .post('/api/shifts/templates')
-      .send({ name: 'Night' });
+      .send(validTemplateBody);
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');

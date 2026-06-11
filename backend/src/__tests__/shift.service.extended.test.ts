@@ -340,7 +340,7 @@ describe('ShiftService templates', () => {
       minStaff: 1,
       maxStaff: 5,
     });
-    expect(r.name).toBe('Morning');
+    expect(r!.name).toBe('Morning');
   });
 
   it('updateShiftTemplate skips UPDATE when no fields', async () => {
@@ -348,7 +348,7 @@ describe('ShiftService templates', () => {
     execute.mockResolvedValueOnce([[templateRow], null] as Tuple);
     const svc = new ShiftService(pool);
     const r = await svc.updateShiftTemplate(1, {});
-    expect(r.id).toBe(1);
+    expect(r!.id).toBe(1);
   });
 
   it('updateShiftTemplate rolls back on error', async () => {

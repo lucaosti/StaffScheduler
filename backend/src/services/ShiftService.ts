@@ -9,10 +9,11 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
-import { 
+import {
   Shift,
   CreateShiftRequest,
-  UpdateShiftRequest
+  UpdateShiftRequest,
+  ShiftTemplate
 } from '../types';
 import { logger } from '../config/logger';
 
@@ -719,7 +720,7 @@ export class ShiftService {
     }
   }
 
-  async getAllShiftTemplates(): Promise<any[]> {
+  async getAllShiftTemplates(): Promise<ShiftTemplate[]> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         'SELECT * FROM shift_templates WHERE is_active = 1 ORDER BY name ASC LIMIT 1000'
@@ -743,7 +744,7 @@ export class ShiftService {
     }
   }
 
-  async getShiftTemplateById(id: number): Promise<any | null> {
+  async getShiftTemplateById(id: number): Promise<ShiftTemplate | null> {
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         'SELECT * FROM shift_templates WHERE id = ? LIMIT 1',
@@ -770,7 +771,7 @@ export class ShiftService {
     }
   }
 
-  async createShiftTemplate(templateData: any): Promise<any> {
+  async createShiftTemplate(templateData: any): Promise<ShiftTemplate> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -780,7 +781,9 @@ export class ShiftService {
       );
       await connection.commit();
       logger.info('Shift template created: ' + result.insertId);
-      return this.getShiftTemplateById(result.insertId);
+      const created = await this.getShiftTemplateById(result.insertId);
+      if (!created) throw new Error('Failed to retrieve created shift template');
+      return created;
     } catch (error) {
       await connection.rollback();
       logger.error('Failed to create shift template:', error);
@@ -790,7 +793,7 @@ export class ShiftService {
     }
   }
 
-  async updateShiftTemplate(id: number, templateData: any): Promise<any> {
+  async updateShiftTemplate(id: number, templateData: any): Promise<ShiftTemplate | null> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();

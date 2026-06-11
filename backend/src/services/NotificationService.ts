@@ -94,11 +94,12 @@ export class NotificationService {
     if (options.unreadOnly) {
       conditions.push('is_read = 0');
     }
+    params.push(limit);
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM notifications
         WHERE ${conditions.join(' AND ')}
         ORDER BY created_at DESC
-        LIMIT ${limit}`,
+        LIMIT ?`,
       params
     );
     return rows.map(mapRow);

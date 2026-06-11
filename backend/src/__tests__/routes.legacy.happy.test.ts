@@ -92,7 +92,7 @@ describe('employees router happy paths', () => {
       .fn()
       .mockResolvedValue({ id: 7, email: 'new@x.com' });
     const app = mountApp('/api/employees', createEmployeesRouter(fakePool));
-    const res = await request(app).post('/api/employees').send({ email: 'new@x.com' });
+    const res = await request(app).post('/api/employees').send({ email: 'new@x.com', password: 'Password1!', firstName: 'New', lastName: 'User' });
     expect(res.status).toBe(201);
     expect(res.body.data.id).toBe(7);
   });

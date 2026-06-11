@@ -59,7 +59,21 @@ export const createOpenApiRouter = (): Router => {
     res.json(loadSpec());
   });
 
+  // The global helmet CSP restricts scripts/styles to 'self', but the Swagger UI
+  // page loads its assets from the unpkg CDN. Override the CSP for this one route
+  // so the UI actually renders without blocking the required CDN resources.
   router.get('/docs', (_req: Request, res: Response) => {
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self' https://unpkg.com 'unsafe-inline'",
+        "style-src 'self' https://unpkg.com 'unsafe-inline'",
+        "img-src 'self' data: https://unpkg.com",
+        "connect-src 'self'",
+        "font-src 'self' https://unpkg.com",
+      ].join('; ')
+    );
     res.type('text/html').send(swaggerHtml());
   });
 

@@ -3,8 +3,8 @@ import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { validateParams } from '../middleware/validation';
-import { idParam, departmentIdParam, idAndSkillIdParam } from '../schemas';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
@@ -71,7 +71,7 @@ router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, 
 });
 
 // Create new employee
-router.post('/', authenticate, requirePermission('employee.manage'), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (req: Request, res: Response) => {
   try {
     const employee = await employeeService.createEmployee(req.body);
 
@@ -90,7 +90,7 @@ router.post('/', authenticate, requirePermission('employee.manage'), async (req:
 });
 
 // Update employee
-router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
