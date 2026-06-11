@@ -79,9 +79,12 @@ describe('POST /api/auth/refresh', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(typeof res.body.data.token).toBe('string');
-
-    const decoded = jwt.verify(res.body.data.token, config.jwt.secret) as { userId: number };
+    expect(res.body.data.token).toBeUndefined();
+    const cookies = res.headers['set-cookie'] as unknown as string[];
+    const tokenCookie = cookies?.find((c: string) => c.startsWith('token='));
+    expect(tokenCookie).toBeDefined();
+    const cookieToken = tokenCookie!.split(';')[0].split('=')[1];
+    const decoded = jwt.verify(cookieToken, config.jwt.secret) as { userId: number };
     expect(decoded.userId).toBe(7);
   });
 

@@ -29,14 +29,31 @@ const getModuleService = (): ModuleService => {
 };
 
 // In-memory JTI blacklist for server-side token revocation on logout.
-const _jtiBlacklist = new Set<string>();
-export const addToBlacklist = (jti: string): void => { _jtiBlacklist.add(jti); };
+// Each entry stores the expiry timestamp (ms) so expired JTIs are pruned
+// automatically on access, preventing unbounded memory growth.
+const _jtiBlacklist = new Map<string, number>();
+
+export const addToBlacklist = (jti: string, expiresAt?: number): void => {
+  const exp = expiresAt ?? Date.now() + 24 * 60 * 60 * 1000; // default: 24 h
+  _jtiBlacklist.set(jti, exp);
+};
+
+const _isBlacklisted = (jti: string): boolean => {
+  const exp = _jtiBlacklist.get(jti);
+  if (exp === undefined) return false;
+  if (Date.now() > exp) {
+    _jtiBlacklist.delete(jti); // prune expired entry on access
+    return false;
+  }
+  return true;
+};
 
 // Extend Express Request to include user and token JTI
 declare module 'express-serve-static-core' {
   interface Request {
     user?: User;
     tokenJti?: string;
+    tokenExp?: number; // ms timestamp of token expiry, used to set blacklist TTL
   }
 }
 
@@ -95,7 +112,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    if (decodedToken.jti && _jtiBlacklist.has(decodedToken.jti)) {
+    if (decodedToken.jti && _isBlacklisted(decodedToken.jti)) {
       return res.status(401).json({
         success: false,
         error: {
@@ -105,7 +122,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    if (decodedToken.jti) req.tokenJti = decodedToken.jti;
+    if (decodedToken.jti) {
+      req.tokenJti = decodedToken.jti;
+      if (decodedToken.exp) req.tokenExp = decodedToken.exp * 1000; // convert JWT seconds to ms
+    }
 
     const pool = database.getPool();
     const userService = new UserService(pool);

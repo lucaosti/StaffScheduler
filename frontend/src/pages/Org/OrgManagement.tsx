@@ -460,11 +460,11 @@ const OrgManagement: React.FC = () => {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>User</th>
-                    <th>From → To</th>
-                    <th>Range</th>
-                    <th>Status</th>
-                    <th className="text-end">Actions</th>
+                    <th scope="col">User</th>
+                    <th scope="col">From → To</th>
+                    <th scope="col">Range</th>
+                    <th scope="col">Status</th>
+                    <th scope="col" className="text-end">Actions</th>
                   </tr>
                 </thead>
                 <tbody>

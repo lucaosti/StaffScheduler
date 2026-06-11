@@ -423,31 +423,29 @@ export class DepartmentService {
         throw new Error('Department not found');
       }
 
-      // Assign each user
-      for (const userId of userIds) {
-        // Check if user exists and is active
-        const [userRows] = await connection.execute<RowDataPacket[]>(
-          'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
-          [userId]
+      if (userIds.length === 0) {
+        await connection.commit();
+        return;
+      }
+
+      // Verify all users exist and are active in one query
+      const placeholders = userIds.map(() => '?').join(', ');
+      const [validUserRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT id FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
+        userIds
+      );
+      const validIds = new Set((validUserRows as RowDataPacket[]).map(r => r.id as number));
+      const skipped = userIds.filter(id => !validIds.has(id));
+      if (skipped.length > 0) logger.warn(`Skipping invalid users: ${skipped.join(', ')}`);
+
+      const toAssign = userIds.filter(id => validIds.has(id));
+      if (toAssign.length > 0) {
+        // INSERT IGNORE handles already-assigned rows without a pre-check query
+        const valPlaceholders = toAssign.map(() => '(?, ?)').join(', ');
+        await connection.execute(
+          `INSERT IGNORE INTO user_departments (user_id, department_id) VALUES ${valPlaceholders}`,
+          toAssign.flatMap(userId => [userId, departmentId])
         );
-
-        if (userRows.length === 0) {
-          logger.warn(`Skipping invalid user: ${userId}`);
-          continue;
-        }
-
-        // Check if already assigned
-        const [existing] = await connection.execute<RowDataPacket[]>(
-          'SELECT id FROM user_departments WHERE user_id = ? AND department_id = ? LIMIT 1',
-          [userId, departmentId]
-        );
-
-        if (existing.length === 0) {
-          await connection.execute(
-            'INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)',
-            [userId, departmentId]
-          );
-        }
       }
 
       await connection.commit();

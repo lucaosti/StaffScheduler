@@ -13,6 +13,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { bulkImportEmployeesBody, bulkImportShiftsBody } from '../schemas';
 import { BulkImportService } from '../services/BulkImportService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -25,20 +27,10 @@ export const createBulkImportRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requirePermission('employee.manage'));
 
-  router.post('/employees', async (req: Request, res: Response) => {
-    const csv = req.body?.csv as string | undefined;
-    const password = req.body?.defaultPassword as string | undefined;
-    if (!csv) {
-      return respondError(res, 400, 'VALIDATION_ERROR', 'csv body is required');
-    }
-    if (!password) {
-      return respondError(res, 400, 'MISSING_FIELD', 'defaultPassword is required for bulk import');
-    }
-    if (password.length < 8) {
-      return respondError(res, 400, 'VALIDATION_ERROR', 'defaultPassword must be at least 8 characters');
-    }
+  router.post('/employees', validateBody(bulkImportEmployeesBody), async (_req: Request, res: Response) => {
+    const { csv, defaultPassword } = res.locals.body as { csv: string; defaultPassword: string };
     try {
-      const result = await service.importEmployees(csv, password);
+      const result = await service.importEmployees(csv, defaultPassword);
       const status = result.errors.length > 0 ? 400 : 200;
       res.status(status).json({ success: result.errors.length === 0, data: result });
     } catch (err) {
@@ -46,11 +38,8 @@ export const createBulkImportRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/shifts', async (req: Request, res: Response) => {
-    const csv = req.body?.csv as string | undefined;
-    if (!csv) {
-      return respondError(res, 400, 'VALIDATION_ERROR', 'csv body is required');
-    }
+  router.post('/shifts', validateBody(bulkImportShiftsBody), async (_req: Request, res: Response) => {
+    const { csv } = res.locals.body as { csv: string };
     try {
       const result = await service.importShifts(csv);
       const status = result.errors.length > 0 ? 400 : 200;

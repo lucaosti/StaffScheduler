@@ -20,12 +20,14 @@ import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { loginBody } from '../schemas';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { logger } from '../config/logger';
 
 import { config } from '../config';
 
-const isProduction = process.env.NODE_ENV === 'production';
+const isProduction = config.server.env === 'production';
 
 const JWT_COOKIE_NAME = 'token';
 const JWT_COOKIE_OPTIONS = {
@@ -53,7 +55,7 @@ export const createAuthRouter = (pool: Pool) => {
    * The limiter is intentionally lenient under `NODE_ENV === 'test'` so the
    * integration suites can call `/login` repeatedly without hitting 429.
    */
-  const isTestEnv = process.env.NODE_ENV === 'test';
+  const isTestEnv = config.server.env === 'test';
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: isTestEnv ? 1000 : 10,
@@ -93,20 +95,9 @@ export const createAuthRouter = (pool: Pool) => {
  *   }
  * }
  */
-router.post('/login', loginLimiter, async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Request, res: Response) => {
   try {
-    const { email, password } = req.body;
-
-    // Input validation
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Email and password are required'
-        }
-      });
-    }
+    const { email, password } = res.locals.body as { email: string; password: string };
 
     // Authenticate user and generate token
     const user = await userService.validatePassword(email, password);
@@ -140,7 +131,6 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     res.json({
       success: true,
       data: {
-        token,
         user: {
           id: user.id,
           email: user.email,
@@ -227,7 +217,6 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
       success: true,
       data: {
         user: userWithoutPassword,
-        token
       }
     });
   } catch (error) {
@@ -255,7 +244,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
  */
 router.post('/logout', authenticate, (req: Request, res: Response) => {
   if (req.tokenJti) {
-    addToBlacklist(req.tokenJti);
+    addToBlacklist(req.tokenJti, req.tokenExp);
   }
   res.clearCookie(JWT_COOKIE_NAME);
   res.json({

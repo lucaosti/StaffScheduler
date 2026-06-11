@@ -103,10 +103,10 @@ const MemberList: React.FC<Props> = ({
             <table className="table">
               <thead>
                 <tr>
-                  <th>User</th>
-                  <th>Primary</th>
-                  <th>Assigned</th>
-                  <th className="text-end">Actions</th>
+                  <th scope="col">User</th>
+                  <th scope="col">Primary</th>
+                  <th scope="col">Assigned</th>
+                  <th scope="col" className="text-end">Actions</th>
                 </tr>
               </thead>
               <tbody>

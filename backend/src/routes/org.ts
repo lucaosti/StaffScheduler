@@ -24,7 +24,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody } from '../schemas';
+import { idParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
@@ -212,9 +212,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/approve', requirePermission('loan.approve'), async (req: Request, res: Response) => {
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const updated = await loans.approve(Number(req.params.id), req.user!.id, req.body?.notes ?? null);
+      const updated = await loans.approve(Number(req.params.id), req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -226,9 +226,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/reject', requirePermission('loan.approve'), async (req: Request, res: Response) => {
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const updated = await loans.reject(Number(req.params.id), req.user!.id, req.body?.notes ?? null);
+      const updated = await loans.reject(Number(req.params.id), req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
