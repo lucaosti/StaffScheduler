@@ -74,7 +74,7 @@ npm start                  # http://localhost:3000
 ```
 
 > **Note**: `react-scripts@5.0.1` (Create React App) is unmaintained since October 2022.
-> `npm audit` reports 13 HIGH-severity findings — all in CRA's build toolchain (nth-check, serialize-javascript, svgo, etc.), none in the production JS bundle. They cannot be resolved without migrating to Vite. See DOCUMENTATION.md §Future Work.
+> `npm audit` reports findings only in CRA's development toolchain (webpack-dev-server, sockjs, postcss, etc.) — none reach the production JS bundle, and `npm audit --omit=dev` is clean. They cannot be resolved without migrating to Vite. See DOCUMENTATION.md §Future Work.
 
 ### First admin user
 
