@@ -23,7 +23,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
-import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody } from '../schemas';
+import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
@@ -121,12 +121,12 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
       const updated = await exceptions.approve(
         Number(req.params.id),
         req.user!.id,
-        req.body?.notes ?? null
+        (res.locals.body.notes as string | null | undefined) ?? null
       );
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -136,12 +136,12 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
       const updated = await exceptions.reject(
         Number(req.params.id),
         req.user!.id,
-        req.body?.notes ?? null
+        (res.locals.body.notes as string | null | undefined) ?? null
       );
       res.json({ success: true, data: updated });
     } catch (err) {

@@ -106,8 +106,8 @@ const Reports: React.FC = () => {
               <table className="table table-sm mb-0">
                 <thead>
                   <tr>
-                    <th>User</th>
-                    <th className="text-end">Hours</th>
+                    <th scope="col">User</th>
+                    <th scope="col" className="text-end">Hours</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -139,9 +139,9 @@ const Reports: React.FC = () => {
               <table className="table table-sm mb-0">
                 <thead>
                   <tr>
-                    <th>Department</th>
-                    <th className="text-end">Hours</th>
-                    <th className="text-end">Cost</th>
+                    <th scope="col">Department</th>
+                    <th scope="col" className="text-end">Hours</th>
+                    <th scope="col" className="text-end">Cost</th>
                   </tr>
                 </thead>
                 <tbody>

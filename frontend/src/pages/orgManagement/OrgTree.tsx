@@ -132,10 +132,10 @@ const OrgTree: React.FC<Props> = ({
         <table className="table table-hover">
           <thead>
             <tr>
-              <th>Unit</th>
-              <th>Manager</th>
-              <th>Status</th>
-              <th className="text-end">Actions</th>
+              <th scope="col">Unit</th>
+              <th scope="col">Manager</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>

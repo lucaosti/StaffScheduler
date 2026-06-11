@@ -217,12 +217,12 @@ const Employees: React.FC = () => {
             <table className="table table-hover mb-0">
               <thead>
                 <tr>
-                  <th>Employee</th>
-                  <th>Department</th>
-                  <th>Position</th>
-                  <th>Hourly Rate</th>
-                  <th>Status</th>
-                  <th style={{ width: '120px' }}>Actions</th>
+                  <th scope="col">Employee</th>
+                  <th scope="col">Department</th>
+                  <th scope="col">Position</th>
+                  <th scope="col">Hourly Rate</th>
+                  <th scope="col">Status</th>
+                  <th scope="col" style={{ width: '120px' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
