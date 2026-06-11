@@ -25,6 +25,8 @@ jest.mock('../../contexts/AuthContext', () => ({
 
 // eslint-disable-next-line import/first
 import Login from './Login';
+// eslint-disable-next-line import/first
+import { ApiError } from '../../services/apiUtils';
 
 describe('<Login />', () => {
   beforeEach(() => {
@@ -64,5 +66,35 @@ describe('<Login />', () => {
     await userEvent.click(screen.getByRole('button', { name: /sign in|login|submit/i }));
     expect(await screen.findByText(/invalid email or password/i)).toBeInTheDocument();
     expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('reveals the 2FA field on TOTP_REQUIRED and resubmits with the code', async () => {
+    mockLogin.mockRejectedValueOnce(
+      new ApiError('Two-factor authentication code required', 401, 'TOTP_REQUIRED')
+    );
+    render(<Login />);
+    await userEvent.type(
+      screen.getByRole('textbox', { name: /email/i }),
+      'a@x.com'
+    );
+    await userEvent.type(screen.getByLabelText(/^password/i), 'pw');
+    await userEvent.click(screen.getByRole('button', { name: /sign in|login|submit/i }));
+
+    // The code field appears; no error alert is shown for this state.
+    const codeField = await screen.findByLabelText(/two-factor code/i);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    mockLogin.mockResolvedValueOnce(undefined);
+    await userEvent.type(codeField, '123456');
+    await userEvent.click(screen.getByRole('button', { name: /sign in|login|submit/i }));
+
+    await waitFor(() =>
+      expect(mockLogin).toHaveBeenLastCalledWith({
+        email: 'a@x.com',
+        password: 'pw',
+        totpCode: '123456',
+      })
+    );
+    expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
   });
 });

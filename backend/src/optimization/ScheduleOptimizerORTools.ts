@@ -137,6 +137,10 @@ export interface CandidateContext {
 export class ScheduleOptimizer {
   private pythonScriptPath: string;
 
+  // Memoizes the id → shift index per problem instance so overlap checks are
+  // O(1) per lookup instead of scanning the full shift list every time.
+  private _shiftsByIdCache = new WeakMap<Shift[], Map<string, Shift>>();
+
   constructor() {
     // Path to Python optimizer script
     this.pythonScriptPath = join(__dirname, '../../optimization-scripts/schedule_optimizer.py');
@@ -450,6 +454,9 @@ export class ScheduleOptimizer {
    *   being staffed. The CP-SAT path handles this globally.
    * - Weekly hours are not tracked across the full schedule period; only the
    *   per-day budget is enforced here.
+   * - Overlap detection only compares shifts that share the same date. An
+   *   overnight shift is detected against same-date shifts, but not against a
+   *   next-day shift it spills into. The CP-SAT path handles this globally.
    */
   async generateGreedySchedule(problem: OptimizationProblem): Promise<ScheduleAssignment[]> {
     logger.info('Generating greedy schedule as fallback');
@@ -518,8 +525,13 @@ export class ScheduleOptimizer {
     assignedShiftIds: Set<string>,
     allShifts: Shift[]
   ): boolean {
+    let shiftsById = this._shiftsByIdCache.get(allShifts);
+    if (!shiftsById) {
+      shiftsById = new Map(allShifts.map((s) => [s.id, s]));
+      this._shiftsByIdCache.set(allShifts, shiftsById);
+    }
     for (const shiftId of assignedShiftIds) {
-      const assignedShift = allShifts.find((s) => s.id === shiftId);
+      const assignedShift = shiftsById.get(shiftId);
       if (assignedShift && assignedShift.date === shift.date) {
         // Check time overlap
         if (
@@ -539,9 +551,14 @@ export class ScheduleOptimizer {
 
   private _timesOverlap(start1: string, end1: string, start2: string, end2: string): boolean {
     const s1 = this._timeToMinutes(start1);
-    const e1 = this._timeToMinutes(end1);
+    let e1 = this._timeToMinutes(end1);
     const s2 = this._timeToMinutes(start2);
-    const e2 = this._timeToMinutes(end2);
+    let e2 = this._timeToMinutes(end2);
+
+    // Normalize overnight ranges (e.g. 22:00–06:00) so a shift crossing
+    // midnight is still detected as overlapping same-date shifts.
+    if (e1 <= s1) e1 += 24 * 60;
+    if (e2 <= s2) e2 += 24 * 60;
 
     return !(e1 <= s2 || e2 <= s1);
   }

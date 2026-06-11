@@ -181,9 +181,24 @@ describe('twoFactor route error handlers', () => {
     expect(res.status).toBe(500);
   });
 
-  it('POST /disable 500 when service throws', async () => {
-    (TwoFactorService.prototype.disable as jest.Mock).mockRejectedValueOnce(new Error('db'));
+  it('POST /disable 400 when no code is supplied', async () => {
     const res = await request(app()).post('/api/auth/2fa/disable').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('POST /disable 401 when the code is invalid', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock).mockResolvedValueOnce(false);
+    (TwoFactorService.prototype.consumeRecoveryCode as jest.Mock).mockResolvedValueOnce(false);
+    const res = await request(app()).post('/api/auth/2fa/disable').send({ code: '000000' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('TOTP_INVALID');
+  });
+
+  it('POST /disable 500 when service throws', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock).mockResolvedValueOnce(true);
+    (TwoFactorService.prototype.disable as jest.Mock).mockRejectedValueOnce(new Error('db'));
+    const res = await request(app()).post('/api/auth/2fa/disable').send({ code: '123456' });
     expect(res.status).toBe(500);
   });
 
