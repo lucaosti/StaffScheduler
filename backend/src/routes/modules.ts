@@ -11,6 +11,8 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ModuleService } from '../services/ModuleService';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { moduleEnabledBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createModulesRouter = (pool: Pool): Router => {
@@ -27,16 +29,10 @@ export const createModulesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/:code', authenticate, requirePermission('settings.manage'), async (req: Request, res: Response) => {
+  router.put('/:code', authenticate, requirePermission('settings.manage'), validateBody(moduleEnabledBody), async (req: Request, res: Response) => {
     try {
       const { code } = req.params;
-      const { isEnabled } = req.body;
-      if (typeof isEnabled !== 'boolean') {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'isEnabled (boolean) is required' },
-        });
-      }
+      const { isEnabled } = res.locals.body;
       const updated = await moduleService.setEnabled(code, isEnabled);
       res.json({ success: true, data: updated, message: `Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}` });
     } catch (error: any) {

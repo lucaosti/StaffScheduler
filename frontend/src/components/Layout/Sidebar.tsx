@@ -116,21 +116,23 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
         {!collapsed && 'Staff Scheduler'}
       </div>
       
-      <ul className="sidebar-nav">
-        {filteredMenuItems.map((item) => (
-          <li key={item.path} className="sidebar-nav-item">
-            <NavLink
-              to={item.path}
-              className={({ isActive }) =>
-                `sidebar-nav-link ${isActive ? 'active' : ''}`
-              }
-            >
-              <i className={item.icon}></i>
-              {!collapsed && item.label}
-            </NavLink>
-          </li>
-        ))}
-      </ul>
+      <nav aria-label="Main navigation">
+        <ul className="sidebar-nav">
+          {filteredMenuItems.map((item) => (
+            <li key={item.path} className="sidebar-nav-item">
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  `sidebar-nav-link ${isActive ? 'active' : ''}`
+                }
+              >
+                <i className={item.icon}></i>
+                {!collapsed && item.label}
+              </NavLink>
+            </li>
+          ))}
+        </ul>
+      </nav>
 
       <div className="mt-auto p-3 border-top">
         {user && (

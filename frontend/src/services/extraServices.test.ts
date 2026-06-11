@@ -289,7 +289,7 @@ describe('scheduleService extra', () => {
 
 describe('authService extra', () => {
   it('refreshToken POSTs', async () => {
-    await authService.refreshToken('jwt-token');
+    await authService.refreshToken();
     expect(lastInit().method).toBe('POST');
   });
 });

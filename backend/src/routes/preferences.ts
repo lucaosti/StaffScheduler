@@ -12,6 +12,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateParams, validateBody } from '../middleware/validation';
+import { userIdParam, upsertPreferencesBody } from '../schemas';
 import { PreferencesService } from '../services/PreferencesService';
 import { logger } from '../config/logger';
 
@@ -35,18 +37,18 @@ export const createPreferencesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/me', async (req: Request, res: Response) => {
+  router.put('/me', validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
     try {
-      const data = await service.upsert(req.user!.id, req.body || {});
+      const data = await service.upsert(_req.user!.id, res.locals.body);
       res.json({ success: true, data });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
     }
   });
 
-  router.get('/:userId', requirePermission('preferences.manage'), async (req: Request, res: Response) => {
+  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), async (_req: Request, res: Response) => {
     try {
-      const userId = Number(req.params.userId);
+      const userId = res.locals.params.userId;
       const data = await service.getByUserId(userId);
       res.json({ success: true, data });
     } catch (err) {
@@ -55,10 +57,10 @@ export const createPreferencesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/:userId', requirePermission('preferences.manage'), async (req: Request, res: Response) => {
+  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
     try {
-      const userId = Number(req.params.userId);
-      const data = await service.upsert(userId, req.body || {});
+      const userId = res.locals.params.userId;
+      const data = await service.upsert(userId, res.locals.body);
       res.json({ success: true, data });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

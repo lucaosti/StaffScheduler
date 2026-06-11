@@ -20,7 +20,7 @@ export interface SystemInfo {
 export const getSystemInfo = async (): Promise<ApiResponse<SystemInfo>> => {
   const response = await fetch(`${API_BASE_URL}/system/info`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   return handleResponse<SystemInfo>(response);
 };

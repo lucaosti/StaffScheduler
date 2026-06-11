@@ -33,7 +33,7 @@ interface UpsertPreferencesInput {
 export const getMyPreferences = async (): Promise<ApiResponse<UserPreferences>> => {
   const response = await fetch(`${API_BASE_URL}/preferences/me`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   return handleResponse<UserPreferences>(response);
 };
@@ -43,7 +43,7 @@ export const updateMyPreferences = async (
 ): Promise<ApiResponse<UserPreferences>> => {
   const response = await fetch(`${API_BASE_URL}/preferences/me`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify(input),
   });
   return handleResponse<UserPreferences>(response);

@@ -7,7 +7,7 @@
  */
 
 import { ApiResponse } from '../types';
-import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
+import { AUTH_HEADERS, handleResponse, API_BASE_URL } from './apiUtils';
 
 
 export interface Department {
@@ -20,8 +20,9 @@ export interface Department {
 
 const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
   const res = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: 'include',
     ...init,
-    headers: { ...getAuthHeaders(), ...(init.headers || {}) },
+    headers: { ...AUTH_HEADERS, ...(init.headers as Record<string, string> ?? {}) },
   });
   return handleResponse<T>(res);
 };

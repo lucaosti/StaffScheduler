@@ -22,7 +22,7 @@ import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> => {
   const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
 
   return handleResponse<DashboardStats>(response);
@@ -32,7 +32,7 @@ export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => 
   try {
     const response = await fetch(`${API_BASE_URL}/audit-logs?limit=${limit}`, {
       method: 'GET',
-      headers: getAuthHeaders(),
+      ...getAuthHeaders(),
     });
     if (!response.ok) return [];
     const body = await response.json();
