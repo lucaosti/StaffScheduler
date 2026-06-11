@@ -388,7 +388,3 @@ export interface SystemSetting {
   createdAt: Date;
   updatedAt: Date;
 }
-
-export interface UpdateSystemSettingRequest {
-  value: string;
-}

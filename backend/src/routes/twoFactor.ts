@@ -12,6 +12,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { twoFactorCodeBody } from '../schemas';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { logger } from '../config/logger';
 
@@ -35,10 +37,10 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/enable', async (req: Request, res: Response) => {
+  router.post('/enable', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
     try {
-      const code = (req.body?.code as string | undefined) ?? '';
-      const data = await service.confirmEnable(req.user!.id, code);
+      const code = res.locals.body.code as string;
+      const data = await service.confirmEnable(_req.user!.id, code);
       res.json({ success: true, data });
     } catch (err) {
       respondError(res, 400, 'TOTP_ENABLE_FAILED', (err as Error).message);
@@ -55,10 +57,10 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/verify', async (req: Request, res: Response) => {
+  router.post('/verify', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
     try {
-      const code = (req.body?.code as string | undefined) ?? '';
-      const ok = await service.verifyCode(req.user!.id, code);
+      const code = res.locals.body.code as string;
+      const ok = await service.verifyCode(_req.user!.id, code);
       res.json({ success: true, data: { valid: ok } });
     } catch (err) {
       logger.error('2fa verify error:', err);

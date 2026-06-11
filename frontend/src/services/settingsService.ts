@@ -23,7 +23,7 @@ interface SystemSetting {
 export const getSystemSettings = async (): Promise<ApiResponse<SystemSetting[]>> => {
   const response = await fetch(`${API_BASE_URL}/settings`, {
     method: 'GET',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
   });
   return handleResponse<SystemSetting[]>(response);
 };
@@ -31,7 +31,7 @@ export const getSystemSettings = async (): Promise<ApiResponse<SystemSetting[]>>
 export const updateCurrency = async (currency: string): Promise<ApiResponse<{ currency: string }>> => {
   const response = await fetch(`${API_BASE_URL}/settings/currency`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify({ currency }),
   });
   return handleResponse<{ currency: string }>(response);
@@ -42,7 +42,7 @@ export const updateTimePeriod = async (
 ): Promise<ApiResponse<{ timePeriod: string }>> => {
   const response = await fetch(`${API_BASE_URL}/settings/time-period`, {
     method: 'PUT',
-    headers: getAuthHeaders(),
+    ...getAuthHeaders(),
     body: JSON.stringify({ timePeriod }),
   });
   return handleResponse<{ timePeriod: string }>(response);

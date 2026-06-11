@@ -23,7 +23,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
-import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody } from '../schemas';
+import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
@@ -47,11 +47,11 @@ export const createPoliciesRouter = (pool: Pool): Router => {
 
   // ------------- Validation -------------
 
-  router.post('/validate/assignment', async (req: Request, res: Response) => {
+  router.post('/validate/assignment', validateBody(validateAssignmentBody), async (_req: Request, res: Response) => {
     try {
       const result = await validator.validateAssignment({
-        userId: Number(req.body?.userId),
-        shiftId: Number(req.body?.shiftId),
+        userId: res.locals.body.userId,
+        shiftId: res.locals.body.shiftId,
       });
       res.json({ success: true, data: result });
     } catch (err) {
@@ -72,9 +72,9 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/approval-matrix/:changeType', requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.put('/approval-matrix/:changeType', requirePermission('approval.manage'), validateBody(updateApprovalMatrixBody), async (req: Request, res: Response) => {
     try {
-      const updated = await matrix.update(req.params.changeType, req.body ?? {});
+      const updated = await matrix.update(req.params.changeType, res.locals.body);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;

@@ -18,7 +18,7 @@ import { Pool } from 'mysql2/promise';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createApprovalWorkflowBody, updateApprovalWorkflowBody } from '../schemas';
+import { idParam, createApprovalWorkflowBody, updateApprovalWorkflowBody, escalateBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
@@ -26,9 +26,9 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   const engine = new ApprovalEngineService(pool);
 
   // Escalation trigger — called by cron or admin; requires approval.manage
-  router.post('/escalate', authenticate, requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.post('/escalate', authenticate, requirePermission('approval.manage'), validateBody(escalateBody), async (_req: Request, res: Response) => {
     try {
-      const nowIso: string | undefined = req.body?.now ?? undefined;
+      const nowIso: string | undefined = res.locals.body.now ?? undefined;
       const overdue = await engine.processEscalations(nowIso);
       res.json({ success: true, data: { overdue, count: overdue.length } });
     } catch (error) {

@@ -20,7 +20,7 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 
 // Layout Components
@@ -29,16 +29,8 @@ import ProtectedRoute from './components/Auth/ProtectedRoute';
 import PermissionRoute from './components/Auth/PermissionRoute';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// Page Components
+// Eagerly loaded — these are tiny and always needed at first render
 import Login from './pages/Auth/Login';
-import Dashboard from './pages/Dashboard/Dashboard';
-import Employees from './pages/Employees/Employees';
-import Shifts from './pages/Shifts/Shifts';
-import Schedule from './pages/Schedule/Schedule';
-import Reports from './pages/Reports/Reports';
-import Settings from './pages/Settings/Settings';
-import OrgManagement from './pages/Org/OrgManagement';
-import Policies from './pages/Policies/Policies';
 
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
@@ -47,6 +39,16 @@ import { I18nProvider } from './i18n/I18nContext';
 
 // Chrome
 import DemoBanner from './components/DemoBanner';
+
+// Lazily loaded page components — split into separate chunks
+const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
+const Employees = lazy(() => import('./pages/Employees/Employees'));
+const Shifts = lazy(() => import('./pages/Shifts/Shifts'));
+const Schedule = lazy(() => import('./pages/Schedule/Schedule'));
+const Reports = lazy(() => import('./pages/Reports/Reports'));
+const Settings = lazy(() => import('./pages/Settings/Settings'));
+const OrgManagement = lazy(() => import('./pages/Org/OrgManagement'));
+const Policies = lazy(() => import('./pages/Policies/Policies'));
 
 /**
  * Main Application Component
@@ -73,6 +75,7 @@ const App: React.FC = () => {
       <AuthProvider>
         <DemoBanner />
         <ErrorBoundary>
+        <Suspense fallback={null}>
         <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
@@ -128,6 +131,7 @@ const App: React.FC = () => {
           {/* Catch-all route - Redirect unknown paths to dashboard */}
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
+        </Suspense>
         </ErrorBoundary>
       </AuthProvider>
       </I18nProvider>
