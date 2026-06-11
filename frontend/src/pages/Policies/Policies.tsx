@@ -342,11 +342,11 @@ const Policies: React.FC = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Change type</th>
-                  <th>Approver scope</th>
-                  <th>Role</th>
-                  <th>User</th>
-                  <th>Auto approve</th>
+                  <th scope="col">Change type</th>
+                  <th scope="col">Approver scope</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">User</th>
+                  <th scope="col">Auto approve</th>
                 </tr>
               </thead>
               <tbody>

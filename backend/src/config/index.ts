@@ -9,7 +9,7 @@
  * - Environment variable loading with defaults
  * - Type-safe configuration objects
  * - Database connection settings
- * - JWT and session management config
+ * - JWT configuration
  * - Logging configuration
  * - Server and security settings
  * 
@@ -60,18 +60,6 @@ export const config = {
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '30'),
     queueLimit:      parseInt(process.env.DB_QUEUE_LIMIT || '100'),
     connectTimeout:  10_000,
-  },
-  session: {
-    secret: requireSecret('SESSION_SECRET', 'SESSION_SECRET'),
-    name: process.env.SESSION_NAME || 'staff_scheduler_session',
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.SESSION_COOKIE_SECURE === 'true',
-      httpOnly: true,
-      maxAge: parseInt(process.env.SESSION_COOKIE_MAX_AGE || '86400000'), // 24 hours
-      sameSite: 'lax' as const,
-    },
   },
   jwt: {
     secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),

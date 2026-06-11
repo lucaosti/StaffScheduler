@@ -107,12 +107,12 @@ const PolicyList: React.FC<Props> = ({
         <table className="table">
           <thead>
             <tr>
-              <th>Scope</th>
-              <th>Key</th>
-              <th>Value</th>
-              <th>Owner</th>
-              <th>Status</th>
-              <th className="text-end">Actions</th>
+              <th scope="col">Scope</th>
+              <th scope="col">Key</th>
+              <th scope="col">Value</th>
+              <th scope="col">Owner</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>

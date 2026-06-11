@@ -80,8 +80,8 @@ export const createAuthRouter = (pool: Pool) => {
  * @route POST /api/auth/login
  * @body  {string} email    User's email
  * @body  {string} password User's password
- * @returns {Object} `{ success, data: { token, user } }` on success;
- *                   `{ success:false, error:{ code, message } }` otherwise.
+ * @returns Sets an httpOnly "token" cookie and returns `{ success, data: { user } }`.
+ *          The JWT is never exposed in the response body.
  *
  * @example Request
  * { "email": "admin@example.com", "password": "<password>" }
@@ -90,8 +90,7 @@ export const createAuthRouter = (pool: Pool) => {
  * {
  *   "success": true,
  *   "data": {
- *     "token": "<jwt>",
- *     "user": { "id": 1, "email": "admin@example.com", "role": "admin" }
+ *     "user": { "id": 1, "email": "admin@example.com", "roles": [...], "permissions": [...] }
  *   }
  * }
  */
@@ -234,9 +233,9 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
 /**
  * User logout endpoint.
  *
- * With JWT auth this is informational: the client drops the token from
- * storage. A real server-side blacklist would require persistence and is
- * out of scope here (see security backlog item `B001`).
+ * Blacklists the token's JTI so it is rejected on subsequent requests, then
+ * clears the httpOnly cookie. The in-memory blacklist uses TTL-based expiry
+ * (keyed to the token's own exp claim) so entries prune themselves automatically.
  *
  * @route      POST /api/auth/logout
  * @middleware authenticate
