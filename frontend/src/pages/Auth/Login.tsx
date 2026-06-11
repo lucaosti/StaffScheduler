@@ -6,19 +6,21 @@
  * 
  * Features:
  * - Email/password authentication form
+ * - Two-factor (TOTP / recovery code) step when the account has 2FA enabled
  * - Real-time form validation
  * - Loading states during authentication
  * - Error message display
  * - Automatic redirect after successful login
  * - Responsive design with Bootstrap styling
  * - Integration with AuthContext for state management
- * 
+ *
  * @author Luca Ostinelli
  */
 
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { ApiError } from '../../services/apiUtils';
 
 /**
  * Interface for location state with redirect information
@@ -37,9 +39,11 @@ const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({
     email: '',
     password: '',
+    totpCode: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [totpRequired, setTotpRequired] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -53,10 +57,20 @@ const Login: React.FC = () => {
     setError('');
 
     try {
-      await login(credentials);
+      await login({
+        email: credentials.email,
+        password: credentials.password,
+        ...(credentials.totpCode ? { totpCode: credentials.totpCode } : {}),
+      });
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      if (err instanceof ApiError && err.code === 'TOTP_REQUIRED') {
+        // Credentials are valid but the account has 2FA enabled:
+        // reveal the code field instead of surfacing an error.
+        setTotpRequired(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -120,6 +134,29 @@ const Login: React.FC = () => {
                       required
                     />
                   </div>
+
+                  {totpRequired && (
+                    <div className="mb-4">
+                      <label htmlFor="totpCode" className="form-label">
+                        Two-factor code
+                      </label>
+                      <input
+                        type="text"
+                        id="totpCode"
+                        name="totpCode"
+                        className="form-control"
+                        value={credentials.totpCode}
+                        onChange={handleChange}
+                        autoComplete="one-time-code"
+                        inputMode="numeric"
+                        required
+                        autoFocus
+                      />
+                      <div className="form-text">
+                        Enter the code from your authenticator app, or a recovery code.
+                      </div>
+                    </div>
+                  )}
 
                   <button
                     type="submit"

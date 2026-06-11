@@ -100,10 +100,10 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin) {
-          if (config.server.env !== 'production') return callback(null, true);
-          return callback(new Error('Not allowed by CORS'));
-        }
+        // Requests without an Origin header come from non-browser clients
+        // (curl, container healthchecks, server-to-server). CORS only guards
+        // browser cross-origin access, so these are always allowed.
+        if (!origin) return callback(null, true);
         if (config.server.env === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
           return callback(null, true);
         }
@@ -204,7 +204,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
         error: {
           code: err.code || 'INTERNAL_ERROR',
           message:
-            process.env.NODE_ENV === 'production' ? 'An internal error occurred' : err.message,
+            config.server.env === 'production' ? 'An internal error occurred' : err.message,
         },
       });
     }

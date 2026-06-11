@@ -46,6 +46,25 @@ function requireProductionSecret(envVar: string, insecureDefault: string): strin
   return value;
 }
 
+/**
+ * Parses a jsonwebtoken-style duration string ("24h", "7d", "15m", "30s",
+ * or a bare number of seconds) into milliseconds. Falls back to the given
+ * default when the value is not in a recognized format, so the auth cookie
+ * lifetime always stays in lockstep with the JWT expiry.
+ */
+function parseDurationMs(value: string, fallbackMs: number): number {
+  const match = /^(\d+)\s*([smhd])?$/i.exec(value.trim());
+  if (!match) return fallbackMs;
+  const amount = parseInt(match[1], 10);
+  const unit = (match[2] ?? 's').toLowerCase();
+  const multiplier =
+    unit === 's' ? 1_000 :
+    unit === 'm' ? 60_000 :
+    unit === 'h' ? 3_600_000 :
+    86_400_000; // 'd'
+  return amount * multiplier;
+}
+
 export const config = {
   server: {
     port: parseInt(process.env.PORT || '3001'),
@@ -64,6 +83,7 @@ export const config = {
   jwt: {
     secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
+    expiresInMs: parseDurationMs(process.env.JWT_EXPIRES_IN || '24h', 24 * 60 * 60 * 1000),
   },
   email: {
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',

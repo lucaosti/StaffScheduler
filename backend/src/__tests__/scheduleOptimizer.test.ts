@@ -275,6 +275,21 @@ describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
     });
     expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
   });
+
+  it('returns false when an overnight shift overlaps a same-date evening shift', () => {
+    const opt = new ScheduleOptimizer();
+    // s1 runs 22:00 → 06:00 (crosses midnight); s2 runs 23:00 → 23:59 the same
+    // date. Without overnight normalization s1 appears to "end" at 06:00 and
+    // the overlap would be missed.
+    const overnight = buildShift({ id: 's1', start_time: '22:00', end_time: '06:00' });
+    const evening = buildShift({ id: 's2', start_time: '23:00', end_time: '23:59' });
+    const ctx = buildCtx({
+      shift: evening,
+      assignedShiftIds: new Set(['s1']),
+      allShifts: [overnight, evening],
+    });
+    expect(opt.evaluateCandidate(buildEmployee() as any, ctx)).toBe(false);
+  });
 });
 
 describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavailable', () => {

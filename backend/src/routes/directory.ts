@@ -7,7 +7,7 @@
  *   DELETE /api/directory/users/:id/fields/:key  remove a custom field
  *   GET   /api/directory/users/:id/vcard    vCard for a single user
  *   GET   /api/directory/vcard.vcf?ids=…    vCard archive for a list of users
- *   POST  /api/directory/import-vcard       admin-only multipart vCard import
+ *   POST  /api/directory/import-vcard       vCard JSON import (user.manage)
  *
  * @author Luca Ostinelli
  */
@@ -17,7 +17,7 @@ import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
-import { directoryFieldsBody } from '../schemas';
+import { directoryFieldsBody, importVcardBody } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -90,21 +90,24 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .send(vcf);
   });
 
-  router.post('/import-vcard', requirePermission('user.manage'), async (req: Request, res: Response) => {
-    try {
-      const text = typeof req.body === 'string' ? req.body : (req.body?.vcf as string | undefined);
-      if (!text) return error(res, 400, 'VALIDATION_ERROR', 'vcf body required');
-      const defaultPassword = (req.body?.defaultPassword as string | undefined) ?? 'changeme';
-      const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
-      const out = await service.importVcf(text, {
-        defaultPasswordHash: passwordHash,
-        createdBy: req.user!.id,
-      });
-      res.json({ success: true, data: out });
-    } catch (err) {
-      error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
+  router.post(
+    '/import-vcard',
+    requirePermission('user.manage'),
+    validateBody(importVcardBody),
+    async (req: Request, res: Response) => {
+      try {
+        const { vcf, defaultPassword } = res.locals.body as { vcf: string; defaultPassword: string };
+        const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
+        const out = await service.importVcf(vcf, {
+          defaultPasswordHash: passwordHash,
+          createdBy: req.user!.id,
+        });
+        res.json({ success: true, data: out });
+      } catch (err) {
+        error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
+      }
     }
-  });
+  );
 
   return router;
 };

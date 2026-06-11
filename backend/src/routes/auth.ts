@@ -19,6 +19,7 @@ import { Pool } from 'mysql2/promise';
 import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
+import { TwoFactorService } from '../services/TwoFactorService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
 import { loginBody } from '../schemas';
@@ -34,13 +35,16 @@ const JWT_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: isProduction,
   sameSite: 'lax' as const,
-  maxAge: 24 * 60 * 60 * 1000, // 24 hours
+  // Keep the cookie lifetime in lockstep with the JWT expiry so the cookie
+  // never outlives (or prematurely drops) a still-valid token.
+  maxAge: config.jwt.expiresInMs,
 };
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
   const userService = new UserService(pool);
   const rbacService = new RbacService(pool);
+  const twoFactorService = new TwoFactorService(pool);
 
   // Shared JWT signing options, driven by configuration rather than hardcoded.
   const jwtSignOptions: SignOptions = {
@@ -76,10 +80,14 @@ export const createAuthRouter = (pool: Pool) => {
  * User login endpoint.
  *
  * Authenticates a user with email + password credentials and returns a JWT.
+ * When the account has two-factor authentication enabled, a valid TOTP code
+ * (or single-use recovery code) must be supplied as `totpCode`; otherwise the
+ * request is rejected with `TOTP_REQUIRED` / `TOTP_INVALID`.
  *
  * @route POST /api/auth/login
- * @body  {string} email    User's email
- * @body  {string} password User's password
+ * @body  {string} email     User's email
+ * @body  {string} password  User's password
+ * @body  {string} [totpCode] TOTP or recovery code, required when 2FA is enabled
  * @returns Sets an httpOnly "token" cookie and returns `{ success, data: { user } }`.
  *          The JWT is never exposed in the response body.
  *
@@ -96,11 +104,15 @@ export const createAuthRouter = (pool: Pool) => {
  */
 router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Request, res: Response) => {
   try {
-    const { email, password } = res.locals.body as { email: string; password: string };
+    const { email, password, totpCode } = res.locals.body as {
+      email: string;
+      password: string;
+      totpCode?: string;
+    };
 
     // Authenticate user and generate token
     const user = await userService.validatePassword(email, password);
-    
+
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -109,6 +121,33 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Reques
           message: 'Invalid email or password'
         }
       });
+    }
+
+    // Enforce two-factor authentication when the account has it enabled.
+    // The TOTP code is only checked after the password is verified so this
+    // endpoint never leaks whether 2FA is enabled for arbitrary emails.
+    if (await twoFactorService.isEnabled(user.id)) {
+      if (!totpCode) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'TOTP_REQUIRED',
+            message: 'Two-factor authentication code required'
+          }
+        });
+      }
+      const totpValid =
+        (await twoFactorService.verifyCode(user.id, totpCode)) ||
+        (await twoFactorService.consumeRecoveryCode(user.id, totpCode));
+      if (!totpValid) {
+        return res.status(401).json({
+          success: false,
+          error: {
+            code: 'TOTP_INVALID',
+            message: 'Invalid two-factor authentication code'
+          }
+        });
+      }
     }
 
     // Resolve effective permissions/roles so the client can gate its UI.

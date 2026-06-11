@@ -268,9 +268,12 @@ describe('two-factor router', () => {
     expect(res.status).toBe(200);
   });
 
-  it('POST /disable returns ok', async () => {
+  it('POST /disable returns ok with a valid code', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
     (TwoFactorService.prototype.disable as jest.Mock) = jest.fn().mockResolvedValue(undefined);
-    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool))).post('/api/auth/2fa/disable');
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/disable')
+      .send({ code: '123456' });
     expect(res.status).toBe(200);
   });
 
@@ -370,7 +373,10 @@ describe('directory router', () => {
       .mockResolvedValue({ inserted: 1, skipped: [] });
     const res = await request(mountApp('/api/directory', createDirectoryRouter(fakePool)))
       .post('/api/directory/import-vcard')
-      .send({ vcf: 'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nEMAIL:x@y.com\r\nEND:VCARD\r\n' });
+      .send({
+        vcf: 'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nEMAIL:x@y.com\r\nEND:VCARD\r\n',
+        defaultPassword: 'initial-password-1',
+      });
     expect(res.status).toBe(200);
   });
 });

@@ -24,7 +24,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody } from '../schemas';
+import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
@@ -150,9 +150,11 @@ export const createOrgRouter = (pool: Pool): Router => {
   router.patch(
     '/units/:id/members/:userId/primary',
     requirePermission('employee.manage'),
-    async (req: Request, res: Response) => {
+    validateParams(idAndUserIdParam),
+    async (_req: Request, res: Response) => {
       try {
-        await units.setPrimary(Number(req.params.userId), Number(req.params.id));
+        const { id, userId } = res.locals.params;
+        await units.setPrimary(userId, id);
         res.json({ success: true });
       } catch (err) {
         const msg = (err as Error).message;
@@ -165,9 +167,11 @@ export const createOrgRouter = (pool: Pool): Router => {
   router.delete(
     '/units/:id/members/:userId',
     requirePermission('employee.manage'),
-    async (req: Request, res: Response) => {
+    validateParams(idAndUserIdParam),
+    async (_req: Request, res: Response) => {
       try {
-        await units.removeMember(Number(req.params.userId), Number(req.params.id));
+        const { id, userId } = res.locals.params;
+        await units.removeMember(userId, id);
         res.json({ success: true });
       } catch (err) {
         respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

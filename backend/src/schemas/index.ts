@@ -340,6 +340,8 @@ export const updateSettingValueBody = z.object({
 export const loginBody = z.object({
   email: z.string().min(1, 'email is required'),
   password: z.string().min(1, 'password is required'),
+  // TOTP or recovery code; required only when the account has 2FA enabled.
+  totpCode: z.string().min(1).optional(),
 });
 
 export const optionalNotesBody = z.object({
@@ -353,4 +355,9 @@ export const bulkImportEmployeesBody = z.object({
 
 export const bulkImportShiftsBody = z.object({
   csv: z.string().min(1, 'csv is required'),
+});
+
+export const importVcardBody = z.object({
+  vcf: z.string().min(1, 'vcf is required'),
+  defaultPassword: z.string().min(8, 'defaultPassword must be at least 8 characters'),
 });
