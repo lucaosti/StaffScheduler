@@ -47,7 +47,7 @@ describe('NotificationService.listForUser', () => {
     execute.mockResolvedValueOnce([[], null]);
     const service = new NotificationService(pool);
     await service.listForUser(7, { limit: 9999 });
-    expect(execute.mock.calls[0][0]).toMatch(/LIMIT 200/);
+    expect(execute.mock.calls[0][1]).toContain(200);
   });
 
   it('filters unread only when requested', async () => {

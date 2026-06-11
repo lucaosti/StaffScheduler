@@ -10,6 +10,7 @@ import {
   userIdParam,
   createScheduleBody,
   duplicateScheduleBody,
+  updateScheduleBody,
 } from '../schemas';
 import { logger } from '../config/logger';
 
@@ -138,7 +139,7 @@ router.post('/', authenticate, requirePermission('schedule.manage'), validateBod
 });
 
 // Update schedule
-router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 

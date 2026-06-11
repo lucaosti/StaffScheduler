@@ -24,6 +24,8 @@ import {
   scheduleIdParam,
   departmentIdParam,
   createShiftBody,
+  createShiftTemplateBody,
+  updateShiftTemplateBody,
 } from '../schemas';
 import { logger } from '../config/logger';
 
@@ -71,10 +73,9 @@ router.get('/templates/:id', authenticate, validateParams(idParam), async (_req:
 });
 
 // Create new shift template
-router.post('/templates', authenticate, requirePermission('shift.manage'), async (req: Request, res: Response) => {
+router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (req: Request, res: Response) => {
   try {
-    const templateId = await shiftService.createShiftTemplate(req.body);
-    const template = await shiftService.getShiftTemplateById(templateId);
+    const template = await shiftService.createShiftTemplate(req.body);
 
     res.status(201).json({
       success: true,
@@ -91,7 +92,7 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), async
 });
 
 // Update shift template
-router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 

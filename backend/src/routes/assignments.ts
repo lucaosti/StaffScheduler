@@ -10,6 +10,7 @@ import {
   departmentIdParam,
   createAssignmentBody,
   bulkCreateAssignmentsBody,
+  updateAssignmentBody,
 } from '../schemas';
 import { User } from '../types';
 import { logger } from '../config/logger';
@@ -87,7 +88,7 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
 });
 
 // Update assignment
-router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 

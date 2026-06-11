@@ -80,3 +80,71 @@ export const createDepartmentBody = z.object({
 export const addUserToDepartmentBody = z.object({
   userId: z.number().int().positive(),
 });
+
+export const updateUserBody = z.object({
+  email: z.string().email().optional(),
+  password: z.string().min(8).optional(),
+  firstName: z.string().min(1).optional(),
+  lastName: z.string().min(1).optional(),
+  roleIds: z.array(z.number().int().positive()).optional(),
+  employeeId: z.string().optional(),
+  phone: z.string().optional(),
+  position: z.string().optional(),
+  hourlyRate: z.number().nonnegative().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const updateScheduleBody = z.object({
+  name: z.string().min(1).optional(),
+  startDate: z.string().optional(),
+  endDate: z.string().optional(),
+  status: z.enum(['draft', 'published', 'archived']).optional(),
+  departmentId: z.number().int().positive().optional(),
+  notes: z.string().optional(),
+});
+
+export const updateAssignmentBody = z.object({
+  status: z.string().optional(),
+  notes: z.string().optional(),
+});
+
+export const createShiftTemplateBody = z.object({
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  departmentId: z.number().int().positive(),
+  startTime: z.string().min(1, 'Start time is required'),
+  endTime: z.string().min(1, 'End time is required'),
+  minStaff: z.number().int().nonnegative(),
+  maxStaff: z.number().int().positive(),
+});
+
+export const updateShiftTemplateBody = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  minStaff: z.number().int().nonnegative().optional(),
+  maxStaff: z.number().int().positive().optional(),
+});
+
+const approvalStepBody = z.object({
+  stepOrder: z.number().int().positive(),
+  approverScope: z.enum(['direct_manager', 'department_head', 'hr_manager', 'company_user', 'role_based', 'unit_manager_chain']),
+  approverRoleId: z.number().int().positive().nullable().optional(),
+  approverUserId: z.number().int().positive().nullable().optional(),
+  autoApproveForOwner: z.boolean().optional(),
+  escalateAfterHours: z.number().int().positive().nullable().optional(),
+});
+
+export const createApprovalWorkflowBody = z.object({
+  changeType: z.string().min(1, 'changeType is required'),
+  requireAll: z.boolean().optional(),
+  description: z.string().optional(),
+  steps: z.array(approvalStepBody).min(1, 'At least one step is required'),
+});
+
+export const updateApprovalWorkflowBody = z.object({
+  requireAll: z.boolean().optional(),
+  description: z.string().optional(),
+  steps: z.array(approvalStepBody).optional(),
+});
