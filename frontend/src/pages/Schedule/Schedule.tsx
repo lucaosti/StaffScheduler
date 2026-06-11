@@ -418,9 +418,9 @@ const Schedule: React.FC = () => {
               <table className="table table-bordered mb-0">
                 <thead>
                   <tr>
-                    <th style={{ width: '200px' }}>Shift</th>
+                    <th scope="col" style={{ width: '200px' }}>Shift</th>
                     {weekDates.map((date) => (
-                      <th key={date.toISOString()} className="text-center">
+                      <th scope="col" key={date.toISOString()} className="text-center">
                         {formatDate(date)}
                       </th>
                     ))}

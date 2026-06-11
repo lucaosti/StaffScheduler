@@ -1864,7 +1864,7 @@ describe('auth router (extended)', () => {
       password: 'pw',
     });
     expect(res.status).toBe(200);
-    expect(typeof res.body.data.token).toBe('string');
+    expect(res.headers['set-cookie']).toBeDefined();
   });
 
   it('POST /login 401 on service throw', async () => {
@@ -1884,7 +1884,7 @@ describe('auth router (extended)', () => {
   it('POST /refresh 200', async () => {
     const res = await request(app()).post('/api/auth/refresh');
     expect(res.status).toBe(200);
-    expect(typeof res.body.data.token).toBe('string');
+    expect(res.headers['set-cookie']).toBeDefined();
   });
 
   it('POST /logout 200', async () => {

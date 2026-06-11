@@ -544,12 +544,11 @@ describe('RbacService.setUserRoles', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 2 }, null])  // DELETE
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])  // INSERT role 10
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // INSERT role 11
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null]); // batch INSERT IGNORE
 
     const svc = new RbacService(pool);
     await expect(svc.setUserRoles(7, [10, 11])).resolves.toBeUndefined();
-    expect(conn.execute).toHaveBeenCalledTimes(3);
+    expect(conn.execute).toHaveBeenCalledTimes(2);
     expect(conn.commit).toHaveBeenCalled();
   });
 

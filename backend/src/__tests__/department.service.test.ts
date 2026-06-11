@@ -122,9 +122,12 @@ describe('DepartmentService.deleteDepartment', () => {
 });
 
 describe('DepartmentService.assignEmployeesToDepartment', () => {
-  it('runs DELETE + INSERT pairs in a transaction', async () => {
+  it('runs batch SELECT + INSERT IGNORE in a transaction', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 1 }], null])                  // SELECT dept
+      .mockResolvedValueOnce([[{ id: 10 }, { id: 11 }], null])     // SELECT users
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null]);         // INSERT IGNORE
     const service = new DepartmentService(pool);
     await service.assignEmployeesToDepartment(1, [10, 11]);
     expect(conn.commit).toHaveBeenCalled();

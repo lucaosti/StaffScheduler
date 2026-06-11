@@ -15,7 +15,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
-import { createTimeOffBody } from '../schemas';
+import { createTimeOffBody, optionalNotesBody } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
 import { logger } from '../config/logger';
 
@@ -77,10 +77,10 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/approve', requirePermission('timeoff.approve'), async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('timeoff.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
       const id = Number(req.params.id);
-      const updated = await service.approve(id, req.user!.id, req.body?.notes ?? null);
+      const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -89,10 +89,10 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/reject', requirePermission('timeoff.approve'), async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('timeoff.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
       const id = Number(req.params.id);
-      const updated = await service.reject(id, req.user!.id, req.body?.notes ?? null);
+      const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;

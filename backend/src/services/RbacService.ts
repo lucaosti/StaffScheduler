@@ -263,10 +263,11 @@ export class RbacService {
         'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
         [userId]
       );
-      for (const roleId of roleIds) {
+      if (roleIds.length > 0) {
+        const placeholders = roleIds.map(() => '(?, ?, NULL)').join(', ');
         await connection.execute(
-          'INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)',
-          [userId, roleId]
+          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${placeholders}`,
+          roleIds.flatMap(roleId => [userId, roleId])
         );
       }
       await connection.commit();
