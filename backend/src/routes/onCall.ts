@@ -17,6 +17,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, createOnCallPeriodBody, updateOnCallPeriodBody, onCallAssignBody } from '../schemas';
 import { OnCallService } from '../services/OnCallService';
 import { logger } from '../config/logger';
 
@@ -58,18 +60,18 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/periods', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
+  router.post('/periods', requirePermission('oncall.manage'), validateBody(createOnCallPeriodBody), async (_req: Request, res: Response) => {
     try {
-      const created = await service.createPeriod(req.body || {});
+      const created = await service.createPeriod(res.locals.body);
       res.status(201).json({ success: true, data: created });
     } catch (err) {
       error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
     }
   });
 
-  router.get('/periods/:id', async (req: Request, res: Response) => {
+  router.get('/periods/:id', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      const period = await service.getPeriodById(Number(req.params.id));
+      const period = await service.getPeriodById(res.locals.params.id);
       if (!period) return error(res, 404, 'NOT_FOUND', 'On-call period not found');
       res.json({ success: true, data: period });
     } catch (err) {
@@ -78,9 +80,9 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/periods/:id', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
+  router.put('/periods/:id', requirePermission('oncall.manage'), validateParams(idParam), validateBody(updateOnCallPeriodBody), async (_req: Request, res: Response) => {
     try {
-      const updated = await service.updatePeriod(Number(req.params.id), req.body || {});
+      const updated = await service.updatePeriod(res.locals.params.id, res.locals.body);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -89,18 +91,18 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/periods/:id', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
+  router.delete('/periods/:id', requirePermission('oncall.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      await service.deletePeriod(Number(req.params.id));
+      await service.deletePeriod(res.locals.params.id);
       res.json({ success: true });
     } catch (err) {
       error(res, 404, 'NOT_FOUND', (err as Error).message);
     }
   });
 
-  router.get('/periods/:id/assignments', async (req: Request, res: Response) => {
+  router.get('/periods/:id/assignments', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      const data = await service.listAssignments(Number(req.params.id));
+      const data = await service.listAssignments(res.locals.params.id);
       res.json({ success: true, data });
     } catch (err) {
       logger.error('on-call assignments list error:', err);
@@ -108,13 +110,13 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/periods/:id/assign', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
+  router.post('/periods/:id/assign', requirePermission('oncall.manage'), validateParams(idParam), validateBody(onCallAssignBody), async (req: Request, res: Response) => {
     try {
       const data = await service.assign(
-        Number(req.params.id),
-        Number(req.body?.userId),
+        res.locals.params.id,
+        res.locals.body.userId,
         req.user!.id,
-        req.body?.notes ?? null
+        res.locals.body.notes ?? null
       );
       res.status(201).json({ success: true, data });
     } catch (err) {

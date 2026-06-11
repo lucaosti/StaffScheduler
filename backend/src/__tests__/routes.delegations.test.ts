@@ -151,7 +151,7 @@ describe('delegations router POST /', () => {
     const res = await request(mountApp()).post('/api/delegations').send(body);
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when permissionCodes is missing', async () => {
@@ -161,7 +161,7 @@ describe('delegations router POST /', () => {
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when permissionCodes is an empty array', async () => {
@@ -171,7 +171,7 @@ describe('delegations router POST /', () => {
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when permissionCodes is not an array', async () => {
@@ -181,7 +181,7 @@ describe('delegations router POST /', () => {
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when expiresAt is missing', async () => {
@@ -191,7 +191,7 @@ describe('delegations router POST /', () => {
     });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 422 when service throws escalation error', async () => {

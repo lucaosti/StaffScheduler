@@ -7,6 +7,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { createShiftSwapBody } from '../schemas';
 import { ShiftSwapService } from '../services/ShiftSwapService';
 import { logger } from '../config/logger';
 
@@ -20,13 +22,13 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.post('/', async (req: Request, res: Response) => {
+  router.post('/', validateBody(createShiftSwapBody), async (req: Request, res: Response) => {
     try {
       const created = await service.create({
         requesterUserId: req.user!.id,
-        requesterAssignmentId: Number(req.body?.requesterAssignmentId),
-        targetAssignmentId: Number(req.body?.targetAssignmentId),
-        notes: req.body?.notes,
+        requesterAssignmentId: res.locals.body.requesterAssignmentId,
+        targetAssignmentId: res.locals.body.targetAssignmentId,
+        notes: res.locals.body.notes,
       });
       res.status(201).json({ success: true, data: created });
     } catch (err) {
