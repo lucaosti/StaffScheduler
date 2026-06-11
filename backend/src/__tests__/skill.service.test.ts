@@ -131,10 +131,8 @@ describe('SkillService.assignSkillsToUser', () => {
     conn.execute
       .mockResolvedValueOnce([[{ id: 7 }], null]) // user exists
       .mockResolvedValueOnce([{ affectedRows: 3 }, null]) // DELETE
-      .mockResolvedValueOnce([[{ id: 1 }], null]) // skill 1 valid
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // INSERT 1
-      .mockResolvedValueOnce([[{ id: 2 }], null]) // skill 2 valid
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // INSERT 2
+      .mockResolvedValueOnce([[{ id: 1 }, { id: 2 }], null]) // batch skill validation
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null]); // batch INSERT
     const service = new SkillService(pool);
     const ok = await service.assignSkillsToUser(7, [1, 2]);
     expect(ok).toBe(true);
