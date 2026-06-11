@@ -202,3 +202,84 @@ export const onCallAssignBody = z.object({
   userId: z.number().int().positive(),
   notes: z.string().nullable().optional(),
 });
+
+export const updateShiftBody = z.object({
+  date: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  minStaff: z.number().int().nonnegative().optional(),
+  maxStaff: z.number().int().positive().optional(),
+  status: z.enum(['open', 'assigned', 'confirmed', 'cancelled']).optional(),
+  requiredSkillIds: z.array(z.number().int().positive()).optional(),
+  notes: z.string().nullable().optional(),
+});
+
+export const addEmployeeSkillBody = z.object({
+  skillId: z.number().int().positive(),
+  proficiencyLevel: z.number().int().min(1).max(5),
+});
+
+export const createRoleBody = z.object({
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  permissionCodes: z.array(z.string()).optional(),
+});
+
+export const updateRoleBody = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  permissionCodes: z.array(z.string()).optional(),
+});
+
+export const createOrgUnitBody = z.object({
+  name: z.string().min(1, 'Name is required'),
+  description: z.string().optional(),
+  parentId: z.number().int().positive().nullable().optional(),
+  managerUserId: z.number().int().positive().nullable().optional(),
+});
+
+export const updateOrgUnitBody = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  parentId: z.number().int().positive().nullable().optional(),
+  managerUserId: z.number().int().positive().nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const addOrgMemberBody = z.object({
+  userId: z.number().int().positive(),
+  isPrimary: z.boolean().optional(),
+});
+
+export const createLoanBody = z.object({
+  userId: z.number().int().positive(),
+  fromOrgUnitId: z.number().int().positive(),
+  toOrgUnitId: z.number().int().positive(),
+  startDate: z.string().min(1, 'Start date is required'),
+  endDate: z.string().min(1, 'End date is required'),
+  reason: z.string().optional(),
+});
+
+export const createPolicyExceptionBody = z.object({
+  policyId: z.number().int().positive(),
+  targetType: z.string().min(1, 'Target type is required'),
+  targetId: z.number().int().positive(),
+  reason: z.string().nullable().optional(),
+});
+
+export const createPolicyBody = z.object({
+  scopeType: z.enum(['global', 'org_unit', 'schedule', 'shift_template']),
+  scopeId: z.number().int().positive().nullable().optional(),
+  policyKey: z.string().min(1, 'Policy key is required'),
+  policyValue: z.unknown(),
+  description: z.string().nullable().optional(),
+});
+
+export const updatePolicyBody = z.object({
+  scopeType: z.enum(['global', 'org_unit', 'schedule', 'shift_template']).optional(),
+  scopeId: z.number().int().positive().nullable().optional(),
+  policyKey: z.string().min(1).optional(),
+  policyValue: z.unknown().optional(),
+  description: z.string().nullable().optional(),
+  isActive: z.boolean().optional(),
+});

@@ -22,6 +22,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
@@ -104,13 +106,13 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/exceptions', async (req: Request, res: Response) => {
+  router.post('/exceptions', validateBody(createPolicyExceptionBody), async (req: Request, res: Response) => {
     try {
       const created = await exceptions.create({
-        policyId: Number(req.body?.policyId),
-        targetType: req.body?.targetType,
-        targetId: Number(req.body?.targetId),
-        reason: req.body?.reason ?? null,
+        policyId: res.locals.body.policyId,
+        targetType: res.locals.body.targetType,
+        targetId: res.locals.body.targetId,
+        reason: res.locals.body.reason ?? null,
         requestedByUserId: req.user!.id,
       });
       res.status(201).json({ success: true, data: created });
@@ -183,14 +185,14 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/', requirePermission('policy.manage'), async (req: Request, res: Response) => {
+  router.post('/', requirePermission('policy.manage'), validateBody(createPolicyBody), async (req: Request, res: Response) => {
     try {
       const created = await policies.create({
-        scopeType: req.body?.scopeType,
-        scopeId: req.body?.scopeId ?? null,
-        policyKey: req.body?.policyKey,
-        policyValue: req.body?.policyValue,
-        description: req.body?.description ?? null,
+        scopeType: res.locals.body.scopeType,
+        scopeId: res.locals.body.scopeId ?? null,
+        policyKey: res.locals.body.policyKey,
+        policyValue: res.locals.body.policyValue,
+        description: res.locals.body.description ?? null,
         imposedByUserId: req.user!.id,
       });
       await audit.write({
@@ -204,7 +206,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/:id', requirePermission('policy.manage'), async (req: Request, res: Response) => {
+  router.put('/:id', requirePermission('policy.manage'), validateBody(updatePolicyBody), async (req: Request, res: Response) => {
     try {
       const existing = await policies.getById(Number(req.params.id));
       if (!existing) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
@@ -212,7 +214,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       if (existing.imposedByUserId !== req.user!.id && !userHasPermission(req.user, 'settings.manage')) {
         return respondError(res, 403, 'FORBIDDEN', 'Only the policy owner or an administrator may edit this policy');
       }
-      const updated = await policies.update(Number(req.params.id), req.body ?? {});
+      const updated = await policies.update(Number(req.params.id), res.locals.body);
       await audit.write({
         actorId: req.user!.id, action: 'policy.update',
         entityType: 'policy', entityId: updated.id,

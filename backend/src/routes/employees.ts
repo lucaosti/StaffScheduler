@@ -4,7 +4,7 @@ import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody } from '../schemas';
+import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createEmployeesRouter = (pool: Pool) => {
@@ -71,9 +71,9 @@ router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, 
 });
 
 // Create new employee
-router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (_req: Request, res: Response) => {
   try {
-    const employee = await employeeService.createEmployee(req.body);
+    const employee = await employeeService.createEmployee(res.locals.body);
 
     res.status(201).json({
       success: true,
@@ -90,11 +90,11 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
 });
 
 // Update employee
-router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const employee = await employeeService.updateEmployee(id, req.body);
+    const employee = await employeeService.updateEmployee(id, res.locals.body);
     res.json({
       success: true,
       data: employee,
@@ -169,17 +169,10 @@ router.get('/:id/skills', authenticate, validateParams(idParam), async (_req: Re
 });
 
 // Add skill to employee
-router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
-    const { skillId, proficiencyLevel } = req.body;
-
-    if (!skillId || proficiencyLevel === undefined) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'skillId and proficiencyLevel are required' }
-      });
-    }
+    const { skillId, proficiencyLevel } = res.locals.body;
 
     await employeeService.addEmployeeSkill(id, skillId, proficiencyLevel);
 
