@@ -53,7 +53,6 @@ export interface User {
 
 export interface LoginResponse {
   user: Omit<User, 'passwordHash' | 'salt'>;
-  token: string;
 }
 
 // Employee (with matrix organization support)

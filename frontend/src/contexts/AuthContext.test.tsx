@@ -74,7 +74,6 @@ describe('AuthProvider actions', () => {
     mockedAuthService.login.mockResolvedValue({
       success: true,
       data: {
-        token: 't',
         user: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' },
       } as never,
     });
@@ -123,7 +122,6 @@ describe('AuthProvider actions', () => {
     mockedAuthService.refreshToken.mockResolvedValue({
       success: true,
       data: {
-        token: 'new',
         user: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' },
       } as never,
     });
