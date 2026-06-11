@@ -8,6 +8,7 @@ import {
   idParam,
   idAndUserIdParam,
   createDepartmentBody,
+  updateDepartmentBody,
   addUserToDepartmentBody,
 } from '../schemas';
 import { UpdateDepartmentRequest } from '../types';
@@ -77,7 +78,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Create new department
-  router.post('/', authenticate, async (req, res) => {
+  router.post('/', authenticate, validateBody(createDepartmentBody), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -88,19 +89,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         });
       }
 
-      const parseResult = createDepartmentBody.safeParse(req.body);
-      if (!parseResult.success) {
-        return res.status(400).json({
-          success: false,
-          error: {
-            code: 'VALIDATION_ERROR',
-            message: 'Invalid request body',
-            details: parseResult.error.issues.map(e => ({ field: e.path.join('.') || 'value', message: e.message })),
-          },
-        });
-      }
-
-      const departmentData = parseResult.data;
+      const departmentData = res.locals.body;
 
       if (departmentData.managerId) {
         const manager = await userService.getUserById(departmentData.managerId);
@@ -125,11 +114,11 @@ export const createDepartmentsRouter = (pool: Pool) => {
   });
 
   // Update department
-  router.put('/:id', authenticate, validateParams(idParam), async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), async (req, res) => {
     try {
       const user = req.user!;
       const departmentId = res.locals.params.id;
-      const departmentData: UpdateDepartmentRequest = req.body;
+      const departmentData: UpdateDepartmentRequest = res.locals.body;
 
       if (userHasPermission(user, 'settings.manage')) {
         // Full administrators can update any department

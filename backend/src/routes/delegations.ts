@@ -12,8 +12,8 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DelegationService } from '../services/DelegationService';
 import { authenticate } from '../middleware/auth';
-import { validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, createDelegationBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createDelegationsRouter = (pool: Pool): Router => {
@@ -21,17 +21,10 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   const delegationService = new DelegationService(pool);
 
   // Create a delegation
-  router.post('/', authenticate, async (req: Request, res: Response) => {
+  router.post('/', authenticate, validateBody(createDelegationBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user!;
-      const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId } = req.body;
-
-      if (!delegateeId || !Array.isArray(permissionCodes) || permissionCodes.length === 0 || !expiresAt) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'delegateeId, permissionCodes (non-empty array), and expiresAt are required' },
-        });
-      }
+      const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId } = res.locals.body;
 
       const delegation = await delegationService.createDelegation(
         actor.id,

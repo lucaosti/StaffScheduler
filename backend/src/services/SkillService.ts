@@ -327,22 +327,23 @@ export class SkillService {
 
       // Add new skill assignments
       if (skillIds.length > 0) {
-        for (const skillId of skillIds) {
-          // Validate skill exists and is active
-          const [skillRows] = await connection.execute<RowDataPacket[]>(
-            'SELECT id FROM skills WHERE id = ? AND is_active = 1 LIMIT 1',
-            [skillId]
-          );
-
-          if (skillRows.length === 0) {
-            throw new Error(`Skill with ID ${skillId} not found or inactive`);
-          }
-
-          await connection.execute(
-            'INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)',
-            [userId, skillId]
-          );
+        const placeholders = skillIds.map(() => '?').join(', ');
+        const [validRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM skills WHERE id IN (${placeholders}) AND is_active = 1`,
+          skillIds
+        );
+        const validIds = new Set((validRows as RowDataPacket[]).map((r) => r.id as number));
+        const invalid = skillIds.find((id) => !validIds.has(id));
+        if (invalid !== undefined) {
+          throw new Error(`Skill with ID ${invalid} not found or inactive`);
         }
+
+        const insertValues = skillIds.map(() => '(?, ?)').join(', ');
+        const insertParams = skillIds.flatMap((id) => [userId, id]);
+        await connection.execute(
+          `INSERT INTO user_skills (user_id, skill_id) VALUES ${insertValues}`,
+          insertParams
+        );
       }
 
       await connection.commit();
@@ -484,22 +485,23 @@ export class SkillService {
 
       // Add new skill requirements
       if (skillIds.length > 0) {
-        for (const skillId of skillIds) {
-          // Validate skill exists and is active
-          const [skillRows] = await connection.execute<RowDataPacket[]>(
-            'SELECT id FROM skills WHERE id = ? AND is_active = 1 LIMIT 1',
-            [skillId]
-          );
-
-          if (skillRows.length === 0) {
-            throw new Error(`Skill with ID ${skillId} not found or inactive`);
-          }
-
-          await connection.execute(
-            'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
-            [shiftId, skillId]
-          );
+        const placeholders = skillIds.map(() => '?').join(', ');
+        const [validRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM skills WHERE id IN (${placeholders}) AND is_active = 1`,
+          skillIds
+        );
+        const validIds = new Set((validRows as RowDataPacket[]).map((r) => r.id as number));
+        const invalid = skillIds.find((id) => !validIds.has(id));
+        if (invalid !== undefined) {
+          throw new Error(`Skill with ID ${invalid} not found or inactive`);
         }
+
+        const insertValues = skillIds.map(() => '(?, ?)').join(', ');
+        const insertParams = skillIds.flatMap((id) => [shiftId, id]);
+        await connection.execute(
+          `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${insertValues}`,
+          insertParams
+        );
       }
 
       await connection.commit();

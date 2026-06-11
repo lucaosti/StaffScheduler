@@ -953,7 +953,7 @@ describe('departments router (extended)', () => {
 
   it('POST / 403/400/201/500', async () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
-    let res = await request(app()).post('/api/departments').send({});
+    let res = await request(app()).post('/api/departments').send({ name: 'X' });
     expect(res.status).toBe(403);
 
     currentUser = { id: 1, role: 'admin', email: 'a@x' };

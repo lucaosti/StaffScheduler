@@ -14,6 +14,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { validateBody } from '../middleware/validation';
+import { createTimeOffBody } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
 import { logger } from '../config/logger';
 
@@ -27,14 +29,14 @@ export const createTimeOffRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.post('/', async (req: Request, res: Response) => {
+  router.post('/', validateBody(createTimeOffBody), async (req: Request, res: Response) => {
     try {
       const created = await service.create({
         userId: req.user!.id,
-        startDate: req.body?.startDate,
-        endDate: req.body?.endDate,
-        type: req.body?.type,
-        reason: req.body?.reason,
+        startDate: res.locals.body.startDate,
+        endDate: res.locals.body.endDate,
+        type: res.locals.body.type,
+        reason: res.locals.body.reason,
       });
       res.status(201).json({ success: true, data: created });
     } catch (err) {
