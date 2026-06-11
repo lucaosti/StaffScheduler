@@ -17,8 +17,8 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import { validateParams, validateBody } from '../middleware/validation';
+import { idParam, createApprovalWorkflowBody, updateApprovalWorkflowBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
@@ -63,7 +63,7 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Create a workflow
-  router.post('/', authenticate, requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.post('/', authenticate, requirePermission('approval.manage'), validateBody(createApprovalWorkflowBody), async (req: Request, res: Response) => {
     try {
       const { changeType, requireAll, description, steps } = req.body;
       if (!changeType || !Array.isArray(steps) || steps.length === 0) {
@@ -84,7 +84,7 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Update a workflow
-  router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+  router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), validateBody(updateApprovalWorkflowBody), async (req: Request, res: Response) => {
     try {
       const { id } = res.locals.params;
       const workflow = await engine.updateWorkflow(id, req.body);

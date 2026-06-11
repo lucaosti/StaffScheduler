@@ -143,7 +143,7 @@ describe('approval workflows POST /', () => {
     changeType: 'shift_swap',
     requireAll: false,
     description: 'Shift swap approval',
-    steps: [{ stepOrder: 1, approverType: 'manager' }],
+    steps: [{ stepOrder: 1, approverScope: 'direct_manager' }],
   };
 
   it('returns 201 on successful creation', async () => {
@@ -164,10 +164,10 @@ describe('approval workflows POST /', () => {
   it('returns 400 when changeType is missing', async () => {
     const res = await request(mountApp())
       .post('/api/approval-workflows')
-      .send({ steps: [{ stepOrder: 1 }] });
+      .send({ steps: [{ stepOrder: 1, approverScope: 'direct_manager' }] });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when steps array is empty', async () => {
@@ -176,7 +176,7 @@ describe('approval workflows POST /', () => {
       .send({ changeType: 'shift_swap', steps: [] });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 400 when steps is missing', async () => {
@@ -185,7 +185,7 @@ describe('approval workflows POST /', () => {
       .send({ changeType: 'shift_swap' });
 
     expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_INPUT');
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('returns 409 on duplicate change type', async () => {

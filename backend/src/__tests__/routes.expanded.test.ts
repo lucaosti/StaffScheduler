@@ -615,17 +615,15 @@ describe('shifts router (extended)', () => {
   });
 
   it('POST /templates 201/500', async () => {
-    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(7);
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
-      .fn()
-      .mockResolvedValue({ id: 7 });
-    let res = await request(app()).post('/api/shifts/templates').send({});
+    const validTplBody = { name: 'Day', departmentId: 1, startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 4 };
+    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue({ id: 7 });
+    let res = await request(app()).post('/api/shifts/templates').send(validTplBody);
     expect(res.status).toBe(201);
 
     (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
-    res = await request(app()).post('/api/shifts/templates').send({});
+    res = await request(app()).post('/api/shifts/templates').send(validTplBody);
     expect(res.status).toBe(500);
   });
 
@@ -793,7 +791,7 @@ describe('employees router (extended)', () => {
     (EmployeeService.prototype.createEmployee as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
-    const res = await request(app()).post('/api/employees').send({});
+    const res = await request(app()).post('/api/employees').send({ email: 'e@x.com', password: 'Password1!', firstName: 'A', lastName: 'B' });
     expect(res.status).toBe(500);
   });
 

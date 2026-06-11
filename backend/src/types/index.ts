@@ -333,6 +333,21 @@ export interface UpdateShiftRequest {
   notes?: string;
 }
 
+export interface ShiftTemplate {
+  id: number;
+  name: string;
+  description?: string;
+  departmentId: number;
+  departmentName?: string;
+  startTime: string;
+  endTime: string;
+  minStaff: number;
+  maxStaff: number;
+  isActive?: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // ============================================================================
 // ASSIGNMENT TYPES
 // ============================================================================
