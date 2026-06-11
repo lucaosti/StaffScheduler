@@ -170,12 +170,13 @@ export const createUsersRouter = (pool: Pool) => {
         });
       }
 
-      const updateData: UpdateUserRequest = req.body;
+      const updateData: UpdateUserRequest = res.locals.body;
 
       // Self-service editors are limited to a small set of profile fields.
+      // Check raw req.body keys so Zod-stripped unknown fields are still caught.
       if (!canManageUsers) {
         const allowedFields = ['firstName', 'lastName', 'phone'];
-        const submittedFields = Object.keys(updateData);
+        const submittedFields = Object.keys(req.body ?? {});
         const invalidFields = submittedFields.filter(field => !allowedFields.includes(field));
 
         if (invalidFields.length > 0) {

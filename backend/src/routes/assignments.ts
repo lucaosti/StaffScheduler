@@ -88,11 +88,11 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
 });
 
 // Update assignment
-router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const assignment = await assignmentService.updateAssignment(id, req.body);
+    const assignment = await assignmentService.updateAssignment(id, res.locals.body);
     res.json({
       success: true,
       data: assignment,

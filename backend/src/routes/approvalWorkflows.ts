@@ -63,15 +63,9 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Create a workflow
-  router.post('/', authenticate, requirePermission('approval.manage'), validateBody(createApprovalWorkflowBody), async (req: Request, res: Response) => {
+  router.post('/', authenticate, requirePermission('approval.manage'), validateBody(createApprovalWorkflowBody), async (_req: Request, res: Response) => {
     try {
-      const { changeType, requireAll, description, steps } = req.body;
-      if (!changeType || !Array.isArray(steps) || steps.length === 0) {
-        return res.status(400).json({
-          success: false,
-          error: { code: 'INVALID_INPUT', message: 'changeType and steps (non-empty array) are required' },
-        });
-      }
+      const { changeType, requireAll, description, steps } = res.locals.body;
       const workflow = await engine.createWorkflow({ changeType, requireAll, description, steps });
       res.status(201).json({ success: true, data: workflow, message: 'Workflow created' });
     } catch (error: any) {
@@ -84,10 +78,10 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Update a workflow
-  router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), validateBody(updateApprovalWorkflowBody), async (req: Request, res: Response) => {
+  router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), validateBody(updateApprovalWorkflowBody), async (_req: Request, res: Response) => {
     try {
       const { id } = res.locals.params;
-      const workflow = await engine.updateWorkflow(id, req.body);
+      const workflow = await engine.updateWorkflow(id, res.locals.body);
       res.json({ success: true, data: workflow, message: 'Workflow updated' });
     } catch (error: any) {
       if (error.message?.includes('not found')) {
