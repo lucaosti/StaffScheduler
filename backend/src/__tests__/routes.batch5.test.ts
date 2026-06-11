@@ -83,7 +83,7 @@ describe('bulkImport route — POST /employees password too short returns 400', 
       .send({ csv: 'email,firstName,lastName,role\ntest@x.com,A,B,employee', defaultPassword: 'short' });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    expect(res.body.error.message).toMatch(/at least 8 characters/);
+    expect(res.body.error.details[0].message).toMatch(/at least 8 characters/);
   });
 });
 

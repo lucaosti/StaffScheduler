@@ -157,13 +157,13 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 ### Authentication
 
 ```
-POST /api/auth/login       { email, password } → { token, user: { id, email, firstName, lastName, roles, permissions } }
-GET  /api/auth/verify      (Bearer token) → { user }
-POST /api/auth/refresh     (Bearer token) → { token, user }
-POST /api/auth/logout
+POST /api/auth/login       { email, password } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
+GET  /api/auth/verify      (cookie) → { user }
+POST /api/auth/refresh     (cookie) → rotates cookie; body: { user }
+POST /api/auth/logout      blacklists the JTI and clears the cookie
 ```
 
-JWT payload: `{ userId, email }` — no role. Permissions are resolved from the DB on every request.
+JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry.
 
 ### Core endpoints (summary)
 
@@ -597,7 +597,7 @@ Feature requests are welcome — describe the use case, not just the solution.
 | Decision | Rationale |
 |---|---|
 | Permission-based RBAC (no hardcoded roles) | Roles are customer data. Hard-wiring `admin`/`manager`/`employee` prevents multi-tier hierarchies. `user_roles` grants are scoped and time-bound, supporting org-unit subtree access and temporary elevation. |
-| JWT carries `userId` only | Permissions change frequently; a stale role in the token would require revocation infrastructure. Resolving from DB on every request is cheaper than maintaining a token revocation store. |
+| JWT in httpOnly cookie + JTI blacklist | The cookie prevents XSS from stealing the token. The `jti` claim in each token enables server-side revocation on logout via an in-memory `Map<jti, expiresAt>` with lazy TTL expiry — lightweight and sufficient for single-instance deployments. |
 | Hard cutover (no backward-compat shim) | The 3-role ENUM was the root of every hardcoded check. A migration shim would perpetuate the pattern. The seeded bootstrap roles (Administrator/Manager/Employee) reproduce prior behaviour without any shim. |
 | `requireModule` returns 404 | A 401 leaks that the route exists. 404 is the correct response when an entire feature is absent; no information is disclosed. |
 | In-process module cache | Module state changes infrequently. A per-request DB lookup for a static flag is wasteful. Cache invalidation on `setEnabled` is a single line. |

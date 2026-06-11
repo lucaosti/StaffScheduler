@@ -14,7 +14,6 @@ import * as authService from '../services/authService';
 
 interface AuthState {
   user: Omit<User, 'passwordHash' | 'salt'> | null;
-  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
@@ -30,7 +29,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 type AuthAction =
   | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'>; token: string } }
+  | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'> } }
   | { type: 'LOGIN_FAILURE'; payload?: string }
   | { type: 'LOGOUT' }
   | { type: 'SET_USER'; payload: Omit<User, 'passwordHash' | 'salt'> }
@@ -44,7 +43,6 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
       return {
         ...state,
         user: action.payload.user,
-        token: action.payload.token,
         isAuthenticated: true,
         isLoading: false,
         error: null,
@@ -53,13 +51,12 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
       return {
         ...state,
         user: null,
-        token: null,
         isAuthenticated: false,
         isLoading: false,
         error: action.payload || 'Authentication failed',
       };
     case 'LOGOUT':
-      return { ...state, user: null, token: null, isAuthenticated: false, isLoading: false };
+      return { ...state, user: null, isAuthenticated: false, isLoading: false };
     case 'SET_USER':
       return { ...state, user: action.payload };
     case 'SET_LOADING':
@@ -71,7 +68,6 @@ const authReducer = (state: AuthState, action: AuthAction): AuthState => {
 
 const initialState: AuthState = {
   user: null,
-  token: null,
   isAuthenticated: false,
   isLoading: true,
   error: null,
@@ -91,7 +87,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         if (response.success && response.data) {
           dispatch({
             type: 'LOGIN_SUCCESS',
-            payload: { user: response.data, token: '' },
+            payload: { user: response.data },
           });
         } else {
           dispatch({ type: 'SET_LOADING', payload: false });
@@ -111,10 +107,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const response: ApiResponse<LoginResponse> = await authService.login(credentials);
 
       if (response.success && response.data) {
-        const { user, token } = response.data;
+        const { user } = response.data;
         dispatch({
           type: 'LOGIN_SUCCESS',
-          payload: { user, token },
+          payload: { user },
         });
       } else {
         throw new Error(response.error?.message || 'Login failed');

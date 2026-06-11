@@ -336,3 +336,21 @@ export const updateTimePeriodBody = z.object({
 export const updateSettingValueBody = z.object({
   value: z.string(),
 });
+
+export const loginBody = z.object({
+  email: z.string().min(1, 'email is required'),
+  password: z.string().min(1, 'password is required'),
+});
+
+export const optionalNotesBody = z.object({
+  notes: z.string().max(2000).nullable().optional(),
+});
+
+export const bulkImportEmployeesBody = z.object({
+  csv: z.string().min(1, 'csv is required'),
+  defaultPassword: z.string().min(8, 'defaultPassword must be at least 8 characters'),
+});
+
+export const bulkImportShiftsBody = z.object({
+  csv: z.string().min(1, 'csv is required'),
+});
