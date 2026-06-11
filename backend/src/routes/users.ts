@@ -5,7 +5,7 @@ import { RbacService } from '../services/RbacService';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createUserBody } from '../schemas';
+import { idParam, createUserBody, updateUserBody } from '../schemas';
 import { UpdateUserRequest, User } from '../types';
 import { logger } from '../config/logger';
 
@@ -155,7 +155,7 @@ export const createUsersRouter = (pool: Pool) => {
   });
 
   // Update user
-  router.put('/:id', authenticate, validateParams(idParam), async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateUserBody), async (req, res) => {
     try {
       const user = req.user as User;
       const userId = res.locals.params.id;

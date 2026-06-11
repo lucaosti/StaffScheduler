@@ -148,3 +148,57 @@ export const updateApprovalWorkflowBody = z.object({
   description: z.string().optional(),
   steps: z.array(approvalStepBody).optional(),
 });
+
+export const updateDepartmentBody = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  managerId: z.number().int().positive().optional(),
+  orgUnitId: z.number().int().positive().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const createTimeOffBody = z.object({
+  startDate: z.string().min(1, 'Start date is required'),
+  endDate: z.string().min(1, 'End date is required'),
+  type: z.enum(['vacation', 'sick', 'personal', 'other']).optional(),
+  reason: z.string().optional(),
+});
+
+export const createShiftSwapBody = z.object({
+  requesterAssignmentId: z.number().int().positive(),
+  targetAssignmentId: z.number().int().positive(),
+  notes: z.string().optional(),
+});
+
+export const createDelegationBody = z.object({
+  delegateeId: z.number().int().positive(),
+  permissionCodes: z.array(z.string()).min(1, 'At least one permission code is required'),
+  expiresAt: z.string().min(1, 'expiresAt is required'),
+  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+});
+
+export const createOnCallPeriodBody = z.object({
+  departmentId: z.number().int().positive(),
+  date: z.string().min(1, 'Date is required'),
+  startTime: z.string().min(1, 'Start time is required'),
+  endTime: z.string().min(1, 'End time is required'),
+  scheduleId: z.number().int().positive().nullable().optional(),
+  minStaff: z.number().int().nonnegative().optional(),
+  maxStaff: z.number().int().positive().optional(),
+  notes: z.string().optional(),
+});
+
+export const updateOnCallPeriodBody = z.object({
+  date: z.string().optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  minStaff: z.number().int().nonnegative().optional(),
+  maxStaff: z.number().int().positive().optional(),
+  notes: z.string().nullable().optional(),
+  status: z.enum(['open', 'assigned', 'cancelled']).optional(),
+});
+
+export const onCallAssignBody = z.object({
+  userId: z.number().int().positive(),
+  notes: z.string().nullable().optional(),
+});
