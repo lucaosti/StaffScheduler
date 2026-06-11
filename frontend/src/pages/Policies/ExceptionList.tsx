@@ -104,11 +104,11 @@ const ExceptionList: React.FC<Props> = ({
         <table className="table">
           <thead>
             <tr>
-              <th>Policy</th>
-              <th>Target</th>
-              <th>Requested by</th>
-              <th>Status</th>
-              <th className="text-end">Actions</th>
+              <th scope="col">Policy</th>
+              <th scope="col">Target</th>
+              <th scope="col">Requested by</th>
+              <th scope="col">Status</th>
+              <th scope="col" className="text-end">Actions</th>
             </tr>
           </thead>
           <tbody>
