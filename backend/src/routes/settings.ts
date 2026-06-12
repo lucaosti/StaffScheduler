@@ -17,8 +17,8 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
 import { authenticate, userHasPermission } from '../middleware/auth';
-import { validateBody } from '../middleware/validation';
-import { updateCurrencyBody, updateTimePeriodBody, updateSettingValueBody } from '../schemas';
+import { validateBody, validateParams } from '../middleware/validation';
+import { updateCurrencyBody, updateTimePeriodBody, updateSettingValueBody, categoryParam, categoryKeyParam } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createSystemSettingsRouter = (pool: Pool) => {
@@ -44,9 +44,9 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get settings by category
-  router.get('/category/:category', authenticate, async (req, res) => {
+  router.get('/category/:category', authenticate, validateParams(categoryParam), async (_req, res) => {
     try {
-      const { category } = req.params;
+      const { category } = res.locals.params;
       const settings = await settingsService.getSettingsByCategory(category);
 
       res.json({
@@ -157,9 +157,9 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get specific setting value
-  router.get('/:category/:key', authenticate, async (req, res) => {
+  router.get('/:category/:key', authenticate, validateParams(categoryKeyParam), async (_req, res) => {
     try {
-      const { category, key } = req.params;
+      const { category, key } = res.locals.params;
       const value = await settingsService.getSetting(category, key);
 
       if (value === null) {
@@ -183,7 +183,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Update setting value (admin only)
-  router.put('/:category/:key', authenticate, validateBody(updateSettingValueBody), async (req, res) => {
+  router.put('/:category/:key', authenticate, validateParams(categoryKeyParam), validateBody(updateSettingValueBody), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -195,7 +195,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         });
       }
 
-      const { category, key } = req.params;
+      const { category, key } = res.locals.params;
       const { value } = res.locals.body;
 
       // Validate specific settings
@@ -249,7 +249,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Reset setting to default value (admin only)
-  router.post('/:category/:key/reset', authenticate, async (req, res) => {
+  router.post('/:category/:key/reset', authenticate, validateParams(categoryKeyParam), async (req, res) => {
     try {
       const user = req.user!;
 
@@ -261,7 +261,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         });
       }
 
-      const { category, key } = req.params;
+      const { category, key } = res.locals.params;
       const reset = await settingsService.resetSetting(category, key);
 
       if (!reset) {

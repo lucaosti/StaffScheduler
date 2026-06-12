@@ -62,9 +62,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/units/:id', async (req: Request, res: Response) => {
+  router.get('/units/:id', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      const u = await units.getById(Number(req.params.id));
+      const u = await units.getById(res.locals.params.id);
       if (!u) return respondError(res, 404, 'NOT_FOUND', 'Org unit not found');
       res.json({ success: true, data: u });
     } catch (err) {
@@ -108,12 +108,12 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/units/:id', requirePermission('org_unit.manage'), async (req: Request, res: Response) => {
+  router.delete('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      await units.remove(Number(req.params.id));
+      await units.remove(res.locals.params.id);
       await audit.write({
         actorId: req.user!.id, action: 'org_unit.delete',
-        entityType: 'org_unit', entityId: Number(req.params.id),
+        entityType: 'org_unit', entityId: res.locals.params.id,
       });
       res.json({ success: true });
     } catch (err) {
@@ -125,9 +125,9 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Memberships -------------
 
-  router.get('/units/:id/members', async (req: Request, res: Response) => {
+  router.get('/units/:id/members', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      res.json({ success: true, data: await units.listMembers(Number(req.params.id)) });
+      res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
     } catch (err) {
       logger.error('members list failed', err);
       respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list members');
@@ -216,9 +216,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const updated = await loans.approve(Number(req.params.id), req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+      const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -230,9 +230,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const updated = await loans.reject(Number(req.params.id), req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+      const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
@@ -244,9 +244,9 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/loans/:id/cancel', async (req: Request, res: Response) => {
+  router.post('/loans/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const updated = await loans.cancel(Number(req.params.id), req.user!.id);
+      const updated = await loans.cancel(res.locals.params.id, req.user!.id);
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;

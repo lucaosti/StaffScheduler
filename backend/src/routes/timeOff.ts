@@ -14,8 +14,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { validateBody } from '../middleware/validation';
-import { createTimeOffBody, optionalNotesBody } from '../schemas';
+import { validateBody, validateParams } from '../middleware/validation';
+import { createTimeOffBody, optionalNotesBody, idParam } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
 import { logger } from '../config/logger';
 
@@ -62,9 +62,9 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/:id', async (req: Request, res: Response) => {
+  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const id = Number(req.params.id);
+      const { id } = res.locals.params;
       const item = await service.getById(id);
       if (!item) return respondError(res, 404, 'NOT_FOUND', 'Time-off request not found');
       const isOwn = item.userId === req.user!.id;
@@ -77,9 +77,9 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/approve', requirePermission('timeoff.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const id = Number(req.params.id);
+      const { id } = res.locals.params;
       const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -89,9 +89,9 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/reject', requirePermission('timeoff.approve'), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     try {
-      const id = Number(req.params.id);
+      const { id } = res.locals.params;
       const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
@@ -101,9 +101,9 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/:id/cancel', async (req: Request, res: Response) => {
+  router.post('/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const id = Number(req.params.id);
+      const { id } = res.locals.params;
       const updated = await service.cancel(id, req.user!.id);
       res.json({ success: true, data: updated });
     } catch (err) {

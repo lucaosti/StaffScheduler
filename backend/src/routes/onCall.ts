@@ -18,7 +18,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createOnCallPeriodBody, updateOnCallPeriodBody, onCallAssignBody } from '../schemas';
+import { idParam, idAndUserIdParam, createOnCallPeriodBody, updateOnCallPeriodBody, onCallAssignBody } from '../schemas';
 import { OnCallService } from '../services/OnCallService';
 import { logger } from '../config/logger';
 
@@ -127,9 +127,9 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.delete('/periods/:id/assign/:userId', requirePermission('oncall.manage'), async (req: Request, res: Response) => {
+  router.delete('/periods/:id/assign/:userId', requirePermission('oncall.manage'), validateParams(idAndUserIdParam), async (_req: Request, res: Response) => {
     try {
-      const ok = await service.unassign(Number(req.params.id), Number(req.params.userId));
+      const ok = await service.unassign(res.locals.params.id, res.locals.params.userId);
       if (!ok) return error(res, 404, 'NOT_FOUND', 'Assignment not found');
       res.json({ success: true });
     } catch (err) {
