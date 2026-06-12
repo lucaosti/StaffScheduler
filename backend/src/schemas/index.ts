@@ -12,6 +12,15 @@ export const departmentIdParam = z.object({ departmentId: positiveInt });
 export const idAndSkillIdParam = z.object({ id: positiveInt, skillId: positiveInt });
 export const idAndUserIdParam = z.object({ id: positiveInt, userId: positiveInt });
 
+const shortString = z.string().min(1).max(64);
+
+export const idAndKeyParam = z.object({ id: positiveInt, key: z.string().min(1).max(128) });
+export const codeParam = z.object({ code: shortString });
+export const typeParam = z.object({ type: shortString });
+export const changeTypeParam = z.object({ changeType: shortString });
+export const categoryParam = z.object({ category: shortString });
+export const categoryKeyParam = z.object({ category: shortString, key: z.string().min(1).max(128) });
+
 // ── Body schemas ──────────────────────────────────────────────────────────────
 
 export const createUserBody = z.object({
