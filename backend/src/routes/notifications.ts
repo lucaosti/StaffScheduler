@@ -12,6 +12,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireModule } from '../middleware/auth';
+import { validateParams } from '../middleware/validation';
+import { idParam } from '../schemas';
 import { NotificationService } from '../services/NotificationService';
 import { logger } from '../config/logger';
 
@@ -46,9 +48,9 @@ export const createNotificationsRouter = (pool: Pool): Router => {
     }
   });
 
-  router.patch('/:id/read', async (req: Request, res: Response) => {
+  router.patch('/:id/read', validateParams(idParam), async (req: Request, res: Response) => {
     try {
-      const ok = await service.markRead(Number(req.params.id), req.user!.id);
+      const ok = await service.markRead(res.locals.params.id, req.user!.id);
       if (!ok) {
         res.status(404).json({
           success: false,

@@ -16,8 +16,8 @@ import { Pool } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { validateBody } from '../middleware/validation';
-import { directoryFieldsBody, importVcardBody } from '../schemas';
+import { validateBody, validateParams } from '../middleware/validation';
+import { directoryFieldsBody, importVcardBody, idParam, idAndKeyParam } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -37,17 +37,17 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     res.json({ success: true, data: profile });
   });
 
-  router.get('/users/:id', requirePermission('user.read'), async (req: Request, res: Response) => {
-    const profile = await service.getProfile(Number(req.params.id));
+  router.get('/users/:id', requirePermission('user.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+    const profile = await service.getProfile(res.locals.params.id);
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     res.json({ success: true, data: profile });
   });
 
-  router.put('/users/:id/fields', requirePermission('user.manage'), validateBody(directoryFieldsBody), async (req: Request, res: Response) => {
+  router.put('/users/:id/fields', requirePermission('user.manage'), validateParams(idParam), validateBody(directoryFieldsBody), async (_req: Request, res: Response) => {
     try {
       const fields = res.locals.body.fields;
-      await service.setFields(Number(req.params.id), fields);
-      const profile = await service.getProfile(Number(req.params.id));
+      await service.setFields(res.locals.params.id, fields);
+      const profile = await service.getProfile(res.locals.params.id);
       res.json({ success: true, data: profile });
     } catch (err) {
       error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
@@ -57,15 +57,16 @@ export const createDirectoryRouter = (pool: Pool): Router => {
   router.delete(
     '/users/:id/fields/:key',
     requirePermission('user.manage'),
-    async (req: Request, res: Response) => {
-      const ok = await service.removeField(Number(req.params.id), req.params.key);
+    validateParams(idAndKeyParam),
+    async (_req: Request, res: Response) => {
+      const ok = await service.removeField(res.locals.params.id, res.locals.params.key);
       if (!ok) return error(res, 404, 'NOT_FOUND', 'Field not found');
       res.json({ success: true });
     }
   );
 
-  router.get('/users/:id/vcard', requirePermission('user.read'), async (req: Request, res: Response) => {
-    const profile = await service.getProfile(Number(req.params.id));
+  router.get('/users/:id/vcard', requirePermission('user.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+    const profile = await service.getProfile(res.locals.params.id);
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     const vcf = await service.exportVcf([profile.id]);
     res
