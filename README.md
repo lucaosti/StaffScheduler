@@ -9,11 +9,111 @@ constraint-programming optimizer in Python (Google OR-Tools CP-SAT).
 ![React](https://img.shields.io/badge/react-18.2.0-blue.svg)
 ![TypeScript](https://img.shields.io/badge/typescript-5.x-blue.svg)
 
-## Roadmap and capabilities
+## Features
 
-The list of capabilities (implemented, planned, and explicitly out of
-scope) is **not** maintained in this README. The single source of truth
-is the GitHub Project board:
+### Scheduling core
+
+- **Schedules** — create, duplicate, and publish schedules per department
+  and date range; lifecycle states (`draft` → `published`).
+- **Shifts and templates** — per-day shifts with start/end time, min/max
+  staffing, required skills, and reusable shift templates.
+- **Assignments** — assign users to shifts with full validation
+  (double-booking, skill match, availability); employees confirm,
+  decline, or complete their own assignments.
+- **Automatic scheduling** — two interchangeable engines: a greedy
+  TypeScript solver (zero dependencies, default) and a Google OR-Tools
+  CP-SAT solver (optional, Python) with hard constraints (coverage,
+  no double-booking, skills, availability, weekly hour caps) and soft
+  constraints (preferences, fairness, rest time, consecutive-day caps).
+- **Policies and exceptions** — configurable scheduling policies
+  (global, department, or user scope) with a request/approve/reject
+  workflow for one-off exceptions and a per-change-type approval matrix.
+- **Shift swaps** — employee-to-employee swap requests with manager
+  approval, decline, and requester cancellation.
+- **Time off** — request types with manager approval/rejection and
+  requester cancellation; honoured by the scheduling engines.
+- **On-call rotations** — on-call periods per department with capacity
+  limits and per-user assignment.
+
+### Workforce management
+
+- **Employees and departments** — CRUD with skills, hourly rates,
+  multi-department membership, and per-department managers.
+- **Organizational units** — arbitrary org tree (forest) with
+  memberships, primary-unit designation, and org-scoped permissions.
+- **Employee loans** — temporary transfer of an employee between org
+  units with an approval workflow.
+- **User directory** — profiles with custom fields, vCard export
+  (single user or bulk) and vCard import.
+- **Skill gap analysis** — per-department comparison of required vs
+  available skills.
+- **Bulk import** — CSV import for users and shifts with per-row
+  validation and error reporting.
+
+### Security and governance
+
+- **Authentication** — JWT in httpOnly cookies (never exposed to JS),
+  bcrypt password hashing, login rate limiting, server-side token
+  revocation on logout.
+- **Two-factor authentication** — TOTP (RFC 6238) with QR provisioning
+  and single-use recovery codes, enforced at login when enabled.
+- **RBAC** — fully configurable roles and permission codes; permissions
+  are resolved from the database on every request, so changes take
+  effect immediately; org-unit scoping restricts data visibility.
+- **Delegations** — temporary, expiring transfer of a user's roles to
+  another user (e.g. vacation cover).
+- **Approval workflows** — multi-step, configurable approval chains per
+  change type, with escalation for overdue steps.
+- **Audit trail** — append-only audit log of privileged actions with
+  filterable querying.
+- **Module system** — runtime feature flags: disabled modules return
+  404 on their whole route subtree and disappear from the UI.
+
+### Integrations and UX
+
+- **Dashboard** — live KPIs (headcount, coverage, monthly hours/cost,
+  pending approvals), recent activity, upcoming shifts.
+- **Reports** — hours worked per user, cost by department, fairness
+  metrics per schedule.
+- **Notifications** — in-app notification center with unread badge.
+- **Real-time events** — Server-Sent Events stream for live UI updates.
+- **Calendar feeds** — personal and per-department iCal feeds
+  (token-protected, ETag-cached) for Google Calendar / Outlook / Apple
+  Calendar.
+- **Preferences** — per-user scheduling preferences consumed by the
+  optimizer.
+- **System settings** — runtime configuration (currency, default time
+  period, …) editable by administrators.
+- **API documentation** — OpenAPI 3.1 contract served via Swagger UI at
+  `/api/docs`.
+- **Frontend** — responsive React SPA with light/dark theme, accessible
+  tables and forms, error boundaries, and a demo-mode banner.
+
+## How it works
+
+1. **Model the organization** — an administrator creates departments
+   and/or org units, defines roles and permissions (RBAC), and registers
+   employees with their skills, hourly rates, and memberships.
+2. **Define the work** — shifts are created per schedule and department
+   (directly or from templates), each declaring time window, min/max
+   staffing, and required skills.
+3. **Build the schedule** — assignments are created manually (validated
+   against double-booking, skills, and availability) or generated by the
+   optimizer, which honours time off, preferences, policies, and hour
+   caps. The schedule is then published.
+4. **Run the day-to-day** — employees confirm or decline assignments,
+   request time off and shift swaps, and see their calendar feed update;
+   managers approve requests (optionally through multi-step approval
+   workflows) and monitor coverage from the dashboard and reports.
+5. **Govern and audit** — every privileged action lands in the audit
+   log; modules can be switched off at runtime; delegations cover
+   absences without permanent role changes.
+
+## Roadmap
+
+Planned work and explicitly out-of-scope items are tracked on the
+GitHub Project board (the feature overview above covers what is
+implemented today):
 
 - **Roadmap board (Projects v2)**:
   [github.com/users/lucaosti/projects/2](https://github.com/users/lucaosti/projects/2)
@@ -213,7 +313,6 @@ Backend env vars (see `backend/.env.example` for the full list):
 ```env
 NODE_ENV=development
 PORT=3001
-HOST=localhost
 
 DB_HOST=localhost
 DB_PORT=3306
@@ -222,7 +321,7 @@ DB_PASSWORD=...
 DB_NAME=staff_scheduler
 
 JWT_SECRET=change-me
-JWT_EXPIRATION=7d
+JWT_EXPIRES_IN=24h
 BCRYPT_ROUNDS=12
 
 CORS_ORIGIN=http://localhost:3000
