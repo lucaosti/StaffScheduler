@@ -18,7 +18,7 @@ import { Pool } from 'mysql2/promise';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createApprovalWorkflowBody, updateApprovalWorkflowBody, escalateBody } from '../schemas';
+import { idParam, typeParam, createApprovalWorkflowBody, updateApprovalWorkflowBody, escalateBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
@@ -49,9 +49,9 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   });
 
   // Get workflow by change type
-  router.get('/:type', authenticate, requirePermission('approval.manage'), async (req: Request, res: Response) => {
+  router.get('/:type', authenticate, requirePermission('approval.manage'), validateParams(typeParam), async (_req: Request, res: Response) => {
     try {
-      const workflow = await engine.getWorkflowByChangeType(req.params.type);
+      const workflow = await engine.getWorkflowByChangeType(res.locals.params.type);
       if (!workflow) {
         return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Workflow not found' } });
       }

@@ -7,6 +7,8 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModule } from '../middleware/auth';
+import { validateParams } from '../middleware/validation';
+import { scheduleIdParam } from '../schemas';
 import { ReportsService } from '../services/ReportsService';
 import { logger } from '../config/logger';
 
@@ -51,13 +53,9 @@ export const createReportsRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/fairness/:scheduleId', async (req: Request, res: Response) => {
+  router.get('/fairness/:scheduleId', validateParams(scheduleIdParam), async (_req: Request, res: Response) => {
     try {
-      const scheduleId = parseInt(req.params.scheduleId, 10);
-      if (isNaN(scheduleId) || scheduleId <= 0) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'scheduleId must be a positive integer');
-      }
-      const data = await service.fairnessForSchedule(scheduleId);
+      const data = await service.fairnessForSchedule(res.locals.params.scheduleId);
       res.json({ success: true, data });
     } catch (err) {
       logger.error('reports error:', err);
