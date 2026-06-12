@@ -31,32 +31,27 @@ const router = Router();
  */
 router.get('/stats', authenticate, async (_req: Request, res: Response) => {
   try {
-    // Get basic statistics. Every active user is schedulable staff, so the
-    // headcount is the count of active users.
+    // Every active user is schedulable staff, so the headcount is the count
+    // of active users.
     const totalEmployeesQuery =
       'SELECT COUNT(*) as count FROM users WHERE is_active = TRUE';
-    const totalEmployees = await database.queryOne<{ count: number }>(totalEmployeesQuery);
 
     const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
-    const activeSchedules = await database.queryOne<{ count: number }>(activeSchedulesQuery);
 
     const todayShiftsQuery = `
-      SELECT COUNT(*) as count 
-      FROM shifts 
+      SELECT COUNT(*) as count
+      FROM shifts
       WHERE DATE(date) = CURDATE() AND status IN ('open', 'assigned', 'confirmed')
     `;
-    const todayShifts = await database.queryOne<{ count: number }>(todayShiftsQuery);
 
     const pendingApprovalsQuery = `
-      SELECT COUNT(*) as count 
-      FROM shift_assignments 
+      SELECT COUNT(*) as count
+      FROM shift_assignments
       WHERE status = 'pending'
     `;
-    const pendingApprovals = await database.queryOne<{ count: number }>(pendingApprovalsQuery);
 
-    // Calculate monthly hours from assignments
     const monthlyHoursQuery = `
-      SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR, 
+      SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR,
         CONCAT(s.date, ' ', s.start_time),
         CONCAT(s.date, ' ', s.end_time)
       )), 0) as total_hours
@@ -66,13 +61,10 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
         AND YEAR(s.date) = YEAR(CURDATE())
         AND sa.status = 'confirmed'
     `;
-    const monthlyHoursResult = await database.queryOne<{ total_hours: number }>(monthlyHoursQuery);
-    const monthlyHours = monthlyHoursResult?.total_hours || 0;
 
-    // Calculate monthly cost from employee hourly rates
     const monthlyCostQuery = `
       SELECT COALESCE(SUM(
-        TIMESTAMPDIFF(HOUR, 
+        TIMESTAMPDIFF(HOUR,
           CONCAT(s.date, ' ', s.start_time),
           CONCAT(s.date, ' ', s.end_time)
         ) * u.hourly_rate
@@ -84,12 +76,9 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
         AND YEAR(s.date) = YEAR(CURDATE())
         AND sa.status = 'confirmed'
     `;
-    const monthlyCostResult = await database.queryOne<{ total_cost: number }>(monthlyCostQuery);
-    const monthlyCost = monthlyCostResult?.total_cost || 0;
 
-    // Calculate coverage rate (percentage of shifts that are filled)
     const coverageQuery = `
-      SELECT 
+      SELECT
         COUNT(DISTINCT s.id) as total_shifts,
         COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
       FROM shifts s
@@ -97,12 +86,35 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
       WHERE MONTH(s.date) = MONTH(CURDATE())
         AND YEAR(s.date) = YEAR(CURDATE())
     `;
-    const coverageResult = await database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery);
+
+    // The seven aggregates are independent, so run them concurrently instead
+    // of serially — the endpoint latency becomes the slowest query, not the sum.
+    const [
+      totalEmployees,
+      activeSchedules,
+      todayShifts,
+      pendingApprovals,
+      monthlyHoursResult,
+      monthlyCostResult,
+      coverageResult,
+    ] = await Promise.all([
+      database.queryOne<{ count: number }>(totalEmployeesQuery),
+      database.queryOne<{ count: number }>(activeSchedulesQuery),
+      database.queryOne<{ count: number }>(todayShiftsQuery),
+      database.queryOne<{ count: number }>(pendingApprovalsQuery),
+      database.queryOne<{ total_hours: number }>(monthlyHoursQuery),
+      database.queryOne<{ total_cost: number }>(monthlyCostQuery),
+      database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
+    ]);
+
+    const monthlyHours = monthlyHoursResult?.total_hours || 0;
+    const monthlyCost = monthlyCostResult?.total_cost || 0;
     const coverageRate = coverageResult && coverageResult.total_shifts > 0
       ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
       : 0;
 
-    // Calculate employee satisfaction (based on preference matches)
+    // Preference-match satisfaction scoring is not implemented yet; report 0
+    // rather than a fabricated value.
     const employeeSatisfaction = 0;
 
     const stats = {
