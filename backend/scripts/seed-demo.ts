@@ -848,12 +848,14 @@ const insertOnCallCoverage = async (
     );
 
     if (entry.status === 'assigned') {
+      // LIMIT/OFFSET literals — mysql2 prepared statements do not support ? in LIMIT/OFFSET.
+      const offset = entry.daysFromNow;
       const [usersRes] = await conn.execute<mysql.RowDataPacket[]>(
         `SELECT u.id FROM users u
          JOIN user_departments ud ON ud.user_id = u.id
          WHERE ud.department_id = ?
-         ORDER BY u.id ASC LIMIT 1 OFFSET ?`,
-        [emergencyId, entry.daysFromNow]
+         ORDER BY u.id ASC LIMIT 1 OFFSET ${offset}`,
+        [emergencyId]
       );
       const userId = (usersRes[0] as { id?: number } | undefined)?.id;
       if (userId) {
