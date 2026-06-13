@@ -294,17 +294,16 @@ npm start                  # http://localhost:3000
 > **Note**: `react-scripts@5.0.1` (Create React App) is unmaintained since October 2022.
 > `npm audit` reports findings only in CRA's development toolchain (webpack-dev-server, sockjs, postcss, etc.) — none reach the production JS bundle, and `npm audit --omit=dev` is clean. They cannot be resolved without migrating to Vite. See DOCUMENTATION.md §Future Work.
 
-### First admin user
+### Startup modes
 
-`npm run db:init` creates only the schema. There are no default
-accounts. Either provision the first admin via the API (`/api/users`)
-from a privileged session, or use the demo profile below to bootstrap a
-working environment for evaluation.
+The project supports two mutually exclusive startup modes after `npm run db:init`:
 
-## Demo data (optional)
+| Mode | Command | Purpose |
+|---|---|---|
+| **Demo** | `npm run db:seed:demo` | Realistic fake dataset covering every feature. Safe to re-run (idempotent). |
+| **Production** | `npm run db:seed:production` | Minimal real configuration from your own config file. No fake data inserted. |
 
-The project ships an isolated, opt-in demo profile. Nothing in the
-production path depends on it.
+### Demo mode
 
 ```bash
 # One-shot orchestration: docker stack up + schema init + demo seed.
@@ -337,6 +336,29 @@ seed the banner does not render and `demo1234` is not a valid password
 against any account.
 
 No demo or mock accounts are created automatically.
+
+### Production mode (first deployment)
+
+```bash
+# 1. Copy the template — config.json is gitignored, never committed.
+cp backend/scripts/fixtures/production/config.template.json \
+   backend/scripts/fixtures/production/config.json
+
+# 2. Open config.json and replace every TODO_ placeholder:
+#    - admin credentials (change the password after first login)
+#    - departments, skills, shift templates, system settings
+
+# 3. Apply the schema, then seed.
+cd backend
+npm run db:init
+npm run db:seed:production
+```
+
+The seed is idempotent for all entities except the admin user (created
+only when the e-mail does not yet exist). It sets
+`system_settings(runtime.mode = production)` so the demo banner is never
+shown. Only the minimum viable configuration is inserted — no employees,
+no schedules, no shifts. Add those through the UI after logging in.
 
 ## Schedule optimization with OR-Tools
 

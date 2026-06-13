@@ -19,7 +19,9 @@ Staff Scheduler is an enterprise workforce management system.
 npm run dev          # Start dev server with hot reload (nodemon + ts-node)
 npm run build        # Compile TypeScript → dist/
 npm run start        # Run compiled production build
-npm run db:init      # Initialize DB schema (no demo data)
+npm run db:init             # Initialize DB schema (no data)
+npm run db:seed:demo        # Populate with realistic demo data (idempotent)
+npm run db:seed:production  # Seed from scripts/fixtures/production/config.json (first deployment)
 npm test             # Run all tests (Jest + ts-jest)
 npm run test:watch   # Tests in watch mode
 npm run test:coverage
