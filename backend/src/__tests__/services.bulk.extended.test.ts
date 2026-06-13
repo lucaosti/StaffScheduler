@@ -11,6 +11,9 @@
 import { EmployeeService } from '../services/EmployeeService';
 import { OnCallService } from '../services/OnCallService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { NotificationService } from '../services/NotificationService';
+
+const noopNotifications = { notifyAsync: () => {} } as unknown as NotificationService;
 
 jest.mock('../services/UserService', () => {
   const actual = jest.requireActual('../services/UserService');
@@ -398,7 +401,7 @@ describe('ShiftSwapService', () => {
   it('create rejects when requester assignment missing', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockResolvedValueOnce([[], null]);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
     ).rejects.toThrow(/Requester assignment not found/);
@@ -407,7 +410,7 @@ describe('ShiftSwapService', () => {
   it('create rejects when requester does not own the assignment', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockResolvedValueOnce([[{ id: 10, user_id: 99 }], null]);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
     ).rejects.toThrow(/does not own/);
@@ -418,7 +421,7 @@ describe('ShiftSwapService', () => {
     conn.execute
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[], null]);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
     ).rejects.toThrow(/Target assignment not found/);
@@ -438,7 +441,7 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([[{ id: 20, user_id: 2 }], null])
       .mockResolvedValueOnce([{ insertId: 1 }, null]);
     execute.mockResolvedValueOnce([[swap], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.create({
       requesterUserId: 1,
       requesterAssignmentId: 10,
@@ -455,7 +458,7 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([[{ id: 20, user_id: 2 }], null])
       .mockResolvedValueOnce([{ insertId: 1 }, null]);
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
     ).rejects.toThrow(/Failed to retrieve created swap/);
@@ -467,7 +470,7 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([[swap], null] as Tuple)
       .mockResolvedValueOnce([[swap], null] as Tuple)
       .mockResolvedValueOnce([[swap], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     expect((await svc.list()).length).toBe(1);
     expect((await svc.list({ userId: 1 })).length).toBe(1);
     expect((await svc.list({ userId: 1, status: 'pending' })).length).toBe(1);
@@ -476,7 +479,7 @@ describe('ShiftSwapService', () => {
   it('approve rolls back when not pending', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null]);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/Cannot approve swap/);
   });
 
@@ -488,7 +491,7 @@ describe('ShiftSwapService', () => {
         [{ assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' }],
         null,
       ]);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/One or both assignments are gone/);
   });
 
@@ -503,7 +506,7 @@ describe('ShiftSwapService', () => {
       ok: false,
       violations: [{ code: 'OVER_HOURS' }],
     });
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/Requester would violate/);
 
     conn.execute.mockResolvedValueOnce([[swap], null]).mockResolvedValueOnce([pair, null]);
@@ -541,7 +544,7 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce({ ok: true, violations: [] })
       .mockResolvedValueOnce({ ok: true, violations: [] });
     execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.approve(1, 9, 'OK');
     expect(out.status).toBe('approved');
   });
@@ -563,7 +566,7 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([[{ ...swap, requester_user_id: 999 }], null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'declined' }], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = new ShiftSwapService(pool, noopNotifications);
     expect((await svc.decline(1, 9, 'no')).status).toBe('declined');
     await expect(svc.decline(1, 9)).rejects.toThrow(/not found/);
     await expect(svc.decline(1, 9)).rejects.toThrow(/Cannot decline swap/);

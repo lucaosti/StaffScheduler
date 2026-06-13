@@ -11,83 +11,201 @@ constraint-programming optimizer in Python (Google OR-Tools CP-SAT).
 
 ## Features
 
-### Scheduling core
+### 1. Schedules and shifts
 
 - **Schedules** — create, duplicate, and publish schedules per department
-  and date range; lifecycle states (`draft` → `published`).
-- **Shifts and templates** — per-day shifts with start/end time, min/max
-  staffing, required skills, and reusable shift templates.
-- **Assignments** — assign users to shifts with full validation
-  (double-booking, skill match, availability); employees confirm,
-  decline, or complete their own assignments.
-- **Automatic scheduling** — two interchangeable engines: a greedy
-  TypeScript solver (zero dependencies, default) and a Google OR-Tools
-  CP-SAT solver (optional, Python) with hard constraints (coverage,
-  no double-booking, skills, availability, weekly hour caps) and soft
-  constraints (preferences, fairness, rest time, consecutive-day caps).
-- **Policies and exceptions** — configurable scheduling policies
-  (global, department, or user scope) with a request/approve/reject
-  workflow for one-off exceptions and a per-change-type approval matrix.
-- **Shift swaps** — employee-to-employee swap requests with manager
-  approval, decline, and requester cancellation.
-- **Time off** — request types with manager approval/rejection and
-  requester cancellation; honoured by the scheduling engines.
+  and date range; lifecycle states (`draft` → `published` → `archived`).
+- **Shift templates** — reusable shift definitions (time window, min/max
+  staffing, required skills) that can be applied when building a schedule.
+- **Shifts** — per-day instances created from templates or manually, each
+  declaring start/end time, min/max headcount, and required skill set.
+- **Assignments** — assign employees to shifts with full pre-assignment
+  validation: double-booking, skill match, availability, compliance rules.
+  Employees confirm, decline, or mark their own assignments complete.
+- **Bulk assignment** — create multiple assignments in a single request
+  with per-row validation and error reporting.
 - **On-call rotations** — on-call periods per department with capacity
   limits and per-user assignment.
 
-### Workforce management
+### 2. Automatic scheduling (optimizer)
 
-- **Employees and departments** — CRUD with skills, hourly rates,
-  multi-department membership, and per-department managers.
+Two interchangeable engines behind the same REST endpoint
+(`POST /api/schedules/:id/generate`):
+
+| Engine | Language | Dependency |
+|---|---|---|
+| Greedy TypeScript solver | TypeScript | none (default) |
+| Google OR-Tools CP-SAT solver | Python 3.8+ | `pip install ortools` |
+
+Both engines honour:
+
+- **Hard constraints** — shift coverage requirements, no double-booking,
+  skill requirements, declared availability, weekly hour caps.
+- **Soft constraints** — employee preferences, workload fairness, minimum
+  rest time between shifts, consecutive-day caps.
+
+Switch engines at runtime with `OPTIMIZATION_ENGINE=or-tools` in
+`backend/.env`. Constraint weights are configurable at call site.
+
+### 3. Employee requests and approvals
+
+- **Time off** — employees submit requests (vacation, sick, personal,
+  other); managers approve or reject with optional notes; requesters may
+  cancel while still pending. The optimizer and manual assignment
+  validator both respect approved time off.
+- **Shift swaps** — employee-to-employee swap requests; manager approves
+  or declines; requester may cancel while pending. Approval runs
+  compliance checks on both sides and atomically rewrites the
+  `user_id` on both assignments. Both parties receive an in-app
+  notification on approval or decline.
+- **Policy exceptions** — one-off exception requests against scheduling
+  policies, routed through the configurable approval matrix.
+
+### 4. Workforce management
+
+- **Employees** — full CRUD with skills, hourly rates, position,
+  employee ID, phone; activate/deactivate without deleting the record.
+- **Departments** — create and manage departments; assign a manager;
+  track multi-department membership.
 - **Organizational units** — arbitrary org tree (forest) with
-  memberships, primary-unit designation, and org-scoped permissions.
-- **Employee loans** — temporary transfer of an employee between org
-  units with an approval workflow.
-- **User directory** — profiles with custom fields, vCard export
-  (single user or bulk) and vCard import.
+  memberships, primary-unit designation, and org-unit-scoped
+  permissions; supports manager chains for approval routing.
+- **Employee loans** — temporary cross-unit transfer with start/end
+  dates, reason, and an approval workflow.
+- **User directory** — profiles with unlimited custom fields; vCard
+  export (single user or bulk ZIP) and vCard import; contact-book
+  integration with any vCard-compatible app.
 - **Skill gap analysis** — per-department comparison of required vs
-  available skills.
-- **Bulk import** — CSV import for users and shifts with per-row
-  validation and error reporting.
+  available skills, surfaced as a coverage report.
+- **Bulk import** — CSV import for employees and shifts with per-row
+  validation and structured error reporting.
 
-### Security and governance
+### 5. Security and access control
 
-- **Authentication** — JWT in httpOnly cookies (never exposed to JS),
-  bcrypt password hashing, login rate limiting, server-side token
-  revocation on logout.
-- **Two-factor authentication** — TOTP (RFC 6238) with QR provisioning
-  and single-use recovery codes, enforced at login when enabled.
+- **Authentication** — JWT in httpOnly cookies (never exposed to
+  JavaScript); bcrypt password hashing (configurable rounds); login
+  rate limiting; server-side token revocation on logout.
+- **Two-factor authentication (2FA)** — TOTP (RFC 6238) with QR-code
+  provisioning and single-use recovery codes; enforced at login when
+  enabled on the account.
 - **RBAC** — fully configurable roles and permission codes; permissions
-  are resolved from the database on every request, so changes take
-  effect immediately; org-unit scoping restricts data visibility.
+  are resolved from the database on every request (no stale token
+  state); org-unit scoping restricts data visibility to the user's
+  assigned units.
 - **Delegations** — temporary, expiring transfer of a user's roles to
-  another user (e.g. vacation cover).
-- **Approval workflows** — multi-step, configurable approval chains per
-  change type, with escalation for overdue steps.
-- **Audit trail** — append-only audit log of privileged actions with
-  filterable querying.
+  another user (e.g. vacation cover); automatically expires without
+  manual cleanup.
+- **Audit trail** — append-only audit log of privileged actions
+  (who, what, when) with filterable querying for compliance and
+  investigation.
 - **Module system** — runtime feature flags: disabled modules return
-  404 on their whole route subtree and disappear from the UI.
+  404 on their entire route subtree and disappear from the SPA menu.
 
-### Integrations and UX
+### 6. Approval workflows
 
-- **Dashboard** — live KPIs (headcount, coverage, monthly hours/cost,
-  pending approvals), recent activity, upcoming shifts.
-- **Reports** — hours worked per user, cost by department, fairness
-  metrics per schedule.
-- **Notifications** — in-app notification center with unread badge.
-- **Real-time events** — Server-Sent Events stream for live UI updates.
-- **Calendar feeds** — personal and per-department iCal feeds
-  (token-protected, ETag-cached) for Google Calendar / Outlook / Apple
-  Calendar.
-- **Preferences** — per-user scheduling preferences consumed by the
-  optimizer.
+- **Configurable chains** — multi-step approval sequences defined per
+  change type (time-off, shift swap, policy exception, employee loan).
+- **Approver scopes** — `direct_manager`, `department_head`,
+  `hr_manager`, `company_user`, `role_based`, `unit_manager_chain`.
+- **Auto-approve** — steps can be set to auto-approve when the actor
+  is the policy owner, cutting out unnecessary approval hops.
+- **Escalation** — steps that remain un-actioned past a configurable
+  deadline are automatically escalated.
+- **Approval matrix** — per-change-type matrix mapping change types to
+  approver scope; updatable at runtime without code changes.
+
+### 7. Notifications and real-time updates
+
+- **In-app notifications** — notification center with unread badge;
+  events include assignment created, shift swap approved/declined,
+  time-off approved/rejected, loan approved/rejected, and more.
+- **Real-time events (SSE)** — Server-Sent Events stream
+  (`GET /api/events/stream`) pushes live updates to the SPA without
+  polling; no WebSocket dependency.
+
+### 8. Calendar integration
+
+Employees can subscribe to their personal shift schedule directly in
+any calendar app that supports iCal (Google Calendar, Apple Calendar,
+Outlook, Thunderbird, etc.).
+
+**How it works:**
+
+1. The employee generates a personal calendar token in
+   **Settings → Calendar** (`POST /api/calendar/token`).
+2. The token-protected iCal feed URL is displayed and can be copied
+   with one click:
+   ```
+   GET /api/calendar/feed.ics?token=<token>
+   ```
+3. Paste the URL as a new subscribed/internet calendar in the calendar
+   app of choice. The server responds with `ETag` and
+   `Cache-Control: private, max-age=300`; clients that support
+   `If-None-Match` skip re-downloading the feed when nothing has
+   changed.
+4. The feed updates automatically as assignments change — no manual
+   refresh or re-subscription needed.
+
+**Minimum refresh interval by client:**
+
+| Client | Minimum achievable refresh |
+|---|---|
+| Google Calendar | ~12–24 h (enforced server-side by Google, not configurable by the user) |
+| Apple Calendar (macOS/iOS) | 5 min (set "Auto-refresh: Every 5 minutes" in subscription settings) |
+| Outlook desktop | 15–30 min (configurable in Calendar Properties → Update Limit) |
+| Thunderbird | 1 min (configurable in calendar properties) |
+
+> The iCal protocol is poll-based. For instant in-app updates, the
+> SPA uses the SSE stream instead (see §7 above).
+
+**Department feed** (managers and administrators only):
+```
+GET /api/calendar/department/:id.ics?token=<token>
+```
+Aggregates all shifts for a department into a single iCal feed. The
+token's owner must hold `settings.manage` or be the manager of the
+target department.
+
+**Token rotation:** tokens are non-expiring but can be rotated at any
+time (**Settings → Calendar → Rotate token**). Rotating invalidates
+the old URL — any existing calendar subscriptions must be updated with
+the new URL.
+
+### 9. Reports and analytics
+
+- **Dashboard** — live KPIs: active headcount, open schedules, today's
+  shifts, pending approvals, monthly hours, monthly cost, coverage
+  rate. Panels for recent audit activity and upcoming shifts.
+- **Hours report** — hours worked per employee for a selected schedule
+  or date range.
+- **Cost report** — cost by department, computed from shift hours ×
+  hourly rate.
+- **Fairness report** — per-schedule workload distribution metrics used
+  to evaluate optimizer fairness.
+
+### 10. Employee preferences
+
+Per-user scheduling constraints consumed by the optimizer:
+
+- `maxHoursPerWeek` / `minHoursPerWeek`
+- `maxConsecutiveDays`
+- `preferredShifts` — preferred shift templates
+- `avoidShifts` — shift templates to avoid
+- `notes` — free-text notes to the scheduler
+
+Preferences are stored in `user_preferences` and surfaced under
+**Settings → Work Preferences**.
+
+### 11. System and administration
+
 - **System settings** — runtime configuration (currency, default time
-  period, …) editable by administrators.
-- **API documentation** — OpenAPI 3.1 contract served via Swagger UI at
-  `/api/docs`.
-- **Frontend** — responsive React SPA with light/dark theme, accessible
-  tables and forms, error boundaries, and a demo-mode banner.
+  period) editable by administrators at `GET/PUT /api/settings`.
+- **API documentation** — full OpenAPI 3.1 contract served as Swagger
+  UI at `http://localhost:3001/api/docs` and as a static file at
+  `backend/openapi/openapi.json`.
+- **Frontend SPA** — responsive React 18 SPA with Bootstrap 5,
+  light/dark theme toggle, accessible tables and forms (ARIA labels,
+  keyboard navigation), React error boundaries, and a demo-mode banner.
 
 ## How it works
 

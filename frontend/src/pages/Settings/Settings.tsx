@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import PreferencesSection from '../Settings/PreferencesSection';
 import ProfileSection from '../Settings/ProfileSection';
 import SystemSection from '../Settings/SystemSection';
+import CalendarSection from '../Settings/CalendarSection';
 import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
 interface UserSettings {
@@ -41,7 +42,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('system.settings');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'system'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -147,6 +148,14 @@ const Settings: React.FC = () => {
                 <i className="bi bi-briefcase me-2"></i>Work Preferences
               </button>
             </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'calendar' ? 'active' : ''}`}
+                onClick={() => setActiveTab('calendar')}
+              >
+                <i className="bi bi-calendar-event me-2"></i>Calendar
+              </button>
+            </li>
             {isAdmin && (
               <li className="nav-item">
                 <button
@@ -180,6 +189,8 @@ const Settings: React.FC = () => {
           onSave={handleSaveWorkSettings}
         />
       )}
+
+      {activeTab === 'calendar' && <CalendarSection />}
 
       {activeTab === 'system' && isAdmin && <SystemSection />}
     </div>
