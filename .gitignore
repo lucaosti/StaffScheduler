@@ -198,6 +198,9 @@ vite.config.ts.timestamp-*
 database.json
 db-config.json
 
+# Production seed config — contains real credentials, never commit
+backend/scripts/fixtures/production/config.json
+
 # SSL certificates and keys
 *.pem
 *.key

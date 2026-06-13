@@ -1,0 +1,68 @@
+{
+  "_instructions": [
+    "Copy this file to config.json in the same directory.",
+    "Fill in every field marked with TODO — remove the comment lines before running the seed.",
+    "config.json is gitignored and never committed.",
+    "Run: npm run db:seed:production"
+  ],
+  "admin": {
+    "email": "TODO_admin@yourhospital.com",
+    "firstName": "TODO_Admin",
+    "lastName": "TODO_Surname",
+    "employeeId": "ADM001",
+    "password": "TODO_change_me_immediately"
+  },
+  "organization": {
+    "name": "TODO_Hospital Name",
+    "timezone": "Europe/Rome"
+  },
+  "departments": [
+    {
+      "name": "TODO_Department 1",
+      "code": "DEPT1",
+      "description": "TODO_Short description"
+    },
+    {
+      "name": "TODO_Department 2",
+      "code": "DEPT2",
+      "description": "TODO_Short description"
+    }
+  ],
+  "skills": [
+    { "name": "TODO_Skill 1", "description": "TODO_Description" },
+    { "name": "TODO_Skill 2", "description": "TODO_Description" }
+  ],
+  "shiftTemplates": [
+    {
+      "name": "TODO_Morning Shift",
+      "department": "TODO_Department 1",
+      "startTime": "07:00",
+      "endTime": "15:00",
+      "requiredStaff": 3,
+      "color": "#3498db"
+    },
+    {
+      "name": "TODO_Afternoon Shift",
+      "department": "TODO_Department 1",
+      "startTime": "15:00",
+      "endTime": "23:00",
+      "requiredStaff": 2,
+      "color": "#2ecc71"
+    },
+    {
+      "name": "TODO_Night Shift",
+      "department": "TODO_Department 1",
+      "startTime": "23:00",
+      "endTime": "07:00",
+      "requiredStaff": 1,
+      "color": "#9b59b6"
+    }
+  ],
+  "systemSettings": [
+    { "category": "general", "key": "hospital_name", "value": "TODO_Hospital Name" },
+    { "category": "general", "key": "default_timezone", "value": "Europe/Rome" },
+    { "category": "schedule", "key": "max_hours_per_week", "value": "40" },
+    { "category": "schedule", "key": "min_rest_hours_between_shifts", "value": "11" },
+    { "category": "notifications", "key": "email_enabled", "value": "true" }
+  ]
+}
