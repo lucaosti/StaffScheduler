@@ -12,6 +12,7 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
+import { NotificationService } from './NotificationService';
 
 type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
 
@@ -53,7 +54,11 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
 });
 
 export class ShiftSwapService {
-  constructor(private pool: Pool) {}
+  private notifications: NotificationService;
+
+  constructor(private pool: Pool, notifications?: NotificationService) {
+    this.notifications = notifications ?? new NotificationService(pool);
+  }
 
   /**
    * Creates a pending swap request. Validates that the requester owns
@@ -235,6 +240,20 @@ export class ShiftSwapService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve approved swap');
+
+    this.notifications.notifyAsync({
+      userId: refreshed.requesterUserId,
+      type: 'shiftswap.approved',
+      title: 'Shift swap approved',
+      body: `Your shift swap request #${refreshed.id} has been approved.`,
+    });
+    this.notifications.notifyAsync({
+      userId: refreshed.targetUserId,
+      type: 'shiftswap.approved',
+      title: 'Shift swap approved',
+      body: `A shift swap request involving your assignment (#${refreshed.id}) has been approved.`,
+    });
+
     return refreshed;
   }
 
@@ -256,6 +275,14 @@ export class ShiftSwapService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve declined swap');
+
+    this.notifications.notifyAsync({
+      userId: refreshed.requesterUserId,
+      type: 'shiftswap.declined',
+      title: 'Shift swap declined',
+      body: `Your shift swap request #${refreshed.id} has been declined.`,
+    });
+
     return refreshed;
   }
 
