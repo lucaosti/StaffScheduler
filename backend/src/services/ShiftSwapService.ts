@@ -56,8 +56,8 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
 export class ShiftSwapService {
   private notifications: NotificationService;
 
-  constructor(private pool: Pool) {
-    this.notifications = new NotificationService(pool);
+  constructor(private pool: Pool, notifications?: NotificationService) {
+    this.notifications = notifications ?? new NotificationService(pool);
   }
 
   /**
