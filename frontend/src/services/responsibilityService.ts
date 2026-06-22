@@ -65,9 +65,6 @@ export const listResponsibilityRules = (filters?: {
   return request<ResponsibilityRule[]>(`/responsibility-rules${qs ? `?${qs}` : ''}`);
 };
 
-export const getResponsibilityRule = (id: number) =>
-  request<ResponsibilityRule>(`/responsibility-rules/${id}`);
-
 export const createResponsibilityRule = (input: CreateResponsibilityRuleInput) =>
   request<ResponsibilityRule>('/responsibility-rules', {
     method: 'POST',
@@ -84,17 +81,3 @@ export const updateResponsibilityRule = (id: number, patch: UpdateResponsibility
 
 export const deleteResponsibilityRule = (id: number) =>
   request<void>(`/responsibility-rules/${id}`, { method: 'DELETE' });
-
-export const resolveResponsibleUsers = (params: {
-  permissionCode: string;
-  orgUnitId?: number;
-  departmentIds?: number[];
-  roleIds?: number[];
-}) => {
-  const qs = new URLSearchParams();
-  qs.set('permissionCode', params.permissionCode);
-  if (params.orgUnitId !== undefined) qs.set('orgUnitId', String(params.orgUnitId));
-  if (params.departmentIds?.length) qs.set('departmentIds', params.departmentIds.join(','));
-  if (params.roleIds?.length) qs.set('roleIds', params.roleIds.join(','));
-  return request<{ userIds: number[] }>(`/responsibility-rules/resolve?${qs.toString()}`);
-};
