@@ -64,4 +64,51 @@ describe('ThemeContext', () => {
     await userEvent.click(screen.getByText('toggle'));
     expect(screen.getByTestId('choice')).toHaveTextContent('dark');
   });
+
+  it('resolves system theme via matchMedia when available', () => {
+    const mockMql = {
+      matches: true,
+      addEventListener: jest.fn(),
+      removeEventListener: jest.fn(),
+    };
+    window.matchMedia = jest.fn().mockReturnValue(mockMql);
+
+    render(
+      <ThemeProvider>
+        <Probe />
+      </ThemeProvider>
+    );
+
+    // matchMedia was checked: system choice with matches=true resolves to 'dark'
+    expect(screen.getByTestId('resolved')).toHaveTextContent('dark');
+  });
+
+  it('attaches and removes a matchMedia change listener when choice is system', () => {
+    let changeHandler: (() => void) | null = null;
+    const mockMql = {
+      matches: false,
+      addEventListener: jest.fn().mockImplementation((_evt: string, fn: () => void) => {
+        changeHandler = fn;
+      }),
+      removeEventListener: jest.fn(),
+    };
+    window.matchMedia = jest.fn().mockReturnValue(mockMql);
+
+    const { unmount } = render(
+      <ThemeProvider>
+        <Probe />
+      </ThemeProvider>
+    );
+
+    expect(mockMql.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+
+    // Simulate OS switching to dark
+    if (changeHandler) {
+      mockMql.matches = true;
+      changeHandler();
+    }
+
+    unmount();
+    expect(mockMql.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+  });
 });

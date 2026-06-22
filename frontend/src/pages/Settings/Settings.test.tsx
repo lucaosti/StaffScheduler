@@ -24,15 +24,32 @@ jest.mock('../../services/settingsService', () => ({
   updateTimePeriod: jest.fn().mockResolvedValue({ success: true, data: { timePeriod: 'monthly' } }),
 }));
 
+const mockGetPreferences = jest.fn();
+const mockUpdatePreferences = jest.fn();
+
 jest.mock('../../services/preferencesService', () => ({
-  getMyPreferences: jest.fn().mockResolvedValue({ success: true, data: null }),
-  updateMyPreferences: jest.fn().mockResolvedValue({ success: true, data: {} }),
+  getMyPreferences: (...args: unknown[]) => mockGetPreferences(...args),
+  updateMyPreferences: (...args: unknown[]) => mockUpdatePreferences(...args),
+}));
+
+jest.mock('../../services/calendarService', () => ({
+  __esModule: true,
+  getOrCreateCalendarToken: jest.fn().mockResolvedValue({ token: 'tok' }),
+  rotateCalendarToken: jest.fn().mockResolvedValue({ token: 'rotated' }),
+  buildFeedUrl: jest.fn((t: string) => `http://localhost/feed.ics?token=${t}`),
 }));
 
 // eslint-disable-next-line import/first
 import Settings from './Settings';
 
 describe('<Settings />', () => {
+  beforeEach(() => {
+    mockGetPreferences.mockResolvedValue({ success: true, data: null });
+    mockUpdatePreferences.mockResolvedValue({ success: true, data: {} });
+  });
+
+  afterEach(() => jest.clearAllMocks());
+
   it('renders all tabs (admin variant)', async () => {
     mockUseAuth.mockReturnValue({
       user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['settings.manage'] },
@@ -65,5 +82,68 @@ describe('<Settings />', () => {
     });
     render(<Settings />);
     expect(screen.queryByRole('button', { name: /^System$/ })).not.toBeInTheDocument();
+  });
+
+  it('hydrates work settings when preferences load with data', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: [] },
+    });
+    mockGetPreferences.mockResolvedValue({
+      success: true,
+      data: { maxHoursPerWeek: 35, maxConsecutiveDays: 4 },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^Work Preferences$/ }));
+    const hoursInput = (await screen.findByLabelText(/max hours per week/i)) as HTMLInputElement;
+    expect(hoursInput.value).toBe('35');
+  });
+
+  it('calls updateMyPreferences when Save Personal Settings is submitted', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: [] },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /save personal settings/i }));
+    expect(mockUpdatePreferences).toHaveBeenCalledWith(
+      expect.objectContaining({ notes: expect.any(String) })
+    );
+  });
+
+  it('calls updateMyPreferences when Save Work Settings is submitted', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: [] },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^Work Preferences$/ }));
+    await userEvent.click(screen.getByRole('button', { name: /save work settings/i }));
+    expect(mockUpdatePreferences).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxHoursPerWeek: expect.any(Number),
+        maxConsecutiveDays: expect.any(Number),
+      })
+    );
+  });
+
+  it('renders the Calendar tab and shows CalendarSection when clicked', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: [] },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^Calendar$/ }));
+    expect(screen.getByText(/Calendar Feed/)).toBeInTheDocument();
+  });
+
+  it('renders the System tab when admin clicks it', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^System$/ }));
+    expect(screen.getByText(/System Configuration/)).toBeInTheDocument();
   });
 });
