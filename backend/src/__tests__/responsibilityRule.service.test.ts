@@ -468,3 +468,199 @@ describe('ResponsibilityRuleService.resolveResponsibleUsers', () => {
     expect(sql).toContain('delegated_to_role_id IS NULL OR ur.user_id IS NOT NULL');
   });
 });
+
+// ---------------------------------------------------------------------------
+// getMatrix
+// ---------------------------------------------------------------------------
+
+describe('ResponsibilityRuleService.getMatrix', () => {
+  it('groups rules by (subject_type, subject_id, permission_code)', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        buildRow({ id: 1, subject_type: 'department', subject_id: 10, permission_code: 'timeoff.approve' }),
+        buildRow({ id: 2, subject_type: 'department', subject_id: 10, permission_code: 'timeoff.approve', responsible_org_unit_id: 5 }),
+        buildRow({ id: 3, subject_type: 'all', subject_id: null, permission_code: 'schedule.manage' }),
+      ],
+      null,
+    ]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    const matrix = await svc.getMatrix();
+
+    expect(matrix).toHaveLength(2); // 2 distinct (subject, permission) groups
+    const deptGroup = matrix.find(e => e.subjectType === 'department');
+    expect(deptGroup).toBeDefined();
+    expect(deptGroup!.rules).toHaveLength(2);
+
+    const allGroup = matrix.find(e => e.subjectType === 'all');
+    expect(allGroup!.subjectId).toBeNull();
+  });
+
+  it('queries only active rules', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    await svc.getMatrix();
+
+    const [sql] = execute.mock.calls[0];
+    expect(sql).toContain('is_active = TRUE');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getMyResponsibilities
+// ---------------------------------------------------------------------------
+
+describe('ResponsibilityRuleService.getMyResponsibilities', () => {
+  it('returns rules where the user is a responsible party', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[buildRow()], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    const rules = await svc.getMyResponsibilities(42);
+
+    expect(rules).toHaveLength(1);
+    const [sql, params] = execute.mock.calls[0];
+    expect(sql).toContain('user_org_units');
+    expect(params[0]).toBe(42);
+  });
+
+  it('returns empty array when user has no responsibilities', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    expect(await svc.getMyResponsibilities(99)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bulkCreate
+// ---------------------------------------------------------------------------
+
+describe('ResponsibilityRuleService.bulkCreate', () => {
+  const makeConnPool = () => {
+    const execute = jest.fn();
+    const conn = {
+      execute: jest.fn(),
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    return {
+      pool: { execute, getConnection: jest.fn().mockResolvedValue(conn) } as never,
+      execute,
+      conn,
+    };
+  };
+
+  it('creates one rule per (subjectId × permissionCode) combination', async () => {
+    const { pool, conn, execute } = makeConnPool();
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 1 }, null])  // rule 1
+      .mockResolvedValueOnce([{ insertId: 2 }, null])  // rule 2
+      .mockResolvedValueOnce([{ insertId: 3 }, null])  // rule 3
+      .mockResolvedValueOnce([{ insertId: 4 }, null]); // rule 4
+    execute.mockResolvedValueOnce([[buildRow({ id: 1 }), buildRow({ id: 2 }), buildRow({ id: 3 }), buildRow({ id: 4 })], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    const created = await svc.bulkCreate(
+      {
+        subjectType: 'department',
+        subjectIds: [10, 11],
+        permissionCodes: ['timeoff.approve', 'schedule.manage'],
+        responsibleOrgUnitId: 3,
+      },
+      42
+    );
+
+    expect(conn.execute).toHaveBeenCalledTimes(4);
+    expect(created).toHaveLength(4);
+  });
+
+  it('creates rules with subject_id=null when subjectType is all', async () => {
+    const { pool, conn, execute } = makeConnPool();
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 10 }, null]) // one rule for 'all'
+    execute.mockResolvedValueOnce([[buildRow({ id: 10, subject_type: 'all', subject_id: null })], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    await svc.bulkCreate(
+      {
+        subjectType: 'all',
+        subjectIds: [],
+        permissionCodes: ['admin.access'],
+        responsibleOrgUnitId: 1,
+      },
+      1
+    );
+
+    const [, params] = conn.execute.mock.calls[0];
+    expect(params[0]).toBe('all');
+    expect(params[1]).toBeNull(); // subject_id = null for 'all'
+  });
+
+  it('throws when subjectIds is empty and subjectType is not all', async () => {
+    const { pool } = makeConnPool();
+    const svc = new ResponsibilityRuleService(pool);
+    await expect(
+      svc.bulkCreate(
+        { subjectType: 'department', subjectIds: [], permissionCodes: ['x.perm'], responsibleOrgUnitId: 1 },
+        1
+      )
+    ).rejects.toThrow('subjectIds must not be empty');
+  });
+
+  it('rolls back on error and rethrows', async () => {
+    const { pool, conn } = makeConnPool();
+    conn.execute.mockRejectedValueOnce(new Error('FK constraint'));
+
+    const svc = new ResponsibilityRuleService(pool);
+    await expect(
+      svc.bulkCreate(
+        { subjectType: 'department', subjectIds: [1], permissionCodes: ['x'], responsibleOrgUnitId: 99 },
+        1
+      )
+    ).rejects.toThrow('FK constraint');
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getConflicts
+// ---------------------------------------------------------------------------
+
+describe('ResponsibilityRuleService.getConflicts', () => {
+  it('returns other active rules with the same subject+permission', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])  // getById
+      .mockResolvedValueOnce([[buildRow({ id: 2, responsible_org_unit_id: 9 })], null]); // conflicts SELECT
+
+    const svc = new ResponsibilityRuleService(pool);
+    const conflicts = await svc.getConflicts(1);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].id).toBe(2);
+  });
+
+  it('returns empty array when no conflicts exist', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    expect(await svc.getConflicts(1)).toEqual([]);
+  });
+
+  it('throws not found when rule does not exist', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    await expect(svc.getConflicts(99)).rejects.toThrow('not found');
+  });
+});

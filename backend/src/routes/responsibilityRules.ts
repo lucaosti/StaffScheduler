@@ -45,6 +45,15 @@ const updateRuleBody = z.object({
   isActive: z.boolean().optional(),
 });
 
+const bulkBody = z.object({
+  subjectType: z.enum(SUBJECT_TYPES),
+  subjectIds: z.array(z.number().int().positive()).max(200).optional(),
+  permissionCodes: z.array(z.string().min(1).max(80)).min(1).max(50),
+  responsibleOrgUnitId: z.number().int().positive(),
+  delegatedToRoleId: z.number().int().positive().nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+});
+
 export const createResponsibilityRulesRouter = (pool: Pool): Router => {
   const router = Router();
   const svc = new ResponsibilityRuleService(pool);
@@ -98,6 +107,56 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
     }
   });
 
+  // GET /matrix — pivot view: rules grouped by (subject, permission)
+  router.get('/matrix', requirePermission('responsibility.read'), async (_req: Request, res: Response) => {
+    try {
+      const matrix = await svc.getMatrix();
+      res.json({ success: true, data: { matrix } });
+    } catch (error) {
+      logger.error('Get responsibility matrix error:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve responsibility matrix' } });
+    }
+  });
+
+  // GET /my-responsibilities — rules for which the current user is a responsible party
+  router.get('/my-responsibilities', authenticate, async (req: Request, res: Response) => {
+    try {
+      const actor = req.user as User;
+      const rules = await svc.getMyResponsibilities(actor.id);
+      res.json({ success: true, data: rules });
+    } catch (error) {
+      logger.error('Get my responsibilities error:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve responsibilities' } });
+    }
+  });
+
+  // POST /bulk — create N rules in one transaction
+  router.post('/bulk', requirePermission('responsibility.manage'), validateBody(bulkBody), async (req: Request, res: Response) => {
+    try {
+      const actor = req.user as User;
+      const body = res.locals.body;
+      const rules = await svc.bulkCreate(
+        {
+          subjectType: body.subjectType,
+          subjectIds: body.subjectIds ?? [],
+          permissionCodes: body.permissionCodes,
+          responsibleOrgUnitId: body.responsibleOrgUnitId,
+          delegatedToRoleId: body.delegatedToRoleId ?? null,
+          description: body.description ?? null,
+        },
+        actor.id
+      );
+      res.status(201).json({ success: true, data: rules, message: `${rules.length} responsibility rules created` });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to create rules';
+      logger.error('Bulk create responsibility rules error:', error);
+      if (msg.includes('limited to') || msg.includes('must not be empty')) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: msg } });
+      }
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to create responsibility rules' } });
+    }
+  });
+
   // Get by ID
   router.get('/:id', requirePermission('responsibility.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
@@ -125,6 +184,21 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
       }
       logger.error('Create responsibility rule error:', error);
       res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to create responsibility rule' } });
+    }
+  });
+
+  // GET /:id/conflicts — detect overlapping rules for the same subject+permission
+  router.get('/:id/conflicts', requirePermission('responsibility.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+    try {
+      const conflicts = await svc.getConflicts(res.locals.params.id);
+      res.json({ success: true, data: { conflicts, hasConflicts: conflicts.length > 0 } });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : '';
+      if (msg.toLowerCase().includes('not found')) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: msg } });
+      }
+      logger.error('Get conflicts error:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve conflicts' } });
     }
   });
 
