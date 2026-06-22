@@ -52,6 +52,7 @@ import { createRbacRouter } from './routes/rbac';
 import { createDelegationsRouter } from './routes/delegations';
 import { createApprovalWorkflowsRouter } from './routes/approvalWorkflows';
 import { createModulesRouter } from './routes/modules';
+import { createResponsibilityRulesRouter } from './routes/responsibilityRules';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -184,6 +185,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/delegations`, createDelegationsRouter(pool));
     app.use(`${prefix}/approval-workflows`, createApprovalWorkflowsRouter(pool));
     app.use(`${prefix}/modules`, createModulesRouter(pool));
+    app.use(`${prefix}/responsibility-rules`, createResponsibilityRulesRouter(pool));
   };
   mountRoutes('/api/v1');
   mountRoutes('/api');
