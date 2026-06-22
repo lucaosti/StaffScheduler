@@ -17,6 +17,7 @@ import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { NotificationService } from './NotificationService';
 import { PolicyService } from './PolicyService';
+import { AuditLogService } from './AuditLogService';
 
 type ExceptionStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
@@ -70,11 +71,13 @@ export class PolicyExceptionService {
   private approvals: ApprovalMatrixService;
   private notifications: NotificationService;
   private policies: PolicyService;
+  private audit: AuditLogService;
 
   constructor(private pool: Pool) {
     this.approvals = new ApprovalMatrixService(pool);
     this.notifications = new NotificationService(pool);
     this.policies = new PolicyService(pool);
+    this.audit = new AuditLogService(pool);
   }
 
   async create(input: CreateExceptionInput): Promise<PolicyExceptionRequest> {
@@ -110,6 +113,15 @@ export class PolicyExceptionService {
     logger.info(
       `Policy exception created: id=${created.id} policy=${input.policyId} status=${status}`
     );
+    await this.audit.write({
+      actorId: input.requestedByUserId,
+      action: 'policy_exception.create',
+      entityType: 'policy_exception_request',
+      entityId: created.id,
+      description: `Policy exception requested for policy ${input.policyId} on ${input.targetType}#${input.targetId}`,
+      justification: input.reason ?? null,
+      after: { id: created.id, status, policyId: input.policyId },
+    });
     if (status === 'pending' && resolved.approverUserId) {
       try {
         this.notifications.notifyAsync({
@@ -197,6 +209,15 @@ export class PolicyExceptionService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'policy_exception.approve',
+      entityType: 'policy_exception_request',
+      entityId: id,
+      description: `Policy exception approved`,
+      justification: notes ?? null,
+      after: { status: 'approved', reviewerId },
+    });
     this.notifications.notifyAsync({
       userId: refreshed.requestedByUserId,
       type: 'policy.exception.approved',
@@ -229,6 +250,15 @@ export class PolicyExceptionService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'policy_exception.reject',
+      entityType: 'policy_exception_request',
+      entityId: id,
+      description: `Policy exception rejected`,
+      justification: notes ?? null,
+      after: { status: 'rejected', reviewerId },
+    });
     this.notifications.notifyAsync({
       userId: refreshed.requestedByUserId,
       type: 'policy.exception.rejected',
@@ -253,6 +283,14 @@ export class PolicyExceptionService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
+    await this.audit.write({
+      actorId: requesterId,
+      action: 'policy_exception.cancel',
+      entityType: 'policy_exception_request',
+      entityId: id,
+      description: `Policy exception request cancelled`,
+      after: { status: 'cancelled' },
+    });
     return refreshed;
   }
 }

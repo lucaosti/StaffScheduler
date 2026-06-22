@@ -70,6 +70,7 @@ export const createAssignmentBody = z.object({
   shiftId: z.number().int().positive(),
   userId: z.number().int().positive(),
   notes: z.string().optional(),
+  reason: z.string().max(2000).optional(),
 });
 
 export const bulkCreateAssignmentsBody = z.object({
@@ -116,6 +117,7 @@ export const updateScheduleBody = z.object({
 export const updateAssignmentBody = z.object({
   status: z.string().optional(),
   notes: z.string().optional(),
+  reason: z.string().max(2000).optional(),
 });
 
 export const createShiftTemplateBody = z.object({

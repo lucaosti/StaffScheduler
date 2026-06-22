@@ -323,7 +323,7 @@ export class ScheduleService {
     }
   }
 
-  async publishSchedule(id: number, actorId?: number | null): Promise<Schedule> {
+  async publishSchedule(id: number, actorId?: number | null, reason?: string): Promise<Schedule> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -353,6 +353,7 @@ export class ScheduleService {
         entityType: 'schedule',
         entityId: id,
         description: `Schedule published: ${publishedSchedule.name}`,
+        justification: reason ?? null,
         after: { id, status: 'published' },
       });
 

@@ -5,16 +5,19 @@ import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { PolicyValidator } from './PolicyValidator';
 import { AssignmentValidator } from './AssignmentValidator';
 import { AssignmentOrchestrator } from './AssignmentOrchestrator';
+import { AuditLogService } from './AuditLogService';
 
 export class AssignmentService {
   private policyValidator: PolicyValidator;
   private validator: AssignmentValidator;
   private orchestrator: AssignmentOrchestrator;
+  private audit: AuditLogService;
 
   constructor(private pool: Pool) {
     this.policyValidator = new PolicyValidator(pool);
     this.validator = new AssignmentValidator(pool);
     this.orchestrator = new AssignmentOrchestrator(pool);
+    this.audit = new AuditLogService(pool);
   }
 
   async createAssignment(assignmentData: CreateAssignmentRequest): Promise<ShiftAssignment> {
@@ -134,6 +137,15 @@ export class AssignmentService {
 
       const newAssignment = await this.getAssignmentById(assignmentId);
       if (!newAssignment) throw new Error('Failed to retrieve created assignment');
+      await this.audit.write({
+        actorId: assignmentData.actorId ?? null,
+        action: 'assignment.create',
+        entityType: 'shift_assignment',
+        entityId: assignmentId,
+        description: `Assignment created: user ${assignmentData.userId} on shift ${assignmentData.shiftId}`,
+        justification: assignmentData.reason ?? null,
+        after: { shiftId: assignmentData.shiftId, userId: assignmentData.userId, status: 'pending' },
+      });
       return newAssignment;
     } catch (error) {
       await connection.rollback();
@@ -247,7 +259,8 @@ export class AssignmentService {
     }
   }
 
-  async deleteAssignment(id: number): Promise<boolean> {
+  async deleteAssignment(id: number, actorId?: number, reason?: string): Promise<boolean> {
+    const snapshot = await this.getAssignmentById(id);
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -258,6 +271,15 @@ export class AssignmentService {
       if (result.affectedRows === 0) throw new Error('Assignment not found');
       await connection.commit();
       logger.info(`Assignment deleted successfully: ${id}`);
+      await this.audit.write({
+        actorId: actorId ?? null,
+        action: 'assignment.delete',
+        entityType: 'shift_assignment',
+        entityId: id,
+        description: `Assignment deleted`,
+        justification: reason ?? null,
+        before: snapshot ? { shiftId: snapshot.shiftId, userId: snapshot.userId, status: snapshot.status } : null,
+      });
       return true;
     } catch (error) {
       await connection.rollback();
@@ -268,7 +290,7 @@ export class AssignmentService {
     }
   }
 
-  async updateAssignment(id: number, updateData: { status?: string; notes?: string }): Promise<ShiftAssignment> {
+  async updateAssignment(id: number, updateData: { status?: string; notes?: string; actorId?: number; reason?: string }): Promise<ShiftAssignment> {
     const connection = await this.pool.getConnection();
     try {
       const existing = await this.getAssignmentById(id);
@@ -291,6 +313,16 @@ export class AssignmentService {
       const updated = await this.getAssignmentById(id);
       if (!updated) throw new Error('Failed to retrieve updated assignment');
       logger.info(`Assignment ${id} updated successfully`);
+      await this.audit.write({
+        actorId: updateData.actorId ?? null,
+        action: 'assignment.update',
+        entityType: 'shift_assignment',
+        entityId: id,
+        description: `Assignment updated`,
+        justification: updateData.reason ?? null,
+        before: existing ? { status: existing.status, notes: existing.notes } : null,
+        after: { status: updated.status, notes: updated.notes },
+      });
       return updated;
     } catch (error) {
       logger.error('Error updating assignment:', error);
@@ -350,20 +382,59 @@ export class AssignmentService {
 
   // ── Delegated to AssignmentOrchestrator ───────────────────────────────────
 
-  async confirmAssignment(id: number): Promise<ShiftAssignment> {
-    return this.orchestrator.confirmAssignment(id);
+  async confirmAssignment(id: number, actorId?: number): Promise<ShiftAssignment> {
+    const result = await this.orchestrator.confirmAssignment(id);
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'assignment.confirm',
+      entityType: 'shift_assignment',
+      entityId: id,
+      description: `Assignment confirmed by user`,
+      after: { status: 'confirmed' },
+    });
+    return result;
   }
 
-  async cancelAssignment(id: number): Promise<ShiftAssignment> {
-    return this.orchestrator.cancelAssignment(id);
+  async cancelAssignment(id: number, actorId?: number, reason?: string): Promise<ShiftAssignment> {
+    const snapshot = await this.getAssignmentById(id);
+    const result = await this.orchestrator.cancelAssignment(id);
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'assignment.cancel',
+      entityType: 'shift_assignment',
+      entityId: id,
+      description: `Assignment cancelled`,
+      justification: reason ?? null,
+      before: snapshot ? { status: snapshot.status } : null,
+      after: { status: 'cancelled' },
+    });
+    return result;
   }
 
-  async declineAssignment(id: number): Promise<ShiftAssignment> {
-    return this.orchestrator.declineAssignment(id);
+  async declineAssignment(id: number, actorId?: number): Promise<ShiftAssignment> {
+    const result = await this.orchestrator.declineAssignment(id);
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'assignment.decline',
+      entityType: 'shift_assignment',
+      entityId: id,
+      description: `Assignment declined by user`,
+      after: { status: 'declined' },
+    });
+    return result;
   }
 
-  async completeAssignment(id: number): Promise<ShiftAssignment> {
-    return this.orchestrator.completeAssignment(id);
+  async completeAssignment(id: number, actorId?: number): Promise<ShiftAssignment> {
+    const result = await this.orchestrator.completeAssignment(id);
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'assignment.complete',
+      entityType: 'shift_assignment',
+      entityId: id,
+      description: `Assignment marked complete`,
+      after: { status: 'completed' },
+    });
+    return result;
   }
 
   async getAssignmentStatistics(scheduleId: number): Promise<{
