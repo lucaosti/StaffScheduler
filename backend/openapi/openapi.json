@@ -20,7 +20,7 @@
     },
     {
       "url": "http://localhost:3001/api",
-      "description": "Local development (legacy — will be removed)"
+      "description": "Local development (legacy \u2014 will be removed)"
     }
   ],
   "components": {
@@ -1629,7 +1629,7 @@
           "Auth"
         ],
         "summary": "Confirm and enable 2FA",
-        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.",
+        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes \u2014 store them safely.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1813,7 +1813,7 @@
             "description": "Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TOTP_REQUIRED`), or wrong 2FA code (`TOTP_INVALID`)."
           },
           "429": {
-            "description": "Login throttled — too many failed attempts."
+            "description": "Login throttled \u2014 too many failed attempts."
           }
         }
       }
@@ -2003,7 +2003,7 @@
           "Calendar"
         ],
         "summary": "Personal iCalendar feed",
-        "description": "Returns an iCal feed for the user identified by `token`. No JWT required — pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
+        "description": "Returns an iCal feed for the user identified by `token`. No JWT required \u2014 pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
         "security": [],
         "parameters": [
           {
@@ -2072,6 +2072,375 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/change-requests": {
+      "get": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "List change requests",
+        "description": "Returns paginated change requests. Requires change_request.review permission.",
+        "parameters": [
+          {
+            "name": "proposerUserId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "approverUserId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "applied",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "changeType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "targetEntityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 20
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated change request list."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Submit change request",
+        "description": "Creates a new change request proposal. Requires change_request.create permission.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "changeType",
+                  "targetEntityType",
+                  "proposedPayload"
+                ],
+                "properties": {
+                  "changeType": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "targetEntityType": {
+                    "type": "string",
+                    "maxLength": 60
+                  },
+                  "targetEntityId": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "proposedPayload": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "justification": {
+                    "type": "string",
+                    "maxLength": 2000,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Change request created."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/change-requests/{id}": {
+      "get": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Get change request",
+        "description": "Returns a single change request. Accessible by the proposer or any user with change_request.review.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Change request."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/change-requests/{id}/apply": {
+      "post": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Apply change request",
+        "description": "Marks the approved request as applied. Audit log attributes the action to the approver (authority holder). Requires change_request.review.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "justification": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Change request applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Invalid status transition."
+          }
+        }
+      }
+    },
+    "/change-requests/{id}/approve": {
+      "post": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Approve change request",
+        "description": "Moves the request from pending to approved. Requires change_request.review.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "justification": {
+                    "type": "string",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Change request approved."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Invalid status transition."
+          }
+        }
+      }
+    },
+    "/change-requests/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Cancel change request",
+        "description": "Cancels a pending request. Accessible by the proposer or any user with change_request.review.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Change request cancelled."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Invalid status transition."
+          }
+        }
+      }
+    },
+    "/change-requests/{id}/reject": {
+      "post": {
+        "tags": [
+          "Change Requests"
+        ],
+        "summary": "Reject change request",
+        "description": "Moves the request to rejected. Requires change_request.review.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "rejectionReason"
+                ],
+                "properties": {
+                  "rejectionReason": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Change request rejected."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Invalid status transition."
           }
         }
       }
@@ -3192,7 +3561,7 @@
           "Import"
         ],
         "summary": "Bulk import employees from CSV/JSON",
-        "description": "Admin only. Idempotent by email — existing employees are updated.",
+        "description": "Admin only. Idempotent by email \u2014 existing employees are updated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4895,6 +5264,325 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/responsibility-rules": {
+      "get": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "List responsibility rules",
+        "description": "Returns the responsibility matrix. Requires responsibility.read.",
+        "parameters": [
+          {
+            "name": "subjectType",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "org_unit",
+                "department",
+                "role",
+                "all"
+              ]
+            }
+          },
+          {
+            "name": "permissionCode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "responsibleOrgUnitId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "isActive",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of responsibility rules."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "Create responsibility rule",
+        "description": "Adds a new entry to the responsibility matrix. Requires responsibility.manage.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "subjectType",
+                  "permissionCode",
+                  "responsibleOrgUnitId"
+                ],
+                "properties": {
+                  "subjectType": {
+                    "type": "string",
+                    "enum": [
+                      "org_unit",
+                      "department",
+                      "role",
+                      "all"
+                    ]
+                  },
+                  "subjectId": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "permissionCode": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "responsibleOrgUnitId": {
+                    "type": "integer"
+                  },
+                  "delegatedToRoleId": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Responsibility rule created."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/responsibility-rules/resolve": {
+      "get": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "Resolve responsible users",
+        "description": "Returns the user IDs of everyone responsible for a given permission over a specific subject. Requires responsibility.read. departmentIds and roleIds are comma-separated integers (max 100 each).",
+        "parameters": [
+          {
+            "name": "permissionCode",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "orgUnitId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "departmentIds",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated integers"
+            }
+          },
+          {
+            "name": "roleIds",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "description": "Comma-separated integers"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Object with userIds array."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/responsibility-rules/{id}": {
+      "get": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "Get responsibility rule",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Responsibility rule."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "Update responsibility rule",
+        "description": "Partial update. Requires responsibility.manage.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "subjectType": {
+                    "type": "string",
+                    "enum": [
+                      "org_unit",
+                      "department",
+                      "role",
+                      "all"
+                    ]
+                  },
+                  "subjectId": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "permissionCode": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "responsibleOrgUnitId": {
+                    "type": "integer"
+                  },
+                  "delegatedToRoleId": {
+                    "type": "integer",
+                    "nullable": true
+                  },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "nullable": true
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated rule."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Responsibility Rules"
+        ],
+        "summary": "Delete responsibility rule",
+        "description": "Removes a rule from the responsibility matrix. Requires responsibility.manage.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rule deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

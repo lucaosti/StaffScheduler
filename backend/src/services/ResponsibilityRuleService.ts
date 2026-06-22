@@ -236,12 +236,14 @@ export class ResponsibilityRuleService {
       params.push(ctx.orgUnitId);
     }
     if (ctx.departmentIds && ctx.departmentIds.length > 0) {
+      if (ctx.departmentIds.length > 100) throw new Error('Max 100 department IDs allowed');
       subjectConditions.push(
         `(rr.subject_type = 'department' AND rr.subject_id IN (${ctx.departmentIds.map(() => '?').join(',')}))`
       );
       params.push(...ctx.departmentIds);
     }
     if (ctx.roleIds && ctx.roleIds.length > 0) {
+      if (ctx.roleIds.length > 100) throw new Error('Max 100 role IDs allowed');
       subjectConditions.push(
         `(rr.subject_type = 'role' AND rr.subject_id IN (${ctx.roleIds.map(() => '?').join(',')}))`
       );
