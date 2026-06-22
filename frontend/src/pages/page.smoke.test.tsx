@@ -82,9 +82,8 @@ jest.mock('../services/policyService', () => ({
   rejectException: jest.fn(() => okResponse({ id: 1 })),
   cancelException: jest.fn(() => okResponse({ id: 1 })),
   createException: jest.fn(() => okResponse({ id: 1 })),
-  listApprovalMatrix: jest.fn(() => okResponse([])),
-  upsertApprovalRule: jest.fn(() => okResponse({ id: 1 })),
-  deleteApprovalRule: jest.fn(() => okResponse(undefined)),
+  listMatrix: jest.fn(() => okResponse([])),
+  updateMatrix: jest.fn(() => okResponse({ id: 1 })),
 }));
 
 jest.mock('../contexts/AuthContext', () => ({
