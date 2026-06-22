@@ -571,6 +571,21 @@ CREATE TABLE IF NOT EXISTS modules (
     UNIQUE KEY unique_code (code)
 );
 
+-- Per-organization module overrides.  Rows here take priority over the global
+-- is_enabled value in the modules table.  If no row exists for an org+code
+-- pair the global default applies.
+CREATE TABLE IF NOT EXISTS organization_module_overrides (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    organization_name VARCHAR(120) NOT NULL,
+    module_code VARCHAR(60) NOT NULL,
+    is_enabled BOOLEAN NOT NULL,
+    updated_by INT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_org_module (organization_name, module_code),
+    FOREIGN KEY (module_code) REFERENCES modules(code) ON DELETE CASCADE,
+    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- ================================================================
 -- AUDIT LOGS TABLE - Track system activities
 -- ================================================================
