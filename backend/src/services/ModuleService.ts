@@ -20,9 +20,18 @@ export interface Module {
   updatedAt: Date;
 }
 
+export interface ModuleWithOrgOverride extends Module {
+  /** Effective enabled state after applying the org override (same as isEnabled when no override). */
+  effectiveEnabled: boolean;
+  /** The org-specific override, or null if none is set (global default applies). */
+  orgOverride: boolean | null;
+}
+
 export class ModuleService {
-  /** In-process cache: module code → isEnabled. Cleared on every toggle. */
+  /** In-process cache: module code → isEnabled (global). Cleared on every toggle. */
   private cache: Map<string, boolean> | null = null;
+  /** Per-org cache: org name → (code → isEnabled). Cleared on override change for that org. */
+  private orgCache: Map<string, Map<string, boolean>> = new Map();
 
   constructor(private pool: Pool) {}
 
@@ -62,6 +71,92 @@ export class ModuleService {
   async isEnabled(code: string): Promise<boolean> {
     if (this.cache === null) await this.buildCache();
     return this.cache!.get(code) ?? false;
+  }
+
+  /**
+   * Lists all modules with the org-specific override applied.
+   * `orgOverride` is null when no override exists (global default in effect).
+   */
+  async listWithOrgOverrides(org: string): Promise<ModuleWithOrgOverride[]> {
+    const modules = await this.list();
+    const overrideMap = await this.loadOrgOverrides(org);
+    return modules.map((m) => {
+      const override = overrideMap.get(m.code) ?? null;
+      return {
+        ...m,
+        effectiveEnabled: override !== null ? override : m.isEnabled,
+        orgOverride: override,
+      };
+    });
+  }
+
+  /**
+   * Creates or updates a per-organization module override.
+   * org-level override takes priority over the global is_enabled value.
+   */
+  async setOrgOverride(
+    code: string,
+    org: string,
+    isEnabled: boolean,
+    updatedBy?: number | null
+  ): Promise<ModuleWithOrgOverride> {
+    const mod = await this.getByCode(code);
+    if (!mod) throw new Error(`Module not found: ${code}`);
+
+    await this.pool.execute(
+      `INSERT INTO organization_module_overrides (organization_name, module_code, is_enabled, updated_by)
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE is_enabled = VALUES(is_enabled), updated_by = VALUES(updated_by),
+                               updated_at = CURRENT_TIMESTAMP`,
+      [org, code, isEnabled ? 1 : 0, updatedBy ?? null]
+    );
+    this.orgCache.delete(org);
+    logger.info(`Module override: org='${org}' code='${code}' enabled=${isEnabled}`);
+
+    return {
+      ...mod,
+      effectiveEnabled: isEnabled,
+      orgOverride: isEnabled,
+    };
+  }
+
+  /**
+   * Removes the per-org override for a module, reverting to the global default.
+   */
+  async removeOrgOverride(code: string, org: string): Promise<void> {
+    const mod = await this.getByCode(code);
+    if (!mod) throw new Error(`Module not found: ${code}`);
+
+    const [result] = await this.pool.execute<import('mysql2/promise').ResultSetHeader>(
+      `DELETE FROM organization_module_overrides WHERE organization_name = ? AND module_code = ?`,
+      [org, code]
+    );
+    this.orgCache.delete(org);
+    if (result.affectedRows === 0) throw new Error('Override not found');
+    logger.info(`Module override removed: org='${org}' code='${code}'`);
+  }
+
+  /**
+   * Checks whether a module is enabled for a specific organisation.
+   * Org override has priority; falls back to the global default.
+   */
+  async isEnabledForOrg(code: string, org: string): Promise<boolean> {
+    const overrideMap = await this.loadOrgOverrides(org);
+    if (overrideMap.has(code)) return overrideMap.get(code)!;
+    return this.isEnabled(code);
+  }
+
+  private async loadOrgOverrides(org: string): Promise<Map<string, boolean>> {
+    if (!this.orgCache.has(org)) {
+      const [rows] = await this.pool.execute<import('mysql2/promise').RowDataPacket[]>(
+        `SELECT module_code, is_enabled FROM organization_module_overrides WHERE organization_name = ?`,
+        [org]
+      );
+      const m = new Map<string, boolean>();
+      for (const r of rows as any[]) m.set(r.module_code, Boolean(r.is_enabled));
+      this.orgCache.set(org, m);
+    }
+    return this.orgCache.get(org)!;
   }
 
   private async buildCache(): Promise<void> {
