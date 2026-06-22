@@ -66,8 +66,6 @@ const _isBlacklisted = (jti: string): boolean => {
   return true;
 };
 
-export const getBlacklistSize = (): number => _jtiBlacklist.size;
-
 // Extend Express Request to include user and token JTI
 declare module 'express-serve-static-core' {
   interface Request {
