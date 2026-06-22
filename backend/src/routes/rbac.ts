@@ -25,7 +25,7 @@ import { z } from 'zod';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
-import { idParam, createRoleBody, updateRoleBody } from '../schemas';
+import { idParam, userIdParam, userIdAndRoleIdParam, createRoleBody, updateRoleBody } from '../schemas';
 import { logger } from '../config/logger';
 
 const assignRoleBody = z.object({
@@ -87,9 +87,9 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.get('/:id', async (req: Request, res: Response) => {
+  roles.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      const role = await rbac.getRoleById(Number(req.params.id));
+      const role = await rbac.getRoleById(res.locals.params.id);
       if (!role) return respondError(res, 404, 'NOT_FOUND', 'Role not found');
       res.json({ success: true, data: role });
     } catch (err) {
@@ -112,9 +112,9 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.delete('/:id', async (req: Request, res: Response) => {
+  roles.delete('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
     try {
-      await rbac.deleteRole(Number(req.params.id));
+      await rbac.deleteRole(res.locals.params.id);
       res.json({ success: true });
     } catch (err) {
       const msg = (err as Error).message;
@@ -122,19 +122,11 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.post('/users/:userId', async (req: Request, res: Response) => {
+  roles.post('/users/:userId', validateParams(userIdParam), validateBody(assignRoleBody), async (req: Request, res: Response) => {
     try {
-      const userId = parseInt(req.params.userId, 10);
-      if (isNaN(userId) || userId <= 0) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
-      }
-      const parseResult = assignRoleBody.safeParse(req.body);
-      if (!parseResult.success) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'roleId must be a positive integer');
-      }
-      const { roleId, scopeOrgUnitId, expiresAt } = parseResult.data;
+      const { roleId, scopeOrgUnitId, expiresAt } = res.locals.body;
       await rbac.assignRole(
-        userId,
+        res.locals.params.userId,
         roleId,
         scopeOrgUnitId ?? null,
         expiresAt ?? null,
@@ -146,10 +138,14 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
-  roles.delete('/users/:userId/:roleId', async (req: Request, res: Response) => {
+  roles.delete('/users/:userId/:roleId', validateParams(userIdAndRoleIdParam), async (req: Request, res: Response) => {
     try {
-      const scope = req.query.scopeOrgUnitId ? Number(req.query.scopeOrgUnitId) : null;
-      await rbac.removeRole(Number(req.params.userId), Number(req.params.roleId), scope, req.user?.id);
+      const rawScope = req.query.scopeOrgUnitId;
+      const scope = rawScope ? (() => {
+        const n = parseInt(String(rawScope), 10);
+        return isNaN(n) || n <= 0 ? null : n;
+      })() : null;
+      await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id);
       res.json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

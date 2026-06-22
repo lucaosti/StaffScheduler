@@ -48,6 +48,12 @@ export interface WriteAuditLogInput {
   justification?: string | null;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
+  /**
+   * When true, the write() method throws on DB failure instead of swallowing the
+   * error. Use for high-compliance actions where a missing audit record must stop
+   * the operation. Default: false (fire-and-forget, never blocks the caller).
+   */
+  throwOnFailure?: boolean;
 }
 
 interface AuditLogFilters {
@@ -176,8 +182,12 @@ export class AuditLogService {
   /**
    * Writes a single audit log entry. `ip_address`, `user_agent`, and
    * `request_id` are pulled automatically from the AsyncLocalStorage context
-   * when a request is in flight. Silently swallows write errors so a log
-   * failure never blocks the primary operation.
+   * when a request is in flight.
+   *
+   * By default the write is fire-and-forget: errors are logged but never
+   * propagated so audit failures never break the primary operation. Set
+   * `throwOnFailure: true` for actions where a missing audit record must
+   * abort the entire transaction.
    */
   async write(input: WriteAuditLogInput): Promise<void> {
     try {
@@ -203,7 +213,14 @@ export class AuditLogService {
         ]
       );
     } catch (err) {
-      logger.error('Failed to write audit log:', err);
+      logger.error('Failed to write audit log', {
+        action: input.action,
+        actorId: input.actorId,
+        entityType: input.entityType,
+        entityId: input.entityId,
+        error: err,
+      });
+      if (input.throwOnFailure) throw err;
     }
   }
 }

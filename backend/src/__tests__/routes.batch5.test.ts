@@ -98,7 +98,8 @@ describe('rbac route — POST /roles/users/:userId with non-numeric userId retur
       .send({ roleId: 1 });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
-    expect(res.body.error.message).toMatch(/userId must be a positive integer/);
+    // Zod-based validateParams returns the field-level message in details, not top-level message
+    expect(res.body.error.details[0].field).toBe('userId');
   });
 
   it('returns 400 VALIDATION_ERROR when userId is 0', async () => {
