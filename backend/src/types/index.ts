@@ -488,6 +488,32 @@ export interface ChangeRequestFilters {
   offset?: number;
 }
 
+export type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated' | 'skipped';
+
+export interface PendingApproval {
+  id: number;
+  changeRequestId: number;
+  workflowId: number;
+  stepId: number;
+  stepOrder: number;
+  assignedToUserId: number;
+  status: PendingApprovalStatus;
+  decidedAt: string | null;
+  decisionNote: string | null;
+  escalatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PendingApprovalWithContext extends PendingApproval {
+  changeType: string;
+  targetEntityType: string;
+  targetEntityId: number | null;
+  proposedPayload: Record<string, unknown>;
+  justification: string | null;
+  proposerUserId: number;
+}
+
 // System Settings Types
 export interface SystemSetting {
   id: number;
