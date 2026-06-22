@@ -220,3 +220,132 @@ describe('ModuleService.isEnabled', () => {
     expect(execute).toHaveBeenCalledTimes(4);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// listWithOrgOverrides
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('ModuleService.listWithOrgOverrides', () => {
+  it('merges org overrides into the module list', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[enabledRow], null])                               // list()
+      .mockResolvedValueOnce([[{ module_code: 'delegation', is_enabled: 0 }], null]); // org overrides
+
+    const svc = new ModuleService(pool);
+    const result = await svc.listWithOrgOverrides('acme');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].effectiveEnabled).toBe(false);
+    expect(result[0].orgOverride).toBe(false);
+    expect(result[0].isEnabled).toBe(true); // global default unchanged
+  });
+
+  it('sets orgOverride to null when no override exists for the module', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[enabledRow], null])
+      .mockResolvedValueOnce([[], null]); // no overrides for org
+
+    const svc = new ModuleService(pool);
+    const result = await svc.listWithOrgOverrides('acme');
+    expect(result[0].orgOverride).toBeNull();
+    expect(result[0].effectiveEnabled).toBe(true); // falls back to global
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// setOrgOverride
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('ModuleService.setOrgOverride', () => {
+  it('upserts the org override row and returns updated module', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[enabledRow], null])          // getByCode
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);  // INSERT ... ON DUPLICATE KEY UPDATE
+
+    const svc = new ModuleService(pool);
+    const result = await svc.setOrgOverride('delegation', 'acme', false, 1);
+
+    expect(result.orgOverride).toBe(false);
+    expect(result.effectiveEnabled).toBe(false);
+    const [sql] = execute.mock.calls[1];
+    expect(sql).toContain('INSERT INTO organization_module_overrides');
+    expect(sql).toContain('ON DUPLICATE KEY UPDATE');
+  });
+
+  it('throws when module does not exist', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]); // getByCode → not found
+
+    const svc = new ModuleService(pool);
+    await expect(svc.setOrgOverride('nonexistent', 'acme', true)).rejects.toThrow('not found');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// removeOrgOverride
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('ModuleService.removeOrgOverride', () => {
+  it('deletes the override row', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[enabledRow], null])          // getByCode
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);  // DELETE
+
+    const svc = new ModuleService(pool);
+    await svc.removeOrgOverride('delegation', 'acme');
+    const [sql] = execute.mock.calls[1];
+    expect(sql).toContain('DELETE FROM organization_module_overrides');
+  });
+
+  it('throws Override not found when no row is deleted', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[enabledRow], null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]); // no rows deleted
+
+    const svc = new ModuleService(pool);
+    await expect(svc.removeOrgOverride('delegation', 'acme')).rejects.toThrow('Override not found');
+  });
+
+  it('throws when module does not exist', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]); // getByCode → not found
+
+    const svc = new ModuleService(pool);
+    await expect(svc.removeOrgOverride('nonexistent', 'acme')).rejects.toThrow('not found');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// isEnabledForOrg
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('ModuleService.isEnabledForOrg', () => {
+  it('returns false when org has an override disabling a globally-enabled module', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ module_code: 'delegation', is_enabled: 0 }], null]) // org overrides
+      .mockResolvedValueOnce([[enabledRow], null]); // global list (not needed here but keeps queue clean)
+
+    const svc = new ModuleService(pool);
+    const result = await svc.isEnabledForOrg('delegation', 'acme');
+    expect(result).toBe(false);
+    // Only the org override query needed — no global list needed since override hit
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to global when no org override exists for the code', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null])              // org overrides → empty
+      .mockResolvedValueOnce([[enabledRow], null]);   // global list (fallback)
+
+    const svc = new ModuleService(pool);
+    const result = await svc.isEnabledForOrg('delegation', 'acme');
+    expect(result).toBe(true); // falls back to global enabled state
+  });
+});
