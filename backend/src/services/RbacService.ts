@@ -68,17 +68,24 @@ export class RbacService {
     const delegatorIds = (delegRows as any[]).map((r) => r.delegator_id as number);
 
     if (delegatorIds.length > 0) {
-      // Batch-fetch all delegators' current permissions in a single query.
-      // No recursion: sub-delegation is not allowed by design.
-      const [batchRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT ur.user_id, p.code
-           FROM user_roles ur
-           JOIN role_permissions rp ON rp.role_id = ur.role_id
-           JOIN permissions p       ON p.id = rp.permission_id
-          WHERE ur.user_id IN (${delegatorIds.map(() => '?').join(',')})
-            AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
-        delegatorIds
-      );
+      // Batch-fetch all delegators' current permissions, chunked to avoid
+      // unbounded IN(...) placeholders on large delegation sets.
+      const CHUNK_SIZE = 500;
+      const allBatchRows: RowDataPacket[] = [];
+      for (let i = 0; i < delegatorIds.length; i += CHUNK_SIZE) {
+        const chunk = delegatorIds.slice(i, i + CHUNK_SIZE);
+        const [chunkRows] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT DISTINCT ur.user_id, p.code
+             FROM user_roles ur
+             JOIN role_permissions rp ON rp.role_id = ur.role_id
+             JOIN permissions p       ON p.id = rp.permission_id
+            WHERE ur.user_id IN (${chunk.map(() => '?').join(',')})
+              AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+          chunk
+        );
+        allBatchRows.push(...(chunkRows as RowDataPacket[]));
+      }
+      const batchRows = allBatchRows;
 
       // Build a per-delegator permission set from the batch result.
       const delegatorPerms = new Map<number, Set<string>>();
