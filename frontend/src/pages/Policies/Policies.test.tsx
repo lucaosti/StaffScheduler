@@ -34,7 +34,7 @@ jest.mock('../../contexts/AuthContext', () => ({
       id: 1,
       email: 'admin@x',
       role: 'admin',
-      permissions: ['policy.admin', 'policy.manage'],
+      permissions: ['policy.manage', 'policy.read'],
     },
   }),
 }));

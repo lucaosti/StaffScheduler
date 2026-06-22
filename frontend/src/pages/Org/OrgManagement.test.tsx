@@ -36,7 +36,7 @@ jest.mock('../../services/orgService', () => ({
 
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({
-    user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['org.admin', 'org.manage'] },
+    user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['org_unit.manage', 'org_unit.read'] },
   }),
 }));
 

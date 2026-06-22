@@ -40,7 +40,7 @@ interface UserSettings {
 
 const Settings: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.permissions?.includes('system.settings');
+  const isAdmin = user?.permissions?.includes('settings.manage');
 
   const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system'>('personal');
 

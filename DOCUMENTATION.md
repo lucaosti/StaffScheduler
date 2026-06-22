@@ -431,6 +431,13 @@ POST   /api/approval-workflows/escalate  trigger escalation check (cron-callable
 
 Default change types: `Loan.Request`, `Loan.Cancel`, `Policy.Create`, `Policy.Update`, `Policy.Exception`, `Schedule.Publish`, `Schedule.Override`, `OrgUnit.Update`, `Membership.Update`, `TimeOff.Request`, `ShiftSwap.Request`.
 
+Valid `approverScope` values for `approval_steps`:
+- `policy_owner` — the user who owns the policy being acted on
+- `unit_manager` — manager of the org unit in context
+- `unit_manager_chain` — walks up the org tree and returns the first unit with a manager
+- `company_role` — any active user holding `approverRoleId`
+- `company_user` — a specific user identified by `approverUserId`
+
 ---
 
 ## 10. Audit trail

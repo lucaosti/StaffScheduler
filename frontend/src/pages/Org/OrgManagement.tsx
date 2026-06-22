@@ -38,10 +38,10 @@ interface ConfirmState {
 
 const OrgManagement: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.permissions?.includes('org.admin');
+  const isAdmin = user?.permissions?.includes('org_unit.manage');
   const isManager =
-    user?.permissions?.includes('org.admin') ||
-    user?.permissions?.includes('org.manage');
+    user?.permissions?.includes('org_unit.manage') ||
+    user?.permissions?.includes('org_unit.read');
 
   const [activeTab, setActiveTab] = useState<Tab>('tree');
   const [units, setUnits] = useState<OrgUnit[]>([]);
