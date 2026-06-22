@@ -109,6 +109,8 @@ All service files import `handleResponse` and `getAuthHeaders` from `./apiUtils`
 | `delegations` | Temporary permission grants from one user to another |
 | `approval_workflows` | Ordered multi-step approval chains per change type |
 | `approval_steps` | Individual step in a workflow with approver scope and escalation timeout |
+| `responsibility_rules` | Multi-dimensional matrix: (subject group × permission code) → responsible org unit |
+| `change_requests` | Subordinate-proposed changes; approved and applied by the authority holder |
 | `modules` | Runtime feature flags; `requireModule(code)` returns 404 for disabled modules |
 | `audit_logs` | Immutable record of every sensitive mutation |
 | `policies` | Configurable business rules (with exception requests) |
@@ -222,7 +224,7 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
 
 ```
-permissions  — fixed catalog of capability codes (28 codes, cannot be added at runtime)
+permissions  — fixed catalog of capability codes (32 codes, cannot be added at runtime)
 roles        — configurable named bundles (Administrator, Manager, Employee + any custom)
 role_permissions — M:N, which permissions a role grants
 user_roles   — user ↔ role grant, optionally scoped to an org-unit subtree, optionally time-bound
@@ -288,6 +290,9 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `user.read` / `user.manage` | User accounts |
 | `settings.manage` | System settings + module toggles |
 | `role.manage` | Role and permission management |
+| `responsibility.read` / `responsibility.manage` | View / manage responsibility matrix |
+| `change_request.create` | Submit a change request |
+| `change_request.review` | Approve, reject, apply, and list change requests |
 
 ### Anti-escalation
 
@@ -438,6 +443,59 @@ Valid `approverScope` values for `approval_steps`:
 - `unit_manager_chain` — walks up the org tree and returns the first unit with a manager
 - `company_role` — any active user holding `approverRoleId`
 - `company_user` — a specific user identified by `approverUserId`
+- `responsibility_rule` — resolves approvers dynamically via the responsibility matrix; requires `approverPermissionCode` on the step; `ApprovalEngineService.resolveAllApproversForStep(step, ctx)` returns the full set for fan-out notifications
+
+---
+
+## 9a. Responsibility matrix
+
+The responsibility matrix maps `(subject group × permission code) → responsible org unit`, supporting multiple offices holding the same responsibility over different subordinate groups.
+
+```
+GET    /api/responsibility-rules              list rules (responsibility.read)
+POST   /api/responsibility-rules             create rule (responsibility.manage)
+GET    /api/responsibility-rules/resolve     resolve responsible user IDs (responsibility.read)
+GET    /api/responsibility-rules/:id         get one (responsibility.read)
+PUT    /api/responsibility-rules/:id         update (responsibility.manage)
+DELETE /api/responsibility-rules/:id         delete (responsibility.manage)
+```
+
+**Subject types** (`subjectType`):
+- `org_unit` — rule applies when the subject belongs to a specific org unit (`subjectId` = org unit ID)
+- `department` — rule applies when the subject belongs to a department
+- `role` — rule applies when the subject holds a role
+- `all` — rule applies globally regardless of group membership (`subjectId` must be null)
+
+**Resolution algorithm** (`GET /api/responsibility-rules/resolve?permissionCode=...&orgUnitId=...&departmentIds=1,2&roleIds=5`):
+`ResponsibilityRuleService.resolveResponsibleUsers(ctx)` builds a single query covering all applicable subject conditions (org_unit OR department OR role OR all), joins the matching rules to `user_org_units` of the responsible org unit, and returns de-duplicated user IDs. The optional `delegatedToRoleId` on a rule further filters to members who also hold that role.
+
+Limits: `departmentIds` and `roleIds` are capped at 100 entries each.
+
+Required permissions: `responsibility.read` (read), `responsibility.manage` (write). Both are granted to the Manager role by default.
+
+---
+
+## 9b. Change requests
+
+The change request mechanism lets subordinates propose changes that, once approved and applied, are attributed in the audit log to the authority holder (approver) while preserving the proposer's identity via `on_behalf_of_user_id`.
+
+```
+GET    /api/change-requests              list all (change_request.review)
+POST   /api/change-requests             submit proposal (change_request.create)
+GET    /api/change-requests/:id         get one (change_request.review or own proposer)
+POST   /api/change-requests/:id/approve approve (change_request.review)
+POST   /api/change-requests/:id/reject  reject  (change_request.review)
+POST   /api/change-requests/:id/apply   apply   (change_request.review)
+POST   /api/change-requests/:id/cancel  cancel  (own proposer or change_request.review)
+```
+
+**Lifecycle**: `pending → approved → applied` (or `rejected` / `cancelled`). Status transitions are strictly guarded — attempting an invalid transition returns HTTP 409.
+
+**Proxy attribution**: when `apply` is called, `ChangeRequestService.apply()` writes an audit log entry with `actorId = approverUserId` (authority holder) and `onBehalfOfUserId = proposerUserId`. This makes the action appear decided by the authority holder while keeping the full delegation chain auditable.
+
+**`proposedPayload`**: arbitrary JSON object describing the proposed change (e.g. `{ "scheduleId": 42, "action": "publish" }`). The schema is opaque to the service layer; the caller that processes the `apply` event is responsible for interpreting it.
+
+Required permissions: `change_request.create` (propose), `change_request.review` (approve/reject/apply/list). Both are granted to the Manager role by default.
 
 ---
 

@@ -75,7 +75,7 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Create (any authenticated user with permission)
-  router.post('/', requirePermission('change_request.create'), validateBody(createBody), async (req: Request, res: Response) => {
+  router.post('/', validateBody(createBody), requirePermission('change_request.create'), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.create(res.locals.body, actor.id);
