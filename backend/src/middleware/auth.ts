@@ -62,7 +62,6 @@ declare module 'express-serve-static-core' {
  */
 interface JWTPayload {
   userId: string;
-  email: string;
   jti?: string;
   iat?: number;
   exp?: number;

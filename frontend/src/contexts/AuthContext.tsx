@@ -93,7 +93,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           dispatch({ type: 'SET_LOADING', payload: false });
         }
       } catch {
-        dispatch({ type: 'SET_LOADING', payload: false });
+        dispatch({ type: 'LOGOUT' });
       }
     };
 
