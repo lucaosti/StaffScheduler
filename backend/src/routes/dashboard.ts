@@ -87,8 +87,28 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
         AND YEAR(s.date) = YEAR(CURDATE())
     `;
 
-    // The seven aggregates are independent, so run them concurrently instead
-    // of serially — the endpoint latency becomes the slowest query, not the sum.
+    // Preference-match satisfaction: ratio of this month's assignments where the
+    // assigned shift appears in the employee's preferred_shifts list.
+    const satisfactionQuery = `
+      SELECT
+        COUNT(*) AS total_assignments,
+        SUM(
+          CASE
+            WHEN up.preferred_shifts IS NOT NULL
+              AND JSON_LENGTH(up.preferred_shifts) > 0
+              AND JSON_CONTAINS(up.preferred_shifts, CAST(sa.shift_id AS JSON))
+            THEN 1 ELSE 0
+          END
+        ) AS preferred_assignments
+      FROM shift_assignments sa
+      JOIN shifts s ON sa.shift_id = s.id
+      LEFT JOIN user_preferences up ON up.user_id = sa.user_id
+      WHERE MONTH(s.date) = MONTH(CURDATE())
+        AND YEAR(s.date) = YEAR(CURDATE())
+        AND sa.status IN ('confirmed', 'completed')
+    `;
+
+    // The eight aggregates are independent, so run them concurrently.
     const [
       totalEmployees,
       activeSchedules,
@@ -97,6 +117,7 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
       monthlyHoursResult,
       monthlyCostResult,
       coverageResult,
+      satisfactionResult,
     ] = await Promise.all([
       database.queryOne<{ count: number }>(totalEmployeesQuery),
       database.queryOne<{ count: number }>(activeSchedulesQuery),
@@ -105,6 +126,7 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
       database.queryOne<{ total_hours: number }>(monthlyHoursQuery),
       database.queryOne<{ total_cost: number }>(monthlyCostQuery),
       database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
+      database.queryOne<{ total_assignments: number; preferred_assignments: number }>(satisfactionQuery),
     ]);
 
     const monthlyHours = monthlyHoursResult?.total_hours || 0;
@@ -112,10 +134,10 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
     const coverageRate = coverageResult && coverageResult.total_shifts > 0
       ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
       : 0;
-
-    // Preference-match satisfaction scoring is not implemented yet; report 0
-    // rather than a fabricated value.
-    const employeeSatisfaction = 0;
+    const employeeSatisfaction =
+      satisfactionResult && satisfactionResult.total_assignments > 0
+        ? (satisfactionResult.preferred_assignments / satisfactionResult.total_assignments) * 100
+        : 0;
 
     const stats = {
       totalEmployees: totalEmployees?.count || 0,
@@ -125,7 +147,7 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
       monthlyHours: Math.round(monthlyHours),
       monthlyCost: Math.round(monthlyCost * 100) / 100,
       coverageRate: Math.round(coverageRate * 10) / 10,
-      employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10
+      employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10,
     };
 
     res.json({
@@ -134,14 +156,9 @@ router.get('/stats', authenticate, async (_req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Dashboard stats error:', error);
-    
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to fetch dashboard statistics',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch dashboard statistics' },
     });
   }
 });
@@ -188,11 +205,7 @@ router.get('/activities', authenticate, async (_req: Request, res: Response) => 
     logger.error('Dashboard activities error:', error);
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to load recent activities',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to load recent activities' },
     });
   }
 });
@@ -251,11 +264,7 @@ router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response
     
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to load upcoming shifts',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to load upcoming shifts' },
     });
   }
 });
@@ -308,11 +317,7 @@ router.get('/departments', authenticate, async (_req: Request, res: Response) =>
     
     res.status(500).json({
       success: false,
-      error: {
-        code: 'INTERNAL_ERROR',
-        message: 'Failed to load department overview',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }
+      error: { code: 'INTERNAL_ERROR', message: 'Failed to load department overview' },
     });
   }
 });

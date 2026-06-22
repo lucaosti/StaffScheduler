@@ -39,6 +39,7 @@ import { I18nProvider } from './i18n/I18nContext';
 
 // Chrome
 import DemoBanner from './components/DemoBanner';
+import LoadingSpinner from './components/LoadingSpinner';
 
 // Lazily loaded page components — split into separate chunks
 const Dashboard = lazy(() => import('./pages/Dashboard/Dashboard'));
@@ -75,7 +76,7 @@ const App: React.FC = () => {
       <AuthProvider>
         <DemoBanner />
         <ErrorBoundary>
-        <Suspense fallback={null}>
+        <Suspense fallback={<LoadingSpinner />}>
         <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />

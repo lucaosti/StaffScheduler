@@ -152,7 +152,7 @@ const CreateScheduleModal: React.FC<Props> = ({
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-plus-lg me-2"></i>Create Schedule
+                    <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>Create Schedule
                   </>
                 )}
               </button>

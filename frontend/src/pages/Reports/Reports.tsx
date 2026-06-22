@@ -4,17 +4,25 @@
  * Wires the reports API exposed by the backend (`/api/reports/*`):
  *   - hours-worked: total hours per user in a date range
  *   - cost-by-department: hours and labour cost rolled up by department
+ *   - fairness: workload distribution stats for a selected schedule
  *
- * The user picks a date range; both reports refresh together. Errors are
- * surfaced inline. Output is a couple of tables — sufficient as a v1 UI
- * on top of the API; richer charts can land later without changing the
- * service.
+ * The user picks a date range; the first two reports refresh together.
+ * The fairness section requires selecting a schedule.
  *
  * @author Luca Ostinelli
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { hoursWorked, costByDepartment, HoursWorkedRow, CostByDepartmentRow } from '../../services/reportsService';
+import {
+  hoursWorked,
+  costByDepartment,
+  fairnessReport,
+  HoursWorkedRow,
+  CostByDepartmentRow,
+  FairnessReport,
+} from '../../services/reportsService';
+import { getSchedules } from '../../services/scheduleService';
+import { Schedule } from '../../types';
 import { formatCurrency } from '../../utils/format';
 import { errorMessage } from '../../utils/notify';
 
@@ -32,6 +40,18 @@ const Reports: React.FC = () => {
   const [cost, setCost] = useState<CostByDepartmentRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
+  const [fairness, setFairness] = useState<FairnessReport | null>(null);
+  const [fairnessLoading, setFairnessLoading] = useState(false);
+  const [fairnessError, setFairnessError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getSchedules().then((res) => {
+      if (res.success && res.data) setSchedules(res.data);
+    });
+  }, []);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -53,6 +73,21 @@ const Reports: React.FC = () => {
   useEffect(() => {
     reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (selectedScheduleId === null) {
+      setFairness(null);
+      return;
+    }
+    setFairnessLoading(true);
+    setFairnessError(null);
+    fairnessReport(selectedScheduleId)
+      .then((res) => {
+        if (res.success && res.data) setFairness(res.data);
+      })
+      .catch((err) => setFairnessError(errorMessage(err, 'Failed to load fairness report')))
+      .finally(() => setFairnessLoading(false));
+  }, [selectedScheduleId]);
 
   const totalCost = useMemo(() => cost.reduce((acc, r) => acc + (r.cost || 0), 0), [cost]);
 
@@ -98,7 +133,7 @@ const Reports: React.FC = () => {
         <div className="alert alert-danger" role="alert">{error}</div>
       )}
 
-      <div className="row g-4">
+      <div className="row g-4 mb-4">
         <div className="col-lg-6">
           <div className="card h-100">
             <div className="card-header">Hours worked by user</div>
@@ -163,6 +198,79 @@ const Reports: React.FC = () => {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Fairness report */}
+      <div className="card">
+        <div className="card-header d-flex align-items-center gap-3">
+          <span className="fw-semibold">Workload fairness by schedule</span>
+          <select
+            className="form-select form-select-sm w-auto"
+            value={selectedScheduleId ?? ''}
+            onChange={(e) =>
+              setSelectedScheduleId(e.target.value ? Number(e.target.value) : null)
+            }
+            aria-label="Select schedule for fairness report"
+          >
+            <option value="">— select a schedule —</option>
+            {schedules.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedScheduleId === null ? (
+          <div className="card-body text-muted">
+            Select a schedule above to see workload distribution statistics.
+          </div>
+        ) : fairnessLoading ? (
+          <div className="card-body text-muted">Loading…</div>
+        ) : fairnessError ? (
+          <div className="card-body">
+            <div className="alert alert-danger mb-0" role="alert">{fairnessError}</div>
+          </div>
+        ) : fairness && fairness.perUser.length === 0 ? (
+          <div className="card-body text-muted">No assignments in this schedule yet.</div>
+        ) : fairness ? (
+          <div className="card-body">
+            <div className="row g-3 mb-3">
+              {[
+                { label: 'Employees', value: fairness.stats.count },
+                { label: 'Min hours', value: fairness.stats.min.toFixed(1) },
+                { label: 'Max hours', value: fairness.stats.max.toFixed(1) },
+                { label: 'Mean hours', value: fairness.stats.mean.toFixed(1) },
+                { label: 'Std dev', value: fairness.stats.stddev.toFixed(2) },
+              ].map(({ label, value }) => (
+                <div key={label} className="col-auto">
+                  <div className="border rounded p-2 text-center" style={{ minWidth: '90px' }}>
+                    <div className="fw-semibold">{value}</div>
+                    <small className="text-muted">{label}</small>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="table-responsive">
+              <table className="table table-sm mb-0">
+                <thead>
+                  <tr>
+                    <th scope="col">User</th>
+                    <th scope="col" className="text-end">Hours</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fairness.perUser.map((row) => (
+                    <tr key={row.userId}>
+                      <td>{row.fullName}</td>
+                      <td className="text-end">{row.hours.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

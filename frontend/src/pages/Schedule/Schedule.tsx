@@ -313,7 +313,7 @@ const Schedule: React.FC = () => {
                 }}
                 data-testid="open-create-schedule"
               >
-                <i className="bi bi-plus-lg me-2"></i>
+                <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
                 New Schedule
               </button>
               <button
@@ -326,7 +326,7 @@ const Schedule: React.FC = () => {
                   setShowGenerateModal(true);
                 }}
               >
-                <i className="bi bi-magic me-2"></i>
+                <i className="bi bi-magic me-2" aria-hidden="true"></i>
                 Generate
               </button>
               <div className="btn-group" role="group">
@@ -360,7 +360,7 @@ const Schedule: React.FC = () => {
               type="button"
               onClick={() => navigateWeek('prev')}
             >
-              <i className="bi bi-chevron-left"></i>
+              <i className="bi bi-chevron-left" aria-hidden="true"></i>
             </button>
             <h5 className="mb-0">
               {viewMode === 'week'
@@ -375,7 +375,7 @@ const Schedule: React.FC = () => {
               type="button"
               onClick={() => navigateWeek('next')}
             >
-              <i className="bi bi-chevron-right"></i>
+              <i className="bi bi-chevron-right" aria-hidden="true"></i>
             </button>
           </div>
         </div>
