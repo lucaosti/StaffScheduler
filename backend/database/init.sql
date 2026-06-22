@@ -808,10 +808,13 @@ CREATE TABLE IF NOT EXISTS approval_steps (
         'unit_manager',
         'unit_manager_chain',
         'company_role',
-        'company_user'
+        'company_user',
+        'responsibility_rule'
     ) NOT NULL,
     approver_role_id INT NULL,
     approver_user_id INT NULL,
+    -- used when approver_scope = 'responsibility_rule'; identifies which permission to look up
+    approver_permission_code VARCHAR(80) NULL,
     auto_approve_for_owner BOOLEAN NOT NULL DEFAULT TRUE,
     escalate_after_hours INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
