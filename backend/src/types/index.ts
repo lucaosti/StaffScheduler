@@ -348,6 +348,32 @@ export interface ShiftTemplate {
   updatedAt: Date;
 }
 
+export interface CreateShiftTemplateRequest {
+  name: string;
+  description?: string;
+  departmentId: number;
+  startTime: string;
+  endTime: string;
+  minStaff: number;
+  maxStaff: number;
+}
+
+export interface UpdateShiftTemplateRequest {
+  name?: string;
+  description?: string;
+  startTime?: string;
+  endTime?: string;
+  minStaff?: number;
+  maxStaff?: number;
+}
+
+export interface EmployeeSkill {
+  id: number;
+  name: string;
+  description?: string;
+  proficiencyLevel: number;
+}
+
 // ============================================================================
 // ASSIGNMENT TYPES
 // ============================================================================

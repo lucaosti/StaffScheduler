@@ -323,7 +323,7 @@ describe('ShiftService templates', () => {
     const { pool, conn } = makePool();
     conn.execute.mockRejectedValueOnce(new Error('boom'));
     const svc = new ShiftService(pool);
-    await expect(svc.createShiftTemplate({ name: 'X' })).rejects.toThrow(/boom/);
+    await expect(svc.createShiftTemplate({ name: 'X', departmentId: 1, startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 4 })).rejects.toThrow(/boom/);
     expect(conn.rollback).toHaveBeenCalled();
   });
 
