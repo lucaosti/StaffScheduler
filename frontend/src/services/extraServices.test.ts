@@ -13,6 +13,7 @@ import * as departmentService from './departmentService';
 import * as orgService from './orgService';
 import * as policyService from './policyService';
 import * as systemService from './systemService';
+import * as dashboardService from './dashboardService';
 import * as employeeService from './employeeService';
 import * as shiftService from './shiftService';
 import * as scheduleService from './scheduleService';
@@ -291,5 +292,91 @@ describe('authService extra', () => {
   it('refreshToken POSTs', async () => {
     await authService.refreshToken();
     expect(lastInit().method).toBe('POST');
+  });
+
+  it('login POSTs credentials to /auth/login', async () => {
+    await authService.login({ email: 'user@x.com', password: 'secret' });
+    expect(lastInit().method).toBe('POST');
+    expect(lastUrl()).toMatch(/\/auth\/login$/);
+    const body = JSON.parse(lastInit().body as string);
+    expect(body.email).toBe('user@x.com');
+  });
+
+  it('verifyToken GETs /auth/verify', async () => {
+    await authService.verifyToken();
+    expect(lastUrl()).toMatch(/\/auth\/verify$/);
+    expect((lastInit().method ?? 'GET')).toBe('GET');
+  });
+
+  it('logout POSTs /auth/logout and does not throw', async () => {
+    await authService.logout();
+    expect(lastUrl()).toMatch(/\/auth\/logout$/);
+    expect(lastInit().method).toBe('POST');
+  });
+});
+
+describe('dashboardService', () => {
+  it('getDashboardStats GETs /dashboard/stats', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { totalEmployees: 10 } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ) as jest.Mock;
+
+    await dashboardService.getDashboardStats();
+    expect(fetchMock()).toHaveBeenCalledWith(
+      expect.stringMatching(/\/dashboard\/stats$/),
+      expect.anything()
+    );
+  });
+
+  it('getRecentActivity returns items from body.data.items', async () => {
+    const items = [{ id: 1, action: 'login' }];
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { items } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ) as jest.Mock;
+
+    const result = await dashboardService.getRecentActivity(3);
+    expect(result).toEqual(items);
+    expect(fetchMock()).toHaveBeenCalledWith(
+      expect.stringMatching(/audit-logs\?limit=3$/),
+      expect.anything()
+    );
+  });
+
+  it('getRecentActivity returns items from body.data when it is an array', async () => {
+    const items = [{ id: 2, action: 'logout' }];
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: items }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ) as jest.Mock;
+
+    const result = await dashboardService.getRecentActivity();
+    expect(result).toEqual(items);
+  });
+
+  it('getRecentActivity returns [] when response is not ok', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    ) as jest.Mock;
+
+    const result = await dashboardService.getRecentActivity();
+    expect(result).toEqual([]);
+  });
+
+  it('getRecentActivity returns [] when fetch throws', async () => {
+    global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as jest.Mock;
+
+    const result = await dashboardService.getRecentActivity();
+    expect(result).toEqual([]);
   });
 });
