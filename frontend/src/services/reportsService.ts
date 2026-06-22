@@ -38,18 +38,10 @@ export const hoursWorked = (start: string, end: string, departmentId?: number) =
 export const costByDepartment = (start: string, end: string) =>
   request<CostByDepartmentRow[]>(`/reports/cost-by-department?start=${start}&end=${end}`);
 
-export interface FairnessStats {
-  count: number;
-  min: number;
-  max: number;
-  mean: number;
-  stddev: number;
-}
-
 export interface FairnessReport {
   scheduleId: number;
   perUser: HoursWorkedRow[];
-  stats: FairnessStats;
+  stats: { count: number; min: number; max: number; mean: number; stddev: number };
 }
 
 export const fairnessReport = (scheduleId: number) =>
