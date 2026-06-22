@@ -227,7 +227,7 @@ const Shifts: React.FC = () => {
                 setShowAddModal(true);
               }}
             >
-              <i className="bi bi-plus-lg me-2"></i>
+              <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
               Add New Shift
             </button>
           </div>
@@ -238,7 +238,7 @@ const Shifts: React.FC = () => {
         <div className="col-md-6">
           <div className="input-group">
             <span className="input-group-text">
-              <i className="bi bi-search"></i>
+              <i className="bi bi-search" aria-hidden="true"></i>
             </span>
             <input
               type="text"
@@ -273,13 +273,13 @@ const Shifts: React.FC = () => {
 
       {error && (
         <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2"></i>
+          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
           {error}
         </div>
       )}
       {info && (
         <div className="alert alert-success" role="alert">
-          <i className="bi bi-check-circle me-2"></i>
+          <i className="bi bi-check-circle me-2" aria-hidden="true"></i>
           {info}
         </div>
       )}
