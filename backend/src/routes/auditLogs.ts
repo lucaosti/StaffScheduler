@@ -40,11 +40,13 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
 
       const result = await service.list({
         userId: req.query.userId ? Number(req.query.userId) : undefined,
+        onBehalfOfUserId: req.query.onBehalfOfUserId ? Number(req.query.onBehalfOfUserId) : undefined,
         action: req.query.action as string | undefined,
         entityType: req.query.entityType as string | undefined,
         entityId: req.query.entityId ? Number(req.query.entityId) : undefined,
         fromDate: rawFromDate,
         toDate: rawToDate,
+        requestId: req.query.requestId as string | undefined,
         limit,
         offset,
       });
