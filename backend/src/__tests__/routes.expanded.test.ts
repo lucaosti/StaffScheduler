@@ -297,35 +297,57 @@ describe('assignments router (extended)', () => {
   for (const action of ['confirm', 'decline', 'complete'] as const) {
     describe(`PATCH /:id/${action}`, () => {
       const method = `${action}Assignment` as keyof typeof AssignmentService.prototype;
+
+      // confirm and decline do a pre-flight getAssignmentById check before calling
+      // the action method; complete calls the action method directly.
+      const hasPreFlight = action === 'confirm' || action === 'decline';
+
+      beforeEach(() => {
+        if (hasPreFlight) {
+          (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({
+            id: 1,
+            userId: 1,
+          });
+        }
+        (AssignmentService.prototype[method] as jest.Mock).mockResolvedValue({ id: 1 });
+      });
+
       it('400 on NaN', async () => {
         const res = await request(app()).patch(`/api/assignments/abc/${action}`);
         expect(res.status).toBe(400);
       });
+
       it('200 success', async () => {
-        (AssignmentService.prototype[method] as jest.Mock) = jest.fn().mockResolvedValue({ id: 1 });
         const res = await request(app()).patch(`/api/assignments/1/${action}`);
         expect(res.status).toBe(200);
       });
+
       it('404 not found', async () => {
-        (AssignmentService.prototype[method] as jest.Mock) = jest
-          .fn()
-          .mockRejectedValue(new Error('Assignment not found'));
+        if (hasPreFlight) {
+          // Pre-flight returns null → route short-circuits with 404 before calling action.
+          (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue(null);
+        } else {
+          // complete has no pre-flight; trigger 404 via the action method.
+          (AssignmentService.prototype[method] as jest.Mock).mockRejectedValue(
+            new Error('Assignment not found')
+          );
+        }
         const res = await request(app()).patch(`/api/assignments/1/${action}`);
         expect(res.status).toBe(404);
       });
+
       if (action === 'confirm') {
         it('409 already confirmed', async () => {
-          (AssignmentService.prototype[method] as jest.Mock) = jest
-            .fn()
-            .mockRejectedValue(new Error('Already confirmed'));
+          (AssignmentService.prototype.confirmAssignment as jest.Mock).mockRejectedValue(
+            new Error('Already confirmed')
+          );
           const res = await request(app()).patch(`/api/assignments/1/${action}`);
           expect(res.status).toBe(409);
         });
       }
+
       it('500 on other error', async () => {
-        (AssignmentService.prototype[method] as jest.Mock) = jest
-          .fn()
-          .mockRejectedValue(new Error('boom'));
+        (AssignmentService.prototype[method] as jest.Mock).mockRejectedValue(new Error('boom'));
         const res = await request(app()).patch(`/api/assignments/1/${action}`);
         expect(res.status).toBe(500);
       });
