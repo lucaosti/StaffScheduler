@@ -88,7 +88,7 @@ const ShiftTable: React.FC<Props> = ({
                     aria-label="Shift actions"
                     data-bs-toggle="dropdown"
                   >
-                    <i className="bi bi-three-dots"></i>
+                    <i className="bi bi-three-dots" aria-hidden="true"></i>
                   </button>
                   <ul className="dropdown-menu">
                     <li>
@@ -97,7 +97,7 @@ const ShiftTable: React.FC<Props> = ({
                         type="button"
                         onClick={() => onEdit(shift)}
                       >
-                        <i className="bi bi-pencil me-2"></i>Edit
+                        <i className="bi bi-pencil me-2" aria-hidden="true"></i>Edit
                       </button>
                     </li>
                     <li>
@@ -109,7 +109,7 @@ const ShiftTable: React.FC<Props> = ({
                         type="button"
                         onClick={() => onDelete(shift.id!)}
                       >
-                        <i className="bi bi-trash me-2"></i>Delete
+                        <i className="bi bi-trash me-2" aria-hidden="true"></i>Delete
                       </button>
                     </li>
                   </ul>

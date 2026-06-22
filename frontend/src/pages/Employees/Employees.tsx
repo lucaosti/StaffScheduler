@@ -152,7 +152,7 @@ const Employees: React.FC = () => {
               className="btn btn-primary"
               onClick={() => setShowAddModal(true)}
             >
-              <i className="bi bi-plus-lg me-2"></i>
+              <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
               Add Employee
             </button>
           </div>
@@ -164,7 +164,7 @@ const Employees: React.FC = () => {
         <div className="col-md-6">
           <div className="input-group">
             <span className="input-group-text">
-              <i className="bi bi-search"></i>
+              <i className="bi bi-search" aria-hidden="true"></i>
             </span>
             <input
               type="text"
@@ -200,7 +200,7 @@ const Employees: React.FC = () => {
       {/* Error Alert */}
       {error && (
         <div className="alert alert-warning alert-dismissible fade show" role="alert">
-          <i className="bi bi-exclamation-triangle me-2"></i>
+          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
           {error} - Showing sample data
           <button 
             type="button" 
@@ -231,7 +231,7 @@ const Employees: React.FC = () => {
                     <td>
                       <div className="d-flex align-items-center">
                         <div className="bg-primary bg-opacity-10 rounded-circle p-2 me-3">
-                          <i className="bi bi-person text-primary"></i>
+                          <i className="bi bi-person text-primary" aria-hidden="true"></i>
                         </div>
                         <div>
                           <div className="fw-medium">
@@ -263,7 +263,7 @@ const Employees: React.FC = () => {
                           title="Edit Employee"
                           aria-label="Edit employee"
                         >
-                          <i className="bi bi-pencil"></i>
+                          <i className="bi bi-pencil" aria-hidden="true"></i>
                         </button>
                         <button
                           className="btn btn-outline-danger"
@@ -271,7 +271,7 @@ const Employees: React.FC = () => {
                           title="Delete Employee"
                           aria-label="Delete employee"
                         >
-                          <i className="bi bi-trash"></i>
+                          <i className="bi bi-trash" aria-hidden="true"></i>
                         </button>
                       </div>
                     </td>
@@ -283,7 +283,7 @@ const Employees: React.FC = () => {
 
           {filteredEmployees.length === 0 && (
             <div className="text-center py-5">
-              <i className="bi bi-people text-muted" style={{ fontSize: '3rem' }}></i>
+              <i className="bi bi-people text-muted" style={{ fontSize: '3rem' }} aria-hidden="true"></i>
               <h5 className="mt-3">No employees found</h5>
               <p className="text-muted">
                 {searchTerm || selectedDepartment 
