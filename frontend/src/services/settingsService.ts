@@ -2,7 +2,7 @@
  * System settings service.
  *
  * Wraps the GET /api/settings and PUT /api/settings/* endpoints.
- * Only accessible to users with the system.settings permission.
+ * Only accessible to users with the settings.manage permission.
  *
  * @author Luca Ostinelli
  */

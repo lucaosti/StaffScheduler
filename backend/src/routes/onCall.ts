@@ -26,6 +26,8 @@ const error = (res: Response, status: number, code: string, message: string): vo
   res.status(status).json({ success: false, error: { code, message } });
 };
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 export const createOnCallRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new OnCallService(pool);
@@ -34,10 +36,11 @@ export const createOnCallRouter = (pool: Pool): Router => {
 
   router.get('/me', async (req: Request, res: Response) => {
     try {
-      const data = await service.listForUser(req.user!.id, {
-        rangeStart: req.query.start as string | undefined,
-        rangeEnd: req.query.end as string | undefined,
-      });
+      const rangeStart = req.query.start as string | undefined;
+      const rangeEnd = req.query.end as string | undefined;
+      if (rangeStart && !ISO_DATE_RE.test(rangeStart)) return error(res, 400, 'VALIDATION_ERROR', 'start must be an ISO date (YYYY-MM-DD)');
+      if (rangeEnd && !ISO_DATE_RE.test(rangeEnd)) return error(res, 400, 'VALIDATION_ERROR', 'end must be an ISO date (YYYY-MM-DD)');
+      const data = await service.listForUser(req.user!.id, { rangeStart, rangeEnd });
       res.json({ success: true, data });
     } catch (err) {
       logger.error('on-call me error:', err);
@@ -47,11 +50,15 @@ export const createOnCallRouter = (pool: Pool): Router => {
 
   router.get('/periods', async (req: Request, res: Response) => {
     try {
+      const rangeStart = req.query.start as string | undefined;
+      const rangeEnd = req.query.end as string | undefined;
+      if (rangeStart && !ISO_DATE_RE.test(rangeStart)) return error(res, 400, 'VALIDATION_ERROR', 'start must be an ISO date (YYYY-MM-DD)');
+      if (rangeEnd && !ISO_DATE_RE.test(rangeEnd)) return error(res, 400, 'VALIDATION_ERROR', 'end must be an ISO date (YYYY-MM-DD)');
       const data = await service.listPeriods({
         departmentId: req.query.departmentId ? Number(req.query.departmentId) : undefined,
         status: req.query.status as never,
-        rangeStart: req.query.start as string | undefined,
-        rangeEnd: req.query.end as string | undefined,
+        rangeStart,
+        rangeEnd,
       });
       res.json({ success: true, data });
     } catch (err) {

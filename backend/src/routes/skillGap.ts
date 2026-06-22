@@ -18,6 +18,8 @@ export const createSkillGapRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requirePermission('report.read'));
 
+  const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
   router.get('/', async (req: Request, res: Response) => {
     try {
       const departmentId = Number(req.query.departmentId);
@@ -27,6 +29,13 @@ export const createSkillGapRouter = (pool: Pool): Router => {
         res.status(400).json({
           success: false,
           error: { code: 'VALIDATION_ERROR', message: 'departmentId, start, end are required' },
+        });
+        return;
+      }
+      if (!ISO_DATE_RE.test(start) || !ISO_DATE_RE.test(end)) {
+        res.status(400).json({
+          success: false,
+          error: { code: 'VALIDATION_ERROR', message: 'start and end must be ISO dates (YYYY-MM-DD)' },
         });
         return;
       }

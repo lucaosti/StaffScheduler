@@ -188,6 +188,7 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 | `/api/org` | Org units, memberships, loans | `org_unit.manage` |
 | `/api/policies` | Business policies and exceptions | `policy.manage` |
 | `/api/reports` | Reports and analytics (module: `reporting`) | `report.read` |
+| `/api/skill-gap` | Skill gap analysis (`?departmentId=&start=&end=`, dates YYYY-MM-DD) | `report.read` |
 | `/api/audit-logs` | Audit trail viewer (module: `audit`) | `audit.read` |
 | `/api/notifications` | In-app notifications (module: `notifications`) | authenticated |
 | `/api/import` | Bulk CSV import | `employee.manage` |
