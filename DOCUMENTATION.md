@@ -188,6 +188,7 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 | `/api/org` | Org units, memberships, loans | `org_unit.manage` |
 | `/api/policies` | Business policies and exceptions | `policy.manage` |
 | `/api/reports` | Reports and analytics (module: `reporting`) | `report.read` |
+| `/api/skill-gap` | Skill gap analysis (`?departmentId=&start=&end=`, dates YYYY-MM-DD) | `report.read` |
 | `/api/audit-logs` | Audit trail viewer (module: `audit`) | `audit.read` |
 | `/api/notifications` | In-app notifications (module: `notifications`) | authenticated |
 | `/api/import` | Bulk CSV import | `employee.manage` |
@@ -430,6 +431,13 @@ POST   /api/approval-workflows/escalate  trigger escalation check (cron-callable
 `ApprovalEngineService.resolveApprover(changeType, ctx)` walks steps in order and returns the first non-auto-approved step. `processEscalations(nowIso?)` identifies steps whose `escalate_after_hours` deadline has passed.
 
 Default change types: `Loan.Request`, `Loan.Cancel`, `Policy.Create`, `Policy.Update`, `Policy.Exception`, `Schedule.Publish`, `Schedule.Override`, `OrgUnit.Update`, `Membership.Update`, `TimeOff.Request`, `ShiftSwap.Request`.
+
+Valid `approverScope` values for `approval_steps`:
+- `policy_owner` — the user who owns the policy being acted on
+- `unit_manager` — manager of the org unit in context
+- `unit_manager_chain` — walks up the org tree and returns the first unit with a manager
+- `company_role` — any active user holding `approverRoleId`
+- `company_user` — a specific user identified by `approverUserId`
 
 ---
 

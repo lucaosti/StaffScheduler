@@ -24,7 +24,7 @@ const mockedAuth: {
   logout: jest.Mock;
   refreshToken: jest.Mock;
 } = {
-  user: { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['system.admin', 'employees.read', 'shifts.read', 'schedules.read', 'reports.read', 'org.read', 'policies.read'] },
+  user: { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['settings.manage', 'employee.read', 'schedule.read', 'report.read', 'org_unit.read', 'policy.read'] },
   isAuthenticated: true,
   isLoading: false,
   login: jest.fn(),
@@ -44,7 +44,7 @@ const wrap = (ui: React.ReactNode, initial = ['/']) => (
 );
 
 beforeEach(() => {
-  mockedAuth.user = { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['system.admin', 'employees.read', 'shifts.read', 'schedules.read', 'reports.read', 'org.read', 'policies.read'] };
+  mockedAuth.user = { id: 1, role: 'admin', email: 'admin@example.com', permissions: ['settings.manage', 'employee.read', 'schedule.read', 'report.read', 'org_unit.read', 'policy.read'] };
   mockedAuth.isAuthenticated = true;
   mockedAuth.isLoading = false;
   jest.clearAllMocks();
@@ -66,9 +66,9 @@ describe('Sidebar', () => {
     expect(mockedAuth.logout).toHaveBeenCalled();
   });
 
-  it('hides settings when user lacks system.admin permission', () => {
-    // Provide an explicit permission set that excludes system.admin
-    mockedAuth.user = { id: 2, role: 'staff', email: 'e@x', permissions: ['schedules.read', 'policies.read'] };
+  it('hides settings when user lacks settings.manage permission', () => {
+    // Provide an explicit permission set that excludes settings.manage
+    mockedAuth.user = { id: 2, role: 'staff', email: 'e@x', permissions: ['schedule.read', 'policy.read'] };
     render(
       wrap(
         <Routes>

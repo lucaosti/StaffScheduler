@@ -3440,6 +3440,9 @@
           "200": {
             "description": "On-call periods for the caller."
           },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
@@ -3487,6 +3490,9 @@
         "responses": {
           "200": {
             "description": "On-call period list."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -6559,21 +6565,38 @@
           {
             "name": "departmentId",
             "in": "query",
+            "required": true,
             "schema": {
               "type": "integer"
             }
           },
           {
-            "name": "scheduleId",
+            "name": "start",
             "in": "query",
+            "required": true,
+            "description": "Range start (YYYY-MM-DD)",
             "schema": {
-              "type": "integer"
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "description": "Range end (YYYY-MM-DD)",
+            "schema": {
+              "type": "string",
+              "format": "date"
             }
           }
         ],
         "responses": {
           "200": {
             "description": "Gaps between required and available skills."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

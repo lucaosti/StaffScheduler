@@ -16,6 +16,9 @@ const respondError = (res: Response, status: number, code: string, message: stri
   res.status(status).json({ success: false, error: { code, message } });
 };
 
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const isIsoDate = (s: string): boolean => ISO_DATE_RE.test(s);
+
 export const createReportsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new ReportsService(pool);
@@ -28,6 +31,9 @@ export const createReportsRouter = (pool: Pool): Router => {
       const end = req.query.end as string | undefined;
       if (!start || !end) {
         return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
+      }
+      if (!isIsoDate(start) || !isIsoDate(end)) {
+        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
       }
       const departmentId = req.query.departmentId ? Number(req.query.departmentId) : undefined;
       const data = await service.hoursWorkedByUser(start, end, departmentId);
@@ -44,6 +50,9 @@ export const createReportsRouter = (pool: Pool): Router => {
       const end = req.query.end as string | undefined;
       if (!start || !end) {
         return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
+      }
+      if (!isIsoDate(start) || !isIsoDate(end)) {
+        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
       }
       const data = await service.costByDepartment(start, end);
       res.json({ success: true, data });

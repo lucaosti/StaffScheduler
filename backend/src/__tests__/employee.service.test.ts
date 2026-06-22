@@ -77,7 +77,7 @@ describe('EmployeeService', () => {
 
   it('createEmployee forwards the supplied data (roles via roleIds)', async () => {
     mockUserService.createUser = jest.fn().mockResolvedValue(buildUser());
-    await service.createEmployee({ email: 'a@x.com', roleIds: [3] });
+    await service.createEmployee({ email: 'a@x.com', password: 'pass', firstName: 'A', lastName: 'B', roleIds: [3] });
     expect(mockUserService.createUser).toHaveBeenCalledWith(
       expect.objectContaining({ email: 'a@x.com', roleIds: [3] })
     );

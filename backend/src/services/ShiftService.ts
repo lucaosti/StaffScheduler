@@ -13,7 +13,9 @@ import {
   Shift,
   CreateShiftRequest,
   UpdateShiftRequest,
-  ShiftTemplate
+  ShiftTemplate,
+  CreateShiftTemplateRequest,
+  UpdateShiftTemplateRequest,
 } from '../types';
 import { logger } from '../config/logger';
 
@@ -771,7 +773,7 @@ export class ShiftService {
     }
   }
 
-  async createShiftTemplate(templateData: any): Promise<ShiftTemplate> {
+  async createShiftTemplate(templateData: CreateShiftTemplateRequest): Promise<ShiftTemplate> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
@@ -793,7 +795,7 @@ export class ShiftService {
     }
   }
 
-  async updateShiftTemplate(id: number, templateData: any): Promise<ShiftTemplate | null> {
+  async updateShiftTemplate(id: number, templateData: UpdateShiftTemplateRequest): Promise<ShiftTemplate | null> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();

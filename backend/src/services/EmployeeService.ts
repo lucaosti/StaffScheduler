@@ -12,7 +12,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { UserService } from './UserService';
-import { User } from '../types';
+import { User, CreateUserRequest, UpdateUserRequest, EmployeeSkill } from '../types';
 import { logger } from '../config/logger';
 
 /**
@@ -127,43 +127,12 @@ export class EmployeeService {
   }
 
   /**
-   * Gets available employees for a shift
-   * 
-   * Returns employees who are not assigned to any shift that conflicts
-   * with the given time range.
-   * 
-   * @param departmentId - Department ID
-   * @param date - Shift date
-   * @param startTime - Shift start time
-   * @param endTime - Shift end time
-   * @returns Promise resolving to array of available employees
-   */
-  async getAvailableEmployees(
-    departmentId: number,
-    _date: string,
-    _startTime: string,
-    _endTime: string
-  ): Promise<User[]> {
-    try {
-      // This is a simplified version. In a real implementation, you would
-      // check against assignments, availability preferences, and time-off requests
-      return await this.getAllEmployees({ 
-        departmentId, 
-        isActive: true 
-      });
-    } catch (error) {
-      logger.error('Error getting available employees:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Creates a new employee user
-   * 
+   *
    * @param userData - Employee creation data
    * @returns Promise resolving to the created employee
    */
-  async createEmployee(userData: any): Promise<User> {
+  async createEmployee(userData: CreateUserRequest): Promise<User> {
     try {
       // Roles, if any, are supplied by the caller via `roleIds`.
       return await this.userService.createUser({ ...userData });
@@ -175,12 +144,12 @@ export class EmployeeService {
 
   /**
    * Updates an employee user
-   * 
+   *
    * @param id - Employee ID
    * @param userData - Employee update data
    * @returns Promise resolving to the updated employee
    */
-  async updateEmployee(id: number, userData: any): Promise<User> {
+  async updateEmployee(id: number, userData: UpdateUserRequest): Promise<User> {
     try {
       const employee = await this.getEmployeeById(id);
       if (!employee) {
@@ -218,7 +187,7 @@ export class EmployeeService {
    * @param employeeId - Employee ID
    * @returns Promise resolving to array of skills
    */
-  async getEmployeeSkills(employeeId: number): Promise<any[]> {
+  async getEmployeeSkills(employeeId: number): Promise<EmployeeSkill[]> {
     try {
       const [rows] = await this.pool.execute<any[]>(
         `SELECT 

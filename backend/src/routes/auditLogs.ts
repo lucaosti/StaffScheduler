@@ -28,13 +28,23 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
         ? (rawPage - 1) * rawSize
         : (req.query.offset ? Number(req.query.offset) : undefined);
 
+      const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const rawFromDate = req.query.fromDate as string | undefined;
+      const rawToDate = req.query.toDate as string | undefined;
+      if (rawFromDate && !ISO_DATE_RE.test(rawFromDate)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'fromDate must be an ISO date (YYYY-MM-DD)' } });
+      }
+      if (rawToDate && !ISO_DATE_RE.test(rawToDate)) {
+        return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'toDate must be an ISO date (YYYY-MM-DD)' } });
+      }
+
       const result = await service.list({
         userId: req.query.userId ? Number(req.query.userId) : undefined,
         action: req.query.action as string | undefined,
         entityType: req.query.entityType as string | undefined,
         entityId: req.query.entityId ? Number(req.query.entityId) : undefined,
-        fromDate: req.query.fromDate as string | undefined,
-        toDate: req.query.toDate as string | undefined,
+        fromDate: rawFromDate,
+        toDate: rawToDate,
         limit,
         offset,
       });
