@@ -440,6 +440,50 @@ export interface UpdateResponsibilityRuleRequest {
   isActive?: boolean;
 }
 
+// ============================================================================
+// CHANGE REQUEST TYPES
+// ============================================================================
+
+export type ChangeRequestStatus = 'pending' | 'approved' | 'rejected' | 'applied' | 'cancelled';
+
+export interface ChangeRequest {
+  id: number;
+  changeType: string;
+  proposerUserId: number;
+  targetEntityType: string;
+  targetEntityId: number | null;
+  proposedPayload: Record<string, unknown>;
+  justification: string | null;
+  status: ChangeRequestStatus;
+  approverUserId: number | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  rejectionReason: string | null;
+  appliedAt: string | null;
+  /** When applied, the action is attributed to this user (the authority holder). */
+  onBehalfOfUserId: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateChangeRequestInput {
+  changeType: string;
+  targetEntityType: string;
+  targetEntityId?: number | null;
+  proposedPayload: Record<string, unknown>;
+  justification?: string | null;
+}
+
+export interface ChangeRequestFilters {
+  proposerUserId?: number;
+  approverUserId?: number;
+  status?: ChangeRequestStatus;
+  changeType?: string;
+  targetEntityType?: string;
+  limit?: number;
+  offset?: number;
+}
+
 // System Settings Types
 export interface SystemSetting {
   id: number;
