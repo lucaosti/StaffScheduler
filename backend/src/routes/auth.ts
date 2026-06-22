@@ -160,7 +160,7 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Reques
     // resolved from the database on every request by the auth middleware.
     const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { userId: user.id, email: user.email, jti },
+      { userId: user.id, jti },
       config.jwt.secret,
       jwtSignOptions
     );
@@ -245,7 +245,7 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
 
     const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { userId: user.id, email: user.email, jti },
+      { userId: user.id, jti },
       config.jwt.secret,
       jwtSignOptions
     );
