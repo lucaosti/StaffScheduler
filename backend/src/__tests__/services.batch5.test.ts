@@ -187,6 +187,7 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
       .mockResolvedValueOnce([[matrixRow], null] as Tuple)            // ApprovalMatrixService.getByChangeType
       .mockResolvedValueOnce([{ insertId: 5, affectedRows: 1 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow], null] as Tuple)              // getById
+      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)       // audit INSERT for loan.create
       .mockResolvedValueOnce([[{ id: 1, manager_user_id: null }], null] as Tuple) // fanOut org_units
       .mockResolvedValue([{ insertId: 99, affectedRows: 1 }, null] as Tuple);    // notifyAsync calls
 

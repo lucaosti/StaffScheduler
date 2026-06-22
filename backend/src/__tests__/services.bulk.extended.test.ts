@@ -542,12 +542,14 @@ describe('ShiftSwapService', () => {
     execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'declined' }], null] as Tuple)
+      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT for decline#1
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'cancelled' }], null] as Tuple)
+      .mockResolvedValueOnce([{ insertId: 2 }, null] as Tuple) // audit INSERT for cancel#1
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
