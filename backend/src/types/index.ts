@@ -29,6 +29,13 @@ export interface User {
    * valid org unit, so they can access nothing.
    */
   allowedOrgUnitIds?: number[] | null;
+  /**
+   * Per-permission org-unit restrictions introduced by scoped delegations.
+   * Only populated when the user holds at least one delegation with
+   * scope_org_unit_id set.  Route handlers that perform org-unit gating should
+   * check this before allowing a delegated permission to act outside its scope.
+   */
+  delegationScopes?: Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>;
   departments?: UserDepartment[];
   /** Convenience field: name of the user's primary department (populated by list queries). */
   department?: string;
