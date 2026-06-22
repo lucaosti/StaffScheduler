@@ -29,11 +29,29 @@ const getModuleService = (): ModuleService => {
 };
 
 // In-memory JTI blacklist for server-side token revocation on logout.
-// Each entry stores the expiry timestamp (ms) so expired JTIs are pruned
-// automatically on access, preventing unbounded memory growth.
+// Each entry stores the expiry timestamp (ms). A background interval prunes
+// expired entries every hour so the map stays bounded even under sustained
+// logout traffic. MAX_JTI_BLACKLIST_SIZE caps absolute memory usage.
+const MAX_JTI_BLACKLIST_SIZE = 100_000;
 const _jtiBlacklist = new Map<string, number>();
 
+const _pruneBlacklist = (): void => {
+  const now = Date.now();
+  for (const [jti, exp] of _jtiBlacklist) {
+    if (now > exp) _jtiBlacklist.delete(jti);
+  }
+};
+
+// Prune every hour regardless of access patterns.
+const _pruneInterval = setInterval(_pruneBlacklist, 60 * 60 * 1000);
+_pruneInterval.unref(); // don't block process exit
+
 export const addToBlacklist = (jti: string, expiresAt?: number): void => {
+  // Drop oldest entry if at capacity (FIFO approximation).
+  if (_jtiBlacklist.size >= MAX_JTI_BLACKLIST_SIZE) {
+    const firstKey = _jtiBlacklist.keys().next().value;
+    if (firstKey !== undefined) _jtiBlacklist.delete(firstKey);
+  }
   const exp = expiresAt ?? Date.now() + 24 * 60 * 60 * 1000; // default: 24 h
   _jtiBlacklist.set(jti, exp);
 };
