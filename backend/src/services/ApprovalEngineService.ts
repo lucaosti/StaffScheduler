@@ -21,11 +21,15 @@ import {
   CreateApprovalWorkflowRequest,
 } from '../types';
 import { logger } from '../config/logger';
+import { ResponsibilityRuleService } from './ResponsibilityRuleService';
 
 interface ResolveContext {
   orgUnitId?: number;
   policyOwnerId?: number;
   actorUserId: number;
+  /** Subject context for responsibility_rule scope. */
+  subjectDepartmentIds?: number[];
+  subjectRoleIds?: number[];
 }
 
 interface ResolvedStep {
@@ -35,7 +39,11 @@ interface ResolvedStep {
 }
 
 export class ApprovalEngineService {
-  constructor(private pool: Pool) {}
+  private responsibilitySvc: ResponsibilityRuleService;
+
+  constructor(private pool: Pool) {
+    this.responsibilitySvc = new ResponsibilityRuleService(pool);
+  }
 
   // --------------------------------------------------------------------------
   // Workflow CRUD
@@ -46,7 +54,7 @@ export class ApprovalEngineService {
       `SELECT
          w.id, w.change_type, w.require_all, w.description, w.created_at, w.updated_at,
          s.id AS step_id, s.workflow_id AS step_workflow_id, s.step_order,
-         s.approver_scope, s.approver_role_id, s.approver_user_id,
+         s.approver_scope, s.approver_role_id, s.approver_user_id, s.approver_permission_code,
          s.auto_approve_for_owner, s.escalate_after_hours
        FROM approval_workflows w
        LEFT JOIN approval_steps s ON s.workflow_id = w.id
@@ -73,6 +81,7 @@ export class ApprovalEngineService {
           approverScope: row.approver_scope as ApproverScope,
           approverRoleId: row.approver_role_id ?? null,
           approverUserId: row.approver_user_id ?? null,
+          approverPermissionCode: row.approver_permission_code ?? null,
           autoApproveForOwner: Boolean(row.auto_approve_for_owner),
           escalateAfterHours: row.escalate_after_hours ?? null,
         });
@@ -104,14 +113,15 @@ export class ApprovalEngineService {
         await connection.execute(
           `INSERT INTO approval_steps
              (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-              auto_approve_for_owner, escalate_after_hours)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              approver_permission_code, auto_approve_for_owner, escalate_after_hours)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             workflowId,
             s.stepOrder,
             s.approverScope,
             s.approverRoleId ?? null,
             s.approverUserId ?? null,
+            s.approverPermissionCode ?? null,
             s.autoApproveForOwner ?? true,
             s.escalateAfterHours ?? null,
           ]
@@ -153,10 +163,10 @@ export class ApprovalEngineService {
           await connection.execute(
             `INSERT INTO approval_steps
                (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-                auto_approve_for_owner, escalate_after_hours)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                approver_permission_code, auto_approve_for_owner, escalate_after_hours)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [id, s.stepOrder, s.approverScope, s.approverRoleId ?? null, s.approverUserId ?? null,
-             s.autoApproveForOwner ?? true, s.escalateAfterHours ?? null]
+             s.approverPermissionCode ?? null, s.autoApproveForOwner ?? true, s.escalateAfterHours ?? null]
           );
         }
       }
@@ -184,6 +194,24 @@ export class ApprovalEngineService {
   // --------------------------------------------------------------------------
   // Step resolution
   // --------------------------------------------------------------------------
+
+  /**
+   * For a `responsibility_rule` step, returns all user IDs who hold
+   * responsibility (not just the first). Useful for fan-out notifications.
+   */
+  async resolveAllApproversForStep(step: ApprovalStep, ctx: ResolveContext): Promise<number[]> {
+    if (step.approverScope !== 'responsibility_rule') {
+      const single = await this.resolveStepApprover(step, ctx);
+      return single !== null ? [single] : [];
+    }
+    if (!step.approverPermissionCode) return [];
+    return this.responsibilitySvc.resolveResponsibleUsers({
+      permissionCode: step.approverPermissionCode,
+      orgUnitId: ctx.orgUnitId ?? null,
+      departmentIds: ctx.subjectDepartmentIds ?? [],
+      roleIds: ctx.subjectRoleIds ?? [],
+    });
+  }
 
   /**
    * Resolves ALL steps for the given change type in order. Returns the first
@@ -262,7 +290,7 @@ export class ApprovalEngineService {
   private async hydrateWorkflow(w: any): Promise<ApprovalWorkflow> {
     const [stepRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
-              approver_user_id, auto_approve_for_owner, escalate_after_hours
+              approver_user_id, approver_permission_code, auto_approve_for_owner, escalate_after_hours
          FROM approval_steps WHERE workflow_id = ? ORDER BY step_order ASC`,
       [w.id]
     );
@@ -273,6 +301,7 @@ export class ApprovalEngineService {
       approverScope: s.approver_scope as ApproverScope,
       approverRoleId: s.approver_role_id ?? null,
       approverUserId: s.approver_user_id ?? null,
+      approverPermissionCode: s.approver_permission_code ?? null,
       autoApproveForOwner: Boolean(s.auto_approve_for_owner),
       escalateAfterHours: s.escalate_after_hours ?? null,
     }));
@@ -299,6 +328,16 @@ export class ApprovalEngineService {
         return step.approverRoleId ? this.findFirstActiveByRoleId(step.approverRoleId) : null;
       case 'company_user':
         return step.approverUserId;
+      case 'responsibility_rule': {
+        if (!step.approverPermissionCode) return null;
+        const ids = await this.responsibilitySvc.resolveResponsibleUsers({
+          permissionCode: step.approverPermissionCode,
+          orgUnitId: ctx.orgUnitId ?? null,
+          departmentIds: ctx.subjectDepartmentIds ?? [],
+          roleIds: ctx.subjectRoleIds ?? [],
+        });
+        return ids.length > 0 ? ids[0] : null;
+      }
       default:
         return null;
     }

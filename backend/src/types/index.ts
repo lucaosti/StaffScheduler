@@ -104,7 +104,8 @@ export type ApproverScope =
   | 'unit_manager'
   | 'unit_manager_chain'
   | 'company_role'
-  | 'company_user';
+  | 'company_user'
+  | 'responsibility_rule';
 
 export interface ApprovalStep {
   id: number;
@@ -113,6 +114,8 @@ export interface ApprovalStep {
   approverScope: ApproverScope;
   approverRoleId: number | null;
   approverUserId: number | null;
+  /** Required when approverScope === 'responsibility_rule'. */
+  approverPermissionCode: string | null;
   autoApproveForOwner: boolean;
   escalateAfterHours: number | null;
 }
@@ -136,6 +139,7 @@ export interface CreateApprovalWorkflowRequest {
     approverScope: ApproverScope;
     approverRoleId?: number | null;
     approverUserId?: number | null;
+    approverPermissionCode?: string | null;
     autoApproveForOwner?: boolean;
     escalateAfterHours?: number | null;
   }>;
