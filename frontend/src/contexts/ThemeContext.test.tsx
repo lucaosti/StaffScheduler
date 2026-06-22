@@ -103,9 +103,9 @@ describe('ThemeContext', () => {
     expect(mockMql.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
 
     // Simulate OS switching to dark
-    if (changeHandler) {
+    if (typeof changeHandler === 'function') {
       mockMql.matches = true;
-      changeHandler();
+      (changeHandler as () => void)();
     }
 
     unmount();

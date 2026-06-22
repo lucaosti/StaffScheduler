@@ -4,7 +4,6 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import PolicyList from './PolicyList';
 import type { Policy, PolicyScope } from '../../services/policyService';

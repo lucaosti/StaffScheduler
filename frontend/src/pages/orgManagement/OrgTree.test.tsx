@@ -4,7 +4,6 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import OrgTree from './OrgTree';
 import type { OrgUnit, OrgUnitNode } from '../../services/orgService';
@@ -12,6 +11,7 @@ import type { OrgUnit, OrgUnitNode } from '../../services/orgService';
 const makeUnit = (overrides: Partial<OrgUnit> = {}): OrgUnit => ({
   id: 1,
   name: 'Root Unit',
+  description: null,
   parentId: null,
   managerUserId: null,
   isActive: true,
@@ -23,6 +23,7 @@ const makeUnit = (overrides: Partial<OrgUnit> = {}): OrgUnit => ({
 const makeNode = (overrides: Partial<OrgUnitNode> = {}): OrgUnitNode => ({
   id: 1,
   name: 'Root Unit',
+  description: null,
   parentId: null,
   managerUserId: null,
   isActive: true,

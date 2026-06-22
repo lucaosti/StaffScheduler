@@ -4,7 +4,6 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import MemberList from './MemberList';
 import type { OrgUnit, UserOrgUnit } from '../../services/orgService';
@@ -12,6 +11,7 @@ import type { OrgUnit, UserOrgUnit } from '../../services/orgService';
 const makeUnit = (overrides: Partial<OrgUnit> = {}): OrgUnit => ({
   id: 1,
   name: 'Cardiology',
+  description: null,
   parentId: null,
   managerUserId: null,
   isActive: true,
