@@ -2,47 +2,63 @@
  * Audit log service.
  *
  * Provides both read (list / getById) and write (write) operations over the
- * `audit_logs` table. All sensitive mutations in the application should call
- * `AuditLogService.write` (or use a shared pool write helper) to record a
- * structured audit entry, optionally with before/after JSON snapshots.
+ * `audit_logs` table. Every sensitive mutation in the application should call
+ * `AuditLogService.write` to record a structured audit entry, optionally with:
+ *   - before/after JSON snapshots of the affected entity
+ *   - a free-text justification supplied by the actor
+ *   - an `onBehalfOfUserId` for proxy / approval-workflow actions
+ *
+ * `ip_address`, `user_agent`, and `request_id` are populated automatically
+ * from the AsyncLocalStorage request context when `requestId` middleware is
+ * active, so callers do not need to pass them explicitly.
  *
  * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { getRequestId, getRequestIp, getRequestUserAgent } from '../middleware/requestContext';
 
 export interface AuditLogEntry {
   id: number;
   userId: number | null;
+  onBehalfOfUserId: number | null;
   action: string;
   entityType: string | null;
   entityId: number | null;
   description: string | null;
+  justification: string | null;
   beforeSnapshot?: Record<string, unknown> | null;
   afterSnapshot?: Record<string, unknown> | null;
   ipAddress: string | null;
   userAgent: string | null;
+  requestId: string | null;
   createdAt: string;
 }
 
 export interface WriteAuditLogInput {
   actorId: number | null;
+  /** When the action was performed on behalf of another user (proxy / approval). */
+  onBehalfOfUserId?: number | null;
   action: string;
   entityType?: string;
   entityId?: number | null;
   description?: string;
+  /** Optional free-text reason provided by the actor at the time of the action. */
+  justification?: string | null;
   before?: Record<string, unknown> | null;
   after?: Record<string, unknown> | null;
 }
 
 interface AuditLogFilters {
   userId?: number;
+  onBehalfOfUserId?: number;
   action?: string;
   entityType?: string;
   entityId?: number;
   fromDate?: string;
   toDate?: string;
+  requestId?: string;
   /** Max rows to return; clamped to [1, 500]. Default 100. */
   limit?: number;
   /** Offset into the ordered result set. Default 0. */
@@ -54,21 +70,29 @@ interface AuditLogPage {
   items: AuditLogEntry[];
 }
 
+const parseJson = (raw: unknown): Record<string, unknown> | null => {
+  if (!raw) return null;
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+  } catch {
+    return null;
+  }
+};
+
 const mapRow = (row: RowDataPacket): AuditLogEntry => ({
   id: row.id as number,
   userId: (row.user_id as number | null) ?? null,
+  onBehalfOfUserId: (row.on_behalf_of_user_id as number | null) ?? null,
   action: row.action as string,
   entityType: (row.entity_type as string | null) ?? null,
   entityId: (row.entity_id as number | null) ?? null,
   description: (row.description as string | null) ?? null,
-  beforeSnapshot: row.before_snapshot
-    ? (() => { try { return JSON.parse(row.before_snapshot as string); } catch { return null; } })()
-    : null,
-  afterSnapshot: row.after_snapshot
-    ? (() => { try { return JSON.parse(row.after_snapshot as string); } catch { return null; } })()
-    : null,
+  justification: (row.justification as string | null) ?? null,
+  beforeSnapshot: parseJson(row.before_snapshot),
+  afterSnapshot: parseJson(row.after_snapshot),
   ipAddress: (row.ip_address as string | null) ?? null,
   userAgent: (row.user_agent as string | null) ?? null,
+  requestId: (row.request_id as string | null) ?? null,
   createdAt: row.created_at as string,
 });
 
@@ -93,6 +117,10 @@ export class AuditLogService {
       conditions.push('user_id = ?');
       params.push(filters.userId);
     }
+    if (filters.onBehalfOfUserId !== undefined) {
+      conditions.push('on_behalf_of_user_id = ?');
+      params.push(filters.onBehalfOfUserId);
+    }
     if (filters.action) {
       conditions.push('action = ?');
       params.push(filters.action);
@@ -112,6 +140,10 @@ export class AuditLogService {
     if (filters.toDate) {
       conditions.push('created_at <= ?');
       params.push(filters.toDate);
+    }
+    if (filters.requestId) {
+      conditions.push('request_id = ?');
+      params.push(filters.requestId);
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
 
@@ -142,24 +174,32 @@ export class AuditLogService {
   }
 
   /**
-   * Writes a single audit log entry. Silently swallows errors so a write
+   * Writes a single audit log entry. `ip_address`, `user_agent`, and
+   * `request_id` are pulled automatically from the AsyncLocalStorage context
+   * when a request is in flight. Silently swallows write errors so a log
    * failure never blocks the primary operation.
    */
   async write(input: WriteAuditLogInput): Promise<void> {
     try {
       await this.pool.execute<ResultSetHeader>(
         `INSERT INTO audit_logs
-           (user_id, action, entity_type, entity_id, description,
-            before_snapshot, after_snapshot)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+           (user_id, on_behalf_of_user_id, action, entity_type, entity_id,
+            description, justification, before_snapshot, after_snapshot,
+            ip_address, user_agent, request_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           input.actorId,
+          input.onBehalfOfUserId ?? null,
           input.action,
           input.entityType ?? null,
           input.entityId ?? null,
           input.description ?? null,
+          input.justification ?? null,
           input.before != null ? JSON.stringify(input.before) : null,
           input.after != null ? JSON.stringify(input.after) : null,
+          getRequestIp(),
+          getRequestUserAgent(),
+          getRequestId() ?? null,
         ]
       );
     } catch (err) {

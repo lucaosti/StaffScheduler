@@ -577,24 +577,34 @@ CREATE TABLE IF NOT EXISTS modules (
 CREATE TABLE IF NOT EXISTS audit_logs (
     id INT PRIMARY KEY AUTO_INCREMENT,
     user_id INT NULL,
+    -- When the action was performed on behalf of another user (proxy / approval).
+    on_behalf_of_user_id INT NULL,
     action VARCHAR(100) NOT NULL,
     entity_type VARCHAR(50),
     entity_id INT,
     description TEXT,
+    -- Optional free-text reason supplied by the actor at the time of the action.
+    justification TEXT NULL,
     -- JSON snapshots of the entity state before and after a mutation.
     -- Populated for sensitive changes: role grants, policy edits, user updates.
     before_snapshot JSON NULL,
     after_snapshot JSON NULL,
     ip_address VARCHAR(45),
     user_agent TEXT,
+    -- Correlation ID from the X-Request-Id header; links the log entry back to
+    -- the HTTP request that triggered it.
+    request_id VARCHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     INDEX idx_user (user_id),
+    INDEX idx_on_behalf_of (on_behalf_of_user_id),
     INDEX idx_action (action),
     INDEX idx_entity (entity_type, entity_id),
     INDEX idx_created (created_at),
+    INDEX idx_request_id (request_id),
 
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (on_behalf_of_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================
