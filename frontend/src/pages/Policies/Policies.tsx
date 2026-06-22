@@ -36,10 +36,10 @@ interface ConfirmState {
 
 const Policies: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.permissions?.includes('policy.admin');
+  const isAdmin = user?.permissions?.includes('policy.manage');
   const isManager =
-    user?.permissions?.includes('policy.admin') ||
-    user?.permissions?.includes('policy.manage');
+    user?.permissions?.includes('policy.manage') ||
+    user?.permissions?.includes('policy.read');
 
   const [activeTab, setActiveTab] = useState<Tab>('policies');
   const [error, setError] = useState<string | null>(null);

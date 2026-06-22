@@ -138,7 +138,7 @@ export const updateShiftTemplateBody = z.object({
 
 const approvalStepBody = z.object({
   stepOrder: z.number().int().positive(),
-  approverScope: z.enum(['direct_manager', 'department_head', 'hr_manager', 'company_user', 'role_based', 'unit_manager_chain']),
+  approverScope: z.enum(['policy_owner', 'unit_manager', 'unit_manager_chain', 'company_role', 'company_user']),
   approverRoleId: z.number().int().positive().nullable().optional(),
   approverUserId: z.number().int().positive().nullable().optional(),
   autoApproveForOwner: z.boolean().optional(),

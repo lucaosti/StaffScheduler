@@ -2,7 +2,7 @@
  * Settings Page Component for Staff Scheduler
  *
  * Thin coordinator that composes the Settings tabs from sub-components.
- * The System tab is only shown to users with the system.settings permission.
+ * The System tab is only shown to users with the settings.manage permission.
  *
  * @author Luca Ostinelli
  */
@@ -40,7 +40,7 @@ interface UserSettings {
 
 const Settings: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.permissions?.includes('system.settings');
+  const isAdmin = user?.permissions?.includes('settings.manage');
 
   const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system'>('personal');
 

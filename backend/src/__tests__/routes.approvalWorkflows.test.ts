@@ -143,7 +143,7 @@ describe('approval workflows POST /', () => {
     changeType: 'shift_swap',
     requireAll: false,
     description: 'Shift swap approval',
-    steps: [{ stepOrder: 1, approverScope: 'direct_manager' }],
+    steps: [{ stepOrder: 1, approverScope: 'company_user' }],
   };
 
   it('returns 201 on successful creation', async () => {
@@ -164,7 +164,7 @@ describe('approval workflows POST /', () => {
   it('returns 400 when changeType is missing', async () => {
     const res = await request(mountApp())
       .post('/api/approval-workflows')
-      .send({ steps: [{ stepOrder: 1, approverScope: 'direct_manager' }] });
+      .send({ steps: [{ stepOrder: 1, approverScope: 'company_user' }] });
 
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');

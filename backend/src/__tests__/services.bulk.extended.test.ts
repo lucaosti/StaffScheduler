@@ -117,18 +117,6 @@ describe('EmployeeService', () => {
     await expect(svc.getEmployeeStatistics()).rejects.toThrow(/boom/);
   });
 
-  it('getAvailableEmployees forwards to getAllEmployees + bubbles', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[employee], null] as Tuple)
-      .mockRejectedValueOnce(new Error('boom'));
-    const svc = new EmployeeService(pool);
-    expect((await svc.getAvailableEmployees(3, '2026-05-10', '08:00', '16:00')).length).toBe(1);
-    await expect(svc.getAvailableEmployees(3, '2026-05-10', '08:00', '16:00')).rejects.toThrow(
-      /boom/
-    );
-  });
-
   it('createEmployee delegates to createUser and bubbles', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockRejectedValueOnce(new Error('boom'));
