@@ -68,9 +68,6 @@ export const listChangeRequests = (filters?: {
   return request<ChangeRequestPage>(`/change-requests${qs ? `?${qs}` : ''}`);
 };
 
-export const getChangeRequest = (id: number) =>
-  request<ChangeRequest>(`/change-requests/${id}`);
-
 export const createChangeRequest = (input: CreateChangeRequestInput) =>
   request<ChangeRequest>('/change-requests', {
     method: 'POST',
