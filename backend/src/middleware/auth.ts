@@ -178,6 +178,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // roles this is a no-op (null = full access, zero extra queries).
     user.allowedOrgUnitIds = await rbac.computeAllowedOrgUnitIds(roles);
 
+    // Compute per-permission org-unit restrictions from scoped delegations.
+    // Empty array is the common case — no extra work when no scoped delegations exist.
+    user.delegationScopes = await rbac.getEffectiveDelegationScopes(userId);
+
     req.user = user;
 
     logger.debug('User authenticated', { userId: user.id });
