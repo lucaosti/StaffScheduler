@@ -1081,6 +1081,29 @@ CREATE TABLE IF NOT EXISTS change_requests (
     FOREIGN KEY (on_behalf_of_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS pending_approvals (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    change_request_id INT NOT NULL,
+    workflow_id INT NOT NULL,
+    step_id INT NOT NULL,
+    step_order INT NOT NULL,
+    assigned_to_user_id INT NOT NULL,
+    status ENUM('pending','approved','rejected','escalated','skipped') NOT NULL DEFAULT 'pending',
+    decided_at TIMESTAMP NULL,
+    decision_note TEXT NULL,
+    escalated_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (change_request_id) REFERENCES change_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (workflow_id) REFERENCES approval_workflows(id),
+    FOREIGN KEY (step_id) REFERENCES approval_steps(id),
+    FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE CASCADE,
+
+    INDEX idx_pending_approvals_assigned (assigned_to_user_id, status),
+    INDEX idx_pending_approvals_cr (change_request_id, step_order)
+);
+
 -- ================================================================
 -- DEFERRED FOREIGN KEYS
 -- Added here because they reference tables defined later than the source table.

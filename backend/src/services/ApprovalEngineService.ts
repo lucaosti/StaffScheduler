@@ -214,6 +214,36 @@ export class ApprovalEngineService {
   }
 
   /**
+   * Resolves the approver for a single step identified by its DB id.
+   * Used by ChangeRequestService to advance multi-step pending_approval chains.
+   */
+  async resolveApproverForStep(
+    stepId: number,
+    ctx: { actorUserId: number; orgUnitId?: number; policyOwnerId?: number }
+  ): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
+              approver_user_id, approver_permission_code, auto_approve_for_owner, escalate_after_hours
+         FROM approval_steps WHERE id = ? LIMIT 1`,
+      [stepId]
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0] as any;
+    const step: ApprovalStep = {
+      id: r.id,
+      workflowId: r.workflow_id,
+      stepOrder: r.step_order,
+      approverScope: r.approver_scope as ApproverScope,
+      approverRoleId: r.approver_role_id ?? null,
+      approverUserId: r.approver_user_id ?? null,
+      approverPermissionCode: r.approver_permission_code ?? null,
+      autoApproveForOwner: Boolean(r.auto_approve_for_owner),
+      escalateAfterHours: r.escalate_after_hours ?? null,
+    };
+    return this.resolveStepApprover(step, ctx);
+  }
+
+  /**
    * Resolves ALL steps for the given change type in order. Returns the first
    * non-auto-approved step as the active approver, or null when every step
    * can auto-approve.
@@ -352,21 +382,27 @@ export class ApprovalEngineService {
   }
 
   private async findUnitManagerChain(orgUnitId: number): Promise<number | null> {
-    let current: number | null = orgUnitId;
-    const visited = new Set<number>();
-    while (current !== null && !visited.has(current)) {
-      const cur: number = current;
-      visited.add(cur);
-      const [chainRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT manager_user_id, parent_id FROM org_units WHERE id = ? LIMIT 1',
-        [cur]
-      );
-      if (chainRows.length === 0) return null;
-      const managerId = chainRows[0].manager_user_id as number | null;
-      if (managerId !== null && managerId !== undefined) return managerId;
-      current = (chainRows[0].parent_id as number | null) ?? null;
-    }
-    return null;
+    // Walk the entire ancestor chain in one recursive CTE query and return the
+    // first manager found (closest ancestor with a non-null manager_user_id).
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `WITH RECURSIVE chain AS (
+         SELECT id, manager_user_id, parent_id, 0 AS depth
+           FROM org_units
+          WHERE id = ?
+         UNION ALL
+         SELECT o.id, o.manager_user_id, o.parent_id, c.depth + 1
+           FROM org_units o
+           JOIN chain c ON o.id = c.parent_id
+          WHERE c.depth < 20
+       )
+       SELECT manager_user_id
+         FROM chain
+        WHERE manager_user_id IS NOT NULL
+        ORDER BY depth ASC
+        LIMIT 1`,
+      [orgUnitId]
+    );
+    return rows.length === 0 ? null : (rows[0].manager_user_id as number);
   }
 
   private async findFirstActiveByRoleId(roleId: number): Promise<number | null> {
