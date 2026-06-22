@@ -54,6 +54,7 @@ import { createApprovalWorkflowsRouter } from './routes/approvalWorkflows';
 import { createModulesRouter } from './routes/modules';
 import { createChangeRequestsRouter } from './routes/changeRequests';
 import { createResponsibilityRulesRouter } from './routes/responsibilityRules';
+import { createPendingApprovalsRouter } from './routes/pendingApprovals';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -188,6 +189,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/modules`, createModulesRouter(pool));
     app.use(`${prefix}/responsibility-rules`, createResponsibilityRulesRouter(pool));
     app.use(`${prefix}/change-requests`, createChangeRequestsRouter(pool));
+    app.use(`${prefix}/pending-approvals`, createPendingApprovalsRouter(pool));
   };
   mountRoutes('/api/v1');
   mountRoutes('/api');

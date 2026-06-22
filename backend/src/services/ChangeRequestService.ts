@@ -19,9 +19,11 @@ import {
   ChangeRequestStatus,
   CreateChangeRequestInput,
   ChangeRequestFilters,
+  PendingApproval,
 } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { ApprovalEngineService } from './ApprovalEngineService';
 
 const mapRow = (row: RowDataPacket): ChangeRequest => ({
   id: row.id as number,
@@ -46,9 +48,11 @@ const mapRow = (row: RowDataPacket): ChangeRequest => ({
 
 export class ChangeRequestService {
   private audit: AuditLogService;
+  private engine: ApprovalEngineService;
 
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
+    this.engine = new ApprovalEngineService(pool);
   }
 
   // --------------------------------------------------------------------------
@@ -139,6 +143,24 @@ export class ChangeRequestService {
       justification: input.justification ?? undefined,
       after: created as unknown as Record<string, unknown>,
     });
+
+    // Create first pending_approval if an approval workflow is configured for this change type.
+    const workflow = await this.engine.getWorkflowByChangeType(input.changeType);
+    if (workflow && workflow.steps.length > 0) {
+      const firstStep = workflow.steps[0];
+      const approverUserId = await this.engine.resolveApproverForStep(firstStep.id, {
+        actorUserId: proposerUserId,
+      });
+      if (approverUserId !== null) {
+        await this.pool.execute(
+          `INSERT INTO pending_approvals
+             (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
+           VALUES (?, ?, ?, ?, ?, 'pending')`,
+          [created.id, workflow.id, firstStep.id, firstStep.stepOrder, approverUserId]
+        );
+        logger.info(`Pending approval created: cr=${created.id} step=${firstStep.stepOrder} assignee=${approverUserId}`);
+      }
+    }
 
     logger.info(`Change request created: id=${created.id} type=${created.changeType} proposer=${proposerUserId}`);
     return created;
@@ -282,5 +304,122 @@ export class ChangeRequestService {
     });
 
     return updated;
+  }
+
+  /**
+   * Advances a pending_approval step: mark it approved or rejected, then
+   * either open the next step or (when the final step is approved) transition
+   * the change_request to 'approved'.  When rejected the change_request is
+   * immediately set to 'rejected'.
+   *
+   * Only the user who is assigned to the step may act on it.
+   */
+  async advancePendingApproval(
+    pendingApprovalId: number,
+    userId: number,
+    decision: 'approved' | 'rejected',
+    note?: string | null
+  ): Promise<{ pendingApproval: PendingApproval; changeRequest: ChangeRequest }> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+    if (pa.status !== 'pending') throw new Error(`Pending approval is already ${pa.status}`);
+    if (pa.assignedToUserId !== userId) throw new Error('Not authorized to act on this pending approval');
+
+    await this.pool.execute(
+      `UPDATE pending_approvals
+          SET status = ?, decided_at = CURRENT_TIMESTAMP, decision_note = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`,
+      [decision, note ?? null, pendingApprovalId]
+    );
+
+    const cr = await this.getById(pa.changeRequestId);
+    if (!cr) throw new Error('Change request not found');
+
+    if (decision === 'rejected') {
+      await this.pool.execute(
+        `UPDATE change_requests
+            SET status = 'rejected', approver_user_id = ?, rejected_at = CURRENT_TIMESTAMP,
+                rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`,
+        [userId, note ?? null, pa.changeRequestId]
+      );
+      await this.audit.write({
+        actorId: userId,
+        action: 'change_request.reject',
+        entityType: 'change_request',
+        entityId: pa.changeRequestId,
+        description: `Change request rejected via workflow step ${pa.stepOrder}: ${cr.changeType}`,
+        before: cr as unknown as Record<string, unknown>,
+      });
+    } else {
+      // Approved — look for next step in the same workflow.
+      const [nextRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT id, step_order
+           FROM approval_steps
+          WHERE workflow_id = ? AND step_order > ?
+          ORDER BY step_order ASC LIMIT 1`,
+        [pa.workflowId, pa.stepOrder]
+      );
+
+      if (nextRows.length > 0) {
+        const nextStepId = (nextRows[0] as any).id as number;
+        const nextStepOrder = (nextRows[0] as any).step_order as number;
+        const nextApproverUserId = await this.engine.resolveApproverForStep(nextStepId, {
+          actorUserId: userId,
+        });
+        if (nextApproverUserId !== null) {
+          await this.pool.execute(
+            `INSERT INTO pending_approvals
+               (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
+             VALUES (?, ?, ?, ?, ?, 'pending')`,
+            [pa.changeRequestId, pa.workflowId, nextStepId, nextStepOrder, nextApproverUserId]
+          );
+        }
+      } else {
+        // No more steps — all approved; transition change_request.
+        await this.pool.execute(
+          `UPDATE change_requests
+              SET status = 'approved', approver_user_id = ?, approved_at = CURRENT_TIMESTAMP,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+          [userId, pa.changeRequestId]
+        );
+        await this.audit.write({
+          actorId: userId,
+          action: 'change_request.approve',
+          entityType: 'change_request',
+          entityId: pa.changeRequestId,
+          description: `Change request approved after all workflow steps: ${cr.changeType}`,
+          before: cr as unknown as Record<string, unknown>,
+        });
+      }
+    }
+
+    const updatedPa = await this.getPendingApprovalById(pendingApprovalId);
+    const updatedCr = await this.getById(pa.changeRequestId);
+    return { pendingApproval: updatedPa!, changeRequest: updatedCr! };
+  }
+
+  private async getPendingApprovalById(id: number): Promise<PendingApproval | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT * FROM pending_approvals WHERE id = ? LIMIT 1',
+      [id]
+    );
+    if (rows.length === 0) return null;
+    const r = rows[0] as any;
+    return {
+      id: r.id,
+      changeRequestId: r.change_request_id,
+      workflowId: r.workflow_id,
+      stepId: r.step_id,
+      stepOrder: r.step_order,
+      assignedToUserId: r.assigned_to_user_id,
+      status: r.status,
+      decidedAt: r.decided_at ?? null,
+      decisionNote: r.decision_note ?? null,
+      escalatedAt: r.escalated_at ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    };
   }
 }
