@@ -319,10 +319,8 @@ describe('ApprovalEngineService.resolveApprover — additional scopes', () => {
       approver_scope: 'unit_manager_chain', approver_role_id: null,
       approver_user_id: null, auto_approve_for_owner: 0, escalate_after_hours: null,
     }], null]);
-    // First org unit: no manager, has parent 2
-    execute.mockResolvedValueOnce([[{ manager_user_id: null, parent_id: 2 }], null]);
-    // Parent unit: manager is 30
-    execute.mockResolvedValueOnce([[{ manager_user_id: 30, parent_id: null }], null]);
+    // WITH RECURSIVE CTE returns the first non-null manager in the chain (parent's manager = 30)
+    execute.mockResolvedValueOnce([[{ manager_user_id: 30 }], null]);
 
     const svc = new ApprovalEngineService(pool);
     const result = await svc.resolveApprover('TimeOff.Request', {
