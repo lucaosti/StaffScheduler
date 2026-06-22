@@ -861,7 +861,9 @@ INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
 ('user.read',         'user',      'read',    'View user accounts and the directory'),
 ('user.manage',       'user',      'manage',  'Create, update and delete user accounts and assign roles'),
 ('settings.manage',   'settings',  'manage',  'Edit system settings'),
-('role.manage',       'role',      'manage',  'Create roles and assign permissions to them');
+('role.manage',           'role',            'manage',  'Create roles and assign permissions to them'),
+('responsibility.read',  'responsibility',  'read',    'View responsibility rules'),
+('responsibility.manage','responsibility',  'manage',  'Create, update and delete responsibility rules');
 
 -- ----------------------------------------------------------------
 -- Default roles (editable data; not hardcoded in application code).
@@ -885,7 +887,8 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'schedule.optimize','assignment.manage','shift.manage','department.read','department.manage',
   'org_unit.read','oncall.manage','policy.read','policy.manage','policy.approve',
   'loan.request','loan.approve','timeoff.approve','shiftswap.approve','preferences.manage',
-  'report.read','audit.read','user.read','user.manage'
+  'report.read','audit.read','user.read','user.manage',
+  'responsibility.read','responsibility.manage'
 ) WHERE r.name = 'Manager';
 
 -- Employee gets read-only visibility; self-service actions (creating own
@@ -994,6 +997,46 @@ CREATE TABLE IF NOT EXISTS delegations (
 
     FOREIGN KEY (delegator_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (delegatee_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- ================================================================
+-- RESPONSIBILITY RULES
+-- Multidimensional table that maps (subject group, permission) →
+-- (responsible org unit). Answers the question:
+--   "For users matching this condition, who is responsible for this
+--    permission/capability?"
+--
+-- subject_type / subject_id:
+--   'org_unit'   + id → all users whose primary org unit is that unit
+--   'department' + id → all users in that department
+--   'role'       + id → all users holding that role
+--   'all'        + NULL → every user in the system
+--
+-- responsible_org_unit_id: the org unit that holds authority.
+-- delegated_to_role_id: when set, only members of the org unit who also
+--   hold this role can exercise the authority (NULL = all members).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS responsibility_rules (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    subject_type ENUM('org_unit', 'department', 'role', 'all') NOT NULL,
+    subject_id INT NULL,
+    permission_code VARCHAR(80) NOT NULL,
+    responsible_org_unit_id INT NOT NULL,
+    delegated_to_role_id INT NULL,
+    description TEXT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_subject (subject_type, subject_id),
+    INDEX idx_permission (permission_code),
+    INDEX idx_responsible (responsible_org_unit_id),
+    INDEX idx_active (is_active),
+
+    FOREIGN KEY (responsible_org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE,
+    FOREIGN KEY (delegated_to_role_id) REFERENCES roles(id) ON DELETE SET NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================
