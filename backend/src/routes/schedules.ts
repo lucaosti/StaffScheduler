@@ -235,7 +235,8 @@ router.patch('/:id/publish', authenticate, requirePermission('schedule.publish')
   try {
     const { id } = res.locals.params;
 
-    const schedule = await scheduleService.publishSchedule(id, req.user!.id);
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+    const schedule = await scheduleService.publishSchedule(id, req.user!.id, reason);
     res.json({
       success: true,
       data: schedule,

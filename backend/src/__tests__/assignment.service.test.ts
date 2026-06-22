@@ -61,7 +61,9 @@ describe('AssignmentService.confirmAssignment', () => {
 
 describe('AssignmentService.cancelAssignment', () => {
   it('rolls back when not in pending/confirmed', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    // cancelAssignment first fetches the snapshot via pool.execute
+    execute.mockResolvedValueOnce([[buildAssignmentRow()], null]);
     conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
     const service = new AssignmentService(pool);
     await expect(service.cancelAssignment(1)).rejects.toThrow(/already cancelled/);
@@ -69,8 +71,11 @@ describe('AssignmentService.cancelAssignment', () => {
 
   it('cancels a confirmed assignment', async () => {
     const { pool, conn, execute } = makePool();
+    // snapshot + orchestrator fetchById + audit INSERT
+    execute
+      .mockResolvedValueOnce([[buildAssignmentRow()], null])
+      .mockResolvedValueOnce([[buildAssignmentRow({ status: 'cancelled' })], null]);
     conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
-    execute.mockResolvedValueOnce([[buildAssignmentRow({ status: 'cancelled' })], null]);
     const service = new AssignmentService(pool);
     const out = await service.cancelAssignment(1);
     expect(out.status).toBe('cancelled');
@@ -79,14 +84,18 @@ describe('AssignmentService.cancelAssignment', () => {
 
 describe('AssignmentService.deleteAssignment', () => {
   it('throws when no row matched', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    // deleteAssignment first fetches the snapshot via pool.execute
+    execute.mockResolvedValueOnce([[buildAssignmentRow()], null]);
     conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
     const service = new AssignmentService(pool);
     await expect(service.deleteAssignment(99)).rejects.toThrow(/not found/);
   });
 
   it('returns true on hard-delete success', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    // snapshot (pool.execute), then the DELETE uses conn.execute
+    execute.mockResolvedValueOnce([[buildAssignmentRow()], null]);
     conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     const service = new AssignmentService(pool);
     expect(await service.deleteAssignment(1)).toBe(true);

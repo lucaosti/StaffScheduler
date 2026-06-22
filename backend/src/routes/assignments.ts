@@ -68,9 +68,12 @@ router.get('/:id', authenticate, validateParams(idParam), async (req: Request, r
 });
 
 // Create new assignment
-router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), async (_req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), async (req: Request, res: Response) => {
   try {
-    const assignment = await assignmentService.createAssignment(res.locals.body);
+    const assignment = await assignmentService.createAssignment({
+      ...res.locals.body,
+      actorId: req.user?.id,
+    });
 
     res.status(201).json({
       success: true,
@@ -88,11 +91,14 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
 });
 
 // Update assignment
-router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (_req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const assignment = await assignmentService.updateAssignment(id, res.locals.body);
+    const assignment = await assignmentService.updateAssignment(id, {
+      ...res.locals.body,
+      actorId: req.user?.id,
+    });
     res.json({
       success: true,
       data: assignment,
@@ -112,11 +118,12 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), validat
 });
 
 // Delete assignment
-router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
+    const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
 
-    await assignmentService.deleteAssignment(id);
+    await assignmentService.deleteAssignment(id, req.user?.id, reason);
     res.json({
       success: true,
       message: 'Assignment deleted successfully'
@@ -242,7 +249,7 @@ router.patch('/:id/confirm', authenticate, validateParams(idParam), async (req: 
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     }
 
-    const assignment = await assignmentService.confirmAssignment(id);
+    const assignment = await assignmentService.confirmAssignment(id, actor.id);
     res.json({
       success: true,
       data: assignment,
@@ -282,7 +289,7 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: 
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     }
 
-    const assignment = await assignmentService.declineAssignment(id);
+    const assignment = await assignmentService.declineAssignment(id, actor.id);
 
     res.json({
       success: true,
@@ -304,11 +311,11 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: 
 
 // Complete assignment
 // Only a manager (assignment.manage) may mark an assignment complete.
-router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
-    const assignment = await assignmentService.completeAssignment(id);
+    const assignment = await assignmentService.completeAssignment(id, req.user?.id);
     res.json({
       success: true,
       data: assignment,
