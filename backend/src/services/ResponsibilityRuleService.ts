@@ -24,11 +24,43 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import {
   ResponsibilityRule,
+  ResponsibilitySubjectType,
   CreateResponsibilityRuleRequest,
   UpdateResponsibilityRuleRequest,
 } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+
+/**
+ * Specificity order for rule precedence resolution.
+ * When multiple active rules match the same subject+permission, the rule with
+ * the most specific subject_type wins; within the same specificity the most
+ * recently created rule takes precedence.
+ *
+ * org_unit > department > role > all
+ */
+const SPECIFICITY: Record<ResponsibilitySubjectType, number> = {
+  org_unit: 4,
+  department: 3,
+  role: 2,
+  all: 1,
+};
+
+interface MatrixEntry {
+  subjectType: ResponsibilitySubjectType;
+  subjectId: number | null;
+  permissionCode: string;
+  rules: ResponsibilityRule[];
+}
+
+export interface BulkCreateInput {
+  subjectType: ResponsibilitySubjectType;
+  subjectIds: number[];
+  permissionCodes: string[];
+  responsibleOrgUnitId: number;
+  delegatedToRoleId?: number | null;
+  description?: string | null;
+}
 
 interface ResolveContext {
   /** Primary org unit of the subject user. */
@@ -270,5 +302,152 @@ export class ResponsibilityRuleService {
     );
 
     return rows.map((r: any) => r.user_id as number);
+  }
+
+  // --------------------------------------------------------------------------
+  // Matrix, my-responsibilities, bulk create, conflicts
+  // --------------------------------------------------------------------------
+
+  /**
+   * Returns all active rules grouped by (subject_type, subject_id, permission_code).
+   * Rules within each group are ordered by specificity DESC then created_at DESC so
+   * the highest-precedence rule is always first.
+   */
+  async getMatrix(): Promise<MatrixEntry[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM responsibility_rules
+        WHERE is_active = TRUE
+        ORDER BY permission_code ASC, subject_type ASC, created_at DESC`
+    );
+
+    const map = new Map<string, MatrixEntry>();
+    for (const row of rows as any[]) {
+      const key = `${row.subject_type}|${row.subject_id ?? 'null'}|${row.permission_code}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          subjectType: row.subject_type as ResponsibilitySubjectType,
+          subjectId: (row.subject_id as number | null) ?? null,
+          permissionCode: row.permission_code as string,
+          rules: [],
+        });
+      }
+      map.get(key)!.rules.push(mapRule(row));
+    }
+
+    const entries = Array.from(map.values());
+    // Sort entries by specificity DESC within each permissionCode group
+    entries.sort((a, b) => {
+      const perm = a.permissionCode.localeCompare(b.permissionCode);
+      if (perm !== 0) return perm;
+      return (SPECIFICITY[b.subjectType] ?? 0) - (SPECIFICITY[a.subjectType] ?? 0);
+    });
+    return entries;
+  }
+
+  /**
+   * Returns all active rules for which the given user is a responsible party —
+   * either via direct org unit membership or by holding the delegated role
+   * within the responsible org unit.
+   */
+  async getMyResponsibilities(userId: number): Promise<ResponsibilityRule[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT rr.*
+         FROM responsibility_rules rr
+         JOIN user_org_units uou
+           ON uou.org_unit_id = rr.responsible_org_unit_id
+          AND uou.user_id = ?
+         LEFT JOIN user_roles ur
+           ON ur.user_id = ?
+          AND ur.role_id = rr.delegated_to_role_id
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+        WHERE rr.is_active = TRUE
+          AND (rr.delegated_to_role_id IS NULL OR ur.user_id IS NOT NULL)
+        ORDER BY rr.permission_code ASC`,
+      [userId, userId]
+    );
+    return (rows as any[]).map(mapRule);
+  }
+
+  /**
+   * Creates rules for each (subjectId × permissionCode) combination in a single
+   * transaction.  For subjectType='all', subjectIds is ignored and one rule per
+   * permissionCode is created with subject_id=NULL.
+   */
+  async bulkCreate(input: BulkCreateInput, actorId: number | null): Promise<ResponsibilityRule[]> {
+    const effectiveSubjectIds: (number | null)[] =
+      input.subjectType === 'all' ? [null] : input.subjectIds;
+
+    if (effectiveSubjectIds.length === 0) {
+      throw new Error('subjectIds must not be empty');
+    }
+    if (input.permissionCodes.length === 0) {
+      throw new Error('permissionCodes must not be empty');
+    }
+    if (effectiveSubjectIds.length * input.permissionCodes.length > 500) {
+      throw new Error('Bulk create limited to 500 rules per request');
+    }
+
+    const conn = await this.pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const insertIds: number[] = [];
+      for (const subjectId of effectiveSubjectIds) {
+        for (const permCode of input.permissionCodes) {
+          const [res] = await conn.execute<ResultSetHeader>(
+            `INSERT INTO responsibility_rules
+               (subject_type, subject_id, permission_code, responsible_org_unit_id,
+                delegated_to_role_id, description, is_active, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)`,
+            [
+              input.subjectType,
+              subjectId,
+              permCode,
+              input.responsibleOrgUnitId,
+              input.delegatedToRoleId ?? null,
+              input.description ?? null,
+              actorId,
+            ]
+          );
+          insertIds.push(res.insertId);
+        }
+      }
+      await conn.commit();
+
+      if (insertIds.length === 0) return [];
+      const placeholders = insertIds.map(() => '?').join(',');
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT * FROM responsibility_rules WHERE id IN (${placeholders}) ORDER BY id ASC`,
+        insertIds
+      );
+      logger.info(`Bulk responsibility rules created: count=${insertIds.length} by=${actorId}`);
+      return (rows as any[]).map(mapRule);
+    } catch (error) {
+      await conn.rollback();
+      throw error;
+    } finally {
+      conn.release();
+    }
+  }
+
+  /**
+   * Returns all other active rules that share the same (subject_type, subject_id,
+   * permission_code) as the given rule.  These are potential responsibility conflicts —
+   * multiple parties claiming authority over the same subject+permission combination.
+   */
+  async getConflicts(id: number): Promise<ResponsibilityRule[]> {
+    const rule = await this.getById(id);
+    if (!rule) throw new Error('Responsibility rule not found');
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT r2.*
+         FROM responsibility_rules r2
+        WHERE r2.subject_type = ?
+          AND (r2.subject_id = ? OR (r2.subject_id IS NULL AND ? IS NULL))
+          AND r2.permission_code = ?
+          AND r2.id != ?
+          AND r2.is_active = TRUE`,
+      [rule.subjectType, rule.subjectId, rule.subjectId, rule.permissionCode, id]
+    );
+    return (rows as any[]).map(mapRule);
   }
 }
