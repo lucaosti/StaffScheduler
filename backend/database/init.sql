@@ -863,7 +863,9 @@ INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
 ('settings.manage',   'settings',  'manage',  'Edit system settings'),
 ('role.manage',           'role',            'manage',  'Create roles and assign permissions to them'),
 ('responsibility.read',  'responsibility',  'read',    'View responsibility rules'),
-('responsibility.manage','responsibility',  'manage',  'Create, update and delete responsibility rules');
+('responsibility.manage','responsibility',  'manage',  'Create, update and delete responsibility rules'),
+('change_request.create','change_request','create',   'Propose a change request'),
+('change_request.review','change_request','review',   'Approve, reject or apply change requests');
 
 -- ----------------------------------------------------------------
 -- Default roles (editable data; not hardcoded in application code).
@@ -888,7 +890,8 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'org_unit.read','oncall.manage','policy.read','policy.manage','policy.approve',
   'loan.request','loan.approve','timeoff.approve','shiftswap.approve','preferences.manage',
   'report.read','audit.read','user.read','user.manage',
-  'responsibility.read','responsibility.manage'
+  'responsibility.read','responsibility.manage',
+  'change_request.create','change_request.review'
 ) WHERE r.name = 'Manager';
 
 -- Employee gets read-only visibility; self-service actions (creating own
@@ -1037,6 +1040,42 @@ CREATE TABLE IF NOT EXISTS responsibility_rules (
     FOREIGN KEY (responsible_org_unit_id) REFERENCES org_units(id) ON DELETE CASCADE,
     FOREIGN KEY (delegated_to_role_id) REFERENCES roles(id) ON DELETE SET NULL,
     FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- CHANGE REQUESTS
+-- A subordinate proposes a change; when approved and applied the audit
+-- log attributes the action to the authority holder (on_behalf_of tracks
+-- the original proposer so the full chain is auditable).
+-- ================================================================
+CREATE TABLE IF NOT EXISTS change_requests (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    change_type VARCHAR(80) NOT NULL,
+    proposer_user_id INT NOT NULL,
+    target_entity_type VARCHAR(60) NOT NULL,
+    target_entity_id INT NULL,
+    proposed_payload JSON NOT NULL,
+    justification TEXT NULL,
+    status ENUM('pending','approved','rejected','applied','cancelled') NOT NULL DEFAULT 'pending',
+    approver_user_id INT NULL,
+    approved_at TIMESTAMP NULL,
+    rejected_at TIMESTAMP NULL,
+    rejection_reason TEXT NULL,
+    applied_at TIMESTAMP NULL,
+    -- when applied, the action is attributed to this user (the authority holder)
+    on_behalf_of_user_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_cr_proposer (proposer_user_id),
+    INDEX idx_cr_status (status),
+    INDEX idx_cr_change_type (change_type),
+    INDEX idx_cr_target (target_entity_type, target_entity_id),
+    INDEX idx_cr_approver (approver_user_id),
+
+    FOREIGN KEY (proposer_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL,
+    FOREIGN KEY (on_behalf_of_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================
