@@ -15,6 +15,7 @@
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { AuditLogService } from './AuditLogService';
 
 type TimeOffType = 'vacation' | 'sick' | 'personal' | 'other';
 type TimeOffStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -74,7 +75,10 @@ const mapRow = (row: RowDataPacket): TimeOffRequest => ({
 });
 
 export class TimeOffService {
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   /** Creates a new pending request. Range is validated; reason is optional. */
   async create(input: CreateTimeOffInput): Promise<TimeOffRequest> {
@@ -99,6 +103,15 @@ export class TimeOffService {
     const created = await this.getById(result.insertId);
     if (!created) throw new Error('Failed to retrieve created time-off request');
     logger.info(`Time-off request created: id=${created.id} user=${input.userId}`);
+    await this.audit.write({
+      actorId: input.userId,
+      action: 'time_off.create',
+      entityType: 'time_off_request',
+      entityId: created.id,
+      description: `Time-off request created (${input.type ?? 'vacation'}) from ${input.startDate} to ${input.endDate}`,
+      justification: input.reason ?? null,
+      after: { id: created.id, status: created.status, startDate: created.startDate, endDate: created.endDate },
+    });
     return created;
   }
 
@@ -191,6 +204,15 @@ export class TimeOffService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve approved request');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'time_off.approve',
+      entityType: 'time_off_request',
+      entityId: id,
+      description: `Time-off request approved`,
+      justification: notes ?? null,
+      after: { status: 'approved', reviewerId, unavailabilityId: refreshed.unavailabilityId },
+    });
     return refreshed;
   }
 
@@ -216,6 +238,15 @@ export class TimeOffService {
     logger.info(`Time-off request rejected: id=${id} reviewer=${reviewerId}`);
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve rejected request');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'time_off.reject',
+      entityType: 'time_off_request',
+      entityId: id,
+      description: `Time-off request rejected`,
+      justification: notes ?? null,
+      after: { status: 'rejected', reviewerId },
+    });
     return refreshed;
   }
 
@@ -240,6 +271,14 @@ export class TimeOffService {
     logger.info(`Time-off request cancelled: id=${id} user=${requesterId}`);
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve cancelled request');
+    await this.audit.write({
+      actorId: requesterId,
+      action: 'time_off.cancel',
+      entityType: 'time_off_request',
+      entityId: id,
+      description: `Time-off request cancelled`,
+      after: { status: 'cancelled' },
+    });
     return refreshed;
   }
 }

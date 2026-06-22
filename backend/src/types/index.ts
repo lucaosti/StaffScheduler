@@ -403,6 +403,10 @@ export interface CreateAssignmentRequest {
   shiftId: number;
   userId: number;
   notes?: string;
+  /** ID of the user performing the assignment (manager); used for audit trail. */
+  actorId?: number;
+  /** Free-text reason for the assignment; stored in the audit log. */
+  reason?: string;
 }
 
 // ============================================================================

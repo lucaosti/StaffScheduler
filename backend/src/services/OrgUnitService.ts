@@ -10,6 +10,7 @@
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { AuditLogService } from './AuditLogService';
 
 interface OrgUnit {
   id: number;
@@ -72,7 +73,10 @@ const mapMembership = (row: RowDataPacket): UserOrgUnit => ({
 });
 
 export class OrgUnitService {
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   async list(): Promise<OrgUnit[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -222,7 +226,8 @@ export class OrgUnitService {
   async addMember(
     userId: number,
     orgUnitId: number,
-    isPrimary = false
+    isPrimary = false,
+    actorId?: number
   ): Promise<UserOrgUnit> {
     const conn = await this.pool.getConnection();
     try {
@@ -251,10 +256,19 @@ export class OrgUnitService {
       [userId, orgUnitId]
     );
     if (rows.length === 0) throw new Error('Membership not found after insert');
-    return mapMembership(rows[0]);
+    const membership = mapMembership(rows[0]);
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'org_unit.member_add',
+      entityType: 'user_org_unit',
+      entityId: orgUnitId,
+      description: `User ${userId} added to org unit ${orgUnitId}${isPrimary ? ' (primary)' : ''}`,
+      after: { userId, orgUnitId, isPrimary },
+    });
+    return membership;
   }
 
-  async setPrimary(userId: number, orgUnitId: number): Promise<void> {
+  async setPrimary(userId: number, orgUnitId: number, actorId?: number): Promise<void> {
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -275,12 +289,28 @@ export class OrgUnitService {
     } finally {
       conn.release();
     }
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'org_unit.primary_set',
+      entityType: 'user_org_unit',
+      entityId: orgUnitId,
+      description: `Primary org unit set for user ${userId} → org unit ${orgUnitId}`,
+      after: { userId, orgUnitId, isPrimary: true },
+    });
   }
 
-  async removeMember(userId: number, orgUnitId: number): Promise<void> {
+  async removeMember(userId: number, orgUnitId: number, actorId?: number): Promise<void> {
     await this.pool.execute(
       `DELETE FROM user_org_units WHERE user_id = ? AND org_unit_id = ?`,
       [userId, orgUnitId]
     );
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'org_unit.member_remove',
+      entityType: 'user_org_unit',
+      entityId: orgUnitId,
+      description: `User ${userId} removed from org unit ${orgUnitId}`,
+      before: { userId, orgUnitId },
+    });
   }
 }

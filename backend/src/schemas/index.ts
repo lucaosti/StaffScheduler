@@ -11,6 +11,10 @@ export const scheduleIdParam = z.object({ scheduleId: positiveInt });
 export const departmentIdParam = z.object({ departmentId: positiveInt });
 export const idAndSkillIdParam = z.object({ id: positiveInt, skillId: positiveInt });
 export const idAndUserIdParam = z.object({ id: positiveInt, userId: positiveInt });
+export const userIdAndRoleIdParam = z.object({ userId: positiveInt, roleId: positiveInt });
+
+const positiveIntOrNull = z.coerce.number().int().positive().nullable().optional();
+export const scopeOrgUnitQuery = z.object({ scopeOrgUnitId: positiveIntOrNull });
 
 const shortString = z.string().min(1).max(64);
 
@@ -69,6 +73,7 @@ export const createAssignmentBody = z.object({
   shiftId: z.number().int().positive(),
   userId: z.number().int().positive(),
   notes: z.string().optional(),
+  reason: z.string().max(2000).optional(),
 });
 
 export const bulkCreateAssignmentsBody = z.object({
@@ -115,6 +120,7 @@ export const updateScheduleBody = z.object({
 export const updateAssignmentBody = z.object({
   status: z.string().optional(),
   notes: z.string().optional(),
+  reason: z.string().max(2000).optional(),
 });
 
 export const createShiftTemplateBody = z.object({

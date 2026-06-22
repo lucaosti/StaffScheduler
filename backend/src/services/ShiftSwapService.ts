@@ -13,6 +13,7 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { NotificationService } from './NotificationService';
+import { AuditLogService } from './AuditLogService';
 
 type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
 
@@ -55,9 +56,11 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
 
 export class ShiftSwapService {
   private notifications: NotificationService;
+  private audit: AuditLogService;
 
   constructor(private pool: Pool, notifications?: NotificationService) {
     this.notifications = notifications ?? new NotificationService(pool);
+    this.audit = new AuditLogService(pool);
   }
 
   /**
@@ -106,6 +109,14 @@ export class ShiftSwapService {
       const created = await this.getById(insert.insertId);
       if (!created) throw new Error('Failed to retrieve created swap request');
       logger.info(`Shift swap created: id=${created.id} requester=${input.requesterUserId}`);
+      await this.audit.write({
+        actorId: input.requesterUserId,
+        action: 'shift_swap.create',
+        entityType: 'shift_swap_request',
+        entityId: created.id,
+        description: `Shift swap requested: assignment ${input.requesterAssignmentId} ↔ ${input.targetAssignmentId}`,
+        after: { id: created.id, status: 'pending', targetUserId: created.targetUserId },
+      });
       return created;
     } catch (err) {
       await conn.rollback();
@@ -240,6 +251,15 @@ export class ShiftSwapService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve approved swap');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'shift_swap.approve',
+      entityType: 'shift_swap_request',
+      entityId: id,
+      description: `Shift swap approved`,
+      justification: notes ?? null,
+      after: { status: 'approved', reviewerId },
+    });
 
     this.notifications.notifyAsync({
       userId: refreshed.requesterUserId,
@@ -275,6 +295,15 @@ export class ShiftSwapService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve declined swap');
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'shift_swap.decline',
+      entityType: 'shift_swap_request',
+      entityId: id,
+      description: `Shift swap declined`,
+      justification: notes ?? null,
+      after: { status: 'declined', reviewerId },
+    });
 
     this.notifications.notifyAsync({
       userId: refreshed.requesterUserId,
@@ -301,6 +330,14 @@ export class ShiftSwapService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve cancelled swap');
+    await this.audit.write({
+      actorId: requesterUserId,
+      action: 'shift_swap.cancel',
+      entityType: 'shift_swap_request',
+      entityId: id,
+      description: `Shift swap request cancelled`,
+      after: { status: 'cancelled' },
+    });
     return refreshed;
   }
 }

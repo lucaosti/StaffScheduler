@@ -17,6 +17,7 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { NotificationService } from './NotificationService';
+import { AuditLogService } from './AuditLogService';
 
 type LoanStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'ended';
 
@@ -80,10 +81,12 @@ const mapRow = (row: RowDataPacket): EmployeeLoan => ({
 export class EmployeeLoanService {
   private approvals: ApprovalMatrixService;
   private notifications: NotificationService;
+  private audit: AuditLogService;
 
   constructor(private pool: Pool) {
     this.approvals = new ApprovalMatrixService(pool);
     this.notifications = new NotificationService(pool);
+    this.audit = new AuditLogService(pool);
   }
 
   /**
@@ -130,6 +133,15 @@ export class EmployeeLoanService {
     logger.info(
       `Loan created: id=${created.id} user=${input.userId} from=${input.fromOrgUnitId} to=${input.toOrgUnitId} status=${status}`
     );
+    await this.audit.write({
+      actorId: input.requestedBy,
+      action: 'loan.create',
+      entityType: 'employee_loan',
+      entityId: created.id,
+      description: `Employee loan requested: user ${input.userId} from unit ${input.fromOrgUnitId} to ${input.toOrgUnitId}`,
+      justification: input.reason ?? null,
+      after: { id: created.id, status, fromOrgUnitId: input.fromOrgUnitId, toOrgUnitId: input.toOrgUnitId },
+    });
 
     await this.fanOutNotifications(created);
     return created;
@@ -210,6 +222,15 @@ export class EmployeeLoanService {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
     logger.info(`Loan approved: id=${id} reviewer=${reviewerId}`);
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'loan.approve',
+      entityType: 'employee_loan',
+      entityId: id,
+      description: `Employee loan approved`,
+      justification: notes ?? null,
+      after: { status: 'approved', reviewerId },
+    });
     this.notifications.notifyAsync({
       userId: refreshed.userId,
       type: 'loan.approved',
@@ -244,6 +265,15 @@ export class EmployeeLoanService {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
     logger.info(`Loan rejected: id=${id} reviewer=${reviewerId}`);
+    await this.audit.write({
+      actorId: reviewerId,
+      action: 'loan.reject',
+      entityType: 'employee_loan',
+      entityId: id,
+      description: `Employee loan rejected`,
+      justification: notes ?? null,
+      after: { status: 'rejected', reviewerId },
+    });
     this.notifications.notifyAsync({
       userId: refreshed.requestedBy,
       type: 'loan.rejected',
@@ -268,6 +298,14 @@ export class EmployeeLoanService {
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
+    await this.audit.write({
+      actorId: requesterId,
+      action: 'loan.cancel',
+      entityType: 'employee_loan',
+      entityId: id,
+      description: `Employee loan cancelled`,
+      after: { status: 'cancelled' },
+    });
     return refreshed;
   }
 

@@ -73,6 +73,7 @@ describe('EmployeeLoanService.create', () => {
       .mockResolvedValueOnce([[unitRow({ id: 2, manager_user_id: 99 })], null] as Tuple) // unit_manager lookup
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow({ id: 42, status: 'approved' })], null] as Tuple) // SELECT created
+      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT for loan.create
       .mockResolvedValueOnce([
         [
           unitRow({ id: 1, manager_user_id: 50 }),

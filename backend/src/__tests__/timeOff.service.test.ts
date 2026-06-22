@@ -67,7 +67,7 @@ describe('TimeOffService.create', () => {
 
     expect(created.id).toBe(42);
     expect(created.status).toBe('pending');
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(3); // INSERT + SELECT + audit INSERT
     expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO time_off_requests/);
   });
 });
