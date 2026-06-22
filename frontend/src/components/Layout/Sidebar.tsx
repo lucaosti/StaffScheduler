@@ -112,22 +112,23 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
   return (
     <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-brand">
-        <i className="bi bi-calendar-check-fill me-2"></i>
+        <i className="bi bi-calendar-check-fill me-2" aria-hidden="true"></i>
         {!collapsed && 'Staff Scheduler'}
       </div>
-      
+
       <nav aria-label="Main navigation">
         <ul className="sidebar-nav">
           {filteredMenuItems.map((item) => (
             <li key={item.path} className="sidebar-nav-item">
               <NavLink
                 to={item.path}
+                title={collapsed ? item.label : undefined}
                 className={({ isActive }) =>
                   `sidebar-nav-link ${isActive ? 'active' : ''}`
                 }
               >
-                <i className={item.icon}></i>
-                {!collapsed && item.label}
+                <i className={item.icon} aria-hidden="true"></i>
+                <span className={collapsed ? 'visually-hidden' : ''}>{item.label}</span>
               </NavLink>
             </li>
           ))}
@@ -135,7 +136,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       </nav>
 
       <div className="mt-auto p-3 border-top">
-        {user && (
+        {user && !collapsed && (
           <div className="text-body mb-2">
             <small>
               {user.email}
@@ -148,9 +149,11 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
           className="btn btn-outline-secondary btn-sm w-100"
           type="button"
           onClick={handleLogout}
+          title={collapsed ? 'Logout' : undefined}
+          aria-label="Logout"
         >
-          <i className="bi bi-box-arrow-right me-1"></i>
-          {!collapsed && 'Logout'}
+          <i className="bi bi-box-arrow-right me-1" aria-hidden="true"></i>
+          {!collapsed && <span>Logout</span>}
         </button>
       </div>
     </div>

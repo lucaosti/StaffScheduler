@@ -23,7 +23,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { DashboardStats, AuditLogEntry } from '../../types';
 import { getDashboardStats, getRecentActivity } from '../../services/dashboardService';
@@ -119,7 +119,7 @@ const Dashboard: React.FC = () => {
       {/* Permission denied banner — shown when redirected from a guarded route */}
       {permissionDenied && (
         <div className="alert alert-warning alert-dismissible fade show mb-4" role="alert">
-          <i className="bi bi-shield-exclamation me-2"></i>
+          <i className="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
           <strong>Access denied.</strong> You do not have permission to view that page.
           <button
             type="button"
@@ -158,7 +158,7 @@ const Dashboard: React.FC = () => {
                 <div className="d-flex align-items-center">
                   <div className="flex-shrink-0">
                     <div className="bg-primary bg-opacity-10 rounded-3 p-3">
-                      <i className="bi bi-people fs-4 text-primary"></i>
+                      <i className="bi bi-people fs-4 text-primary" aria-hidden="true"></i>
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
@@ -176,7 +176,7 @@ const Dashboard: React.FC = () => {
                 <div className="d-flex align-items-center">
                   <div className="flex-shrink-0">
                     <div className="bg-success bg-opacity-10 rounded-3 p-3">
-                      <i className="bi bi-calendar3 fs-4 text-success"></i>
+                      <i className="bi bi-calendar3 fs-4 text-success" aria-hidden="true"></i>
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
@@ -194,7 +194,7 @@ const Dashboard: React.FC = () => {
                 <div className="d-flex align-items-center">
                   <div className="flex-shrink-0">
                     <div className="bg-info bg-opacity-10 rounded-3 p-3">
-                      <i className="bi bi-clock fs-4 text-info"></i>
+                      <i className="bi bi-clock fs-4 text-info" aria-hidden="true"></i>
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
@@ -212,7 +212,7 @@ const Dashboard: React.FC = () => {
                 <div className="d-flex align-items-center">
                   <div className="flex-shrink-0">
                     <div className="bg-warning bg-opacity-10 rounded-3 p-3">
-                      <i className="bi bi-exclamation-triangle fs-4 text-warning"></i>
+                      <i className="bi bi-exclamation-triangle fs-4 text-warning" aria-hidden="true"></i>
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
@@ -280,22 +280,30 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="card-body">
               <div className="d-grid gap-3">
-                <button className="btn btn-outline-primary text-start">
-                  <i className="bi bi-plus-circle me-2"></i>
-                  Create New Shift
-                </button>
-                <button className="btn btn-outline-success text-start">
-                  <i className="bi bi-person-plus me-2"></i>
-                  Add Employee
-                </button>
-                <button className="btn btn-outline-info text-start">
-                  <i className="bi bi-calendar-plus me-2"></i>
-                  Generate Schedule
-                </button>
-                <button className="btn btn-outline-warning text-start">
-                  <i className="bi bi-graph-up me-2"></i>
-                  View Reports
-                </button>
+                {user?.permissions?.includes('shift.manage') && (
+                  <Link to="/shifts" className="btn btn-outline-primary text-start">
+                    <i className="bi bi-plus-circle me-2" aria-hidden="true"></i>
+                    Create New Shift
+                  </Link>
+                )}
+                {user?.permissions?.includes('employee.read') && (
+                  <Link to="/employees" className="btn btn-outline-success text-start">
+                    <i className="bi bi-person-plus me-2" aria-hidden="true"></i>
+                    Add Employee
+                  </Link>
+                )}
+                {user?.permissions?.includes('schedule.read') && (
+                  <Link to="/schedule" className="btn btn-outline-info text-start">
+                    <i className="bi bi-calendar-plus me-2" aria-hidden="true"></i>
+                    Generate Schedule
+                  </Link>
+                )}
+                {user?.permissions?.includes('report.read') && (
+                  <Link to="/reports" className="btn btn-outline-warning text-start">
+                    <i className="bi bi-graph-up me-2" aria-hidden="true"></i>
+                    View Reports
+                  </Link>
+                )}
               </div>
             </div>
           </div>
@@ -310,7 +318,7 @@ const Dashboard: React.FC = () => {
               {recentActivity.length === 0 ? (
                 <div className="d-flex align-items-center justify-content-center text-center py-5 text-muted">
                   <div>
-                    <i className="bi bi-clock-history fs-3 mb-2 d-block"></i>
+                    <i className="bi bi-clock-history fs-3 mb-2 d-block" aria-hidden="true"></i>
                     <p className="mb-0">No recent activity.</p>
                   </div>
                 </div>
