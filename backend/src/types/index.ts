@@ -401,6 +401,45 @@ export interface CreateAssignmentRequest {
   notes?: string;
 }
 
+// ============================================================================
+// RESPONSIBILITY RULES
+// ============================================================================
+
+export type ResponsibilitySubjectType = 'org_unit' | 'department' | 'role' | 'all';
+
+export interface ResponsibilityRule {
+  id: number;
+  subjectType: ResponsibilitySubjectType;
+  subjectId: number | null;
+  permissionCode: string;
+  responsibleOrgUnitId: number;
+  delegatedToRoleId: number | null;
+  description: string | null;
+  isActive: boolean;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateResponsibilityRuleRequest {
+  subjectType: ResponsibilitySubjectType;
+  subjectId?: number | null;
+  permissionCode: string;
+  responsibleOrgUnitId: number;
+  delegatedToRoleId?: number | null;
+  description?: string | null;
+}
+
+export interface UpdateResponsibilityRuleRequest {
+  subjectType?: ResponsibilitySubjectType;
+  subjectId?: number | null;
+  permissionCode?: string;
+  responsibleOrgUnitId?: number;
+  delegatedToRoleId?: number | null;
+  description?: string | null;
+  isActive?: boolean;
+}
+
 // System Settings Types
 export interface SystemSetting {
   id: number;
