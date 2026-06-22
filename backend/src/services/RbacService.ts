@@ -370,6 +370,46 @@ export class RbacService {
     return [...new Set(subtrees.flat())];
   }
 
+  /**
+   * Returns the per-permission org-unit restrictions that apply to this user
+   * through their active, scoped delegations. Entries are merged by permission
+   * code so callers receive one entry per code with the union of allowed org
+   * units across all matching delegations.
+   *
+   * Returns an empty array when the user has no scoped delegations.
+   */
+  async getEffectiveDelegationScopes(
+    userId: number
+  ): Promise<Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT d.permission_codes, d.scope_org_unit_id
+         FROM delegations d
+        WHERE d.delegatee_id = ? AND d.is_active = TRUE
+          AND d.starts_at <= NOW() AND d.expires_at > NOW()
+          AND d.scope_org_unit_id IS NOT NULL`,
+      [userId]
+    );
+    if ((rows as any[]).length === 0) return [];
+
+    // Build { permissionCode → Set<orgUnitId> } by expanding each delegation's
+    // scope_org_unit_id to include all descendants.
+    const merged = new Map<string, Set<number>>();
+    for (const row of rows as any[]) {
+      const codes: string[] = JSON.parse(row.permission_codes as string);
+      const scopeId: number = row.scope_org_unit_id as number;
+      const allowed = await this.getDescendantOrgUnitIds(scopeId);
+      for (const code of codes) {
+        if (!merged.has(code)) merged.set(code, new Set());
+        for (const id of allowed) merged.get(code)!.add(id);
+      }
+    }
+
+    return Array.from(merged.entries()).map(([permissionCode, ids]) => ({
+      permissionCode,
+      allowedOrgUnitIds: Array.from(ids),
+    }));
+  }
+
   /** Resolves a role id from its (unique) name. Useful for seeding/import. */
   async getRoleIdByName(name: string): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

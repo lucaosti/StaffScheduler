@@ -832,3 +832,72 @@ describe('RbacService.getRoleIdByName', () => {
     await expect(svc.getRoleIdByName('Admin')).rejects.toThrow('timeout');
   });
 });
+
+// ---------------------------------------------------------------------------
+// getEffectiveDelegationScopes
+// ---------------------------------------------------------------------------
+
+describe('RbacService.getEffectiveDelegationScopes', () => {
+  it('returns empty array when user has no scoped delegations', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]); // delegations query → none
+
+    const svc = new RbacService(pool);
+    const scopes = await svc.getEffectiveDelegationScopes(10);
+    expect(scopes).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('resolves org-unit subtree for each scoped delegation', async () => {
+    const { pool, execute } = makePool();
+    execute
+      // Delegations query — one row with scope_org_unit_id = 5
+      .mockResolvedValueOnce([
+        [{ permission_codes: JSON.stringify(['schedule.manage', 'timeoff.approve']), scope_org_unit_id: 5 }],
+        null,
+      ])
+      // getDescendantOrgUnitIds(5) — CTE returns [5, 10, 11]
+      .mockResolvedValueOnce([[{ id: 5 }, { id: 10 }, { id: 11 }], null]);
+
+    const svc = new RbacService(pool);
+    const scopes = await svc.getEffectiveDelegationScopes(10);
+
+    expect(scopes).toHaveLength(2);
+    const scheduleScope = scopes.find((s) => s.permissionCode === 'schedule.manage')!;
+    expect(scheduleScope.allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 10, 11]));
+    const timeoffScope = scopes.find((s) => s.permissionCode === 'timeoff.approve')!;
+    expect(timeoffScope.allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 10, 11]));
+  });
+
+  it('merges allowedOrgUnitIds for the same permissionCode across multiple delegations', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          { permission_codes: JSON.stringify(['schedule.manage']), scope_org_unit_id: 5 },
+          { permission_codes: JSON.stringify(['schedule.manage']), scope_org_unit_id: 20 },
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([[{ id: 5 }], null])   // subtree for org 5
+      .mockResolvedValueOnce([[{ id: 20 }], null]);  // subtree for org 20
+
+    const svc = new RbacService(pool);
+    const scopes = await svc.getEffectiveDelegationScopes(7);
+
+    expect(scopes).toHaveLength(1); // merged into one entry
+    expect(scopes[0].permissionCode).toBe('schedule.manage');
+    expect(scopes[0].allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 20]));
+  });
+
+  it('only queries delegations with scope_org_unit_id IS NOT NULL', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new RbacService(pool);
+    await svc.getEffectiveDelegationScopes(99);
+
+    const [sql] = execute.mock.calls[0];
+    expect(sql).toContain('scope_org_unit_id IS NOT NULL');
+  });
+});
