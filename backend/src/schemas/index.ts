@@ -11,10 +11,6 @@ export const scheduleIdParam = z.object({ scheduleId: positiveInt });
 export const departmentIdParam = z.object({ departmentId: positiveInt });
 export const idAndSkillIdParam = z.object({ id: positiveInt, skillId: positiveInt });
 export const idAndUserIdParam = z.object({ id: positiveInt, userId: positiveInt });
-export const userIdAndRoleIdParam = z.object({ userId: positiveInt, roleId: positiveInt });
-
-const positiveIntOrNull = z.coerce.number().int().positive().nullable().optional();
-export const scopeOrgUnitQuery = z.object({ scopeOrgUnitId: positiveIntOrNull });
 
 const shortString = z.string().min(1).max(64);
 
