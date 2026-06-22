@@ -1108,3 +1108,5 @@ ALTER TABLE departments
 CREATE INDEX idx_shift_assignments_shift_status ON shift_assignments(shift_id, status);
 CREATE INDEX idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);
 CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at);
+CREATE INDEX idx_cr_created_status ON change_requests(created_at DESC, status);
+CREATE INDEX idx_responsibility_subject_perm ON responsibility_rules(subject_type, subject_id, permission_code, is_active);
