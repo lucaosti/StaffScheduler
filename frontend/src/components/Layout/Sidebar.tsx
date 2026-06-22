@@ -90,6 +90,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'policy.read',
     },
     {
+      path: '/governance',
+      icon: 'bi-diagram-3-fill',
+      label: 'Governance',
+      requiredPermission: 'responsibility.read',
+    },
+    {
       path: '/settings',
       icon: 'bi-gear',
       label: 'Settings',
