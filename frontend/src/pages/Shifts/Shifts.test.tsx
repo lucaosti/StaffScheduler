@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mockGetShifts = jest.fn();
@@ -70,6 +70,7 @@ describe('<Shifts />', () => {
   });
 
   afterEach(() => {
+    jest.clearAllMocks();
     jest.restoreAllMocks();
   });
 
@@ -87,11 +88,14 @@ describe('<Shifts />', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: /add new shift/i }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /create shift/i }));
-    expect(screen.getByRole('alert')).toHaveTextContent(/please fill in schedule/i);
+    // jsdom 20+ enforces HTML5 constraint validation; submit the form directly
+    // to bypass it and let the React handler run its own validation check.
+    const dialog = screen.getByRole('dialog');
+    const modalForm = dialog.querySelector('form')!;
+    fireEvent.submit(modalForm);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/please fill in schedule/i);
 
     // Fill minimal required fields and create
-    const dialog = screen.getByRole('dialog');
     await userEvent.selectOptions(within(dialog).getByLabelText(/^schedule \*/i), '1');
     await userEvent.selectOptions(within(dialog).getByLabelText(/^department \*/i), '10');
     await userEvent.clear(within(dialog).getByLabelText(/^date \*/i));

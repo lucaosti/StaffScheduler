@@ -17,27 +17,9 @@ if (typeof (globalThis as { TextDecoder?: unknown }).TextDecoder === 'undefined'
     TextDecoder as unknown as typeof globalThis.TextDecoder;
 }
 
-// MSW v2 needs a real `fetch` / `Request` / `Response` implementation
-// even under jsdom. `undici` ships those primitives and is already a
-// transitive dependency of jest in CRA, so we re-export them here.
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const undici = require('undici');
-  if (typeof (globalThis as { fetch?: unknown }).fetch === 'undefined') {
-    (globalThis as unknown as { fetch: typeof undici.fetch }).fetch = undici.fetch;
-  }
-  if (typeof (globalThis as { Request?: unknown }).Request === 'undefined') {
-    (globalThis as unknown as { Request: typeof undici.Request }).Request = undici.Request;
-  }
-  if (typeof (globalThis as { Response?: unknown }).Response === 'undefined') {
-    (globalThis as unknown as { Response: typeof undici.Response }).Response = undici.Response;
-  }
-  if (typeof (globalThis as { Headers?: unknown }).Headers === 'undefined') {
-    (globalThis as unknown as { Headers: typeof undici.Headers }).Headers = undici.Headers;
-  }
-} catch {
-  // undici is optional; fall back to the jsdom defaults when present.
-}
+// MSW v2 requires real Web API globals (fetch, Request, Response, Headers,
+// ReadableStream). These are injected into the jsdom window by jest.environment.js,
+// which captures Node.js 18+ built-ins before jsdom setup.
 
 // `BroadcastChannel` is referenced by MSW v2 internals but is not
 // available in jsdom yet. A no-op stub is enough for unit tests.

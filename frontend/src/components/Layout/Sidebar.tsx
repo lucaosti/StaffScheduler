@@ -1,20 +1,3 @@
-/**
- * Sidebar Navigation Component for Staff Scheduler
- * 
- * Provides the main navigation menu with collapsible functionality,
- * user information display, and logout capability.
- * 
- * Features:
- * - Collapsible navigation with smooth transitions
- * - Active route highlighting with React Router
- * - User profile information display
- * - Logout functionality with redirect
- * - Bootstrap-styled menu items with icons
- * - Responsive design for different screen sizes
- * 
- * @author Luca Ostinelli
- */
-
 import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';

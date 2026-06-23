@@ -57,7 +57,7 @@ const Employees: React.FC = () => {
         setError('Failed to load employees. Please ensure the backend is running and database is populated.');
         setEmployees([]);
       }
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to load employees. Please check your connection and try again.');
       setEmployees([]);
     } finally {
@@ -102,7 +102,7 @@ const Employees: React.FC = () => {
     try {
       await employeeService.deleteEmployee(id);
       await loadEmployees(searchTerm, selectedDepartment); // Reload the list
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to delete employee');
     }
   };
@@ -366,7 +366,7 @@ const Employees: React.FC = () => {
                     await loadEmployees(searchTerm, selectedDepartment);
                     setShowAddModal(false);
                     setEditingEmployee(null);
-                  } catch (err) {
+                  } catch (_err) {
                     setError('Failed to save employee');
                   }
                 }}>

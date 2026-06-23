@@ -319,12 +319,42 @@ export class RbacService {
     actorId?: number | null,
     justification?: string | null
   ): Promise<{ assigned: number }> {
-    let assigned = 0;
-    for (const userId of userIds) {
-      await this.assignRole(userId, roleId, scopeOrgUnitId, expiresAt, actorId, justification);
-      assigned++;
+    if (userIds.length === 0) return { assigned: 0 };
+
+    const connection = await this.pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const userId of userIds) {
+        await connection.execute(
+          `INSERT INTO user_roles (user_id, role_id, scope_org_unit_id, expires_at)
+           VALUES (?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)`,
+          [userId, roleId, scopeOrgUnitId, expiresAt]
+        );
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
     }
-    return { assigned };
+
+    // Audit writes are append-only; run after commit so a write failure
+    // does not roll back the role grants.
+    for (const userId of userIds) {
+      await this.audit.write({
+        actorId: actorId ?? null,
+        action: 'role.grant',
+        entityType: 'user',
+        entityId: userId,
+        description: `Role ${roleId} granted to user ${userId} (bulk)`,
+        justification: justification ?? null,
+        after: { userId, roleId, scopeOrgUnitId, expiresAt },
+      });
+    }
+
+    return { assigned: userIds.length };
   }
 
   async removeRole(

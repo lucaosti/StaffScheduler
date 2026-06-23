@@ -12,7 +12,7 @@ export const createEmployeesRouter = (pool: Pool) => {
   const employeeService = new EmployeeService(pool);
 
 // Get all employees
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('employee.read'), async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
     const { search, department } = req.query;
@@ -48,7 +48,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get employee by ID
-router.get('/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -137,7 +137,7 @@ router.delete('/:id', authenticate, requirePermission('employee.manage'), valida
 });
 
 // Get employees by department
-router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   try {
     const { departmentId } = res.locals.params;
 
@@ -153,7 +153,7 @@ router.get('/department/:departmentId', authenticate, validateParams(departmentI
 });
 
 // Get employee skills
-router.get('/:id/skills', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
