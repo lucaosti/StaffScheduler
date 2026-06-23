@@ -96,6 +96,18 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'responsibility.read',
     },
     {
+      path: '/org-chart',
+      icon: 'bi-diagram-3',
+      label: 'Org Chart',
+      requiredPermission: 'org_unit.read',
+    },
+    {
+      path: '/governance/raci-matrix',
+      icon: 'bi-grid-3x3',
+      label: 'RACI Matrix',
+      requiredPermission: 'responsibility.read',
+    },
+    {
       path: '/admin/rbac',
       icon: 'bi-person-badge',
       label: 'Roles',
