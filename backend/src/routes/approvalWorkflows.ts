@@ -18,22 +18,23 @@ import { Pool } from 'mysql2/promise';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, typeParam, createApprovalWorkflowBody, updateApprovalWorkflowBody, escalateBody } from '../schemas';
+import { idParam, typeParam, createApprovalWorkflowBody, updateApprovalWorkflowBody } from '../schemas';
 import { logger } from '../config/logger';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   const router = Router();
   const engine = new ApprovalEngineService(pool);
 
-  // Escalation trigger — called by cron or admin; requires approval.manage
-  router.post('/escalate', authenticate, requirePermission('approval.manage'), validateBody(escalateBody), async (_req: Request, res: Response) => {
+  // Escalation trigger — called by cron or admin; requires approval.manage.
+  // Marks overdue pending_approvals as 'escalated' and creates new pending_approvals
+  // for the escalated approver (manager chain walk).
+  router.post('/escalate', authenticate, requirePermission('approval.manage'), async (_req: Request, res: Response) => {
     try {
-      const nowIso: string | undefined = res.locals.body.now ?? undefined;
-      const overdue = await engine.processEscalations(nowIso);
-      res.json({ success: true, data: { overdue, count: overdue.length } });
+      const result = await engine.processEscalations();
+      res.json({ success: true, data: result });
     } catch (error) {
-      logger.error('Error running escalation check:', error);
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Escalation check failed' } });
+      logger.error('Error running escalation:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Escalation run failed' } });
     }
   });
 
