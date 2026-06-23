@@ -311,6 +311,22 @@ export class RbacService {
     });
   }
 
+  async bulkAssignRole(
+    userIds: number[],
+    roleId: number,
+    scopeOrgUnitId: number | null = null,
+    expiresAt: string | null = null,
+    actorId?: number | null,
+    justification?: string | null
+  ): Promise<{ assigned: number }> {
+    let assigned = 0;
+    for (const userId of userIds) {
+      await this.assignRole(userId, roleId, scopeOrgUnitId, expiresAt, actorId, justification);
+      assigned++;
+    }
+    return { assigned };
+  }
+
   async removeRole(
     userId: number,
     roleId: number,
