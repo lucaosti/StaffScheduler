@@ -36,6 +36,12 @@ export interface User {
    * check this before allowing a delegated permission to act outside its scope.
    */
   delegationScopes?: Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>;
+  /**
+   * Organization name for per-org module override resolution. Matches
+   * `organization_name` in `organization_module_overrides`. Null means the user
+   * is not assigned to a named org — global module defaults apply.
+   */
+  organizationName?: string | null;
   departments?: UserDepartment[];
   /** Convenience field: name of the user's primary department (populated by list queries). */
   department?: string;
@@ -192,6 +198,8 @@ export interface UpdateUserRequest {
   position?: string;
   hourlyRate?: number;
   isActive?: boolean;
+  /** Organization name for per-org module override resolution. Null clears the assignment. */
+  organizationName?: string | null;
 }
 
 // ============================================================================

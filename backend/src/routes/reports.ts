@@ -6,7 +6,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requirePermission, requireModule } from '../middleware/auth';
+import { authenticate, requirePermission, requireModuleForUser } from '../middleware/auth';
 import { validateParams } from '../middleware/validation';
 import { scheduleIdParam } from '../schemas';
 import { ReportsService } from '../services/ReportsService';
@@ -23,7 +23,7 @@ export const createReportsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new ReportsService(pool);
 
-  router.use(requireModule('reporting'), authenticate, requirePermission('report.read'));
+  router.use(authenticate, requireModuleForUser('reporting'), requirePermission('report.read'));
 
   router.get('/hours-worked', async (req: Request, res: Response) => {
     try {
