@@ -51,6 +51,7 @@ const Settings = lazy(() => import('./pages/Settings/Settings'));
 const OrgManagement = lazy(() => import('./pages/Org/OrgManagement'));
 const Policies = lazy(() => import('./pages/Policies/Policies'));
 const Governance = lazy(() => import('./pages/Governance/Governance'));
+const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
 
 /**
  * Main Application Component
@@ -126,6 +127,11 @@ const App: React.FC = () => {
           <Route path="governance" element={
             <PermissionRoute permission="responsibility.read">
               <Governance />
+            </PermissionRoute>
+          } />
+          <Route path="admin/rbac" element={
+            <PermissionRoute permission="role.manage">
+              <RbacManagement />
             </PermissionRoute>
           } />
           <Route path="settings" element={
