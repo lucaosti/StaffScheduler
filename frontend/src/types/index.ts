@@ -49,6 +49,7 @@ export interface User {
   resetTokenExpiry?: Date;
   notificationToken?: string;
   maxSubordinateLevel?: number;
+  organizationName?: string;
 }
 
 export interface LoginResponse {
@@ -208,9 +209,31 @@ export interface AuditLogEntry {
   id: number;
   actorId: number | null;
   actorEmail?: string;
+  onBehalfOfUserId?: number | null;
+  onBehalfOfEmail?: string;
   action: string;
   entityType: string;
   entityId?: number | null;
   description?: string;
+  justification?: string | null;
+  beforeSnapshot?: Record<string, unknown> | null;
+  afterSnapshot?: Record<string, unknown> | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  requestId?: string | null;
   createdAt: string;
+}
+
+export interface Module {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  isEnabled: boolean;
+  updatedAt: string;
+}
+
+export interface ModuleWithOrgOverride extends Module {
+  effectiveEnabled: boolean;
+  orgOverride: boolean | null;
 }
