@@ -101,6 +101,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       label: 'Settings',
       requiredPermission: 'settings.manage',
     },
+    {
+      path: '/admin/audit-logs',
+      icon: 'bi-journal-text',
+      label: 'Audit Log',
+      requiredPermission: 'audit.read',
+    },
   ];
 
   const hasPermission = (requiredPermission: string | null): boolean => {
