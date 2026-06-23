@@ -16,9 +16,6 @@ export const listPermissions = (): Promise<ApiResponse<Permission[]>> =>
 export const listRoles = (): Promise<ApiResponse<Role[]>> =>
   fetch(ROLES, { method: 'GET', ...getAuthHeaders() }).then(handleResponse<Role[]>);
 
-export const getRole = (id: number): Promise<ApiResponse<Role>> =>
-  fetch(`${ROLES}/${id}`, { method: 'GET', ...getAuthHeaders() }).then(handleResponse<Role>);
-
 export const createRole = (body: {
   name: string;
   description?: string;
