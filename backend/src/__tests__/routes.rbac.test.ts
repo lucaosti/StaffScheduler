@@ -393,3 +393,84 @@ describe('rbac DELETE /roles/users/:userId/:roleId', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 });
+
+// ── POST /roles/bulk-assign ───────────────────────────────────────────────────
+
+describe('rbac POST /roles/bulk-assign', () => {
+  it('returns 201 with assigned count on success', async () => {
+    (RbacService.prototype.bulkAssignRole as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ assigned: 3 });
+
+    const res = await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({ roleId: 2, userIds: [1, 2, 3] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.assigned).toBe(3);
+    expect(RbacService.prototype.bulkAssignRole).toHaveBeenCalledWith(
+      [1, 2, 3], 2, null, null, 1, null
+    );
+  });
+
+  it('passes optional fields through to service', async () => {
+    (RbacService.prototype.bulkAssignRole as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ assigned: 2 });
+
+    await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({
+        roleId: 5,
+        userIds: [10, 20],
+        scopeOrgUnitId: 3,
+        expiresAt: '2027-06-01T00:00:00Z',
+        justification: 'Coverage assignment',
+      });
+
+    expect(RbacService.prototype.bulkAssignRole).toHaveBeenCalledWith(
+      [10, 20], 5, 3, '2027-06-01T00:00:00Z', 1, 'Coverage assignment'
+    );
+  });
+
+  it('returns 400 when userIds is empty', async () => {
+    const res = await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({ roleId: 1, userIds: [] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 when roleId is missing', async () => {
+    const res = await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({ userIds: [1, 2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 400 on service error', async () => {
+    (RbacService.prototype.bulkAssignRole as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new Error('Role not found'));
+
+    const res = await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({ roleId: 999, userIds: [1, 2] });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    authState.mode = 'reject401';
+    const res = await request(mountApp())
+      .post('/api/roles/bulk-assign')
+      .send({ roleId: 1, userIds: [1] });
+
+    expect(res.status).toBe(401);
+  });
+});
