@@ -96,6 +96,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'responsibility.read',
     },
     {
+      path: '/admin/rbac',
+      icon: 'bi-person-badge',
+      label: 'Roles',
+      requiredPermission: 'role.manage',
+    },
+    {
       path: '/settings',
       icon: 'bi-gear',
       label: 'Settings',
@@ -106,6 +112,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       icon: 'bi-journal-text',
       label: 'Audit Log',
       requiredPermission: 'audit.read',
+    },
+    {
+      path: '/admin/approval-workflows',
+      icon: 'bi-diagram-2',
+      label: 'Approval Flows',
+      requiredPermission: 'approval.manage',
     },
   ];
 

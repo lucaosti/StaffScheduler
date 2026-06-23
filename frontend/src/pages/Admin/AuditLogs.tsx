@@ -286,7 +286,7 @@ const AuditLogs: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td className="text-muted small">{entry.userId ?? '—'}</td>
+                      <td className="text-muted small">{entry.actorId ?? '—'}</td>
                       <td className="small" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {entry.description ?? '—'}
                       </td>

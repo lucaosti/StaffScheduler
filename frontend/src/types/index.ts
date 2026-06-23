@@ -49,6 +49,7 @@ export interface User {
   resetTokenExpiry?: Date;
   notificationToken?: string;
   maxSubordinateLevel?: number;
+  organizationName?: string;
 }
 
 export interface LoginResponse {
@@ -204,19 +205,60 @@ export interface DashboardStats {
   employeeSatisfaction: number;
 }
 
+export interface Permission {
+  id: number;
+  code: string;
+  resource: string;
+  action: string;
+  description?: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  permissions?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserRoleAssignment {
+  roleId: number;
+  roleName: string;
+  scopeOrgUnitId?: number | null;
+  expiresAt?: string | null;
+}
+
 export interface AuditLogEntry {
   id: number;
-  userId: number | null;
-  onBehalfOfUserId: number | null;
+  actorId: number | null;
+  actorEmail?: string;
+  onBehalfOfUserId?: number | null;
+  onBehalfOfEmail?: string;
   action: string;
-  entityType: string | null;
-  entityId: number | null;
-  description: string | null;
-  justification: string | null;
+  entityType: string;
+  entityId?: number | null;
+  description?: string;
+  justification?: string | null;
   beforeSnapshot?: Record<string, unknown> | null;
   afterSnapshot?: Record<string, unknown> | null;
-  ipAddress: string | null;
-  userAgent: string | null;
-  requestId: string | null;
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  requestId?: string | null;
   createdAt: string;
+}
+
+export interface Module {
+  id: number;
+  code: string;
+  name: string;
+  description: string | null;
+  isEnabled: boolean;
+  updatedAt: string;
+}
+
+export interface ModuleWithOrgOverride extends Module {
+  effectiveEnabled: boolean;
+  orgOverride: boolean | null;
 }
