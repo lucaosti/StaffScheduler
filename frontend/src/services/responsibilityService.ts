@@ -92,5 +92,3 @@ export interface MatrixEntry {
 export const getResponsibilityMatrix = () =>
   request<{ matrix: MatrixEntry[] }>('/responsibility-rules/matrix');
 
-export const getMyResponsibilities = () =>
-  request<ResponsibilityRule[]>('/responsibility-rules/my-responsibilities');
