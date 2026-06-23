@@ -42,6 +42,10 @@ CREATE TABLE IF NOT EXISTS users (
     totp_secret VARCHAR(64) NULL,
     totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     totp_recovery_codes TEXT NULL,
+    -- Organization name for per-org module override resolution.
+    -- Matches organization_name in organization_module_overrides.
+    -- NULL = no org-specific module overrides apply (global defaults used).
+    organization_name VARCHAR(120) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -49,7 +53,8 @@ CREATE TABLE IF NOT EXISTS users (
 
     INDEX idx_email (email),
     INDEX idx_employee_id (employee_id),
-    INDEX idx_active (is_active)
+    INDEX idx_active (is_active),
+    INDEX idx_organization (organization_name)
 );
 
 -- ================================================================

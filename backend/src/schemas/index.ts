@@ -103,6 +103,7 @@ export const updateUserBody = z.object({
   position: z.string().optional(),
   hourlyRate: z.number().nonnegative().optional(),
   isActive: z.boolean().optional(),
+  organizationName: z.string().max(120).nullable().optional(),
 });
 
 export const updateScheduleBody = z.object({
