@@ -81,3 +81,14 @@ export const updateResponsibilityRule = (id: number, patch: UpdateResponsibility
 
 export const deleteResponsibilityRule = (id: number) =>
   request<void>(`/responsibility-rules/${id}`, { method: 'DELETE' });
+
+export interface MatrixEntry {
+  subjectType: ResponsibilitySubjectType;
+  subjectId: number | null;
+  permissionCode: string;
+  rules: ResponsibilityRule[];
+}
+
+export const getResponsibilityMatrix = () =>
+  request<{ matrix: MatrixEntry[] }>('/responsibility-rules/matrix');
+
