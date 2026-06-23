@@ -42,11 +42,6 @@ export const listAuditLogs = async (filters: AuditLogFilters = {}): Promise<Audi
   return handleResponse<AuditLogEntry[]>(res) as Promise<AuditPageResponse>;
 };
 
-export const getAuditLogEntry = async (id: number): Promise<ApiResponse<AuditLogEntry>> => {
-  const res = await fetch(`${BASE}/${id}`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<AuditLogEntry>(res);
-};
-
 export const buildExportUrl = (filters: Omit<AuditLogFilters, 'page' | 'pageSize'>, format: 'csv' | 'json'): string => {
   const qs = new URLSearchParams({ format });
   if (filters.userId !== undefined) qs.set('userId', String(filters.userId));
