@@ -4,7 +4,7 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, AuditLogEntry, AuditLogPage } from '../types';
+import { ApiResponse, AuditLogEntry } from '../types';
 import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
 
 const BASE = `${API_BASE_URL}/audit-logs`;
