@@ -50,7 +50,13 @@ export class ModuleService {
     return rows.length ? this.mapRow(rows[0] as any) : null;
   }
 
-  async setEnabled(code: string, isEnabled: boolean): Promise<Module> {
+  async setEnabled(
+    code: string,
+    isEnabled: boolean,
+    actorId?: number | null,
+    justification?: string | null
+  ): Promise<Module> {
+    const before = await this.getByCode(code);
     const [result] = await this.pool.execute<ResultSetHeader>(
       'UPDATE modules SET is_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?',
       [isEnabled ? 1 : 0, code]
@@ -60,6 +66,18 @@ export class ModuleService {
     logger.info(`Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}`);
     const mod = await this.getByCode(code);
     if (!mod) throw new Error('Failed to retrieve module after update');
+
+    const audit = new (await import('./AuditLogService')).AuditLogService(this.pool);
+    await audit.write({
+      actorId: actorId ?? null,
+      action: 'module.toggle',
+      entityType: 'module',
+      description: `Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}`,
+      justification: justification ?? null,
+      before: before as unknown as Record<string, unknown>,
+      after: mod as unknown as Record<string, unknown>,
+    });
+
     return mod;
   }
 
@@ -98,7 +116,8 @@ export class ModuleService {
     code: string,
     org: string,
     isEnabled: boolean,
-    updatedBy?: number | null
+    updatedBy?: number | null,
+    justification?: string | null
   ): Promise<ModuleWithOrgOverride> {
     const mod = await this.getByCode(code);
     if (!mod) throw new Error(`Module not found: ${code}`);
@@ -112,6 +131,16 @@ export class ModuleService {
     );
     this.orgCache.delete(org);
     logger.info(`Module override: org='${org}' code='${code}' enabled=${isEnabled}`);
+
+    const audit = new (await import('./AuditLogService')).AuditLogService(this.pool);
+    await audit.write({
+      actorId: updatedBy ?? null,
+      action: 'module.org_override',
+      entityType: 'module',
+      description: `Module '${code}' org override for '${org}': ${isEnabled ? 'enabled' : 'disabled'}`,
+      justification: justification ?? null,
+      after: { code, org, isEnabled },
+    });
 
     return {
       ...mod,

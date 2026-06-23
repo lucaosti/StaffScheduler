@@ -24,12 +24,13 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   router.post('/', authenticate, validateBody(createDelegationBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user!;
-      const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId } = res.locals.body;
+      const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId, justification } = res.locals.body;
 
       const delegation = await delegationService.createDelegation(
         actor.id,
         actor.permissions ?? [],
-        { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId: scopeOrgUnitId ?? null }
+        { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId: scopeOrgUnitId ?? null },
+        justification ?? null
       );
 
       res.status(201).json({ success: true, data: delegation, message: 'Delegation created' });
@@ -64,7 +65,8 @@ export const createDelegationsRouter = (pool: Pool): Router => {
     try {
       const { id } = res.locals.params;
 
-      await delegationService.revokeDelegation(id, req.user!.id);
+      const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
+      await delegationService.revokeDelegation(id, req.user!.id, justification);
       res.json({ success: true, message: 'Delegation revoked' });
     } catch (error: any) {
       if (error.message?.includes('not found')) {
