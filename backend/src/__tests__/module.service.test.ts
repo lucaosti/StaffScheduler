@@ -112,7 +112,8 @@ describe('ModuleService.getByCode', () => {
 describe('ModuleService.setEnabled', () => {
   it('throws when the module code does not exist (affectedRows = 0)', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    execute.mockResolvedValueOnce([[], null]);                   // getByCode before-snapshot
+    execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]); // UPDATE
 
     const svc = new ModuleService(pool);
     await expect(svc.setEnabled('ghost', true)).rejects.toThrow(/Module not found/);
@@ -120,28 +121,36 @@ describe('ModuleService.setEnabled', () => {
 
   it('enables a module, invalidates the cache, and returns the updated module', async () => {
     const { pool, execute } = makePool();
+    // getByCode before-snapshot
+    execute.mockResolvedValueOnce([[enabledRow], null]);
     // UPDATE
     execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     // getByCode after update
     execute.mockResolvedValueOnce([[enabledRow], null]);
+    // audit.write INSERT
+    execute.mockResolvedValueOnce([{ insertId: 1 }, null]);
 
     const svc = new ModuleService(pool);
     const result = await svc.setEnabled('delegation', true);
 
-    expect(execute.mock.calls[0][0]).toContain('UPDATE modules SET is_enabled');
-    expect(execute.mock.calls[0][1]).toEqual([1, 'delegation']);
+    expect(execute.mock.calls[1][0]).toContain('UPDATE modules SET is_enabled');
+    expect(execute.mock.calls[1][1]).toEqual([1, 'delegation']);
     expect(result.isEnabled).toBe(true);
   });
 
   it('disables a module, invalidates the cache, and returns the updated module', async () => {
     const { pool, execute } = makePool();
+    // getByCode before-snapshot
+    execute.mockResolvedValueOnce([[enabledRow], null]);
     execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     execute.mockResolvedValueOnce([[{ ...disabledRow, code: 'delegation', is_enabled: 0 }], null]);
+    // audit.write INSERT
+    execute.mockResolvedValueOnce([{ insertId: 1 }, null]);
 
     const svc = new ModuleService(pool);
     const result = await svc.setEnabled('delegation', false);
 
-    expect(execute.mock.calls[0][1]).toEqual([0, 'delegation']);
+    expect(execute.mock.calls[1][1]).toEqual([0, 'delegation']);
     expect(result.isEnabled).toBe(false);
   });
 });
@@ -200,10 +209,14 @@ describe('ModuleService.isEnabled', () => {
     const { pool, execute } = makePool();
     // First isEnabled → buildCache via list()
     execute.mockResolvedValueOnce([[enabledRow], null]);
+    // setEnabled: getByCode before-snapshot
+    execute.mockResolvedValueOnce([[enabledRow], null]);
     // setEnabled UPDATE
     execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
-    // setEnabled getByCode
+    // setEnabled getByCode after update
     execute.mockResolvedValueOnce([[{ ...enabledRow, is_enabled: 0 }], null]);
+    // setEnabled audit.write INSERT
+    execute.mockResolvedValueOnce([{ insertId: 1 }, null]);
     // Second isEnabled → cache was nulled → buildCache via list() again
     execute.mockResolvedValueOnce([[{ ...enabledRow, is_enabled: 0 }], null]);
 
@@ -216,8 +229,8 @@ describe('ModuleService.isEnabled', () => {
     const after = await svc.isEnabled('delegation');
     expect(after).toBe(false);
 
-    // Total execute calls: list (1) + UPDATE (1) + getByCode (1) + list (1) = 4
-    expect(execute).toHaveBeenCalledTimes(4);
+    // Total: list (1) + getByCode-before (1) + UPDATE (1) + getByCode-after (1) + audit-insert (1) + list (1) = 6
+    expect(execute).toHaveBeenCalledTimes(6);
   });
 });
 

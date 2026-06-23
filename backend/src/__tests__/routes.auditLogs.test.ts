@@ -28,6 +28,8 @@ jest.mock('../middleware/auth', () => ({
     next(),
   requireModule: (_code: string) => (_req: Request, _res: Response, next: () => void) =>
     next(),
+  requireModuleForUser: (_code: string) => (_req: Request, _res: Response, next: () => void) =>
+    next(),
 }));
 
 jest.mock('../services/AuditLogService');
