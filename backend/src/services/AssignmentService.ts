@@ -291,7 +291,6 @@ export class AssignmentService {
   }
 
   async updateAssignment(id: number, updateData: { status?: string; notes?: string; actorId?: number; reason?: string }): Promise<ShiftAssignment> {
-    const connection = await this.pool.getConnection();
     try {
       const existing = await this.getAssignmentById(id);
       if (!existing) throw new Error('Assignment not found');
@@ -305,7 +304,7 @@ export class AssignmentService {
       if (updates.length === 0) return existing;
 
       values.push(id);
-      await connection.execute(
+      await this.pool.execute(
         `UPDATE shift_assignments SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
         values
       );
@@ -327,8 +326,6 @@ export class AssignmentService {
     } catch (error) {
       logger.error('Error updating assignment:', error);
       throw error;
-    } finally {
-      connection.release();
     }
   }
 

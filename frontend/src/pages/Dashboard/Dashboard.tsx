@@ -66,7 +66,7 @@ const Dashboard: React.FC = () => {
         throw new Error('Failed to load dashboard statistics');
       }
       setRecentActivity(activity);
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to load dashboard data. Please ensure the backend is running and database is populated.');
       
       // Set empty stats on error

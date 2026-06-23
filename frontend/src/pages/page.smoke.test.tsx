@@ -33,7 +33,7 @@ jest.mock('../services/scheduleService', () => ({
 
 jest.mock('../services/employeeService', () => ({
   __esModule: true,
-  getEmployees: jest.fn(() => okResponse({ data: [], pagination: { total: 0, page: 1, totalPages: 1, limit: 20 } })),
+  getEmployees: jest.fn(() => okResponse([])),
   getEmployee: jest.fn(() => okResponse(null)),
   createEmployee: jest.fn(() => okResponse({ id: 1 })),
   updateEmployee: jest.fn(() => okResponse({ id: 1 })),

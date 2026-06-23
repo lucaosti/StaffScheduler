@@ -25,6 +25,9 @@ export class ApiError extends Error {
   constructor(message: string, public status?: number, public code?: string) {
     super(message);
     this.name = 'ApiError';
+    // TypeScript + target:es5 breaks the prototype chain for subclasses of
+    // built-in types (Error, Array…). Restoring it makes instanceof reliable.
+    Object.setPrototypeOf(this, ApiError.prototype);
   }
 }
 

@@ -38,6 +38,8 @@ interface ResolvedStep {
   autoApprove: boolean;
 }
 
+const MAX_ORG_DEPTH = 20;
+
 export class ApprovalEngineService {
   private responsibilitySvc: ResponsibilityRuleService;
 
@@ -310,36 +312,45 @@ export class ApprovalEngineService {
       []
     );
 
-    if ((overdueRows as any[]).length === 0) {
+    const rows = overdueRows as any[];
+    if (rows.length === 0) {
       return { escalated: 0, items: [] };
     }
 
-    const items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }> = [];
+    const items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }> =
+      rows.map((row) => ({
+        pendingApprovalId: row.id as number,
+        changeRequestId: row.change_request_id as number,
+        escalatedToUserId: (row.manager_id as number | null) ?? null,
+      }));
 
-    for (const row of overdueRows as any[]) {
-      const paId = row.id as number;
-      const crId = row.change_request_id as number;
-      const escalatedToUserId = (row.manager_id as number | null) ?? null;
+    // Batch UPDATE — mark all overdue items escalated in one statement.
+    const paIds = items.map((i) => i.pendingApprovalId);
+    const placeholders = paIds.map(() => '?').join(', ');
+    await this.pool.execute(
+      `UPDATE pending_approvals
+          SET status = 'escalated', escalated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (${placeholders}) AND status = 'pending'`,
+      paIds
+    );
 
-      // Mark current pending_approval as escalated.
+    // Batch INSERT — one row per item that has an identified manager.
+    const escalatable = rows.filter((r) => (r.manager_id as number | null) !== null);
+    if (escalatable.length > 0) {
+      const insertPlaceholders = escalatable.map(() => '(?, ?, ?, ?, ?, \'pending\')').join(', ');
+      const insertValues = escalatable.flatMap((r) => [
+        r.change_request_id,
+        r.workflow_id,
+        r.step_id,
+        r.step_order,
+        r.manager_id,
+      ]);
       await this.pool.execute(
-        `UPDATE pending_approvals
-            SET status = 'escalated', escalated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND status = 'pending'`,
-        [paId]
+        `INSERT INTO pending_approvals
+           (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
+         VALUES ${insertPlaceholders}`,
+        insertValues
       );
-
-      // If a manager was found, create a new pending_approval for them.
-      if (escalatedToUserId !== null) {
-        await this.pool.execute(
-          `INSERT INTO pending_approvals
-             (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
-           VALUES (?, ?, ?, ?, ?, 'pending')`,
-          [crId, row.workflow_id, row.step_id, row.step_order, escalatedToUserId]
-        );
-      }
-
-      items.push({ pendingApprovalId: paId, changeRequestId: crId, escalatedToUserId });
     }
 
     logger.info(`Escalation run: ${items.length} pending approval(s) escalated`);
@@ -436,7 +447,7 @@ export class ApprovalEngineService {
          SELECT o.id, o.manager_user_id, o.parent_id, c.depth + 1
            FROM org_units o
            JOIN chain c ON o.id = c.parent_id
-          WHERE c.depth < 20
+          WHERE c.depth < ${MAX_ORG_DEPTH}
        )
        SELECT manager_user_id
          FROM chain

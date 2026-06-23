@@ -616,7 +616,6 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     request_id VARCHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    INDEX idx_user (user_id),
     INDEX idx_on_behalf_of (on_behalf_of_user_id),
     INDEX idx_action (action),
     INDEX idx_entity (entity_type, entity_id),
