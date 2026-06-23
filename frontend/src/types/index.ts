@@ -220,8 +220,3 @@ export interface AuditLogEntry {
   requestId: string | null;
   createdAt: string;
 }
-
-export interface AuditLogPage {
-  total: number;
-  items: AuditLogEntry[];
-}
