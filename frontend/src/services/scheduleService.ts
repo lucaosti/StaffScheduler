@@ -12,9 +12,16 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse } from '../types';
+import { ApiResponse, Schedule, Shift, Assignment } from '../types';
 import { AUTH_HEADERS, handleResponse, API_BASE_URL } from './apiUtils';
 
+interface ShiftWithAssignments extends Shift {
+  assignments?: Assignment[];
+}
+
+interface ScheduleWithShifts extends Schedule {
+  shifts?: ShiftWithAssignments[];
+}
 
 interface CreateScheduleParams {
   name: string;
@@ -48,32 +55,32 @@ const request = async <T>(
 export const getSchedules = (params?: Record<string, string>) => {
   const query = new URLSearchParams(params || {}).toString();
   const suffix = query ? `?${query}` : '';
-  return request<any[]>(`/schedules${suffix}`);
+  return request<Schedule[]>(`/schedules${suffix}`);
 };
 
 export const getScheduleWithShifts = (id: string | number) =>
-  request<any>(`/schedules/${id}/shifts`);
+  request<ScheduleWithShifts>(`/schedules/${id}/shifts`);
 
 export const createSchedule = (params: CreateScheduleParams) =>
-  request<any>('/schedules', {
+  request<Schedule>('/schedules', {
     method: 'POST',
     body: JSON.stringify(params),
   });
 
 export const updateSchedule = (id: string | number, params: Partial<CreateScheduleParams>) =>
-  request<any>(`/schedules/${id}`, {
+  request<Schedule>(`/schedules/${id}`, {
     method: 'PUT',
     body: JSON.stringify(params),
   });
 
 export const deleteSchedule = (id: string | number) =>
-  request<any>(`/schedules/${id}`, { method: 'DELETE' });
+  request<{ message: string }>(`/schedules/${id}`, { method: 'DELETE' });
 
 export const generateSchedule = (id: string | number) =>
   request<GenerateScheduleResponse>(`/schedules/${id}/generate`, { method: 'POST' });
 
 export const publishSchedule = (id: string | number) =>
-  request<any>(`/schedules/${id}/publish`, { method: 'PATCH' });
+  request<Schedule>(`/schedules/${id}/publish`, { method: 'PATCH' });
 
 export const archiveSchedule = (id: string | number) =>
-  request<any>(`/schedules/${id}/archive`, { method: 'PATCH' });
+  request<Schedule>(`/schedules/${id}/archive`, { method: 'PATCH' });

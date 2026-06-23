@@ -509,6 +509,8 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 
 `GET /api/audit-logs` supports filtering by `userId`, `action`, `entityType`, `entityId`, `fromDate`, `toDate`, `limit`, `offset`. No `DELETE` endpoint exists.
 
+`GET /api/audit-logs/export` returns all matching entries without row limit (same filters, no `limit`/`offset`). Supported formats: `?format=csv` (returns `text/csv` with `Content-Disposition: attachment`) and `?format=json` (default). Requires `audit.read` permission. Use `fromDate`/`toDate` to scope exports to a specific period and avoid loading the full table.
+
 ---
 
 ## 11. Extension points
