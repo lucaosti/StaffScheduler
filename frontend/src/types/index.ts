@@ -206,11 +206,22 @@ export interface DashboardStats {
 
 export interface AuditLogEntry {
   id: number;
-  actorId: number | null;
-  actorEmail?: string;
+  userId: number | null;
+  onBehalfOfUserId: number | null;
   action: string;
-  entityType: string;
-  entityId?: number | null;
-  description?: string;
+  entityType: string | null;
+  entityId: number | null;
+  description: string | null;
+  justification: string | null;
+  beforeSnapshot?: Record<string, unknown> | null;
+  afterSnapshot?: Record<string, unknown> | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  requestId: string | null;
   createdAt: string;
+}
+
+export interface AuditLogPage {
+  total: number;
+  items: AuditLogEntry[];
 }
