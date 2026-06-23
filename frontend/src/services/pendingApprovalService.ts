@@ -9,7 +9,7 @@ import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
 
 const BASE = `${API_BASE_URL}/pending-approvals`;
 
-export type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated';
+type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated';
 
 export interface PendingApprovalItem {
   id: number;
@@ -44,11 +44,6 @@ export const listPendingApprovals = async (
   const qs = new URLSearchParams({ status });
   const res = await fetch(`${BASE}?${qs}`, { method: 'GET', ...getAuthHeaders() });
   return handleResponse<PendingApprovalListResponse>(res);
-};
-
-export const countPendingApprovals = async (): Promise<ApiResponse<{ count: number }>> => {
-  const res = await fetch(`${BASE}/count`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<{ count: number }>(res);
 };
 
 export const approvePendingItem = async (
