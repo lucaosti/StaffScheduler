@@ -72,27 +72,8 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      const id = res.locals.params.id;
-      const item = await service.getById(id);
-      if (!item) {
-        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Audit log entry not found' } });
-      }
-      res.json({ success: true, data: item });
-    } catch (error) {
-      logger.error('Get audit log error:', error);
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve audit log entry' } });
-    }
-  });
-
-  /**
-   * GET /export?format=csv|json&...filters
-   *
-   * Exports all matching audit log entries without row limit. Supported
-   * formats: `csv` (application/octet-stream) and `json` (default).
-   * Same filters as GET / but without limit/offset pagination.
-   */
+  // /export must be registered before /:id to prevent Express from matching
+  // the literal string "export" as a numeric ID parameter.
   router.get('/export', async (req: Request, res: Response) => {
     try {
       const format = (req.query.format as string | undefined)?.toLowerCase() ?? 'json';
@@ -134,6 +115,20 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
     } catch (error) {
       logger.error('Audit log export error:', error);
       res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to export audit logs' } });
+    }
+  });
+
+  router.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
+    try {
+      const id = res.locals.params.id;
+      const item = await service.getById(id);
+      if (!item) {
+        return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Audit log entry not found' } });
+      }
+      res.json({ success: true, data: item });
+    } catch (error) {
+      logger.error('Get audit log error:', error);
+      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve audit log entry' } });
     }
   });
 

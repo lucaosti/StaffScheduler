@@ -58,7 +58,7 @@ const ConfirmModal: React.FC<Props> = ({
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
               {cancelLabel}
             </button>
-            <button type="button" className="btn btn-danger" onClick={onConfirm}>
+            <button type="button" className="btn btn-danger" onClick={onConfirm} autoFocus>
               {confirmLabel}
             </button>
           </div>
