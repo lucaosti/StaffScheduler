@@ -205,7 +205,11 @@ export class AuditLogService {
       `SELECT * FROM audit_logs${where} ORDER BY created_at ASC`,
       params
     );
-    return (rows as RowDataPacket[]).map(mapRow);
+    const entries = (rows as RowDataPacket[]).map(mapRow);
+    if (entries.length > 50_000) {
+      logger.warn('audit exportAll returned a very large result set', { count: entries.length });
+    }
+    return entries;
   }
 
   /**

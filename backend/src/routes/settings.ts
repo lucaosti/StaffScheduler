@@ -231,10 +231,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
         message: 'Setting updated successfully',
         data: { category, key, value }
       });
-    } catch (error: any) {
+    } catch (error) {
       logger.error('Update setting error:', error);
 
-      if (error.message === 'System setting cannot be modified') {
+      if ((error as Error).message === 'System setting cannot be modified') {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'This system setting cannot be modified' }
