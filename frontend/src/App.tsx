@@ -53,6 +53,9 @@ const Policies = lazy(() => import('./pages/Policies/Policies'));
 const Governance = lazy(() => import('./pages/Governance/Governance'));
 const OrgChart = lazy(() => import('./pages/OrgChart/OrgChart'));
 const RaciMatrix = lazy(() => import('./pages/Governance/RaciMatrix'));
+const PendingApprovals = lazy(() => import('./pages/Approvals/PendingApprovals'));
+const ChangeRequests = lazy(() => import('./pages/ChangeRequests/ChangeRequests'));
+const Delegations = lazy(() => import('./pages/Delegations/Delegations'));
 const AuditLogs = lazy(() => import('./pages/Admin/AuditLogs'));
 const ApprovalWorkflows = lazy(() => import('./pages/Admin/ApprovalWorkflows'));
 const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
@@ -151,6 +154,13 @@ const App: React.FC = () => {
           <Route path="governance/raci-matrix" element={
             <PermissionRoute permission="responsibility.read">
               <RaciMatrix />
+            </PermissionRoute>
+          } />
+          <Route path="approvals/pending" element={<PendingApprovals />} />
+          <Route path="change-requests" element={<ChangeRequests />} />
+          <Route path="delegations" element={
+            <PermissionRoute permission="delegation.manage">
+              <Delegations />
             </PermissionRoute>
           } />
           <Route path="admin/audit-logs" element={
