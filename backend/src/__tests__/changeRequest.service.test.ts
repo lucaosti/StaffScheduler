@@ -156,6 +156,9 @@ describe('ChangeRequestService.create', () => {
       .mockResolvedValueOnce([{ insertId: 7, affectedRows: 1 }, null])  // INSERT change_request
       .mockResolvedValueOnce([[buildRow({ id: 7 })], null])               // getById
       .mockResolvedValueOnce([{ insertId: 99, affectedRows: 1 }, null])   // audit.write
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — roles
       .mockResolvedValueOnce([[], null]);                                  // getWorkflowByChangeType → no workflow
 
     const svc = new ChangeRequestService(pool);
@@ -178,6 +181,9 @@ describe('ChangeRequestService.create', () => {
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])
       .mockResolvedValueOnce([[buildRow()], null])
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])   // audit
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])                                   // resolveProposerContext — roles
       .mockResolvedValueOnce([[], null]);                                  // getWorkflowByChangeType → no workflow
 
     const svc = new ChangeRequestService(pool);
@@ -198,6 +204,9 @@ describe('ChangeRequestService.create', () => {
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])
       .mockResolvedValueOnce([[buildRow()], null])
       .mockResolvedValueOnce([{ insertId: 99, affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null])  // resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])  // resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])  // resolveProposerContext — roles
       .mockResolvedValueOnce([[], null]); // getWorkflowByChangeType → no workflow
 
     const svc = new ChangeRequestService(pool);
@@ -206,7 +215,7 @@ describe('ChangeRequestService.create', () => {
       5
     );
 
-    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute).toHaveBeenCalledTimes(7);
     const [auditSql] = execute.mock.calls[2];
     expect(auditSql).toContain('INSERT INTO audit_logs');
   });
@@ -226,6 +235,9 @@ describe('ChangeRequestService.create', () => {
       .mockResolvedValueOnce([{ insertId: 7 }, null])          // INSERT change_request
       .mockResolvedValueOnce([[buildRow({ id: 7 })], null])     // getById
       .mockResolvedValueOnce([{ insertId: 99 }, null])          // audit.write
+      .mockResolvedValueOnce([[], null])                         // resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])                         // resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])                         // resolveProposerContext — roles
       .mockResolvedValueOnce([[workflowRow], null])              // getWorkflowByChangeType
       .mockResolvedValueOnce([[stepRow], null])                  // hydrateWorkflow steps
       .mockResolvedValueOnce([[stepRow], null])                  // resolveApproverForStep SELECT
@@ -503,6 +515,9 @@ describe('ChangeRequestService.advancePendingApproval', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE pending_approval → approved
       .mockResolvedValueOnce([[buildRow()], null])                // getById change_request
       .mockResolvedValueOnce([[nextStepRow], null])               // SELECT next step from approval_steps
+      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — roles
       .mockResolvedValueOnce([[nextStepFullRow], null])           // resolveApproverForStep SELECT
       .mockResolvedValueOnce([{ insertId: 6 }, null])            // INSERT next pending_approval
       .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null])  // getPendingApprovalById refresh

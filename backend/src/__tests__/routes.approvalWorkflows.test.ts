@@ -29,6 +29,7 @@ jest.mock('../middleware/auth', () => ({
     next();
   },
   requireModule: () => (_req: any, _res: any, next: any) => next(),
+  requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
@@ -327,10 +328,10 @@ describe('approval workflows DELETE /:id', () => {
 
 describe('approval workflows POST /escalate', () => {
   it('returns 200 with overdue escalations', async () => {
-    const overdue = [{ workflowId: 1, stepId: 2, changeType: 'shift_swap' }];
+    const mockResult = { escalated: 1, items: [{ pendingApprovalId: 10, changeRequestId: 5, escalatedToUserId: 3 }] };
     (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
       .fn()
-      .mockResolvedValue(overdue);
+      .mockResolvedValue(mockResult);
 
     const res = await request(mountApp())
       .post('/api/approval-workflows/escalate')
@@ -338,22 +339,23 @@ describe('approval workflows POST /escalate', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.count).toBe(1);
-    expect(res.body.data.overdue).toHaveLength(1);
+    expect(res.body.data.escalated).toBe(1);
+    expect(res.body.data.items).toHaveLength(1);
   });
 
-  it('returns 200 with a custom now timestamp', async () => {
+  it('returns 200 with no escalations', async () => {
+    const mockResult = { escalated: 0, items: [] };
     (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
       .fn()
-      .mockResolvedValue([]);
+      .mockResolvedValue(mockResult);
 
     const res = await request(mountApp())
       .post('/api/approval-workflows/escalate')
-      .send({ now: '2026-06-07T10:00:00Z' });
+      .send({});
 
     expect(res.status).toBe(200);
-    expect(res.body.data.count).toBe(0);
-    expect(ApprovalEngineService.prototype.processEscalations).toHaveBeenCalledWith('2026-06-07T10:00:00Z');
+    expect(res.body.data.escalated).toBe(0);
+    expect(ApprovalEngineService.prototype.processEscalations).toHaveBeenCalledWith();
   });
 
   it('returns 500 on service error', async () => {

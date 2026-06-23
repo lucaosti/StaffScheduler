@@ -395,34 +395,36 @@ describe('ApprovalEngineService.resolveApprover — additional scopes', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('ApprovalEngineService.processEscalations — default now', () => {
-  it('uses the current ISO timestamp when no arg is supplied', async () => {
+  it('returns empty result when no overdue items exist', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null]);
 
     const svc = new ApprovalEngineService(pool);
-    const before = new Date();
-    await svc.processEscalations();
-    const after = new Date();
+    const result = await svc.processEscalations();
 
-    const passedTimestamp = execute.mock.calls[0][1]![0] as string;
-    const ts = new Date(passedTimestamp);
-    expect(ts.getTime()).toBeGreaterThanOrEqual(before.getTime() - 1000);
-    expect(ts.getTime()).toBeLessThanOrEqual(after.getTime() + 1000);
+    expect(result.escalated).toBe(0);
+    expect(result.items).toHaveLength(0);
+    // Uses NOW() in SQL so no timestamp param is needed
+    expect(execute.mock.calls[0][1]).toEqual([]);
   });
 
   it('returns multiple overdue items', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[
-      { workflow_id: 1, step_id: 1, change_type: 'TimeOff.Request' },
-      { workflow_id: 2, step_id: 3, change_type: 'Loan.Request' },
-    ], null]);
+    execute
+      .mockResolvedValueOnce([[
+        { id: 1, change_request_id: 5, workflow_id: 1, step_id: 1, step_order: 1, assigned_to_user_id: 10, escalate_after_hours: 24, manager_id: 11 },
+        { id: 2, change_request_id: 6, workflow_id: 2, step_id: 3, step_order: 1, assigned_to_user_id: 20, escalate_after_hours: 48, manager_id: null },
+      ], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])  // UPDATE row 1
+      .mockResolvedValueOnce([{ insertId: 10 }, null])     // INSERT escalated for row 1
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])  // UPDATE row 2 (no manager → no INSERT)
 
     const svc = new ApprovalEngineService(pool);
-    const result = await svc.processEscalations('2030-01-01T00:00:00Z');
+    const result = await svc.processEscalations();
 
-    expect(result).toHaveLength(2);
-    expect(result[1].changeType).toBe('Loan.Request');
-    expect(result[1].workflowId).toBe(2);
-    expect(result[1].stepId).toBe(3);
+    expect(result.escalated).toBe(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0].pendingApprovalId).toBe(1);
+    expect(result.items[1].pendingApprovalId).toBe(2);
   });
 });

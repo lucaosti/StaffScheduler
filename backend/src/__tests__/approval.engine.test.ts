@@ -108,26 +108,31 @@ describe('ApprovalEngineService.resolveApprover', () => {
 });
 
 describe('ApprovalEngineService.processEscalations', () => {
-  it('returns overdue workflow steps', async () => {
+  it('escalates overdue pending approvals and returns a summary', async () => {
     const { pool, execute } = makePool();
+    // SELECT overdue rows
     execute.mockResolvedValueOnce([[
-      { workflow_id: 1, step_id: 1, change_type: 'TimeOff.Request' },
+      { id: 1, change_request_id: 10, workflow_id: 2, step_id: 3, step_order: 1,
+        assigned_to_user_id: 5, escalate_after_hours: 24, manager_id: 7 },
     ], null]);
+    execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);  // UPDATE
+    execute.mockResolvedValueOnce([{ insertId: 50 }, null]);     // INSERT
 
     const svc = new ApprovalEngineService(pool);
-    const overdue = await svc.processEscalations('2030-01-01T00:00:00Z');
+    const result = await svc.processEscalations();
 
-    expect(overdue).toHaveLength(1);
-    expect(overdue[0].changeType).toBe('TimeOff.Request');
+    expect(result.escalated).toBe(1);
+    expect(result.items[0]).toMatchObject({ pendingApprovalId: 1, changeRequestId: 10, escalatedToUserId: 7 });
   });
 
-  it('returns empty array when nothing is overdue', async () => {
+  it('returns { escalated: 0, items: [] } when nothing is overdue', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null]);
 
     const svc = new ApprovalEngineService(pool);
-    const overdue = await svc.processEscalations('2020-01-01T00:00:00Z');
+    const result = await svc.processEscalations();
 
-    expect(overdue).toHaveLength(0);
+    expect(result.escalated).toBe(0);
+    expect(result.items).toHaveLength(0);
   });
 });

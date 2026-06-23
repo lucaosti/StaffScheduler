@@ -51,7 +51,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])  // INSERT delegation
-      .mockResolvedValueOnce([[], null])                                  // audit_logs INSERT
+      .mockResolvedValueOnce([{ insertId: 1 }, null])                    // audit_logs INSERT
       .mockResolvedValueOnce([[makeDelegationRow()], null]);               // getDelegationById
 
     const svc = new DelegationService(pool);
@@ -71,7 +71,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([{ insertId: 42, affectedRows: 1 }, null])  // INSERT delegation
-      .mockResolvedValueOnce([[], null])                                   // audit INSERT
+      .mockResolvedValueOnce([{ insertId: 1 }, null])                     // audit INSERT
       .mockResolvedValueOnce([[makeDelegationRow({ id: 42 })], null]);     // getDelegationById
 
     const svc = new DelegationService(pool);
@@ -84,7 +84,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
     // Second execute call should be the audit_logs INSERT
     expect(execute.mock.calls[1][0]).toContain('INSERT INTO audit_logs');
     const auditArgs = execute.mock.calls[1][1] as unknown[];
-    expect(auditArgs[1]).toBe('delegation.grant');
+    expect(auditArgs[2]).toBe('delegation.grant');
   });
 
   it('still resolves even if audit log INSERT fails (silent error)', async () => {
@@ -116,7 +116,7 @@ describe('DelegationService.revokeDelegation — happy path', () => {
     execute
       .mockResolvedValueOnce([[{ id: 1, delegator_id: 10 }], null])  // SELECT
       .mockResolvedValueOnce([{ affectedRows: 1 }, null])             // UPDATE is_active
-      .mockResolvedValueOnce([[], null]);                              // audit INSERT
+      .mockResolvedValueOnce([{ insertId: 1 }, null]);                // audit INSERT
 
     const svc = new DelegationService(pool);
     await expect(svc.revokeDelegation(1, 10)).resolves.toBeUndefined();
@@ -127,7 +127,7 @@ describe('DelegationService.revokeDelegation — happy path', () => {
 
     // Audit log call
     expect(execute.mock.calls[2][0]).toContain('INSERT INTO audit_logs');
-    expect(execute.mock.calls[2][1]![1]).toBe('delegation.revoke');
+    expect(execute.mock.calls[2][1]![2]).toBe('delegation.revoke');
   });
 });
 
