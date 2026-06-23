@@ -101,6 +101,24 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       label: 'Settings',
       requiredPermission: 'settings.manage',
     },
+    {
+      path: '/approvals/pending',
+      icon: 'bi-inbox',
+      label: 'Pending Approvals',
+      requiredPermission: null,
+    },
+    {
+      path: '/change-requests',
+      icon: 'bi-pencil-square',
+      label: 'Change Requests',
+      requiredPermission: null,
+    },
+    {
+      path: '/delegations',
+      icon: 'bi-person-check',
+      label: 'Delegations',
+      requiredPermission: 'delegation.manage',
+    },
   ];
 
   const hasPermission = (requiredPermission: string | null): boolean => {
