@@ -1,18 +1,3 @@
-/**
- * Shift Management Routes
- *
- * Handles all shift-related operations including:
- * - Shift template CRUD operations
- * - Individual shift management
- * - Schedule-based shift retrieval
- * - Department-specific shift filtering
- *
- * Authentication: Required on all endpoints
- * Authorization: Manager/Admin roles required for creation/modification
- *
- * @author Luca Ostinelli
- */
-
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
@@ -37,7 +22,7 @@ export const createShiftsRouter = (pool: Pool) => {
 // Shift Template Routes
 
 // Get all shift templates
-router.get('/templates', authenticate, async (_req: Request, res: Response) => {
+router.get('/templates', authenticate, requirePermission('schedule.read'), async (_req: Request, res: Response) => {
   try {
     const templates = await shiftService.getAllShiftTemplates();
     res.json({ success: true, data: templates });
@@ -51,7 +36,7 @@ router.get('/templates', authenticate, async (_req: Request, res: Response) => {
 });
 
 // Get shift template by ID
-router.get('/templates/:id', authenticate, validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -148,7 +133,7 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 // Shift Routes
 
 // Get all shifts
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('schedule.read'), async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
     const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
@@ -172,7 +157,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get shift by ID
-router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 

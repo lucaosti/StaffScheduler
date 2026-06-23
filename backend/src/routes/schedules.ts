@@ -19,7 +19,7 @@ export const createSchedulesRouter = (pool: Pool) => {
   const scheduleService = new ScheduleService(pool);
 
 // Get all schedules
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('schedule.read'), async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
     const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
@@ -43,7 +43,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
 });
 
 // Get schedule by ID
-router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 
@@ -77,7 +77,7 @@ router.get('/:id', authenticate, validateParams(idParam), async (req: Request, r
 });
 
 // Get schedule with shifts
-router.get('/:id/shifts', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
   try {
     const { id } = res.locals.params;
 

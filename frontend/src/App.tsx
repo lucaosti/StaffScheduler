@@ -1,25 +1,3 @@
-/**
- * Staff Scheduler Frontend Application
- * 
- * Main React application component that defines the routing structure and provides
- * global context for authentication and state management.
- * 
- * Features:
- * - Protected routes with authentication
- * - Role-based access control
- * - Responsive layout with sidebar navigation
- * - Modern React Router v6 implementation
- * - Context-based authentication state management
- * 
- * Architecture:
- * - Uses React Router for client-side routing
- * - AuthProvider wraps entire app for authentication context
- * - Layout component provides consistent UI structure
- * - ProtectedRoute guards private pages
- * 
- * @author Luca Ostinelli
- */
-
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 

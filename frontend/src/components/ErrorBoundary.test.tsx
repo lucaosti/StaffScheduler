@@ -44,13 +44,9 @@ describe('<ErrorBoundary />', () => {
 
   it('calls window.location.reload when the reload button is clicked', () => {
     const reloadSpy = jest.fn();
-    Object.defineProperty(window, 'location', {
-      value: { reload: reloadSpy },
-      writable: true,
-    });
 
     render(
-      <ErrorBoundary>
+      <ErrorBoundary onReload={reloadSpy}>
         <ThrowOnMount message="Crash" />
       </ErrorBoundary>
     );

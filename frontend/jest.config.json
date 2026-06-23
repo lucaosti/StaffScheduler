@@ -1,0 +1,49 @@
+{
+  "testEnvironment": "<rootDir>/jest.environment.js",
+  "setupFilesAfterEnv": ["<rootDir>/src/setupTests.ts"],
+  "transform": {
+    "^.+\\.(ts|tsx)$": ["ts-jest", {
+      "tsconfig": {
+        "module": "CommonJS",
+        "target": "ES2015",
+        "jsx": "react-jsx"
+      }
+    }],
+    "^.+\\.(mjs|cjs|js)$": ["ts-jest", {
+      "tsconfig": {
+        "module": "CommonJS",
+        "target": "ES2015",
+        "allowJs": true
+      }
+    }]
+  },
+  "moduleNameMapper": {
+    "^@/(.*)$": "<rootDir>/src/$1"
+  },
+  "testPathIgnorePatterns": [
+    "/node_modules/",
+    "<rootDir>/e2e/"
+  ],
+  "transformIgnorePatterns": [
+    "<rootDir>/jest\\.environment\\.js",
+    "node_modules/(?!(rettime|@open-draft|@bundled-es-modules|until-async|outvariant|strict-event-emitter|headers-polyfill|tough-cookie|psl|@inquirer)/)"
+  ],
+  "collectCoverageFrom": [
+    "src/**/*.{ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/**/*.test.{ts,tsx}",
+    "!src/setupTests.ts",
+    "!src/index.tsx",
+    "!src/App.tsx",
+    "!src/types/**/*",
+    "!src/mocks/**/*"
+  ],
+  "coverageThreshold": {
+    "global": {
+      "branches": 40,
+      "functions": 50,
+      "lines": 60,
+      "statements": 60
+    }
+  }
+}

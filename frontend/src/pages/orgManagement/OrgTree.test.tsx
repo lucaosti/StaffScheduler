@@ -144,7 +144,11 @@ describe('<OrgTree />', () => {
 
   it('calls onCreateUnit when the form is submitted', () => {
     render(<OrgTree {...defaultProps} />);
-    fireEvent.click(screen.getByRole('button', { name: /create/i }));
+    // Use fireEvent.submit on the form directly to bypass HTML5 constraint
+    // validation (jsdom 20+ enforces "required" and blocks clicks on submit
+    // buttons when fields are empty).
+    const form = screen.getByRole('button', { name: /create/i }).closest('form')!;
+    fireEvent.submit(form);
     expect(defaultProps.onCreateUnit).toHaveBeenCalledTimes(1);
   });
 });

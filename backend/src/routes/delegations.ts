@@ -11,7 +11,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DelegationService } from '../services/DelegationService';
-import { authenticate } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import { idParam, createDelegationBody } from '../schemas';
 import { logger } from '../config/logger';
@@ -21,7 +21,7 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   const delegationService = new DelegationService(pool);
 
   // Create a delegation
-  router.post('/', authenticate, validateBody(createDelegationBody), async (req: Request, res: Response) => {
+  router.post('/', authenticate, requirePermission('delegation.manage'), validateBody(createDelegationBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user!;
       const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId, justification } = res.locals.body;
@@ -61,7 +61,7 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   });
 
   // Revoke a delegation
-  router.delete('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
+  router.delete('/:id', authenticate, requirePermission('delegation.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     try {
       const { id } = res.locals.params;
 

@@ -23,9 +23,7 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ login: mockLogin }),
 }));
 
-// eslint-disable-next-line import/first
 import Login from './Login';
-// eslint-disable-next-line import/first
 import { ApiError } from '../../services/apiUtils';
 
 describe('<Login />', () => {

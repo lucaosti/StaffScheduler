@@ -98,7 +98,7 @@ const Schedule: React.FC = () => {
           setAssignments(allAssignments);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       const message = err instanceof ApiError ? err.message : 'Failed to load schedule data';
       setError(message);
     } finally {
@@ -215,7 +215,7 @@ const Schedule: React.FC = () => {
       } else {
         setCreateError(response.error?.message || 'Failed to create schedule.');
       }
-    } catch (err) {
+    } catch (_err) {
       const message = err instanceof ApiError ? err.message : 'Failed to create schedule.';
       setCreateError(message);
     } finally {
@@ -242,7 +242,7 @@ const Schedule: React.FC = () => {
       } else {
         setGenerateError(response.error?.message || 'Failed to generate schedule.');
       }
-    } catch (err) {
+    } catch (_err) {
       const message = err instanceof ApiError ? err.message : 'Failed to generate schedule.';
       setGenerateError(message);
     } finally {
@@ -261,7 +261,7 @@ const Schedule: React.FC = () => {
       } else {
         setError(response.error?.message || 'Failed to publish schedule.');
       }
-    } catch (err) {
+    } catch (_err) {
       const message = err instanceof ApiError ? err.message : 'Failed to publish schedule.';
       setError(message);
     }
@@ -278,7 +278,7 @@ const Schedule: React.FC = () => {
       } else {
         setError(response.error?.message || 'Failed to archive schedule.');
       }
-    } catch (err) {
+    } catch (_err) {
       const message = err instanceof ApiError ? err.message : 'Failed to archive schedule.';
       setError(message);
     }
