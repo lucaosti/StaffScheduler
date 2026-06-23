@@ -62,7 +62,7 @@ const RaciMatrix: React.FC = () => {
       )
     : entries;
 
-  const permCodes = [...new Set(filteredEntries.map((e) => e.permissionCode))].sort();
+  const permCodes = Array.from(new Set(filteredEntries.map((e) => e.permissionCode))).sort();
 
   const colMap = new Map<string, MatrixCol>();
   filteredEntries.forEach((e) => {
@@ -76,7 +76,7 @@ const RaciMatrix: React.FC = () => {
       });
     }
   });
-  const cols = [...colMap.values()].sort((a, b) => a.label.localeCompare(b.label));
+  const cols = Array.from(colMap.values()).sort((a, b) => a.label.localeCompare(b.label));
 
   // Build lookup: permCode → colKey → entry
   const lookup = new Map<string, Map<string, MatrixEntry>>();
