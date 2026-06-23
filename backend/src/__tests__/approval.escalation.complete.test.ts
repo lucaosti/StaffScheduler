@@ -89,17 +89,15 @@ describe('ApprovalEngineService.processEscalations', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[overdueRow({ id: 1 }), overdueRow({ id: 2, change_request_id: 11 })], null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])  // UPDATE id=1
-      .mockResolvedValueOnce([{ insertId: 50 }, null])     // INSERT for id=1
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])  // UPDATE id=2
-      .mockResolvedValueOnce([{ insertId: 51 }, null]);    // INSERT for id=2
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null])  // batch UPDATE all items
+      .mockResolvedValueOnce([{ insertId: 50 }, null]);    // batch INSERT all manager rows
 
     const svc = new ApprovalEngineService(pool);
     const result = await svc.processEscalations();
 
     expect(result.escalated).toBe(2);
     expect(result.items).toHaveLength(2);
-    expect(execute).toHaveBeenCalledTimes(5); // 1 SELECT + 2*(UPDATE + INSERT)
+    expect(execute).toHaveBeenCalledTimes(3); // 1 SELECT + 1 batch UPDATE + 1 batch INSERT
   });
 });
 
