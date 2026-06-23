@@ -76,11 +76,7 @@ interface CreateEmployeeData {
   notes?: string;
 }
 
-/**
- * Interface for updating existing employee records
- * Extends CreateEmployeeData with all fields optional
- */
-interface UpdateEmployeeData extends Partial<CreateEmployeeData> {}
+type UpdateEmployeeData = Partial<CreateEmployeeData>;
 
 /**
  * Retrieves a list of employees with optional filtering and pagination
