@@ -45,6 +45,7 @@ jest.mock('../middleware/auth', () => ({
     next();
   },
   requireModule: () => (_req: any, _res: any, next: any) => next(),
+  requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
@@ -233,6 +234,6 @@ describe('modules router PUT /:code', () => {
 
     await request(mountApp()).put('/api/modules/approvals').send({ isEnabled: false });
 
-    expect(setFn).toHaveBeenCalledWith('approvals', false);
+    expect(setFn).toHaveBeenCalledWith('approvals', false, 1, null);
   });
 });

@@ -121,6 +121,7 @@ jest.mock('../middleware/auth', () => ({
   authenticate: (_req: any, _res: any, next: any) => next(),
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
+  requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: () => false,
 }));
 jest.mock('../services/ScheduleService');

@@ -124,8 +124,9 @@ describe('ModuleService.setEnabled — null after update', () => {
   it('throws Failed to retrieve module after update when getByCode returns null', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE modules
-      .mockResolvedValueOnce([[], null] as Tuple);                  // getByCode → null
+      .mockResolvedValueOnce([[], null] as Tuple)                   // getByCode before-snapshot → null
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)  // UPDATE modules
+      .mockResolvedValueOnce([[], null] as Tuple);                  // getByCode after → null
     const svc = new ModuleService(pool);
     await expect(svc.setEnabled('notifications', true)).rejects.toThrow('Failed to retrieve module after update');
   });

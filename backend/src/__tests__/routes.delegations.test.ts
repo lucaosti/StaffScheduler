@@ -32,6 +32,7 @@ jest.mock('../middleware/auth', () => ({
   },
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
+  requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
@@ -238,7 +239,8 @@ describe('delegations router POST /', () => {
     expect(createFn).toHaveBeenCalledWith(
       1,
       expect.any(Array),
-      expect.objectContaining({ scopeOrgUnitId: 5 })
+      expect.objectContaining({ scopeOrgUnitId: 5 }),
+      null
     );
   });
 
@@ -251,7 +253,8 @@ describe('delegations router POST /', () => {
     expect(createFn).toHaveBeenCalledWith(
       1,
       expect.any(Array),
-      expect.objectContaining({ scopeOrgUnitId: null })
+      expect.objectContaining({ scopeOrgUnitId: null }),
+      null
     );
   });
 });
@@ -320,6 +323,6 @@ describe('delegations router DELETE /:id', () => {
 
     await request(mountApp()).delete('/api/delegations/7');
 
-    expect(revokeFn).toHaveBeenCalledWith(7, 3);
+    expect(revokeFn).toHaveBeenCalledWith(7, 3, null);
   });
 });
