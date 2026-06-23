@@ -55,11 +55,6 @@ export const listWorkflows = async (): Promise<ApiResponse<ApprovalWorkflow[]>> 
   return handleResponse<ApprovalWorkflow[]>(res);
 };
 
-export const getWorkflowByType = async (changeType: string): Promise<ApiResponse<ApprovalWorkflow>> => {
-  const res = await fetch(`${BASE}/${encodeURIComponent(changeType)}`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<ApprovalWorkflow>(res);
-};
-
 export const createWorkflow = async (body: CreateWorkflowBody): Promise<ApiResponse<ApprovalWorkflow>> => {
   const res = await fetch(BASE, {
     method: 'POST',
