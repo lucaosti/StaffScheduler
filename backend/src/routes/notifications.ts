@@ -11,7 +11,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requireModule } from '../middleware/auth';
+import { authenticate, requireModuleForUser } from '../middleware/auth';
 import { validateParams } from '../middleware/validation';
 import { idParam } from '../schemas';
 import { NotificationService } from '../services/NotificationService';
@@ -21,9 +21,8 @@ export const createNotificationsRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new NotificationService(pool);
 
-  router.use(requireModule('notifications'));
-
   router.use(authenticate);
+  router.use(requireModuleForUser('notifications'));
 
   router.get('/', async (req: Request, res: Response) => {
     try {
