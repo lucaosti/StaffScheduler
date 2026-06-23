@@ -56,7 +56,7 @@ export interface WriteAuditLogInput {
   throwOnFailure?: boolean;
 }
 
-interface AuditLogFilters {
+export interface AuditLogFilters {
   userId?: number;
   onBehalfOfUserId?: number;
   action?: string;
@@ -177,6 +177,65 @@ export class AuditLogService {
       [id]
     );
     return rows.length === 0 ? null : mapRow(rows[0]);
+  }
+
+  /**
+   * Exports all audit log entries matching the given filters — without row
+   * limit. Intended for compliance exports; callers should stream or buffer
+   * the result themselves. Returns entries ordered by created_at ASC so the
+   * chronological record is preserved.
+   *
+   * @param filters Same filter options as list(), but limit/offset are ignored.
+   */
+  async exportAll(filters: Omit<AuditLogFilters, 'limit' | 'offset'> = {}): Promise<AuditLogEntry[]> {
+    const conditions: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filters.userId !== undefined) { conditions.push('user_id = ?'); params.push(filters.userId); }
+    if (filters.onBehalfOfUserId !== undefined) { conditions.push('on_behalf_of_user_id = ?'); params.push(filters.onBehalfOfUserId); }
+    if (filters.action) { conditions.push('action = ?'); params.push(filters.action); }
+    if (filters.entityType) { conditions.push('entity_type = ?'); params.push(filters.entityType); }
+    if (filters.entityId !== undefined) { conditions.push('entity_id = ?'); params.push(filters.entityId); }
+    if (filters.fromDate) { conditions.push('created_at >= ?'); params.push(filters.fromDate); }
+    if (filters.toDate) { conditions.push('created_at <= ?'); params.push(filters.toDate); }
+    if (filters.requestId) { conditions.push('request_id = ?'); params.push(filters.requestId); }
+
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT * FROM audit_logs${where} ORDER BY created_at ASC`,
+      params
+    );
+    return (rows as RowDataPacket[]).map(mapRow);
+  }
+
+  /**
+   * Serialises an array of audit log entries to CSV. Includes a header row.
+   * Snapshot fields are rendered as compact JSON strings.
+   */
+  static toCsv(entries: AuditLogEntry[]): string {
+    const HEADER = [
+      'id', 'created_at', 'user_id', 'on_behalf_of_user_id', 'action',
+      'entity_type', 'entity_id', 'description', 'justification',
+      'ip_address', 'user_agent', 'request_id',
+      'before_snapshot', 'after_snapshot',
+    ];
+    const escape = (v: unknown): string => {
+      if (v === null || v === undefined) return '';
+      const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n')
+        ? `"${s.replace(/"/g, '""')}"`
+        : s;
+    };
+    const lines = [HEADER.join(',')];
+    for (const e of entries) {
+      lines.push([
+        e.id, e.createdAt, e.userId, e.onBehalfOfUserId, e.action,
+        e.entityType, e.entityId, e.description, e.justification,
+        e.ipAddress, e.userAgent, e.requestId,
+        e.beforeSnapshot, e.afterSnapshot,
+      ].map(escape).join(','));
+    }
+    return lines.join('\r\n');
   }
 
   /**
