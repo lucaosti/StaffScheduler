@@ -11,6 +11,7 @@ import React from 'react';
 
 interface Props {
   children: React.ReactNode;
+  onReload?: () => void;
 }
 
 interface State {
@@ -39,7 +40,11 @@ class ErrorBoundary extends React.Component<Props, State> {
   }
 
   handleReload = (): void => {
-    window.location.reload();
+    if (this.props.onReload) {
+      this.props.onReload();
+    } else {
+      window.location.reload();
+    }
   };
 
   render(): React.ReactNode {

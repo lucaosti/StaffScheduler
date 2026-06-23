@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const mockGetSchedules = jest.fn();
@@ -124,8 +124,11 @@ describe('<Schedule />', () => {
     expect(screen.getByRole('heading', { name: /create schedule/i })).toBeInTheDocument();
 
     // Submit empty -> validation error
-    await userEvent.click(screen.getByRole('button', { name: /create schedule/i }));
-    expect(screen.getByRole('alert')).toHaveTextContent(/please fill in name/i);
+    // jsdom 26 enforces HTML5 constraint validation; submit the form directly
+    // to bypass it and let the React handler run its own validation check.
+    const modalForm = screen.getByRole('button', { name: /create schedule/i }).closest('form')!;
+    fireEvent.submit(modalForm);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/please fill in name/i);
 
     // Fill dates invalid -> end before start
     await userEvent.type(screen.getByLabelText(/name \*/i), 'My Schedule');

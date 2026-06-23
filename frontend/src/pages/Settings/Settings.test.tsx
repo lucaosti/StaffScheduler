@@ -47,7 +47,6 @@ jest.mock('../../services/moduleService', () => ({
   removeModuleOrgOverride: jest.fn().mockResolvedValue({ success: true }),
 }));
 
-// eslint-disable-next-line import/first
 import Settings from './Settings';
 
 describe('<Settings />', () => {

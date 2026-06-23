@@ -146,7 +146,10 @@ describe('<PolicyList />', () => {
 
   it('calls onCreatePolicy when the form is submitted', () => {
     render(<PolicyList {...defaultProps} />);
-    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+    // Use fireEvent.submit to bypass HTML5 constraint validation (jsdom 20+
+    // blocks click-to-submit when required fields are empty).
+    const form = screen.getByRole('button', { name: /^add$/i }).closest('form')!;
+    fireEvent.submit(form);
     expect(defaultProps.onCreatePolicy).toHaveBeenCalledTimes(1);
   });
 });

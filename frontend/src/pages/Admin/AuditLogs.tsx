@@ -1,17 +1,3 @@
-/**
- * AuditLogs — Immutable audit trail viewer.
- *
- * Features:
- *   - Filter by action, entity type, user ID, date range, request ID
- *   - Paginated table (50 rows per page)
- *   - Expandable row: justification + before/after JSON diff
- *   - Export CSV / JSON via the backend's native export endpoint
- *
- * Requires `audit.read` permission; the route is protected via PermissionRoute.
- *
- * @author Luca Ostinelli
- */
-
 import React, { useEffect, useState, useCallback } from 'react';
 import { AuditLogEntry } from '../../types';
 import { listAuditLogs, buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
