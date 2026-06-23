@@ -377,22 +377,22 @@ describe('AssignmentService.updateAssignment', () => {
   });
 
   it('updates status and notes and refreshes', async () => {
-    const { pool, execute, conn } = makePool();
+    const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)
-      .mockResolvedValueOnce([[assignmentRow({ status: 'confirmed' })], null] as Tuple);
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)          // getAssignmentById initial
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])                 // UPDATE
+      .mockResolvedValueOnce([[assignmentRow({ status: 'confirmed' })], null] as Tuple); // getAssignmentById refresh
     const svc = new AssignmentService(pool);
     const r = await svc.updateAssignment(1, { status: 'confirmed', notes: 'ok' });
     expect(r.status).toBe('confirmed');
   });
 
   it('throws when refresh returns null', async () => {
-    const { pool, execute, conn } = makePool();
+    const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple);
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)  // getAssignmentById initial
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple);                 // getAssignmentById refresh (null)
     const svc = new AssignmentService(pool);
     await expect(svc.updateAssignment(1, { status: 'x' })).rejects.toThrow(/Failed to retrieve/);
   });

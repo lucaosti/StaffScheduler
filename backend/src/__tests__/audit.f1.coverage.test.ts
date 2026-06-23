@@ -339,12 +339,11 @@ describe('AssignmentService — audit log', () => {
   });
 
   it('updateAssignment writes assignment.update audit', async () => {
-    const { pool, execute, conn } = makeConnPool();
-    // getAssignmentById (existing)
+    const { pool, execute } = makeConnPool();
     execute
-      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)
-      .mockResolvedValueOnce([[assignmentRow({ status: 'confirmed' })], null] as Tuple);
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple);
+      .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)           // getAssignmentById initial
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)         // UPDATE
+      .mockResolvedValueOnce([[assignmentRow({ status: 'confirmed' })], null] as Tuple); // getAssignmentById refresh
 
     const service = new AssignmentService(pool);
     await service.updateAssignment(1, { status: 'confirmed', actorId: 5, reason: 'Manual confirm' });
