@@ -108,6 +108,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'responsibility.read',
     },
     {
+      path: '/admin/rbac',
+      icon: 'bi-person-badge',
+      label: 'Roles',
+      requiredPermission: 'role.manage',
+    },
+    {
       path: '/settings',
       icon: 'bi-gear',
       label: 'Settings',
