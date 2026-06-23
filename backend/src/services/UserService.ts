@@ -81,7 +81,7 @@ export class UserService {
   async getUserById(id: number): Promise<User | null> {
     try {
       const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT id, email, first_name, last_name, employee_id, phone, position, hourly_rate, is_active, last_login, created_at, updated_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, employee_id, phone, position, hourly_rate, is_active, last_login, organization_name, created_at, updated_at FROM users WHERE id = ?',
         [id]
       );
       if (userRows.length === 0) return null;
@@ -103,6 +103,7 @@ export class UserService {
         hourlyRate: row.hourly_rate != null ? Number(row.hourly_rate) : undefined,
         isActive: Boolean(row.is_active),
         lastLogin: row.last_login,
+        organizationName: (row.organization_name as string | null) ?? null,
         departments: deptRows.map((d: any) => ({ id: d.id, name: d.name })),
         skills: skillRows.map((s: any) => ({ id: s.id, name: s.name, description: s.description, isActive: Boolean(s.is_active), createdAt: s.created_at })),
         createdAt: row.created_at,
@@ -307,6 +308,10 @@ export class UserService {
       if (userData.isActive !== undefined) {
         updates.push('is_active = ?');
         values.push(userData.isActive ? 1 : 0);
+      }
+      if (Object.prototype.hasOwnProperty.call(userData, 'organizationName')) {
+        updates.push('organization_name = ?');
+        values.push(userData.organizationName ?? null);
       }
       if (updates.length > 0) {
         values.push(id);

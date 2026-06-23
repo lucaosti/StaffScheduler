@@ -236,12 +236,11 @@ export const requirePermission = (code: string) => {
 };
 
 /**
- * Module-guard Middleware
+ * Module-guard Middleware (global check)
  *
- * Returns 404 when the specified module is disabled so that consumers (both
- * authenticated and unauthenticated) get no signal about the route's
- * existence. Call this BEFORE `authenticate` on routes where the entire
- * module should be invisible.
+ * Returns 404 when the specified module is disabled at the global level.
+ * Call this BEFORE `authenticate` on routes where the entire module should
+ * be invisible regardless of user context.
  *
  * @param code - Module code to check (e.g. `reporting`, `notifications`)
  */
@@ -258,6 +257,44 @@ export const requireModule = (code: string) => {
       next();
     } catch (err) {
       logger.error('requireModule check failed:', err);
+      return res.status(503).json({
+        success: false,
+        error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
+      });
+    }
+  };
+};
+
+/**
+ * Organization-aware Module-guard Middleware
+ *
+ * Must be called AFTER `authenticate`. Checks the module state against the
+ * authenticated user's organization. If the user has no `organizationName`,
+ * falls back to the global module state.
+ *
+ * Returns 404 when the module is disabled — either globally or by the user's
+ * org-specific override — so the route is invisible to the caller.
+ *
+ * @param code - Module code to check (e.g. `reporting`, `notifications`)
+ */
+export const requireModuleForUser = (code: string) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const orgName = req.user?.organizationName ?? null;
+      const svc = getModuleService();
+      const enabled = orgName
+        ? await svc.isEnabledForOrg(code, orgName)
+        : await svc.isEnabled(code);
+
+      if (!enabled) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'NOT_FOUND', message: 'Not Found' },
+        });
+      }
+      next();
+    } catch (err) {
+      logger.error('requireModuleForUser check failed:', err);
       return res.status(503).json({
         success: false,
         error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable' },
