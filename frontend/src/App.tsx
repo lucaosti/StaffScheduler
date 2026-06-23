@@ -51,6 +51,8 @@ const Settings = lazy(() => import('./pages/Settings/Settings'));
 const OrgManagement = lazy(() => import('./pages/Org/OrgManagement'));
 const Policies = lazy(() => import('./pages/Policies/Policies'));
 const Governance = lazy(() => import('./pages/Governance/Governance'));
+const OrgChart = lazy(() => import('./pages/OrgChart/OrgChart'));
+const RaciMatrix = lazy(() => import('./pages/Governance/RaciMatrix'));
 
 /**
  * Main Application Component
@@ -131,6 +133,16 @@ const App: React.FC = () => {
           <Route path="settings" element={
             <PermissionRoute permission="settings.manage">
               <Settings />
+            </PermissionRoute>
+          } />
+          <Route path="org-chart" element={
+            <PermissionRoute permission="org_unit.read">
+              <OrgChart />
+            </PermissionRoute>
+          } />
+          <Route path="governance/raci-matrix" element={
+            <PermissionRoute permission="responsibility.read">
+              <RaciMatrix />
             </PermissionRoute>
           } />
         </Route>
