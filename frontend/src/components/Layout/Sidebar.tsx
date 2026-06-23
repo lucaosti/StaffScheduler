@@ -120,6 +120,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'settings.manage',
     },
     {
+      path: '/admin/audit-logs',
+      icon: 'bi-journal-text',
+      label: 'Audit Log',
+      requiredPermission: 'audit.read',
+    },
+    {
       path: '/admin/approval-workflows',
       icon: 'bi-diagram-2',
       label: 'Approval Flows',
