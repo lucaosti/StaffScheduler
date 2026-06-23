@@ -219,7 +219,13 @@ export class ApprovalEngineService {
    */
   async resolveApproverForStep(
     stepId: number,
-    ctx: { actorUserId: number; orgUnitId?: number; policyOwnerId?: number }
+    ctx: {
+      actorUserId: number;
+      orgUnitId?: number;
+      policyOwnerId?: number;
+      subjectDepartmentIds?: number[];
+      subjectRoleIds?: number[];
+    }
   ): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
@@ -268,39 +274,76 @@ export class ApprovalEngineService {
   }
 
   /**
-   * Finds approval steps whose escalation deadline has passed and logs them.
-   * In production this would be called by a scheduler (e.g. a cron job calling
-   * POST /api/approval-workflows/process-escalations). Returns the count of
-   * escalated items.
+   * Processes all overdue pending_approvals: marks them as 'escalated' and
+   * attempts to find the next approver by walking up the org-unit manager
+   * chain from the current assigned-to user. A new pending_approval row is
+   * created for the escalated approver when one is found.
    *
-   * NOTE: This method identifies overdue workflows but does not itself mutate
-   * any `pending_approval` records — the pending-approvals table is outside
-   * the current schema scope. It returns which workflows have overdue steps so
-   * callers can act accordingly.
+   * Returns a summary of each escalated item. Designed to be called from a
+   * scheduled job (cron) or a manual POST endpoint.
    */
-  async processEscalations(nowIso?: string): Promise<{ workflowId: number; stepId: number; changeType: string }[]> {
-    const now = nowIso ?? new Date().toISOString();
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT aw.id AS workflow_id, ast.id AS step_id, aw.change_type
-         FROM approval_workflows aw
-         JOIN approval_steps ast ON ast.workflow_id = aw.id
-        WHERE ast.escalate_after_hours IS NOT NULL
-          AND DATE_ADD(aw.created_at, INTERVAL ast.escalate_after_hours HOUR) < ?
-        ORDER BY aw.id ASC, ast.step_order ASC`,
-      [now]
+  async processEscalations(): Promise<{
+    escalated: number;
+    items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }>;
+  }> {
+    // Find all pending approvals whose escalate_after_hours window has expired.
+    const [overdueRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT pa.id, pa.change_request_id, pa.workflow_id, pa.step_id, pa.step_order,
+              pa.assigned_to_user_id,
+              ast.escalate_after_hours,
+              u.id AS manager_id
+         FROM pending_approvals pa
+         JOIN approval_steps ast ON ast.id = pa.step_id
+         LEFT JOIN users u ON u.id = (
+           SELECT ou.manager_user_id
+             FROM user_org_units uou
+             JOIN org_units ou ON ou.id = uou.org_unit_id
+            WHERE uou.user_id = pa.assigned_to_user_id
+              AND ou.manager_user_id IS NOT NULL
+              AND ou.manager_user_id != pa.assigned_to_user_id
+            ORDER BY ou.id ASC
+            LIMIT 1
+         )
+        WHERE pa.status = 'pending'
+          AND ast.escalate_after_hours IS NOT NULL
+          AND DATE_ADD(pa.created_at, INTERVAL ast.escalate_after_hours HOUR) < NOW()`,
+      []
     );
 
-    const overdue = rows.map((r: any) => ({
-      workflowId: r.workflow_id as number,
-      stepId: r.step_id as number,
-      changeType: r.change_type as string,
-    }));
-
-    if (overdue.length > 0) {
-      logger.info(`Escalation check: ${overdue.length} overdue workflow step(s) detected`);
+    if ((overdueRows as any[]).length === 0) {
+      return { escalated: 0, items: [] };
     }
 
-    return overdue;
+    const items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }> = [];
+
+    for (const row of overdueRows as any[]) {
+      const paId = row.id as number;
+      const crId = row.change_request_id as number;
+      const escalatedToUserId = (row.manager_id as number | null) ?? null;
+
+      // Mark current pending_approval as escalated.
+      await this.pool.execute(
+        `UPDATE pending_approvals
+            SET status = 'escalated', escalated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'pending'`,
+        [paId]
+      );
+
+      // If a manager was found, create a new pending_approval for them.
+      if (escalatedToUserId !== null) {
+        await this.pool.execute(
+          `INSERT INTO pending_approvals
+             (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
+           VALUES (?, ?, ?, ?, ?, 'pending')`,
+          [crId, row.workflow_id, row.step_id, row.step_order, escalatedToUserId]
+        );
+      }
+
+      items.push({ pendingApprovalId: paId, changeRequestId: crId, escalatedToUserId });
+    }
+
+    logger.info(`Escalation run: ${items.length} pending approval(s) escalated`);
+    return { escalated: items.length, items };
   }
 
   // --------------------------------------------------------------------------

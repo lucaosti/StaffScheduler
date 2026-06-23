@@ -144,12 +144,18 @@ export class ChangeRequestService {
       after: created as unknown as Record<string, unknown>,
     });
 
+    // Resolve proposer context for responsibility-rule-based approver lookup.
+    const proposerCtx = await this.resolveProposerContext(proposerUserId);
+
     // Create first pending_approval if an approval workflow is configured for this change type.
     const workflow = await this.engine.getWorkflowByChangeType(input.changeType);
     if (workflow && workflow.steps.length > 0) {
       const firstStep = workflow.steps[0];
       const approverUserId = await this.engine.resolveApproverForStep(firstStep.id, {
         actorUserId: proposerUserId,
+        orgUnitId: proposerCtx.orgUnitId ?? undefined,
+        subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
+        subjectRoleIds: proposerCtx.subjectRoleIds,
       });
       if (approverUserId !== null) {
         await this.pool.execute(
@@ -164,6 +170,37 @@ export class ChangeRequestService {
 
     logger.info(`Change request created: id=${created.id} type=${created.changeType} proposer=${proposerUserId}`);
     return created;
+  }
+
+  /**
+   * Loads the org unit, department IDs, and role IDs for a user so the
+   * approval engine can correctly resolve responsibility-rule-based approvers.
+   */
+  private async resolveProposerContext(userId: number): Promise<{
+    orgUnitId: number | null;
+    subjectDepartmentIds: number[];
+    subjectRoleIds: number[];
+  }> {
+    const [orgRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT org_unit_id FROM user_org_units WHERE user_id = ? ORDER BY org_unit_id ASC LIMIT 1`,
+      [userId]
+    );
+    const orgUnitId = orgRows.length > 0 ? ((orgRows[0] as any).org_unit_id as number) : null;
+
+    const [deptRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT department_id FROM user_departments WHERE user_id = ?`,
+      [userId]
+    );
+    const subjectDepartmentIds = (deptRows as any[]).map((r) => r.department_id as number);
+
+    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT role_id FROM user_roles
+        WHERE user_id = ? AND (expires_at IS NULL OR expires_at > NOW())`,
+      [userId]
+    );
+    const subjectRoleIds = (roleRows as any[]).map((r) => r.role_id as number);
+
+    return { orgUnitId, subjectDepartmentIds, subjectRoleIds };
   }
 
   async approve(id: number, approverUserId: number, justification?: string | null): Promise<ChangeRequest> {
@@ -364,8 +401,13 @@ export class ChangeRequestService {
       if (nextRows.length > 0) {
         const nextStepId = (nextRows[0] as any).id as number;
         const nextStepOrder = (nextRows[0] as any).step_order as number;
+        // Resolve proposer context for responsibility-rule-based lookup.
+        const proposerCtx = await this.resolveProposerContext(cr.proposerUserId);
         const nextApproverUserId = await this.engine.resolveApproverForStep(nextStepId, {
           actorUserId: userId,
+          orgUnitId: proposerCtx.orgUnitId ?? undefined,
+          subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
+          subjectRoleIds: proposerCtx.subjectRoleIds,
         });
         if (nextApproverUserId !== null) {
           await this.pool.execute(
