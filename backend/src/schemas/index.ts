@@ -298,10 +298,6 @@ export const updatePolicyBody = z.object({
   isActive: z.boolean().optional(),
 });
 
-export const escalateBody = z.object({
-  now: z.string().optional(),
-});
-
 export const twoFactorCodeBody = z.object({
   code: z.string().min(1, 'code is required'),
 });
