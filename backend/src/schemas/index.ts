@@ -188,6 +188,7 @@ export const createDelegationBody = z.object({
   permissionCodes: z.array(z.string()).min(1, 'At least one permission code is required'),
   expiresAt: z.string().min(1, 'expiresAt is required'),
   scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+  justification: z.string().max(1000).nullable().optional(),
 });
 
 export const createOnCallPeriodBody = z.object({
@@ -316,6 +317,7 @@ export const upsertPreferencesBody = z.object({
 
 export const moduleEnabledBody = z.object({
   isEnabled: z.boolean(),
+  justification: z.string().max(1000).nullable().optional(),
 });
 
 export const directoryFieldsBody = z.object({

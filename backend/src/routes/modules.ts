@@ -23,6 +23,7 @@ const codeOrgParams = z.object({
 
 const orgOverrideBody = z.object({
   isEnabled: z.boolean(),
+  justification: z.string().max(1000).nullable().optional(),
 });
 
 export const createModulesRouter = (pool: Pool): Router => {
@@ -39,11 +40,11 @@ export const createModulesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.put('/:code', authenticate, requirePermission('settings.manage'), validateParams(codeParam), validateBody(moduleEnabledBody), async (_req: Request, res: Response) => {
+  router.put('/:code', authenticate, requirePermission('settings.manage'), validateParams(codeParam), validateBody(moduleEnabledBody), async (req: Request, res: Response) => {
     try {
       const { code } = res.locals.params;
-      const { isEnabled } = res.locals.body;
-      const updated = await moduleService.setEnabled(code, isEnabled);
+      const { isEnabled, justification } = res.locals.body;
+      const updated = await moduleService.setEnabled(code, isEnabled, req.user?.id ?? null, justification ?? null);
       res.json({ success: true, data: updated, message: `Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}` });
     } catch (error: any) {
       if (error.message?.includes('not found')) {
@@ -73,8 +74,8 @@ export const createModulesRouter = (pool: Pool): Router => {
   router.put('/:code/org/:org', authenticate, requirePermission('settings.manage'), validateParams(codeOrgParams), validateBody(orgOverrideBody), async (req: Request, res: Response) => {
     try {
       const { code, org } = res.locals.params;
-      const { isEnabled } = res.locals.body;
-      const updated = await moduleService.setOrgOverride(code, org, isEnabled, req.user?.id ?? null);
+      const { isEnabled, justification } = res.locals.body;
+      const updated = await moduleService.setOrgOverride(code, org, isEnabled, req.user?.id ?? null, justification ?? null);
       res.json({
         success: true,
         data: updated,
