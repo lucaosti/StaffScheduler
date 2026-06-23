@@ -39,6 +39,14 @@ jest.mock('../../services/calendarService', () => ({
   buildFeedUrl: jest.fn((t: string) => `http://localhost/feed.ics?token=${t}`),
 }));
 
+jest.mock('../../services/moduleService', () => ({
+  listModules: jest.fn().mockResolvedValue({ success: true, data: [] }),
+  listModulesForOrg: jest.fn().mockResolvedValue({ success: true, data: [] }),
+  setModuleEnabled: jest.fn().mockResolvedValue({ success: true, data: {} }),
+  setModuleOrgOverride: jest.fn().mockResolvedValue({ success: true, data: {} }),
+  removeModuleOrgOverride: jest.fn().mockResolvedValue({ success: true }),
+}));
+
 // eslint-disable-next-line import/first
 import Settings from './Settings';
 
@@ -145,5 +153,32 @@ describe('<Settings />', () => {
     render(<Settings />);
     await userEvent.click(screen.getByRole('button', { name: /^System$/ }));
     expect(screen.getByText(/System Configuration/)).toBeInTheDocument();
+  });
+
+  it('shows the Modules tab for admin users', () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
+    });
+
+    render(<Settings />);
+    expect(screen.getByRole('button', { name: /^Modules$/ })).toBeInTheDocument();
+  });
+
+  it('hides the Modules tab for non-admin users', () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 2, email: 'mgr@x', role: 'manager' },
+    });
+    render(<Settings />);
+    expect(screen.queryByRole('button', { name: /^Modules$/ })).not.toBeInTheDocument();
+  });
+
+  it('renders ModulesSection when admin clicks the Modules tab', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^Modules$/ }));
+    expect(screen.getByText(/Global Modules/i)).toBeInTheDocument();
   });
 });
