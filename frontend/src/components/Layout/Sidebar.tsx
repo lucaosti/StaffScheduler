@@ -108,6 +108,24 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'settings.manage',
     },
     {
+      path: '/approvals/pending',
+      icon: 'bi-inbox',
+      label: 'Pending Approvals',
+      requiredPermission: null,
+    },
+    {
+      path: '/change-requests',
+      icon: 'bi-pencil-square',
+      label: 'Change Requests',
+      requiredPermission: null,
+    },
+    {
+      path: '/delegations',
+      icon: 'bi-person-check',
+      label: 'Delegations',
+      requiredPermission: 'delegation.manage',
+    },
+    {
       path: '/admin/audit-logs',
       icon: 'bi-journal-text',
       label: 'Audit Log',

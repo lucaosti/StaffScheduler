@@ -51,6 +51,9 @@ const Settings = lazy(() => import('./pages/Settings/Settings'));
 const OrgManagement = lazy(() => import('./pages/Org/OrgManagement'));
 const Policies = lazy(() => import('./pages/Policies/Policies'));
 const Governance = lazy(() => import('./pages/Governance/Governance'));
+const PendingApprovals = lazy(() => import('./pages/Approvals/PendingApprovals'));
+const ChangeRequests = lazy(() => import('./pages/ChangeRequests/ChangeRequests'));
+const Delegations = lazy(() => import('./pages/Delegations/Delegations'));
 const AuditLogs = lazy(() => import('./pages/Admin/AuditLogs'));
 const ApprovalWorkflows = lazy(() => import('./pages/Admin/ApprovalWorkflows'));
 const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
@@ -139,6 +142,13 @@ const App: React.FC = () => {
           <Route path="settings" element={
             <PermissionRoute permission="settings.manage">
               <Settings />
+            </PermissionRoute>
+          } />
+          <Route path="approvals/pending" element={<PendingApprovals />} />
+          <Route path="change-requests" element={<ChangeRequests />} />
+          <Route path="delegations" element={
+            <PermissionRoute permission="delegation.manage">
+              <Delegations />
             </PermissionRoute>
           } />
           <Route path="admin/audit-logs" element={
