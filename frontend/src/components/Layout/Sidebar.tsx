@@ -119,6 +119,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       label: 'Settings',
       requiredPermission: 'settings.manage',
     },
+    {
+      path: '/admin/approval-workflows',
+      icon: 'bi-diagram-2',
+      label: 'Approval Flows',
+      requiredPermission: 'approval.manage',
+    },
   ];
 
   const hasPermission = (requiredPermission: string | null): boolean => {
