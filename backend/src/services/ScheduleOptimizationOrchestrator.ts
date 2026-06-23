@@ -209,6 +209,8 @@ export class ScheduleOptimizationOrchestrator {
         [sourceScheduleId]
       );
 
+      // Build old->new shift ID map and insert all shifts.
+      const oldToNewShiftId = new Map<number, number>();
       for (const shift of shifts) {
         const shiftDate = new Date(shift.date);
         shiftDate.setDate(shiftDate.getDate() + dayOffset);
@@ -217,9 +219,24 @@ export class ScheduleOptimizationOrchestrator {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
           [newScheduleId, shift.department_id, shift.template_id, shiftDate.toISOString().split('T')[0], shift.start_time, shift.end_time, shift.min_staff, shift.max_staff, shift.notes]
         );
-        const [skills] = await connection.execute<RowDataPacket[]>('SELECT skill_id FROM shift_skills WHERE shift_id = ?', [shift.id]);
-        for (const skill of skills) {
-          await connection.execute('INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)', [shiftResult.insertId, skill.skill_id]);
+        oldToNewShiftId.set(shift.id as number, shiftResult.insertId);
+      }
+
+      // Bulk-fetch all skills for the original shifts, then bulk-insert for the clones.
+      if (oldToNewShiftId.size > 0) {
+        const oldIds = [...oldToNewShiftId.keys()];
+        const placeholders = oldIds.map(() => '?').join(', ');
+        const [allSkills] = await connection.execute<RowDataPacket[]>(
+          `SELECT shift_id, skill_id FROM shift_skills WHERE shift_id IN (${placeholders})`,
+          oldIds
+        );
+        if (allSkills.length > 0) {
+          const skillValues = allSkills.map((s) => [oldToNewShiftId.get(s.shift_id as number), s.skill_id]);
+          const skillPlaceholders = skillValues.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${skillPlaceholders}`,
+            skillValues.flat()
+          );
         }
       }
 
