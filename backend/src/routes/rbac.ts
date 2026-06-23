@@ -35,6 +35,14 @@ const assignRoleBody = z.object({
   justification: z.string().max(1000).nullable().optional(),
 });
 
+const bulkAssignRoleBody = z.object({
+  roleId: z.number().int().positive(),
+  userIds: z.array(z.number().int().positive()).min(1).max(500),
+  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  justification: z.string().max(1000).nullable().optional(),
+});
+
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
 };
@@ -120,6 +128,23 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     } catch (err) {
       const msg = (err as Error).message;
       respondError(res, statusFor(msg), statusFor(msg) === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
+    }
+  });
+
+  roles.post('/bulk-assign', validateBody(bulkAssignRoleBody), async (req: Request, res: Response) => {
+    try {
+      const { roleId, userIds, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
+      const result = await rbac.bulkAssignRole(
+        userIds,
+        roleId,
+        scopeOrgUnitId ?? null,
+        expiresAt ?? null,
+        req.user?.id,
+        justification ?? null
+      );
+      res.status(201).json({ success: true, data: result });
+    } catch (err) {
+      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
     }
   });
 
