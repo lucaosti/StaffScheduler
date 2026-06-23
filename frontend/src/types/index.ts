@@ -204,6 +204,31 @@ export interface DashboardStats {
   employeeSatisfaction: number;
 }
 
+export interface Permission {
+  id: number;
+  code: string;
+  resource: string;
+  action: string;
+  description?: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description?: string;
+  isSystem: boolean;
+  permissions?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UserRoleAssignment {
+  roleId: number;
+  roleName: string;
+  scopeOrgUnitId?: number | null;
+  expiresAt?: string | null;
+}
+
 export interface AuditLogEntry {
   id: number;
   actorId: number | null;
