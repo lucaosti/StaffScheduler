@@ -15,9 +15,13 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { Delegation, CreateDelegationRequest } from '../types';
 import { logger } from '../config/logger';
+import { AuditLogService } from './AuditLogService';
 
 export class DelegationService {
-  constructor(private pool: Pool) {}
+  private audit: AuditLogService;
+  constructor(private pool: Pool) {
+    this.audit = new AuditLogService(pool);
+  }
 
   /**
    * Creates a new delegation. Throws if any requested permission code is not
@@ -26,7 +30,8 @@ export class DelegationService {
   async createDelegation(
     delegatorId: number,
     delegatorPermissions: string[],
-    input: CreateDelegationRequest
+    input: CreateDelegationRequest,
+    justification?: string | null
   ): Promise<Delegation> {
     if (input.delegateeId === delegatorId) {
       throw new Error('Cannot delegate to yourself');
@@ -50,10 +55,20 @@ export class DelegationService {
       ]
     );
 
-    await this.writeAuditLog(delegatorId, 'delegation.grant', {
-      delegationId: result.insertId,
-      delegateeId: input.delegateeId,
-      permissionCodes: input.permissionCodes,
+    await this.audit.write({
+      actorId: delegatorId,
+      action: 'delegation.grant',
+      entityType: 'delegation',
+      entityId: result.insertId,
+      description: `Delegation granted to user ${input.delegateeId}: ${input.permissionCodes.join(', ')}`,
+      justification: justification ?? null,
+      after: {
+        delegationId: result.insertId,
+        delegateeId: input.delegateeId,
+        permissionCodes: input.permissionCodes,
+        scopeOrgUnitId: input.scopeOrgUnitId ?? null,
+        expiresAt: input.expiresAt,
+      },
     });
 
     const delegation = await this.getDelegationById(result.insertId);
@@ -62,7 +77,7 @@ export class DelegationService {
   }
 
   /** Revokes (deactivates) a delegation. Only the delegator may revoke. */
-  async revokeDelegation(id: number, requestorId: number): Promise<void> {
+  async revokeDelegation(id: number, requestorId: number, justification?: string | null): Promise<void> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       'SELECT id, delegator_id FROM delegations WHERE id = ? LIMIT 1',
       [id]
@@ -78,7 +93,15 @@ export class DelegationService {
       [id]
     );
 
-    await this.writeAuditLog(requestorId, 'delegation.revoke', { delegationId: id });
+    await this.audit.write({
+      actorId: requestorId,
+      action: 'delegation.revoke',
+      entityType: 'delegation',
+      entityId: id,
+      description: `Delegation ${id} revoked`,
+      justification: justification ?? null,
+      before: { delegationId: id },
+    });
 
     logger.info(`Delegation ${id} revoked by user ${requestorId}`);
   }
@@ -148,20 +171,4 @@ export class DelegationService {
     };
   }
 
-  private async writeAuditLog(
-    userId: number,
-    action: string,
-    details: Record<string, unknown>
-  ): Promise<void> {
-    try {
-      const entityId = (details.delegationId as number | null | undefined) ?? null;
-      await this.pool.execute(
-        `INSERT INTO audit_logs (user_id, action, entity_type, entity_id, description)
-         VALUES (?, ?, 'delegation', ?, ?)`,
-        [userId, action, entityId, JSON.stringify(details)]
-      );
-    } catch (err) {
-      logger.error('Failed to write delegation audit log:', err);
-    }
-  }
 }

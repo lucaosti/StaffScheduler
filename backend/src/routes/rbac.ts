@@ -32,6 +32,7 @@ const assignRoleBody = z.object({
   roleId: z.number().int().positive(),
   scopeOrgUnitId: z.number().int().positive().nullable().optional(),
   expiresAt: z.string().nullable().optional(),
+  justification: z.string().max(1000).nullable().optional(),
 });
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -124,13 +125,14 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
 
   roles.post('/users/:userId', validateParams(userIdParam), validateBody(assignRoleBody), async (req: Request, res: Response) => {
     try {
-      const { roleId, scopeOrgUnitId, expiresAt } = res.locals.body;
+      const { roleId, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
       await rbac.assignRole(
         res.locals.params.userId,
         roleId,
         scopeOrgUnitId ?? null,
         expiresAt ?? null,
-        req.user?.id
+        req.user?.id,
+        justification ?? null
       );
       res.status(201).json({ success: true });
     } catch (err) {
@@ -145,7 +147,8 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
         const n = parseInt(String(rawScope), 10);
         return isNaN(n) || n <= 0 ? null : n;
       })() : null;
-      await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id);
+      const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
+      await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
       res.json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
