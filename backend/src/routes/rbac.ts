@@ -123,6 +123,16 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     }
   });
 
+  roles.get('/users/:userId', validateParams(userIdParam), async (_req: Request, res: Response) => {
+    try {
+      const assignments = await rbac.getUserRoles(res.locals.params.userId);
+      res.json({ success: true, data: assignments });
+    } catch (err) {
+      logger.error('get user roles failed', err);
+      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to get user roles');
+    }
+  });
+
   roles.post('/users/:userId', validateParams(userIdParam), validateBody(assignRoleBody), async (req: Request, res: Response) => {
     try {
       const { roleId, scopeOrgUnitId, expiresAt, justification } = res.locals.body;

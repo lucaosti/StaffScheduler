@@ -12,6 +12,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import PreferencesSection from '../Settings/PreferencesSection';
 import ProfileSection from '../Settings/ProfileSection';
 import SystemSection from '../Settings/SystemSection';
+import ModulesSection from '../Settings/ModulesSection';
 import CalendarSection from '../Settings/CalendarSection';
 import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
 
@@ -42,7 +43,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system' | 'modules'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -166,6 +167,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {isAdmin && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'modules' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('modules')}
+                >
+                  <i className="bi bi-toggles me-2"></i>Modules
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -193,6 +204,8 @@ const Settings: React.FC = () => {
       {activeTab === 'calendar' && <CalendarSection />}
 
       {activeTab === 'system' && isAdmin && <SystemSection />}
+
+      {activeTab === 'modules' && isAdmin && <ModulesSection />}
     </div>
   );
 };
