@@ -3,7 +3,7 @@ FROM node:22-alpine AS base
 WORKDIR /app
 
 # Copy package files
-COPY package*.json ./
+COPY .npmrc package*.json ./
 
 # Build stage
 FROM base AS build
