@@ -125,10 +125,10 @@ create_dev_env_override() {
     # Create docker-compose.override.yml for development
     cat > "${SCRIPT_DIR}/docker-compose.override.yml" << 'EOF'
 # Development environment overrides
-version: '3.9'
-
 services:
   backend:
+    build:
+      target: build
     environment:
       NODE_ENV: development
       DEBUG: "*"
@@ -141,13 +141,18 @@ services:
       - "9229:9229"  # Debug port for Node.js inspector
 
   frontend:
+    build:
+      target: build
     environment:
+      HOST: "0.0.0.0"
       REACT_APP_DEBUG: "true"
     volumes:
       - ./frontend/src:/app/src
       - ./frontend/public:/app/public
       - /app/node_modules
     command: npm start
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
     stdin_open: true
     tty: true
 
@@ -176,8 +181,8 @@ create_directories() {
 build_images() {
     print_info "Building development Docker images..."
     
-    DOCKER_BUILDKIT=1 docker-compose -f "$DOCKER_COMPOSE_FILE" build
-    
+    DOCKER_BUILDKIT=1 docker-compose -f "$DOCKER_COMPOSE_FILE" -f "${SCRIPT_DIR}/docker-compose.override.yml" build
+
     print_success "Development images built"
 }
 
@@ -186,8 +191,8 @@ start_services() {
     print_info "Starting development services..."
     print_debug "Using environment file: $ENV_FILE"
     
-    docker-compose -f "$DOCKER_COMPOSE_FILE" up -d
-    
+    docker-compose -f "$DOCKER_COMPOSE_FILE" -f "${SCRIPT_DIR}/docker-compose.override.yml" up -d
+
     print_success "Development services started"
 }
 
