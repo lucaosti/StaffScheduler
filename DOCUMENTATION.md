@@ -773,9 +773,9 @@ The following capabilities are planned but not yet implemented. Pull requests fo
 
 ### Future Work
 
-#### CRA → Vite migration
+#### Dependency major-version policy
 
-`react-scripts@5.0.1` is the last Create React App release and is no longer maintained. The build toolchain carries 13 HIGH-severity transitive vulnerabilities that cannot be patched without replacing the build tool. Recommended path: migrate to Vite 5.x (drop `react-scripts`, add `vite` + `@vitejs/plugin-react`). No application code API changes are required; the migration affects only dev-server and build configuration.
+The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and ESLint 8 (the flat-config migration required by ESLint 9+ is pending). Security patches within these majors are applied as they appear.
 
 #### Express 4 → Express 5
 

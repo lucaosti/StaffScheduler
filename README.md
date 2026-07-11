@@ -291,8 +291,7 @@ npm install
 npm start                  # http://localhost:3000
 ```
 
-> **Note**: `react-scripts@5.0.1` (Create React App) is unmaintained since October 2022.
-> `npm audit` reports findings only in CRA's development toolchain (webpack-dev-server, sockjs, postcss, etc.) — none reach the production JS bundle, and `npm audit --omit=dev` is clean. They cannot be resolved without migrating to Vite. See DOCUMENTATION.md §Future Work.
+> **Note**: the frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`). The former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during the Vite migration; `npm audit --omit=dev` is clean.
 
 ### Startup modes
 
@@ -427,7 +426,7 @@ npm run lint:fix
 ### Frontend
 
 ```bash
-npm start                  # CRA dev server
+npm start                  # Vite dev server
 npm run build              # production bundle
 CI=true npm test -- --watchAll=false
 npm run lint
@@ -521,8 +520,8 @@ The following jobs **must** pass before a PR can merge into `main`:
 | Job | What it does |
 | --- | --- |
 | `Backend (lint, typecheck, test, build)` | ESLint, `tsc --noEmit`, Jest unit/integration tests with coverage gates. |
-| `Frontend (lint, test, build)` | ESLint, Jest + React Testing Library tests with coverage, production CRA build. |
-| `Frontend e2e (Playwright) [required]` | Boots MySQL service, seeds demo data, starts the backend, runs Playwright against the CRA dev server. Uploads the HTML report (and traces on failure) as artifacts. |
+| `Frontend (lint, test, build)` | ESLint, Jest + React Testing Library tests with coverage, production Vite build. |
+| `Frontend e2e (Playwright) [required]` | Boots MySQL service, seeds demo data, starts the backend, runs Playwright against the Vite dev server. Uploads the HTML report (and traces on failure) as artifacts. |
 
 Run the same checks locally with:
 
