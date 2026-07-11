@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Staff Scheduler is an enterprise workforce management system.
 
 - **Backend**: Node.js/Express/TypeScript REST API — runs on port **3001**
-- **Frontend**: React 18/TypeScript SPA (Create React App) — runs on port **3000**
+- **Frontend**: React 18/TypeScript SPA (Vite) — runs on port **3000**
 - **Database**: MySQL 8.0 (37 tables, schema in `backend/database/init.sql`)
 - **Optimizer**: Python 3.8+ with Google OR-Tools CP-SAT, invoked via `child_process` from `backend/src/optimization/ScheduleOptimizerORTools.ts`
 
@@ -120,7 +120,7 @@ frontend/src/
 
 All service files import `handleResponse` and `getAuthHeaders` from `./apiUtils`. Do not re-define them locally. Import `ApiError` from `./apiUtils` only if a specific service needs to catch or throw typed API errors.
 
-The frontend proxies all `/api/*` requests to `http://localhost:3001` (via `"proxy"` in `frontend/package.json`).
+The frontend dev server proxies all `/api/*` requests to `http://localhost:3001` (via `server.proxy` in `frontend/vite.config.ts`).
 
 ### API Response Contract
 
