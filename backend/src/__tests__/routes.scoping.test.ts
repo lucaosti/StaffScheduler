@@ -270,7 +270,7 @@ describe('GET /api/shifts — scope filtering', () => {
       .set('Authorization', `Bearer ${makeToken()}`);
 
     const callArg = (ShiftService.prototype.getAllShifts as jest.Mock).mock.calls[0][0];
-    expect(callArg).toBeUndefined();
+    expect(callArg).toEqual({});
   });
 
   it('scoped manager calls getAllShifts with orgUnitIds filter', async () => {

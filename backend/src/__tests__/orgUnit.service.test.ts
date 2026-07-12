@@ -113,3 +113,52 @@ describe('OrgUnitService.setPrimary', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 });
+
+describe('OrgUnitService.listMembersDetailed', () => {
+  it('joins users for display-ready member rows', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        { user_id: 7, first_name: 'Mario', last_name: 'Rossi', email: 'mario@demo.local', position: 'Nurse', is_primary: 1 },
+      ],
+      null,
+    ] as Tuple);
+
+    const service = new OrgUnitService(pool);
+    const members = await service.listMembersDetailed(11);
+
+    expect(members).toEqual([
+      { userId: 7, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Nurse', isPrimary: true },
+    ]);
+    expect(execute.mock.calls[0][0]).toMatch(/JOIN users u ON u\.id = uou\.user_id/);
+  });
+});
+
+describe('OrgUnitService.getManagerChain', () => {
+  it('returns an empty chain when the user has no primary unit', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getPrimaryUnitForUser
+
+    const service = new OrgUnitService(pool);
+    expect(await service.getManagerChain(5)).toEqual([]);
+  });
+
+  it('walks from the primary unit up to the root, resolving each manager', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildUnit({ id: 3, name: 'Ward A', parent_id: 2, manager_user_id: 20 })], null] as Tuple) // getPrimaryUnitForUser
+      .mockResolvedValueOnce([[{ id: 20, first_name: 'Head', last_name: 'Nurse', email: 'head@demo.local' }], null] as Tuple) // manager of unit 3
+      .mockResolvedValueOnce([[buildUnit({ id: 2, name: 'Department', parent_id: 1, manager_user_id: 10 })], null] as Tuple) // getById(2)
+      .mockResolvedValueOnce([[{ id: 10, first_name: 'General', last_name: 'Manager', email: 'gm@demo.local' }], null] as Tuple) // manager of unit 2
+      .mockResolvedValueOnce([[buildUnit({ id: 1, name: 'Hospital', parent_id: null, manager_user_id: null })], null] as Tuple); // getById(1), no manager
+
+    const service = new OrgUnitService(pool);
+    const chain = await service.getManagerChain(7);
+
+    expect(chain).toEqual([
+      { unitId: 3, unitName: 'Ward A', manager: { id: 20, firstName: 'Head', lastName: 'Nurse', email: 'head@demo.local' } },
+      { unitId: 2, unitName: 'Department', manager: { id: 10, firstName: 'General', lastName: 'Manager', email: 'gm@demo.local' } },
+      { unitId: 1, unitName: 'Hospital', manager: null },
+    ]);
+  });
+});

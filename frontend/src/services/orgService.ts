@@ -30,6 +30,28 @@ export interface UserOrgUnit {
   assignedAt: string;
 }
 
+export interface OrgUnitMemberDetail {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  position: string | null;
+  isPrimary: boolean;
+}
+
+interface ManagerRef {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+export interface ManagerChainLink {
+  unitId: number;
+  unitName: string;
+  manager: ManagerRef | null;
+}
+
 type LoanStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'ended';
 
 export interface EmployeeLoan {
@@ -97,6 +119,12 @@ export const deleteUnit = (id: number) =>
 
 export const listMembers = (orgUnitId: number) =>
   request<UserOrgUnit[]>(`/org/units/${orgUnitId}/members`);
+
+export const listMembersDetailed = (orgUnitId: number) =>
+  request<OrgUnitMemberDetail[]>(`/org/units/${orgUnitId}/members/detailed`);
+
+export const getManagerChain = (userId?: number) =>
+  request<ManagerChainLink[]>(`/org/manager-chain${userId ? `/${userId}` : ''}`);
 
 export const addMember = (orgUnitId: number, userId: number, isPrimary = false) =>
   request<UserOrgUnit>(`/org/units/${orgUnitId}/members`, {
