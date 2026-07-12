@@ -256,7 +256,7 @@ async function main(): Promise<void> {
       log.info(`Made ${decisionsThisRound.length} decisions this round (${allDecisions.length} total so far).`);
 
       // ---- PHASE 3: verify this round's request outcomes -----------------
-      await verifyAllRequests(pool, log, requestsThisRound, decisionsThisRound);
+      await verifyAllRequests(pool, log, requestsThisRound);
 
       // ---- PHASE 4: generate this period's schedule ----------------------
       log.info(`PHASE 4: generate schedule for ${label} (after this round's decisions have landed)`);

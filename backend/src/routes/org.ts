@@ -28,6 +28,7 @@ import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrg
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
+import { mapServiceError } from '../utils/httpErrors';
 import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -247,12 +248,8 @@ export const createOrgRouter = (pool: Pool): Router => {
       const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status =
-        msg.includes('not found') ? 404 : msg === 'Forbidden' || msg.includes('Not authorized') ? 403 : 409;
-      const code =
-        status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
-      respondError(res, status, code, msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 
@@ -261,12 +258,8 @@ export const createOrgRouter = (pool: Pool): Router => {
       const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status =
-        msg.includes('not found') ? 404 : msg === 'Forbidden' || msg.includes('Not authorized') ? 403 : 409;
-      const code =
-        status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
-      respondError(res, status, code, msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 
@@ -275,11 +268,8 @@ export const createOrgRouter = (pool: Pool): Router => {
       const updated = await loans.cancel(res.locals.params.id, req.user!.id);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status =
-        msg.includes('not found') ? 404 : msg === 'Forbidden' ? 403 : 409;
-      const code = status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
-      respondError(res, status, code, msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 

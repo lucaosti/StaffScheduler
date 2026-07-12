@@ -396,6 +396,44 @@ export class ApprovalEngineService {
     return false;
   }
 
+  /** The user who originally filed the entity this pending approval decides. */
+  private async getProposerUserId(pa: PendingApproval): Promise<number | null> {
+    const [table, column, id]: [string, string, number | null] =
+      pa.timeOffRequestId !== null
+        ? ['time_off_requests', 'user_id', pa.timeOffRequestId]
+        : pa.employeeLoanId !== null
+          ? ['employee_loans', 'user_id', pa.employeeLoanId]
+          : pa.shiftSwapRequestId !== null
+            ? ['shift_swap_requests', 'requester_user_id', pa.shiftSwapRequestId]
+            : ['change_requests', 'proposer_user_id', pa.changeRequestId];
+    if (id === null) return null;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT ${column} AS proposer_user_id FROM ${table} WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    return rows.length > 0 ? ((rows[0] as any).proposer_user_id as number) : null;
+  }
+
+  /**
+   * Who may see a decision's chain of command: broader than who may decide
+   * it — the proposer, the current assignee, whoever already decided it, and
+   * (unlike isAuthorizedToDecide) every member of the assigned structure
+   * regardless of whether it has been opened to the whole team yet, since
+   * "who is this decision with" is exactly what an affected team member
+   * needs to see.
+   */
+  private async isAuthorizedToViewChain(pa: PendingApproval, userId: number): Promise<boolean> {
+    if (pa.assignedToUserId === userId || pa.decidedByUserId === userId) return true;
+    if (pa.assignedToOrgUnitId !== null) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT 1 FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
+        [userId, pa.assignedToOrgUnitId]
+      );
+      if (rows.length > 0) return true;
+    }
+    return (await this.getProposerUserId(pa)) === userId;
+  }
+
   private entityRefFromPendingApproval(pa: PendingApproval): PendingApprovalEntityRef {
     if (pa.changeRequestId !== null) return { changeRequestId: pa.changeRequestId };
     if (pa.timeOffRequestId !== null) return { timeOffRequestId: pa.timeOffRequestId };
@@ -515,10 +553,11 @@ export class ApprovalEngineService {
       [pendingApprovalId]
     );
     if (existing.length === 0) {
-      await this.pool.execute(
-        `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ?`,
+      const [result] = await this.pool.execute<ResultSetHeader>(
+        `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ? AND status = 'pending'`,
         [headUserId, pendingApprovalId]
       );
+      if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
       await this.pool.execute(
         `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'kept', ?)`,
         [pendingApprovalId, headUserId]
@@ -539,10 +578,11 @@ export class ApprovalEngineService {
     );
     if (memberRows.length === 0) throw new Error('targetUserId must be a member of the structure');
 
-    await this.pool.execute(
-      `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ?`,
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ? AND status = 'pending'`,
       [targetUserId, pendingApprovalId]
     );
+    if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
     await this.pool.execute(
       `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id, target_user_id)
        VALUES (?, 'delegated_to_person', ?, ?)`,
@@ -557,10 +597,11 @@ export class ApprovalEngineService {
     if (!pa) throw new Error('Pending approval not found');
     await this.requireStructureHead(pa, headUserId);
 
-    await this.pool.execute(
-      `UPDATE pending_approvals SET assigned_to_user_id = NULL, open_to_structure = TRUE WHERE id = ?`,
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE pending_approvals SET assigned_to_user_id = NULL, open_to_structure = TRUE WHERE id = ? AND status = 'pending'`,
       [pendingApprovalId]
     );
+    if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
     await this.pool.execute(
       `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'opened_to_structure', ?)`,
       [pendingApprovalId, headUserId]
@@ -569,9 +610,12 @@ export class ApprovalEngineService {
   }
 
   /** The full chain of command for a decision: structure → head's choice(s) → who decided. */
-  async getDecisionChain(pendingApprovalId: number): Promise<DecisionChain> {
+  async getDecisionChain(pendingApprovalId: number, userId: number): Promise<DecisionChain> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
     if (!pa) throw new Error('Pending approval not found');
+    if (!(await this.isAuthorizedToViewChain(pa, userId))) {
+      throw new Error('Forbidden: not authorized to view this decision chain');
+    }
 
     let assignedToOrgUnit: DecisionChain['assignedToOrgUnit'] = null;
     if (pa.assignedToOrgUnitId !== null) {
@@ -648,11 +692,15 @@ export class ApprovalEngineService {
    */
   async processEscalations(): Promise<{
     escalated: number;
-    items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }>;
+    items: Array<{ pendingApprovalId: number; entityRef: PendingApprovalEntityRef; escalatedToUserId: number | null }>;
   }> {
     // Find all pending approvals whose escalate_after_hours window has expired.
+    // Selects all four entity FKs (not just change_request_id) since
+    // pending_approvals covers time-off/loan/shift-swap too, not only
+    // change requests.
     const [overdueRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT pa.id, pa.change_request_id, pa.workflow_id, pa.step_id, pa.step_order,
+      `SELECT pa.id, pa.change_request_id, pa.time_off_request_id, pa.employee_loan_id,
+              pa.shift_swap_request_id, pa.workflow_id, pa.step_id, pa.step_order,
               pa.assigned_to_user_id,
               ast.escalate_after_hours,
               u.id AS manager_id
@@ -679,10 +727,17 @@ export class ApprovalEngineService {
       return { escalated: 0, items: [] };
     }
 
-    const items: Array<{ pendingApprovalId: number; changeRequestId: number; escalatedToUserId: number | null }> =
+    const entityRefOf = (row: any): PendingApprovalEntityRef => {
+      if (row.change_request_id !== null) return { changeRequestId: row.change_request_id };
+      if (row.time_off_request_id !== null) return { timeOffRequestId: row.time_off_request_id };
+      if (row.employee_loan_id !== null) return { employeeLoanId: row.employee_loan_id };
+      return { shiftSwapRequestId: row.shift_swap_request_id };
+    };
+
+    const items: Array<{ pendingApprovalId: number; entityRef: PendingApprovalEntityRef; escalatedToUserId: number | null }> =
       rows.map((row) => ({
         pendingApprovalId: row.id as number,
-        changeRequestId: row.change_request_id as number,
+        entityRef: entityRefOf(row),
         escalatedToUserId: (row.manager_id as number | null) ?? null,
       }));
 
@@ -696,20 +751,29 @@ export class ApprovalEngineService {
       paIds
     );
 
-    // Batch INSERT — one row per item that has an identified manager.
+    // Batch INSERT — one row per item that has an identified manager. All
+    // four entity FK columns are always included (three NULL, one set) so
+    // every row shares the same column list regardless of entity type.
     const escalatable = rows.filter((r) => (r.manager_id as number | null) !== null);
     if (escalatable.length > 0) {
-      const insertPlaceholders = escalatable.map(() => '(?, ?, ?, ?, ?, \'pending\')').join(', ');
-      const insertValues = escalatable.flatMap((r) => [
-        r.change_request_id,
-        r.workflow_id,
-        r.step_id,
-        r.step_order,
-        r.manager_id,
-      ]);
+      const insertPlaceholders = escalatable.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, \'pending\')').join(', ');
+      const insertValues = escalatable.flatMap((r) => {
+        const ref = entityRefOf(r);
+        return [
+          ref.changeRequestId ?? null,
+          ref.timeOffRequestId ?? null,
+          ref.employeeLoanId ?? null,
+          ref.shiftSwapRequestId ?? null,
+          r.workflow_id,
+          r.step_id,
+          r.step_order,
+          r.manager_id,
+        ];
+      });
       await this.pool.execute(
         `INSERT INTO pending_approvals
-           (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
+           (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id,
+            workflow_id, step_id, step_order, assigned_to_user_id, status)
          VALUES ${insertPlaceholders}`,
         insertValues
       );

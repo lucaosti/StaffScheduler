@@ -20,6 +20,7 @@ import { authenticate, requirePermission, requireModuleForUser, userHasPermissio
 import { validateBody, validateParams } from '../middleware/validation';
 import { clockInBody, optionalNotesBody, idParam } from '../schemas';
 import { AttendanceService } from '../services/AttendanceService';
+import { mapServiceError } from '../utils/httpErrors';
 import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -50,10 +51,8 @@ export const createAttendanceRouter = (pool: Pool): Router => {
       const updated = await service.clockOut(req.user!.id, id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg === 'Attendance record not found' ? 404 : msg === 'Forbidden' ? 403 : 409;
-      const code = status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
-      respondError(res, status, code, msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 
@@ -118,9 +117,8 @@ export const createAttendanceRouter = (pool: Pool): Router => {
       const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg === 'Attendance record not found' ? 404 : 409;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 
@@ -130,9 +128,8 @@ export const createAttendanceRouter = (pool: Pool): Router => {
       const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
       res.json({ success: true, data: updated });
     } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg === 'Attendance record not found' ? 404 : 409;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
+      const { status, code, message } = mapServiceError(err);
+      respondError(res, status, code, message);
     }
   });
 

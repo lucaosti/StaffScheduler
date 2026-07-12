@@ -122,7 +122,11 @@ describe('ApprovalEngineService.processEscalations', () => {
     const result = await svc.processEscalations();
 
     expect(result.escalated).toBe(1);
-    expect(result.items[0]).toMatchObject({ pendingApprovalId: 1, changeRequestId: 10, escalatedToUserId: 7 });
+    expect(result.items[0]).toMatchObject({
+      pendingApprovalId: 1,
+      entityRef: { changeRequestId: 10 },
+      escalatedToUserId: 7,
+    });
   });
 
   it('returns { escalated: 0, items: [] } when nothing is overdue', async () => {
