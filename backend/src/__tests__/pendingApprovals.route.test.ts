@@ -25,9 +25,16 @@ jest.mock('../middleware/auth', () => ({
 
 jest.mock('../services/PendingApprovalService');
 jest.mock('../services/ChangeRequestService');
+jest.mock('../services/ApprovalEngineService');
+jest.mock('../services/TimeOffService');
+jest.mock('../services/EmployeeLoanService');
+jest.mock('../services/ShiftSwapService');
 
 import { PendingApprovalService } from '../services/PendingApprovalService';
 import { ChangeRequestService } from '../services/ChangeRequestService';
+import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { TimeOffService } from '../services/TimeOffService';
+import { ShiftSwapService } from '../services/ShiftSwapService';
 import { createPendingApprovalsRouter } from '../routes/pendingApprovals';
 
 const fakePool = {} as never;
@@ -110,7 +117,10 @@ describe('GET /api/pending-approvals/count', () => {
 // ─── POST /:id/approve ────────────────────────────────────────────────────────
 
 describe('POST /api/pending-approvals/:id/approve', () => {
-  it('returns 200 with result when approval advances successfully', async () => {
+  it('returns 200 with result when approval advances successfully (change-request-linked)', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 1, changeRequestId: 1, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    });
     const result = {
       pendingApproval: { id: 1, status: 'approved' },
       changeRequest: { id: 1, status: 'approved' },
@@ -126,23 +136,24 @@ describe('POST /api/pending-approvals/:id/approve', () => {
   });
 
   it('returns 404 when pending approval is not found', async () => {
-    (ChangeRequestService.prototype.advancePendingApproval as jest.Mock).mockRejectedValueOnce(
-      new Error('Pending approval not found')
-    );
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce(null);
 
     const res = await request(app).post('/api/pending-approvals/99/approve').send({});
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('returns 400 when pending approval is already acted upon', async () => {
+  it('returns 409 when pending approval is already acted upon', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 1, changeRequestId: 1, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    });
     (ChangeRequestService.prototype.advancePendingApproval as jest.Mock).mockRejectedValueOnce(
       new Error('Pending approval is already approved')
     );
 
     const res = await request(app).post('/api/pending-approvals/1/approve').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_STATE');
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
   });
 
   it('returns 400 when :id is not a positive integer', async () => {
@@ -155,7 +166,10 @@ describe('POST /api/pending-approvals/:id/approve', () => {
 // ─── POST /:id/reject ─────────────────────────────────────────────────────────
 
 describe('POST /api/pending-approvals/:id/reject', () => {
-  it('returns 200 with rejected result', async () => {
+  it('returns 200 with rejected result (change-request-linked)', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 1, changeRequestId: 1, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    });
     const result = {
       pendingApproval: { id: 1, status: 'rejected' },
       changeRequest: { id: 1, status: 'rejected' },
@@ -169,23 +183,161 @@ describe('POST /api/pending-approvals/:id/reject', () => {
     );
   });
 
-  it('returns 400 when user is not authorized to act on this step', async () => {
+  it('returns 403 when user is not authorized to act on this step', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 1, changeRequestId: 1, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    });
     (ChangeRequestService.prototype.advancePendingApproval as jest.Mock).mockRejectedValueOnce(
       new Error('Not authorized to act on this pending approval')
     );
 
     const res = await request(app).post('/api/pending-approvals/1/reject').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('INVALID_STATE');
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
-  it('returns 500 when service throws unexpected error', async () => {
+  it('returns 409 for any other service error, matching the per-entity routes\' own fallback', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 1, changeRequestId: 1, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    });
     (ChangeRequestService.prototype.advancePendingApproval as jest.Mock).mockRejectedValueOnce(
       new Error('disk full')
     );
 
     const res = await request(app).post('/api/pending-approvals/1/reject').send({});
-    expect(res.status).toBe(500);
-    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+
+  it('dispatches to TimeOffService when the decision is time-off-linked', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 2, changeRequestId: null, timeOffRequestId: 55, employeeLoanId: null, shiftSwapRequestId: null,
+    });
+    (TimeOffService.prototype.reject as jest.Mock).mockResolvedValueOnce({ id: 55, status: 'rejected' });
+
+    const res = await request(app).post('/api/pending-approvals/2/reject').send({ note: 'no' });
+    expect(res.status).toBe(200);
+    expect(TimeOffService.prototype.reject).toHaveBeenCalledWith(55, 20, 'no');
+  });
+
+  it('dispatches to ShiftSwapService.decline (not reject) when the decision is swap-linked', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      id: 3, changeRequestId: null, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: 77,
+    });
+    (ShiftSwapService.prototype.decline as jest.Mock).mockResolvedValueOnce({ id: 77, status: 'declined' });
+
+    const res = await request(app).post('/api/pending-approvals/3/reject').send({});
+    expect(res.status).toBe(200);
+    expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(77, 20, null);
+  });
+});
+
+// ─── POST /:id/keep, /:id/delegate, /:id/open-to-structure, GET /:id/chain ────
+// Entity-agnostic structure-delegation actions — go straight through
+// ApprovalEngineService, not ChangeRequestService, since they apply equally
+// to time-off/loan/shift-swap decisions.
+
+describe('POST /api/pending-approvals/:id/keep', () => {
+  it('returns 200 when the caller is the structure head', async () => {
+    (ApprovalEngineService.prototype.keepForSelf as jest.Mock).mockResolvedValueOnce({ id: 1, assignedToUserId: 20 });
+
+    const res = await request(app).post('/api/pending-approvals/1/keep');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(ApprovalEngineService.prototype.keepForSelf).toHaveBeenCalledWith(1, 20);
+  });
+
+  it('returns 403 when the caller is not the structure head', async () => {
+    (ApprovalEngineService.prototype.keepForSelf as jest.Mock).mockRejectedValueOnce(new Error('Forbidden'));
+
+    const res = await request(app).post('/api/pending-approvals/1/keep');
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('returns 404 when the pending approval does not exist', async () => {
+    (ApprovalEngineService.prototype.keepForSelf as jest.Mock).mockRejectedValueOnce(
+      new Error('Pending approval not found')
+    );
+
+    const res = await request(app).post('/api/pending-approvals/99/keep');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+});
+
+describe('POST /api/pending-approvals/:id/delegate', () => {
+  it('returns 200 and forwards targetUserId', async () => {
+    (ApprovalEngineService.prototype.delegateToPerson as jest.Mock).mockResolvedValueOnce({ id: 1, assignedToUserId: 12 });
+
+    const res = await request(app).post('/api/pending-approvals/1/delegate').send({ targetUserId: 12 });
+    expect(res.status).toBe(200);
+    expect(ApprovalEngineService.prototype.delegateToPerson).toHaveBeenCalledWith(1, 20, 12);
+  });
+
+  it('returns 400 when targetUserId is missing', async () => {
+    const res = await request(app).post('/api/pending-approvals/1/delegate').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when the target is not a member of the structure', async () => {
+    (ApprovalEngineService.prototype.delegateToPerson as jest.Mock).mockRejectedValueOnce(
+      new Error('targetUserId must be a member of the structure')
+    );
+
+    const res = await request(app).post('/api/pending-approvals/1/delegate').send({ targetUserId: 99 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+});
+
+describe('POST /api/pending-approvals/:id/open-to-structure', () => {
+  it('returns 200 when the caller is the structure head', async () => {
+    (ApprovalEngineService.prototype.openToStructure as jest.Mock).mockResolvedValueOnce({
+      id: 1, assignedToUserId: null, openToStructure: true,
+    });
+
+    const res = await request(app).post('/api/pending-approvals/1/open-to-structure');
+    expect(res.status).toBe(200);
+    expect(ApprovalEngineService.prototype.openToStructure).toHaveBeenCalledWith(1, 20);
+  });
+
+  it('returns 409 when the decision is no longer pending', async () => {
+    (ApprovalEngineService.prototype.openToStructure as jest.Mock).mockRejectedValueOnce(
+      new Error("Cannot reassign a decision in 'approved' status")
+    );
+
+    const res = await request(app).post('/api/pending-approvals/1/open-to-structure');
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+});
+
+describe('GET /api/pending-approvals/:id/chain', () => {
+  it('returns the chain of command for the decision', async () => {
+    const chain = {
+      pendingApprovalId: 1,
+      status: 'approved',
+      assignedToOrgUnit: { id: 3, name: 'Emergency Department', headUserId: 30, headName: 'Mara Demo' },
+      reassignments: [],
+      currentAssigneeUserId: 20,
+      openToStructure: false,
+      decidedByUserId: 20,
+      decidedByName: 'Approver Demo',
+    };
+    (ApprovalEngineService.prototype.getDecisionChain as jest.Mock).mockResolvedValueOnce(chain);
+
+    const res = await request(app).get('/api/pending-approvals/1/chain');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(chain);
+  });
+
+  it('returns 404 when the pending approval does not exist', async () => {
+    (ApprovalEngineService.prototype.getDecisionChain as jest.Mock).mockRejectedValueOnce(
+      new Error('Pending approval not found')
+    );
+
+    const res = await request(app).get('/api/pending-approvals/99/chain');
+    expect(res.status).toBe(404);
   });
 });

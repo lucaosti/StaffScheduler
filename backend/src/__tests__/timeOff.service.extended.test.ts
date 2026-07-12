@@ -31,8 +31,30 @@ const buildRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const buildPendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 501,
+  change_request_id: null,
+  time_off_request_id: 1,
+  employee_loan_id: null,
+  shift_swap_request_id: null,
+  workflow_id: 10,
+  step_id: 20,
+  step_order: 1,
+  assigned_to_user_id: 99,
+  assigned_to_org_unit_id: null,
+  open_to_structure: 0,
+  decided_by_user_id: null,
+  status: 'pending',
+  decided_at: null,
+  decision_note: null,
+  escalated_at: null,
+  created_at: 't',
+  updated_at: 't',
+  ...overrides,
+});
+
 const makePool = () => {
-  const execute = jest.fn();
+  const execute = jest.fn().mockResolvedValue([[], null]);
   const conn = {
     execute: jest.fn(),
     beginTransaction: jest.fn().mockResolvedValue(undefined),
@@ -109,19 +131,28 @@ describe('TimeOffService.list', () => {
 
 describe('TimeOffService.approve extra paths', () => {
   it('throws when the request is missing', async () => {
-    const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([[], null]);
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getById
     const svc = new TimeOffService(pool);
     await expect(svc.approve(1, 99)).rejects.toThrow(/Time-off request not found/);
   });
 
   it('throws when post-commit refresh fails', async () => {
     const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
+      .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
+      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'approved' })], null] as Tuple) // getPendingApprovalById (post)
+      .mockResolvedValueOnce([[], null] as Tuple); // final getById -> not found
     conn.execute
       .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[], null]) // checkNoDuplicateUnavailability (locked re-check) -> none
       .mockResolvedValueOnce([{ insertId: 555 }, null])
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
-    execute.mockResolvedValueOnce([[], null] as Tuple);
     const svc = new TimeOffService(pool);
     await expect(svc.approve(1, 99)).rejects.toThrow(/Failed to retrieve approved request/);
   });
@@ -131,8 +162,13 @@ describe('TimeOffService.reject extra paths', () => {
   it('returns the rejected request on the happy path', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
-      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null] as Tuple);
+      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE time_off_requests
+      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null] as Tuple); // final getById
     const svc = new TimeOffService(pool);
     const out = await svc.reject(1, 99, 'no');
     expect(out.status).toBe('rejected');
@@ -140,9 +176,7 @@ describe('TimeOffService.reject extra paths', () => {
 
   it('throws when the request does not exist', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple);
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getById
     const svc = new TimeOffService(pool);
     await expect(svc.reject(1, 99)).rejects.toThrow(/Time-off request not found/);
   });
@@ -150,8 +184,13 @@ describe('TimeOffService.reject extra paths', () => {
   it('throws when post-update refresh fails', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple);
+      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE time_off_requests
+      .mockResolvedValueOnce([[], null] as Tuple); // final getById -> not found
     const svc = new TimeOffService(pool);
     await expect(svc.reject(1, 99)).rejects.toThrow(/Failed to retrieve rejected request/);
   });

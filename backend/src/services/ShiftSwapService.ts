@@ -2,18 +2,24 @@
  * Shift swap requests (F01).
  *
  * Two-leg swap: employee A asks to exchange their assignment with employee B's.
- * The swap is finalised by a manager. Approval atomically rewrites the
- * `user_id` on both `shift_assignments` rows so neither employee ends up
- * unassigned mid-swap.
+ * The decision is routed through the `approval_workflows`/`pending_approvals`
+ * engine (`ShiftSwap.Request`, demo-seeded as `unit_structure` — assigned to
+ * the requester's unit as a whole; the unit head can keep it, delegate it to
+ * a team member, or open it to the team, see ApprovalEngineService). Once
+ * that decision resolves as approved, this atomically rewrites the `user_id`
+ * on both `shift_assignments` rows so neither employee ends up unassigned
+ * mid-swap.
  *
  * @author Luca Ostinelli
  */
 
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
+import { ApprovalEngineService } from './ApprovalEngineService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
+import { DateUtils } from '../utils';
 
 type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
 
@@ -57,10 +63,12 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
 export class ShiftSwapService {
   private notifications: NotificationService;
   private audit: AuditLogService;
+  private engine: ApprovalEngineService;
 
   constructor(private pool: Pool, notifications?: NotificationService) {
     this.notifications = notifications ?? new NotificationService(pool);
     this.audit = new AuditLogService(pool);
+    this.engine = new ApprovalEngineService(pool);
   }
 
   /**
@@ -117,6 +125,18 @@ export class ShiftSwapService {
         description: `Shift swap requested: assignment ${input.requesterAssignmentId} ↔ ${input.targetAssignmentId}`,
         after: { id: created.id, status: 'pending', targetUserId: created.targetUserId },
       });
+
+      const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
+      if (workflow && workflow.steps.length > 0) {
+        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
+        await this.engine.createPendingApprovalForStep(
+          workflow.id,
+          workflow.steps[0],
+          { shiftSwapRequestId: created.id },
+          { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined }
+        );
+      }
+
       return created;
     } catch (err) {
       await conn.rollback();
@@ -124,6 +144,14 @@ export class ShiftSwapService {
     } finally {
       conn.release();
     }
+  }
+
+  private async findPendingApprovalId(shiftSwapRequestId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM pending_approvals WHERE shift_swap_request_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+      [shiftSwapRequestId]
+    );
+    return rows.length === 0 ? null : ((rows[0] as any).id as number);
   }
 
   async getById(id: number): Promise<ShiftSwapRequest | null> {
@@ -156,6 +184,76 @@ export class ShiftSwapService {
   }
 
   /**
+   * Verifies both parties would still be compliant after the swap. Runs
+   * against `this.pool` (no lock held) as an upfront dry run, and again
+   * against a transaction connection with the row locked immediately before
+   * commit — same query either way.
+   */
+  private async checkSwapCompliance(swap: ShiftSwapRequest, conn: PoolConnection | Pool = this.pool): Promise<void> {
+    const [pairRows] = await conn.execute<RowDataPacket[]>(
+      `SELECT sa.id AS assignment_id, sa.user_id, sa.shift_id, s.date, s.start_time, s.end_time
+         FROM shift_assignments sa
+         JOIN shifts s ON sa.shift_id = s.id
+        WHERE sa.id IN (?, ?)`,
+      [swap.requesterAssignmentId, swap.targetAssignmentId]
+    );
+    if (pairRows.length !== 2) throw new Error('One or both assignments are gone');
+
+    const reqRow = pairRows.find((r) => r.assignment_id === swap.requesterAssignmentId);
+    const tgtRow = pairRows.find((r) => r.assignment_id === swap.targetAssignmentId);
+    if (!reqRow || !tgtRow) throw new Error('Assignment row mismatch');
+
+    // shift_assignments has a UNIQUE (shift_id, user_id) constraint. If
+    // either party already holds a *different* assignment on the shift
+    // they'd be swapped onto, completing the swap would collide with it —
+    // check this before compliance so it's caught in the same upfront dry
+    // run, not left to fail the UPDATE after the decision already committed.
+    const [dupRows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id, user_id, shift_id FROM shift_assignments
+        WHERE (shift_id = ? AND user_id = ? AND id != ?)
+           OR (shift_id = ? AND user_id = ? AND id != ?)`,
+      [tgtRow.shift_id, swap.requesterUserId, reqRow.assignment_id, reqRow.shift_id, swap.targetUserId, tgtRow.assignment_id]
+    );
+    if (dupRows.length > 0) {
+      const dup = dupRows[0];
+      const who = dup.user_id === swap.requesterUserId ? 'Requester' : 'Target';
+      throw new Error(`${who} is already assigned to the other party's shift (assignment #${dup.id})`);
+    }
+
+    // Compliance: requester would be working the target shift, target the requester's.
+    const swappedRequester = await evaluateAssignmentCompliance(
+      this.pool,
+      swap.requesterUserId,
+      {
+        date: typeof tgtRow.date === 'string' ? tgtRow.date : DateUtils.fromMySQLDate(tgtRow.date as Date),
+        startTime: tgtRow.start_time as string,
+        endTime: tgtRow.end_time as string,
+      },
+      { excludeAssignmentId: swap.requesterAssignmentId }
+    );
+    if (!swappedRequester.ok) {
+      throw new Error(
+        `Requester would violate compliance: ${swappedRequester.violations[0].code}`
+      );
+    }
+    const swappedTarget = await evaluateAssignmentCompliance(
+      this.pool,
+      swap.targetUserId,
+      {
+        date: typeof reqRow.date === 'string' ? reqRow.date : DateUtils.fromMySQLDate(reqRow.date as Date),
+        startTime: reqRow.start_time as string,
+        endTime: reqRow.end_time as string,
+      },
+      { excludeAssignmentId: swap.targetAssignmentId }
+    );
+    if (!swappedTarget.ok) {
+      throw new Error(
+        `Target would violate compliance: ${swappedTarget.violations[0].code}`
+      );
+    }
+  }
+
+  /**
    * Approves a swap. Atomically rewrites the `user_id` on both assignments,
    * runs compliance checks against the swapped state, and rolls back if
    * either user would violate working-time rules under the new shift.
@@ -165,6 +263,41 @@ export class ShiftSwapService {
     reviewerId: number,
     notes: string | null = null
   ): Promise<ShiftSwapRequest> {
+    const existingForAuth = await this.getById(id);
+    if (!existingForAuth) throw new Error('Shift swap request not found');
+    if (existingForAuth.status !== 'pending') {
+      throw new Error(`Cannot approve swap in status '${existingForAuth.status}'`);
+    }
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new Error('No pending approval found for this shift swap');
+
+    // Dry-run the compliance check before committing the workflow decision.
+    // decidePendingApproval finalizes the pending_approvals row immediately
+    // (its own auto-committed UPDATE, not part of the swap transaction
+    // below), so a compliance failure discovered only after that point would
+    // leave the decision permanently "approved" while the swap itself never
+    // applied — a stuck, unretryable request. Validating first means a
+    // rejection here never touches pending_approvals at all.
+    if (await this.engine.wouldBeFinalStep(pendingApprovalId)) {
+      await this.checkSwapCompliance(existingForAuth);
+    }
+
+    const decision = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'approved',
+      notes,
+      async () => {
+        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
+        return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
+      }
+    );
+    if (!decision.isFinalStep) {
+      const refreshed = await this.getById(id);
+      if (!refreshed) throw new Error('Failed to retrieve shift swap request');
+      return refreshed;
+    }
+
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -178,51 +311,9 @@ export class ShiftSwapService {
         throw new Error(`Cannot approve swap in status '${swap.status}'`);
       }
 
-      // Load the two assignments and the underlying shifts to feed compliance.
-      const [pairRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT sa.id AS assignment_id, sa.user_id, s.date, s.start_time, s.end_time
-           FROM shift_assignments sa
-           JOIN shifts s ON sa.shift_id = s.id
-          WHERE sa.id IN (?, ?)`,
-        [swap.requesterAssignmentId, swap.targetAssignmentId]
-      );
-      if (pairRows.length !== 2) throw new Error('One or both assignments are gone');
-
-      const reqRow = pairRows.find((r) => r.assignment_id === swap.requesterAssignmentId);
-      const tgtRow = pairRows.find((r) => r.assignment_id === swap.targetAssignmentId);
-      if (!reqRow || !tgtRow) throw new Error('Assignment row mismatch');
-
-      // Compliance: requester would be working the target shift, target the requester's.
-      const swappedRequester = await evaluateAssignmentCompliance(
-        this.pool,
-        swap.requesterUserId,
-        {
-          date: typeof tgtRow.date === 'string' ? tgtRow.date : new Date(tgtRow.date as Date).toISOString().slice(0, 10),
-          startTime: tgtRow.start_time as string,
-          endTime: tgtRow.end_time as string,
-        },
-        { excludeAssignmentId: swap.requesterAssignmentId }
-      );
-      if (!swappedRequester.ok) {
-        throw new Error(
-          `Requester would violate compliance: ${swappedRequester.violations[0].code}`
-        );
-      }
-      const swappedTarget = await evaluateAssignmentCompliance(
-        this.pool,
-        swap.targetUserId,
-        {
-          date: typeof reqRow.date === 'string' ? reqRow.date : new Date(reqRow.date as Date).toISOString().slice(0, 10),
-          startTime: reqRow.start_time as string,
-          endTime: reqRow.end_time as string,
-        },
-        { excludeAssignmentId: swap.targetAssignmentId }
-      );
-      if (!swappedTarget.ok) {
-        throw new Error(
-          `Target would violate compliance: ${swappedTarget.violations[0].code}`
-        );
-      }
+      // Re-check compliance with the row lock held, in case the assignments
+      // changed between the dry run above and now.
+      await this.checkSwapCompliance(swap, conn);
 
       // Swap the user_id on both assignments.
       await conn.execute(
@@ -282,6 +373,24 @@ export class ShiftSwapService {
     reviewerId: number,
     notes: string | null = null
   ): Promise<ShiftSwapRequest> {
+    const existing = await this.getById(id);
+    if (!existing) throw new Error('Shift swap request not found');
+    if (existing.status !== 'pending') {
+      throw new Error(`Cannot decline swap in status '${existing.status}'`);
+    }
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new Error('No pending approval found for this shift swap');
+    await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'rejected',
+      notes,
+      async () => {
+        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
+        return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
+      }
+    );
+
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE shift_swap_requests
           SET status = 'declined', reviewer_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?

@@ -77,8 +77,13 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
-      const status = msg.includes('not found') ? 404 : 409;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
+      const status = msg.includes('not found')
+        ? 404
+        : msg.includes('Forbidden') || msg.includes('Not authorized')
+          ? 403
+          : 409;
+      const code = status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
+      respondError(res, status, code, msg);
     }
   });
 
@@ -89,8 +94,13 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
       res.json({ success: true, data: updated });
     } catch (err) {
       const msg = (err as Error).message;
-      const status = msg.includes('not found') ? 404 : 409;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
+      const status = msg.includes('not found')
+        ? 404
+        : msg.includes('Forbidden') || msg.includes('Not authorized')
+          ? 403
+          : 409;
+      const code = status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
+      respondError(res, status, code, msg);
     }
   });
 

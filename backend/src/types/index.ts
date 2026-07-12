@@ -118,7 +118,8 @@ export type ApproverScope =
   | 'unit_manager_chain'
   | 'company_role'
   | 'company_user'
-  | 'responsibility_rule';
+  | 'responsibility_rule'
+  | 'unit_structure';
 
 export interface ApprovalStep {
   id: number;
@@ -509,13 +510,26 @@ export interface ChangeRequestFilters {
 
 export type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated' | 'skipped';
 
+/** Which entity table a `pending_approvals` row is deciding on. Exactly one of the four *Id fields is set. */
+export type PendingApprovalEntityType = 'change_request' | 'time_off_request' | 'employee_loan' | 'shift_swap_request';
+
 export interface PendingApproval {
   id: number;
-  changeRequestId: number;
+  changeRequestId: number | null;
+  timeOffRequestId: number | null;
+  employeeLoanId: number | null;
+  shiftSwapRequestId: number | null;
   workflowId: number;
   stepId: number;
   stepOrder: number;
-  assignedToUserId: number;
+  /** The person who can decide this right now. Null once opened to the whole structure. */
+  assignedToUserId: number | null;
+  /** Set when this step's scope is 'unit_structure' — the decision belongs to this org unit. */
+  assignedToOrgUnitId: number | null;
+  /** When true, any member of assignedToOrgUnitId may decide it (assignedToUserId is null). */
+  openToStructure: boolean;
+  /** Who actually decided it — may differ from assignedToUserId once opened to the structure. */
+  decidedByUserId: number | null;
   status: PendingApprovalStatus;
   decidedAt: string | null;
   decisionNote: string | null;
@@ -526,11 +540,33 @@ export interface PendingApproval {
 
 export interface PendingApprovalWithContext extends PendingApproval {
   changeType: string;
-  targetEntityType: string;
+  targetEntityType: PendingApprovalEntityType;
   targetEntityId: number | null;
   proposedPayload: Record<string, unknown>;
   justification: string | null;
   proposerUserId: number;
+}
+
+export type DecisionReassignmentAction = 'kept' | 'delegated_to_person' | 'opened_to_structure';
+
+export interface DecisionReassignment {
+  id: number;
+  pendingApprovalId: number;
+  action: DecisionReassignmentAction;
+  actorUserId: number;
+  targetUserId: number | null;
+  createdAt: string;
+}
+
+export interface DecisionChain {
+  pendingApprovalId: number;
+  status: PendingApprovalStatus;
+  assignedToOrgUnit: { id: number; name: string; headUserId: number | null; headName: string | null } | null;
+  reassignments: Array<DecisionReassignment & { actorName: string; targetName: string | null }>;
+  currentAssigneeUserId: number | null;
+  openToStructure: boolean;
+  decidedByUserId: number | null;
+  decidedByName: string | null;
 }
 
 // System Settings Types

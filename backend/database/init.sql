@@ -4,6 +4,12 @@
 -- Inspired by PoliTO_Timetable_Allocator architecture
 -- ================================================================
 
+-- Force the session charset regardless of the invoking client's default
+-- (e.g. the MySQL docker image's docker-entrypoint-initdb.d runner), so
+-- multi-byte UTF-8 literals below (em dashes, accented names) are not
+-- reinterpreted as Latin-1 and double-encoded on storage.
+SET NAMES utf8mb4;
+
 -- ================================================================
 -- TENANTS TABLE (F13) - Multi-tenant scaffolding
 -- All tenant-scoped tables should carry a tenant_id FK to this row.
@@ -333,6 +339,35 @@ CREATE TABLE IF NOT EXISTS shift_assignments (
     FOREIGN KEY (shift_id) REFERENCES shifts(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- ================================================================
+-- ATTENDANCE RECORDS TABLE - clock-in/clock-out punches
+-- Free-standing: not required to reference a planned shift at creation time.
+-- Reconciliation against shift_assignments/shifts happens on the read side
+-- (AttendanceService.getCostEstimate), not via a rigid FK constraint.
+-- ================================================================
+CREATE TABLE IF NOT EXISTS attendance_records (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    user_id INT NOT NULL,
+    shift_assignment_id INT NULL,
+    clock_in TIMESTAMP NOT NULL,
+    clock_out TIMESTAMP NULL,
+    status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+    reviewer_id INT NULL,
+    reviewed_at TIMESTAMP NULL,
+    review_notes TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    INDEX idx_attendance_user (user_id),
+    INDEX idx_attendance_status (status),
+    INDEX idx_attendance_clock_in (clock_in),
+
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (shift_assignment_id) REFERENCES shift_assignments(id) ON DELETE SET NULL,
+    FOREIGN KEY (reviewer_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- ================================================================
@@ -822,6 +857,12 @@ CREATE TABLE IF NOT EXISTS approval_matrix (
 -- `require_all` = FALSE → first step to approve is sufficient.
 -- `escalate_after_hours` → if non-null, a background job advances the
 --                          request to the next step after the timeout.
+--
+-- `approver_scope = 'unit_structure'` assigns the decision to a whole org
+-- unit rather than one resolved person: `pending_approvals.assigned_to_org_unit_id`
+-- is set instead of (defaulting alongside) `assigned_to_user_id`, and that
+-- unit's head (`org_units.manager_user_id`) can keep it, delegate it to one
+-- team member, or open it to the whole unit — see `decision_reassignments`.
 -- ================================================================
 CREATE TABLE IF NOT EXISTS approval_workflows (
     id INT PRIMARY KEY AUTO_INCREMENT,
@@ -844,7 +885,8 @@ CREATE TABLE IF NOT EXISTS approval_steps (
         'unit_manager_chain',
         'company_role',
         'company_user',
-        'responsibility_rule'
+        'responsibility_rule',
+        'unit_structure'
     ) NOT NULL,
     approver_role_id INT NULL,
     approver_user_id INT NULL,
@@ -903,7 +945,9 @@ INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
 ('responsibility.read',  'responsibility',  'read',    'View responsibility rules'),
 ('responsibility.manage','responsibility',  'manage',  'Create, update and delete responsibility rules'),
 ('change_request.create','change_request','create',   'Propose a change request'),
-('change_request.review','change_request','review',   'Approve, reject or apply change requests');
+('change_request.review','change_request','review',   'Approve, reject or apply change requests'),
+('attendance.approve', 'attendance', 'approve', 'Approve or reject clock-in/clock-out attendance records'),
+('attendance.read',    'attendance', 'read',    'View attendance records and payroll cost estimates for other users');
 
 -- ----------------------------------------------------------------
 -- Default roles (editable data; not hardcoded in application code).
@@ -929,7 +973,8 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'loan.request','loan.approve','timeoff.approve','shiftswap.approve','preferences.manage',
   'report.read','audit.read','user.read','user.manage',
   'responsibility.read','responsibility.manage',
-  'change_request.create','change_request.review'
+  'change_request.create','change_request.review',
+  'attendance.approve','attendance.read'
 ) WHERE r.name = 'Manager';
 
 -- Employee gets read-only visibility; self-service actions (creating own
@@ -956,7 +1001,9 @@ INSERT IGNORE INTO modules (code, name, description, is_enabled) VALUES
 ('forecasting',   'Forecasting',    'Demand forecasting and headcount planning', TRUE),
 ('integrations',  'Integrations',   'Third-party HR and payroll integrations', TRUE),
 ('audit',         'Audit Log',      'Audit trail viewer for administrators', TRUE),
-('compliance',    'Compliance',     'Compliance rules, policy engine, and exception tracking', TRUE);
+('compliance',    'Compliance',     'Compliance rules, policy engine, and exception tracking', TRUE),
+('attendance',    'Attendance Tracking', 'Clock-in/clock-out punches and approval', TRUE),
+('payroll',       'Payroll Cost Estimation', 'Planned vs. actual labor cost from hourly rates', TRUE);
 
 -- Default system settings
 INSERT IGNORE INTO system_settings (category, `key`, value, type, default_value, description, is_editable) VALUES
@@ -993,12 +1040,18 @@ INSERT IGNORE INTO approval_workflows (change_type, require_all, description) VA
 ('OrgUnit.Update',    FALSE, 'Org tree edit — administrator approval'),
 ('Membership.Update', FALSE, 'Membership change — unit manager approval'),
 ('TimeOff.Request',   FALSE, 'Time-off request — unit manager approval'),
-('ShiftSwap.Request', FALSE, 'Shift swap — unit manager approval');
+('ShiftSwap.Request', FALSE, 'Shift swap — assigned to the unit as a structure; the head decides, delegates, or opens it to the team');
 
 -- Steps for each workflow (one step = same behavior as the old single-row matrix)
 INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
 SELECT w.id, 1, 'unit_manager', NULL, TRUE, 48
-FROM approval_workflows w WHERE w.change_type IN ('Loan.Request','Loan.Cancel','Schedule.Publish','Membership.Update','TimeOff.Request','ShiftSwap.Request');
+FROM approval_workflows w WHERE w.change_type IN ('Loan.Request','Loan.Cancel','Schedule.Publish','Membership.Update','TimeOff.Request');
+
+-- ShiftSwap.Request demonstrates structure-level assignment: the decision
+-- goes to the unit as a whole, not directly to its manager.
+INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, auto_approve_for_owner, escalate_after_hours)
+SELECT w.id, 1, 'unit_structure', TRUE, 48
+FROM approval_workflows w WHERE w.change_type = 'ShiftSwap.Request';
 
 INSERT IGNORE INTO approval_steps (workflow_id, step_order, approver_scope, approver_role_id, auto_approve_for_owner, escalate_after_hours)
 SELECT w.id, 1, 'company_role', (SELECT id FROM roles WHERE name = 'Administrator'), TRUE, 72
@@ -1116,13 +1169,28 @@ CREATE TABLE IF NOT EXISTS change_requests (
     FOREIGN KEY (on_behalf_of_user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- `pending_approvals` covers a decision on exactly one of four entity types
+-- (change_request_id / time_off_request_id / employee_loan_id /
+-- shift_swap_request_id — enforced by chk_pending_approval_one_entity).
+-- `assigned_to_user_id` is the person who can decide it right now; for
+-- structure-assigned decisions (`assigned_to_org_unit_id` set) it defaults to
+-- that unit's head and can be reassigned via `decision_reassignments`, or set
+-- to NULL with `open_to_structure = TRUE` so any member of the unit may act.
+-- `decided_by_user_id` records who actually decided (may differ from
+-- `assigned_to_user_id` once opened to the whole structure).
 CREATE TABLE IF NOT EXISTS pending_approvals (
     id INT PRIMARY KEY AUTO_INCREMENT,
-    change_request_id INT NOT NULL,
+    change_request_id INT NULL,
+    time_off_request_id INT NULL,
+    employee_loan_id INT NULL,
+    shift_swap_request_id INT NULL,
     workflow_id INT NOT NULL,
     step_id INT NOT NULL,
     step_order INT NOT NULL,
-    assigned_to_user_id INT NOT NULL,
+    assigned_to_user_id INT NULL,
+    assigned_to_org_unit_id INT NULL,
+    open_to_structure BOOLEAN NOT NULL DEFAULT FALSE,
+    decided_by_user_id INT NULL,
     status ENUM('pending','approved','rejected','escalated','skipped') NOT NULL DEFAULT 'pending',
     decided_at TIMESTAMP NULL,
     decision_note TEXT NULL,
@@ -1131,12 +1199,45 @@ CREATE TABLE IF NOT EXISTS pending_approvals (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
     FOREIGN KEY (change_request_id) REFERENCES change_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (time_off_request_id) REFERENCES time_off_requests(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_loan_id) REFERENCES employee_loans(id) ON DELETE CASCADE,
+    FOREIGN KEY (shift_swap_request_id) REFERENCES shift_swap_requests(id) ON DELETE CASCADE,
     FOREIGN KEY (workflow_id) REFERENCES approval_workflows(id),
     FOREIGN KEY (step_id) REFERENCES approval_steps(id),
     FOREIGN KEY (assigned_to_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_to_org_unit_id) REFERENCES org_units(id) ON DELETE SET NULL,
+    FOREIGN KEY (decided_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+
+    CONSTRAINT chk_pending_approval_one_entity CHECK (
+      (CASE WHEN change_request_id IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN time_off_request_id IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN employee_loan_id IS NOT NULL THEN 1 ELSE 0 END +
+       CASE WHEN shift_swap_request_id IS NOT NULL THEN 1 ELSE 0 END) = 1
+    ),
 
     INDEX idx_pending_approvals_assigned (assigned_to_user_id, status),
-    INDEX idx_pending_approvals_cr (change_request_id, step_order)
+    INDEX idx_pending_approvals_org_unit (assigned_to_org_unit_id, status),
+    INDEX idx_pending_approvals_cr (change_request_id, step_order),
+    INDEX idx_pending_approvals_time_off (time_off_request_id),
+    INDEX idx_pending_approvals_loan (employee_loan_id),
+    INDEX idx_pending_approvals_swap (shift_swap_request_id)
+);
+
+-- Append-only chain-of-command log: each row is one decision made by a
+-- structure head about a `pending_approvals` row assigned to their unit.
+CREATE TABLE IF NOT EXISTS decision_reassignments (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    pending_approval_id INT NOT NULL,
+    action ENUM('kept', 'delegated_to_person', 'opened_to_structure') NOT NULL,
+    actor_user_id INT NOT NULL,
+    target_user_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (pending_approval_id) REFERENCES pending_approvals(id) ON DELETE CASCADE,
+    FOREIGN KEY (actor_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (target_user_id) REFERENCES users(id) ON DELETE SET NULL,
+
+    INDEX idx_decision_reassignments_pa (pending_approval_id)
 );
 
 -- ================================================================

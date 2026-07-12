@@ -111,7 +111,10 @@ describe('ScheduleService.publishSchedule', () => {
     conn.execute
       .mockResolvedValueOnce([[{ shift_count: 5 }], null])
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
-    execute.mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit.write's INSERT
+      .mockResolvedValueOnce([[], null]); // assigned users for the publish notification fan-out
     const service = new ScheduleService(pool);
     const out = await service.publishSchedule(1);
     expect(out.status).toBe('published');
@@ -120,13 +123,41 @@ describe('ScheduleService.publishSchedule', () => {
 });
 
 describe('ScheduleService.archiveSchedule', () => {
-  it('marks any non-archived schedule as archived', async () => {
+  it('marks a draft/published schedule with no pending assignments as archived', async () => {
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    conn.execute
+      .mockResolvedValueOnce([[{ status: 'published' }], null]) // SELECT status ... FOR UPDATE
+      .mockResolvedValueOnce([[{ pending_count: 0 }], null]) // pending-assignment check
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE
     execute.mockResolvedValueOnce([[buildScheduleRow({ status: 'archived' })], null]);
     const service = new ScheduleService(pool);
     const out = await service.archiveSchedule(1);
     expect(out.status).toBe('archived');
+  });
+
+  it('refuses to archive a schedule with pending shift assignments', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ status: 'published' }], null])
+      .mockResolvedValueOnce([[{ pending_count: 2 }], null]);
+    const service = new ScheduleService(pool);
+    await expect(service.archiveSchedule(1)).rejects.toThrow(/2 pending shift assignment/);
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('refuses to archive an already-archived schedule', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([[{ status: 'archived' }], null]);
+    const service = new ScheduleService(pool);
+    await expect(service.archiveSchedule(1)).rejects.toThrow("Cannot archive schedule in 'archived' status");
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('throws not found when the schedule does not exist', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([[], null]);
+    const service = new ScheduleService(pool);
+    await expect(service.archiveSchedule(999)).rejects.toThrow('Schedule not found');
   });
 });
 

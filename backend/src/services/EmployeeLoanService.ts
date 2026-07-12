@@ -2,10 +2,13 @@
  * Employee loans (cross-unit temporary assignments).
  *
  * A target unit manager can borrow an employee from another unit for a
- * date range. Approval is routed through the `approval_matrix` (default:
- * receiving unit manager). Source and target managers are notified for
- * informational purposes; auto-approve fires when the actor is the resolved
- * approver and the matrix allows it.
+ * date range. The legacy `approval_matrix` (`ApprovalMatrixService`) is
+ * still consulted at *creation* time only, to decide whether the request
+ * auto-approves immediately (actor is already the resolved approver).
+ * Otherwise the request is routed through the modern `approval_workflows`/
+ * `pending_approvals` engine (see ApprovalEngineService) exactly like
+ * time-off and shift-swap decisions — supporting structure-level assignment
+ * and delegation, not just a single hardcoded approver.
  *
  * Querying for "is user X eligible in unit Y on date D" is done via
  * `isOnLoan()`, used by schedule validation.
@@ -16,8 +19,10 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
+import { ApprovalEngineService } from './ApprovalEngineService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
+import { DateUtils } from '../utils';
 
 type LoanStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'ended';
 
@@ -61,13 +66,9 @@ const mapRow = (row: RowDataPacket): EmployeeLoan => ({
   fromOrgUnitId: row.from_org_unit_id as number,
   toOrgUnitId: row.to_org_unit_id as number,
   startDate:
-    typeof row.start_date === 'string'
-      ? row.start_date
-      : new Date(row.start_date).toISOString().slice(0, 10),
+    typeof row.start_date === 'string' ? row.start_date : DateUtils.fromMySQLDate(row.start_date),
   endDate:
-    typeof row.end_date === 'string'
-      ? row.end_date
-      : new Date(row.end_date).toISOString().slice(0, 10),
+    typeof row.end_date === 'string' ? row.end_date : DateUtils.fromMySQLDate(row.end_date),
   reason: (row.reason as string | null) ?? null,
   status: row.status as LoanStatus,
   requestedBy: row.requested_by as number,
@@ -80,11 +81,13 @@ const mapRow = (row: RowDataPacket): EmployeeLoan => ({
 
 export class EmployeeLoanService {
   private approvals: ApprovalMatrixService;
+  private engine: ApprovalEngineService;
   private notifications: NotificationService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
     this.approvals = new ApprovalMatrixService(pool);
+    this.engine = new ApprovalEngineService(pool);
     this.notifications = new NotificationService(pool);
     this.audit = new AuditLogService(pool);
   }
@@ -144,6 +147,19 @@ export class EmployeeLoanService {
     });
 
     await this.fanOutNotifications(created);
+
+    if (!resolved.autoApprove) {
+      const workflow = await this.engine.getWorkflowByChangeType('Loan.Request');
+      if (workflow && workflow.steps.length > 0) {
+        await this.engine.createPendingApprovalForStep(
+          workflow.id,
+          workflow.steps[0],
+          { employeeLoanId: created.id },
+          { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId }
+        );
+      }
+    }
+
     return created;
   }
 
@@ -197,15 +213,33 @@ export class EmployeeLoanService {
     return ((rows[0] as { c: number }).c) > 0;
   }
 
+  private async findPendingApprovalId(employeeLoanId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM pending_approvals WHERE employee_loan_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+      [employeeLoanId]
+    );
+    return rows.length === 0 ? null : ((rows[0] as any).id as number);
+  }
+
   async approve(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Loan not found');
-    const resolved = await this.approvals.resolve('Loan.Request', {
-      orgUnitId: existing.toOrgUnitId,
-      actorUserId: reviewerId,
-    });
-    if (resolved.approverUserId !== reviewerId) {
-      throw new Error('Forbidden');
+    if (existing.status !== 'pending') {
+      throw new Error(`Cannot approve loan in status '${existing.status}'`);
+    }
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new Error('No pending approval found for this loan');
+    const decision = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'approved',
+      notes,
+      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId })
+    );
+    if (!decision.isFinalStep) {
+      const refreshed = await this.getById(id);
+      if (!refreshed) throw new Error('Failed to refresh loan');
+      return refreshed;
     }
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE employee_loans
@@ -243,13 +277,18 @@ export class EmployeeLoanService {
   async reject(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Loan not found');
-    const resolved = await this.approvals.resolve('Loan.Request', {
-      orgUnitId: existing.toOrgUnitId,
-      actorUserId: reviewerId,
-    });
-    if (resolved.approverUserId !== reviewerId) {
-      throw new Error('Forbidden');
+    if (existing.status !== 'pending') {
+      throw new Error(`Cannot reject loan in status '${existing.status}'`);
     }
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new Error('No pending approval found for this loan');
+    await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'rejected',
+      notes,
+      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId })
+    );
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE employee_loans
           SET status = 'rejected',
