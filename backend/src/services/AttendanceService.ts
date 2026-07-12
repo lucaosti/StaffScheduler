@@ -194,18 +194,21 @@ export class AttendanceService {
   }
 
   async approve(id: number, reviewerId: number, notes: string | null = null): Promise<AttendanceRecord> {
+    // Separation of duties: a reviewer with attendance.approve still cannot
+    // approve their own clock-in/out, so hours can't be self-certified.
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE attendance_records
           SET status = 'approved',
               reviewer_id = ?,
               reviewed_at = CURRENT_TIMESTAMP,
               review_notes = ?
-        WHERE id = ? AND status = 'pending' AND clock_out IS NOT NULL`,
-      [reviewerId, notes, id]
+        WHERE id = ? AND status = 'pending' AND clock_out IS NOT NULL AND user_id != ?`,
+      [reviewerId, notes, id, reviewerId]
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
       if (!existing) throw new Error('Attendance record not found');
+      if (existing.userId === reviewerId) throw new Error('Forbidden: cannot approve your own attendance record');
       if (existing.clockOut === null) throw new Error('Cannot approve a record that is still clocked in');
       throw new Error(`Cannot approve record in status '${existing.status}'`);
     }
@@ -225,18 +228,20 @@ export class AttendanceService {
   }
 
   async reject(id: number, reviewerId: number, notes: string | null = null): Promise<AttendanceRecord> {
+    // Same separation-of-duties rule as approve(): no self-review.
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE attendance_records
           SET status = 'rejected',
               reviewer_id = ?,
               reviewed_at = CURRENT_TIMESTAMP,
               review_notes = ?
-        WHERE id = ? AND status = 'pending'`,
-      [reviewerId, notes, id]
+        WHERE id = ? AND status = 'pending' AND user_id != ?`,
+      [reviewerId, notes, id, reviewerId]
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
       if (!existing) throw new Error('Attendance record not found');
+      if (existing.userId === reviewerId) throw new Error('Forbidden: cannot reject your own attendance record');
       throw new Error(`Cannot reject record in status '${existing.status}'`);
     }
     logger.info(`Attendance record rejected: id=${id} reviewer=${reviewerId}`);

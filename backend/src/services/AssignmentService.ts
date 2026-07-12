@@ -6,6 +6,7 @@ import { PolicyValidator } from './PolicyValidator';
 import { AssignmentValidator } from './AssignmentValidator';
 import { AssignmentOrchestrator } from './AssignmentOrchestrator';
 import { AuditLogService } from './AuditLogService';
+import { DateUtils } from '../utils';
 
 export class AssignmentService {
   private policyValidator: PolicyValidator;
@@ -92,9 +93,7 @@ export class AssignmentService {
       // Block the assignment if it would exceed configured compliance limits.
       const compliance = await evaluateAssignmentCompliance(this.pool, assignmentData.userId, {
         date:
-          typeof shift.date === 'string'
-            ? shift.date
-            : new Date(shift.date).toISOString().slice(0, 10),
+          typeof shift.date === 'string' ? shift.date : DateUtils.fromMySQLDate(shift.date),
         startTime: shift.start_time,
         endTime: shift.end_time,
       });

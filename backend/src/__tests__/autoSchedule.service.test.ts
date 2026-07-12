@@ -68,7 +68,8 @@ describe('AutoScheduleService.generate', () => {
         null,
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
-      .mockResolvedValueOnce([[], null]); // unavailability
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
     conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
     const service = new AutoScheduleService(pool);
@@ -92,7 +93,8 @@ describe('AutoScheduleService.generate', () => {
         null,
       ])
       .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
     conn.execute.mockRejectedValue(new Error('insert failed'));
 
     const service = new AutoScheduleService(pool);
@@ -112,7 +114,8 @@ describe('AutoScheduleService.generate', () => {
       ], null])
       .mockResolvedValueOnce([[
         { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
-      ], null]);
+      ], null])
+      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
 
     const service = new AutoScheduleService(pool);
     await service.generate(1, 1);

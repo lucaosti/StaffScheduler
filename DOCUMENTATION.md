@@ -380,7 +380,7 @@ The `optimize()` return status is `GREEDY_FALLBACK` when the Python solver was u
 
 ## 7. Module system
 
-Runtime feature flags persisted in the `modules` table. All 9 default modules are enabled on a fresh install.
+Runtime feature flags persisted in the `modules` table. All 11 default modules are enabled on a fresh install.
 
 | Module code | What it guards |
 |---|---|
@@ -393,12 +393,38 @@ Runtime feature flags persisted in the `modules` table. All 9 default modules ar
 | `integrations` | Third-party integrations |
 | `audit` | Audit log viewer |
 | `compliance` | Policies and exception tracking |
+| `attendance` | Clock-in/clock-out punches and approval — see [7a](#7a-attendance-tracking) |
+| `payroll` | Planned-vs-actual labor cost estimation, gates `GET /api/attendance/cost-estimate` on top of `attendance` |
 
 `requireModule(code)` middleware returns **404** (not 401) for disabled modules so consumers cannot infer the route's existence. It runs before `authenticate`.
 
 Admin API: `GET /api/modules`, `PUT /api/modules/:code` (requires `settings.manage`).
 
 > **Note (Tier 3+):** The module-enabled cache is in-process only. With multiple backend instances, cache invalidation is not propagated across instances — one node may serve stale enabled/disabled state. At Tier 3+, replace the in-process cache with a Redis-backed store or add a background job that broadcasts cache invalidation to all instances.
+
+---
+
+## 7a. Attendance tracking
+
+Clock-in/clock-out punches, independent of shift assignment (an employee may punch without one, e.g. for unscheduled work), with a separate approval step before the hours count toward reporting.
+
+```
+POST /api/attendance/clock-in            clock in (self)
+POST /api/attendance/:id/clock-out       clock out an open record (self, ownership-checked)
+GET  /api/attendance                     list (own for employees, all for holders of attendance.approve)
+GET  /api/attendance/:id                 read one (own or approver)
+POST /api/attendance/:id/approve         requires attendance.approve
+POST /api/attendance/:id/reject          requires attendance.approve
+GET  /api/attendance/cost-estimate       planned vs. actual hours/cost for a date range — requires the payroll module and attendance.read
+```
+
+**Lifecycle**: `clock-in` creates a record with `clock_out = NULL, status = 'pending'`. `clock-out` fills `clock_out`. Only a clocked-out record (`clock_out IS NOT NULL`) can be approved; a still-open record can only be rejected outright.
+
+**Separation of duties**: a reviewer holding `attendance.approve` still cannot approve or reject their own record — `AttendanceService.approve`/`reject` guard on `user_id != reviewerId` in the same atomic `UPDATE ... WHERE status = 'pending'` used elsewhere in the codebase, returning a clear "cannot approve your own attendance record" error rather than a generic conflict.
+
+**Cost estimate**: compares planned cost (sum of `shift_assignments` hours × `users.hourly_rate` for the date range) against actual cost (sum of approved `attendance_records` hours × hourly rate) per department. Gated by the `payroll` module in addition to `attendance`, and by `attendance.read`.
+
+Required permissions: `attendance.approve` (approve/reject), `attendance.read` (view others' records and cost estimates). Clock-in/out require no special permission beyond authentication — every user can punch for themselves.
 
 ---
 
@@ -441,9 +467,12 @@ Valid `approverScope` values for `approval_steps`:
 - `policy_owner` — the user who owns the policy being acted on
 - `unit_manager` — manager of the org unit in context
 - `unit_manager_chain` — walks up the org tree and returns the first unit with a manager
+- `unit_structure` — assigns the decision to the org unit as a whole rather than a single person; the unit's head then chooses to keep, delegate, or open it — see [9c](#9c-structure-vs-person-decision-delegation)
 - `company_role` — any active user holding `approverRoleId`
 - `company_user` — a specific user identified by `approverUserId`
 - `responsibility_rule` — resolves approvers dynamically via the responsibility matrix; requires `approverPermissionCode` on the step; `ApprovalEngineService.resolveAllApproversForStep(step, ctx)` returns the full set for fan-out notifications
+
+Every `pending_approvals` row belongs to exactly one entity — `change_request_id`, `time_off_request_id`, `employee_loan_id`, or `shift_swap_request_id` (a `CHECK` constraint enforces exactly one is set). Time-off, employee-loan, and shift-swap approve/reject now route through the same `ApprovalEngineService.decidePendingApproval` as change requests, instead of each having its own bespoke authorization check.
 
 ---
 
@@ -496,6 +525,30 @@ POST   /api/change-requests/:id/cancel  cancel  (own proposer or change_request.
 **`proposedPayload`**: arbitrary JSON object describing the proposed change (e.g. `{ "scheduleId": 42, "action": "publish" }`). The schema is opaque to the service layer; the caller that processes the `apply` event is responsible for interpreting it.
 
 Required permissions: `change_request.create` (propose), `change_request.review` (approve/reject/apply/list). Both are granted to the Manager role by default.
+
+---
+
+## 9c. Structure-vs-person decision delegation
+
+Any workflow-routed decision — change request, time-off, employee loan, or shift swap — can be assigned to an org unit as a whole (`approverScope: 'unit_structure'`) instead of a single person. `pending_approvals.assigned_to_org_unit_id` holds the unit; `assigned_to_user_id` defaults to that unit's head (`org_units.manager_user_id`) so the decision is immediately actionable without the head having to "claim" it first.
+
+The unit head then has three choices for a decision still sitting with them:
+
+```
+POST /api/pending-approvals/:id/keep               keep and decide it personally (idempotent)
+POST /api/pending-approvals/:id/delegate            { targetUserId } — hand it to one member of the unit
+POST /api/pending-approvals/:id/open-to-structure   any member of the unit may now decide it
+GET  /api/pending-approvals/:id/chain               chain of command for this decision
+```
+
+Every keep/delegate/open-to-structure action appends one row to `decision_reassignments` (`action`, `actor_user_id`, `target_user_id`, `created_at`) — an append-only audit trail, never overwritten. `GET .../chain` assembles: the assigned org unit and its head, the full `decision_reassignments` history in order, the current assignee, and who ultimately decided it (`pending_approvals.decided_by_user_id`).
+
+**Authorization**:
+- Deciding a `unit_structure` item: the current assignee, or (once opened) any member of `assigned_to_org_unit_id` — same `ApprovalEngineService.decidePendingApproval` check used for person-assigned decisions.
+- Keeping/delegating/opening: only the unit's head (`requireStructureHead` — verifies `org_units.manager_user_id === headUserId`, and that the decision is still `pending`).
+- Viewing the chain: deliberately broader than deciding it — the original proposer, the current assignee, whoever already decided it, and any member of the assigned structure (regardless of whether it has been opened to the whole team yet), since "who is this decision with" is exactly what an affected team member needs to see.
+
+`approve`/`reject` on `/api/pending-approvals/:id/...` are entity-agnostic: they inspect which of the four entity FKs is set on the `pending_approvals` row and dispatch to the matching service (`ChangeRequestService`, `TimeOffService`, `EmployeeLoanService`, or `ShiftSwapService` — note `ShiftSwapService.decline`, not `.reject`), via the shared `dispatchPendingApprovalDecision` helper (`src/services/PendingApprovalDispatch.ts`).
 
 ---
 
@@ -762,14 +815,14 @@ The following capabilities are planned but not yet implemented. Pull requests fo
 |---|---|
 | Mobile app | Native or PWA for employees to view shifts and request swaps on mobile |
 | Real-time shift swap marketplace | Employees can post and claim swaps without manager intervention |
-| Geofencing | Clock-in/out gated by physical location |
+| Geofencing | GPS/location verification on top of the existing plain clock-in/out (see [7a](#7a-attendance-tracking)) |
 | Predictive demand forecasting | Historical data model to auto-suggest minimum staffing targets |
 | Compliance reporting | Jurisdiction-specific labor rule checks (rest periods, overtime, etc.) |
 | Payroll integration | Export to payroll providers (Gusto, ADP, Workday) |
 | Multi-language / RTL support | i18n for the frontend SPA |
 | SSO / SAML / OAuth2 | Enterprise identity provider federation |
 | Bulk API | Batch endpoints for high-volume integrations |
-| Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in |
+| Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in against the existing `POST /api/attendance/clock-in` endpoint |
 
 ### Future Work
 
@@ -942,8 +995,8 @@ Features are grouped by category:
 | Mobile app (iOS/Android or PWA) | Standard | High | High | The single highest-impact gap. Employees on shift floors do not have desktop access. A React PWA reuses the existing SPA; a native shell (React Native + Expo) gives push notifications but doubles the surface area. |
 | Self-service shift swap marketplace | Standard | High | Medium | Backend `ShiftSwapService` already handles managed swaps; the gap is employee-facing discovery (open shift board) and peer-to-peer offer/accept flow with compliance guardrails. |
 | Push notifications | Standard | High | Medium | Requires a mobile app or browser push (Web Push API). The current SSE stream is server-initiated but cannot wake a closed browser or mobile app. |
-| Geofencing / GPS clock-in | Standard | Medium | Medium | Requires mobile app or kiosk. Backend already has the `on-call` and `assignments` endpoints; clock-in payload just needs a `latitude`/`longitude` field validated against a configured geofence polygon. |
-| Time-clock / kiosk mode | Standard | Medium | Medium | A separate restricted-permission view on a shared tablet. Backend already supports role-scoped access. |
+| Geofencing / GPS clock-in | Standard | Medium | Medium | Plain clock-in/out already exists (`AttendanceService`, see [7a](#7a-attendance-tracking)). This adds a `latitude`/`longitude` field to the existing clock-in payload, validated against a configured geofence polygon — no new endpoints needed. |
+| Time-clock / kiosk mode | Standard | Medium | Medium | A separate restricted-permission view on a shared tablet, reusing the existing `POST /api/attendance/clock-in`/`clock-out` endpoints. Backend already supports role-scoped access. |
 | Reporting dashboard UI | Standard | Medium | Low | The `ReportsService` and `/api/reports` endpoints are complete. The frontend dashboard is a stub. Building charts (e.g., Recharts) on top of existing API responses is straightforward. |
 | SSO / SAML / OAuth2 | Enterprise | High | Medium | Blocks enterprise deals. Passport.js has SAML and OAuth2 strategies. `UserService` would need a federated-identity lookup path alongside local password auth. |
 | Payroll export (ADP, Gusto, Workday) | Enterprise | High | High | Requires per-provider data mapping, OAuth credentials management, and scheduled sync jobs. The `integrations` module is defined but empty. |

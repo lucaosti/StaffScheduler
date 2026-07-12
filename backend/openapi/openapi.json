@@ -4647,6 +4647,78 @@
         }
       }
     },
+    "/org/units/{id}/members/detailed": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "List members of an org unit with display details",
+        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position — used by the org-chart view and the structure-decision delegate picker.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/org/manager-chain": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "Chain of superiors for the caller",
+        "description": "Same as GET /org/manager-chain/{userId}, defaulted to the authenticated caller.",
+        "responses": {
+          "200": {
+            "description": "OK."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/org/manager-chain/{userId}": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "Chain of superiors for a user",
+        "description": "Walks up from the target user's primary org unit to the root, resolving each unit's manager. Open to any authenticated user, same visibility as the rest of the org tree.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/org/units/{id}/members/{userId}": {
       "delete": {
         "tags": [
@@ -8594,6 +8666,178 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/pending-approvals/{id}/keep": {
+      "post": {
+        "tags": [
+          "Pending Approvals"
+        ],
+        "summary": "Structure head keeps a decision for themselves",
+        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent — a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decision kept by the structure head."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/pending-approvals/{id}/delegate": {
+      "post": {
+        "tags": [
+          "Pending Approvals"
+        ],
+        "summary": "Structure head delegates a decision to one team member",
+        "description": "For a decision assigned to an org unit as a whole, the unit head hands it to one specific member of that unit, who becomes the new assignee. 400 if targetUserId is not a member of the structure; 403 if the caller is not the unit's head.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "targetUserId"
+                ],
+                "properties": {
+                  "targetUserId": {
+                    "type": "integer",
+                    "description": "Must be a member of the structure the decision is assigned to."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decision delegated to the target member."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/pending-approvals/{id}/open-to-structure": {
+      "post": {
+        "tags": [
+          "Pending Approvals"
+        ],
+        "summary": "Structure head opens a decision to the whole team",
+        "description": "For a decision assigned to an org unit as a whole, the unit head opens it so that any member of that unit may decide it (not only the head). 403 if the caller is not the unit's head.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decision opened to the structure."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/pending-approvals/{id}/chain": {
+      "get": {
+        "tags": [
+          "Pending Approvals"
+        ],
+        "summary": "Chain of command for a decision",
+        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure — not just whoever is authorized to decide it.",
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Decision chain."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
