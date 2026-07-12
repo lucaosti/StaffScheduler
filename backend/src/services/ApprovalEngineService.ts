@@ -328,6 +328,21 @@ export class ApprovalEngineService {
   }
 
   /**
+   * True when `createPendingApprovalForStep` for this step/context would
+   * attach an approver. Callers use it BEFORE inserting their entity row so
+   * a request whose configured workflow cannot be satisfied (e.g. the
+   * requester has no primary org unit for a unit-scoped step) is rejected
+   * loudly at creation time instead of being inserted and then silently
+   * stranded forever with no approval gate anyone could ever decide.
+   */
+  async canCreatePendingApprovalForStep(step: ApprovalStep, ctx: ResolveContext): Promise<boolean> {
+    if (step.approverScope === 'unit_structure') {
+      return ctx.orgUnitId !== undefined && ctx.orgUnitId !== null;
+    }
+    return (await this.resolveStepApprover(step, ctx)) !== null;
+  }
+
+  /**
    * Creates the pending_approvals row for one step of a workflow, for
    * whichever entity type `entityRef` identifies. When the step's scope is
    * `unit_structure`, assigns the decision to the org unit as a whole

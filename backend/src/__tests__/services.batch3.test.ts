@@ -237,6 +237,7 @@ describe('EmployeeLoanService.create — post-insert null', () => {
     // approvals.getByChangeType (matrix) → unit_manager scope → no extra pool calls for policy_owner
     execute
       .mockResolvedValueOnce([[loanMatrixRow({ approver_scope: 'policy_owner', approver_user_id: 8 })], null] as Tuple) // matrix
+      .mockResolvedValueOnce([[], null] as Tuple)                // getWorkflowByChangeType -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple)  // INSERT loan
       .mockResolvedValueOnce([[], null] as Tuple);               // getById → null
     const svc = new EmployeeLoanService(pool);

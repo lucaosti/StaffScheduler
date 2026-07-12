@@ -110,14 +110,14 @@ describe('ShiftSwapService.create', () => {
 
   it('inserts the swap and returns the persisted row (no workflow configured)', async () => {
     const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]); // getWorkflowByChangeType('ShiftSwap.Request') -> not found (checked before insert)
     conn.execute
       .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null])
       .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null])
       .mockResolvedValueOnce([{ insertId: 42 }, null]);
     execute
       .mockResolvedValueOnce([[buildSwap({ id: 42 })], null]) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]) // audit.write
-      .mockResolvedValueOnce([[], null]); // getWorkflowByChangeType('ShiftSwap.Request') -> not found
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
 
     const service = new ShiftSwapService(pool);
     const created = await service.create({
@@ -129,6 +129,36 @@ describe('ShiftSwapService.create', () => {
     expect(created.id).toBe(42);
     expect(created.targetUserId).toBe(8);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('rejects creation when the workflow exists but the requester has no primary org unit', async () => {
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 10, change_type: 'ShiftSwap.Request', require_all: 0, description: null }], null]) // getWorkflowByChangeType
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 20,
+            workflow_id: 10,
+            step_order: 1,
+            approver_scope: 'unit_structure',
+            approver_role_id: null,
+            approver_user_id: null,
+            approver_permission_code: null,
+            auto_approve_for_owner: 1,
+            escalate_after_hours: 48,
+          },
+        ],
+        null,
+      ]) // hydrate workflow steps
+      .mockResolvedValueOnce([[], null]); // resolvePrimaryOrgUnitForUser -> no membership
+
+    const service = new ShiftSwapService(pool);
+    await expect(
+      service.create({ requesterUserId: 7, requesterAssignmentId: 100, targetAssignmentId: 200 })
+    ).rejects.toThrow(/No approver could be resolved/);
+    // Rejected before the transaction ever opens — no swap row inserted.
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
   });
 });
 
