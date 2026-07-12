@@ -271,6 +271,9 @@ router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'),
     if (message.toLowerCase().includes('not found')) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message } });
     }
+    if (message.startsWith('Cannot archive schedule')) {
+      return res.status(409).json({ success: false, error: { code: 'CONFLICT', message } });
+    }
     logger.error('Error archiving schedule:', error);
     res.status(500).json({
       success: false,

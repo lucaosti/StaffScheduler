@@ -8,8 +8,16 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
-import { getTree, OrgUnitNode } from '../../services/orgService';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
+import {
+  getTree,
+  getManagerChain,
+  listMembersDetailed,
+  OrgUnitNode,
+  ManagerChainLink,
+  OrgUnitMemberDetail,
+} from '../../services/orgService';
 
 const NODE_W = 180;
 const NODE_H = 60;
@@ -91,10 +99,12 @@ interface OrgNodeProps {
   item: TreeNodeLayout;
   collapsed: boolean;
   hasChildren: boolean;
-  onClick: () => void;
+  highlighted: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
 }
 
-const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, onClick }) => {
+const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlighted, onSelect, onToggle }) => {
   const { node, x, y } = item;
   const midX = x + NODE_W / 2;
   const midY = y + NODE_H / 2;
@@ -102,13 +112,12 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, onClick
   return (
     <g
       role="button"
-      aria-label={`${node.name}${hasChildren ? (collapsed ? ', collapsed' : ', expanded') : ''}`}
-      aria-expanded={hasChildren ? !collapsed : undefined}
+      aria-label={`${node.name}${highlighted ? ', part of your reporting chain' : ''}${hasChildren ? (collapsed ? ', collapsed' : ', expanded') : ''}`}
       tabIndex={0}
-      style={{ cursor: hasChildren ? 'pointer' : 'default' }}
-      onClick={hasChildren ? onClick : undefined}
+      style={{ cursor: 'pointer' }}
+      onClick={onSelect}
       onKeyDown={(e) => {
-        if (hasChildren && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); onClick(); }
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(); }
       }}
     >
       <rect
@@ -119,9 +128,9 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, onClick
         rx={8}
         ry={8}
         className="org-node-rect"
-        fill="var(--bs-body-bg, #fff)"
+        fill={highlighted ? 'var(--bs-primary-bg-subtle, #cfe2ff)' : 'var(--bs-body-bg, #fff)'}
         stroke="var(--bs-primary, #0d6efd)"
-        strokeWidth={2}
+        strokeWidth={highlighted ? 3 : 2}
       />
       <text
         x={midX}
@@ -144,25 +153,45 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, onClick
         </text>
       )}
       {hasChildren && (
-        <text
-          x={x + NODE_W - 14}
-          y={y + NODE_H / 2}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          style={{ fontSize: 14, fill: 'var(--bs-primary, #0d6efd)', fontFamily: 'monospace' }}
+        <g
+          role="button"
+          aria-label={collapsed ? `Expand ${node.name}` : `Collapse ${node.name}`}
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); onToggle(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onToggle(); }
+          }}
+          style={{ cursor: 'pointer' }}
         >
-          {collapsed ? '+' : '−'}
-        </text>
+          <rect x={x + NODE_W - 26} y={y + NODE_H / 2 - 10} width={20} height={20} fill="transparent" />
+          <text
+            x={x + NODE_W - 14}
+            y={y + NODE_H / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            style={{ fontSize: 14, fill: 'var(--bs-primary, #0d6efd)', fontFamily: 'monospace' }}
+          >
+            {collapsed ? '+' : '−'}
+          </text>
+        </g>
       )}
     </g>
   );
 };
 
 const OrgChart: React.FC = () => {
+  const { user } = useAuth();
   const [roots, setRoots] = useState<OrgUnitNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+
+  const [myChain, setMyChain] = useState<ManagerChainLink[]>([]);
+
+  const [selectedNode, setSelectedNode] = useState<OrgUnitNode | null>(null);
+  const [members, setMembers] = useState<OrgUnitMemberDetail[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [membersError, setMembersError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -177,7 +206,21 @@ const OrgChart: React.FC = () => {
     }
   }, []);
 
+  const loadMyChain = useCallback(async () => {
+    try {
+      const res = await getManagerChain();
+      setMyChain(res.data ?? []);
+    } catch {
+      setMyChain([]);
+    }
+  }, []);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadMyChain(); }, [loadMyChain]);
+
+  // Units the current user belongs to or reports up through — used to
+  // highlight "your" branch of the tree.
+  const myUnitIds = useMemo(() => new Set(myChain.map((l) => l.unitId)), [myChain]);
 
   const toggleNode = (id: number) => {
     setCollapsed((prev) => {
@@ -186,6 +229,20 @@ const OrgChart: React.FC = () => {
       else next.add(id);
       return next;
     });
+  };
+
+  const selectNode = async (node: OrgUnitNode) => {
+    setSelectedNode(node);
+    setMembersLoading(true);
+    setMembersError(null);
+    try {
+      const res = await listMembersDetailed(node.id);
+      setMembers(res.data ?? []);
+    } catch (e) {
+      setMembersError((e as Error).message ?? 'Failed to load members.');
+    } finally {
+      setMembersLoading(false);
+    }
   };
 
   const expandAll = () => setCollapsed(new Set());
@@ -208,7 +265,7 @@ const OrgChart: React.FC = () => {
         <div className="col d-flex align-items-center justify-content-between">
           <div>
             <h1 className="h3 mb-0">Organisation Chart</h1>
-            <p className="text-muted mb-0 small">Interactive hierarchy of org units</p>
+            <p className="text-muted mb-0 small">Browse every office top-down; click one to see who's in it</p>
           </div>
           <div className="d-flex gap-2">
             <button className="btn btn-sm btn-outline-secondary" onClick={expandAll} aria-label="Expand all nodes">
@@ -227,6 +284,29 @@ const OrgChart: React.FC = () => {
       {error && (
         <div className="alert alert-danger" role="alert">
           <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
+        </div>
+      )}
+
+      {myChain.length > 0 && (
+        <div className="card mb-3">
+          <div className="card-body py-2">
+            <div className="d-flex align-items-center flex-wrap gap-2">
+              <span className="text-muted small fw-semibold text-uppercase">Your reporting chain</span>
+              {myChain.map((link, i) => (
+                <React.Fragment key={link.unitId}>
+                  {i > 0 && <i className="bi bi-chevron-right text-muted small" aria-hidden="true"></i>}
+                  <span className="small">
+                    <span className="fw-semibold">{link.unitName}</span>
+                    {link.manager ? (
+                      <span className="text-muted"> — {link.manager.firstName} {link.manager.lastName}</span>
+                    ) : (
+                      <span className="text-muted fst-italic"> — no manager assigned</span>
+                    )}
+                  </span>
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -271,7 +351,9 @@ const OrgChart: React.FC = () => {
                     item={item}
                     collapsed={collapsed.has(item.node.id)}
                     hasChildren={item.node.children.length > 0}
-                    onClick={() => toggleNode(item.node.id)}
+                    highlighted={myUnitIds.has(item.node.id)}
+                    onSelect={() => void selectNode(item.node)}
+                    onToggle={() => toggleNode(item.node.id)}
                   />
                 ))}
               </svg>
@@ -279,6 +361,57 @@ const OrgChart: React.FC = () => {
           )}
         </div>
       </div>
+
+      {selectedNode && (
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`${selectedNode.name} details`}>
+          <div className="modal-dialog modal-dialog-scrollable">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">
+                  {selectedNode.name}
+                  {myUnitIds.has(selectedNode.id) && (
+                    <span className="badge bg-primary ms-2">You report here</span>
+                  )}
+                </h5>
+                <button type="button" className="btn-close" aria-label="Close" onClick={() => setSelectedNode(null)}></button>
+              </div>
+              <div className="modal-body">
+                {selectedNode.description && (
+                  <p className="text-muted small">{selectedNode.description}</p>
+                )}
+                {membersError && (
+                  <div className="alert alert-danger py-2 small" role="alert">{membersError}</div>
+                )}
+                {membersLoading ? (
+                  <div className="d-flex align-items-center justify-content-center py-4">
+                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading members"></span>Loading…
+                  </div>
+                ) : members.length === 0 ? (
+                  <p className="text-muted small mb-0">No members in this office.</p>
+                ) : (
+                  <ul className="list-group list-group-flush">
+                    {members.map((m) => (
+                      <li key={m.userId} className="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div>
+                          <div className="fw-semibold">
+                            {m.firstName} {m.lastName}
+                            {user && Number(user.id) === m.userId && (
+                              <span className="badge bg-secondary ms-2">You</span>
+                            )}
+                          </div>
+                          <div className="text-muted small">{m.email}{m.position ? ` · ${m.position}` : ''}</div>
+                        </div>
+                        {m.isPrimary && <span className="badge bg-success">Primary</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="modal-backdrop fade show"></div>
+        </div>
+      )}
     </div>
   );
 };
