@@ -7,6 +7,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import PendingApprovals from './PendingApprovals';
+import { PendingApprovalItem } from '../../services/pendingApprovalService';
 
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 5, email: 'manager@demo.staffscheduler.local' } }),
@@ -42,7 +43,7 @@ const { listMembersDetailed: mockListMembers } = jest.requireMock('../../service
   listMembersDetailed: jest.Mock;
 };
 
-const ITEM_1 = {
+const ITEM_1: PendingApprovalItem = {
   id: 1,
   changeRequestId: 10,
   timeOffRequestId: null,
@@ -62,27 +63,27 @@ const ITEM_1 = {
   createdAt: '2024-01-15T10:00:00.000Z',
   updatedAt: '2024-01-15T10:00:00.000Z',
   changeType: 'TimeOff.Request',
-  targetEntityType: 'leave',
+  targetEntityType: 'change_request',
   targetEntityId: null,
   proposedPayload: { days: 3, type: 'vacation' },
   justification: 'Family event',
   proposerUserId: 3,
 };
 
-const ITEM_2 = {
+const ITEM_2: PendingApprovalItem = {
   ...ITEM_1,
   id: 2,
   changeRequestId: 11,
   status: 'approved',
   changeType: 'Schedule.Change',
-  targetEntityType: 'shift',
+  targetEntityType: 'change_request',
   targetEntityId: 42,
   proposedPayload: { shiftId: 42 },
   justification: null,
   proposerUserId: 7,
 };
 
-const makeResponse = (items = [ITEM_1, ITEM_2]) => ({
+const makeResponse = (items: PendingApprovalItem[] = [ITEM_1, ITEM_2]) => ({
   success: true,
   data: { items, total: items.length },
 });
