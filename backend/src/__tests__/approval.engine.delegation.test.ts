@@ -304,7 +304,7 @@ describe('ApprovalEngineService.getDecisionChain', () => {
       .mockResolvedValueOnce([[{ name: 'Anna Demo' }], null] as Tuple); // decidedByName lookup
 
     const engine = new ApprovalEngineService(pool);
-    const chain = await engine.getDecisionChain(501);
+    const chain = await engine.getDecisionChain(501, 12);
 
     expect(chain.assignedToOrgUnit).toEqual({ id: 3, name: 'Emergency Department', headUserId: 30, headName: 'Mara Demo' });
     expect(chain.reassignments).toHaveLength(1);
@@ -321,9 +321,44 @@ describe('ApprovalEngineService.getDecisionChain', () => {
       .mockResolvedValueOnce([[], null] as Tuple); // decision_reassignments — none
 
     const engine = new ApprovalEngineService(pool);
-    const chain = await engine.getDecisionChain(501);
+    const chain = await engine.getDecisionChain(501, 7);
     expect(chain.assignedToOrgUnit).toBeNull();
     expect(chain.reassignments).toEqual([]);
     expect(chain.decidedByName).toBeNull();
+  });
+
+  it('rejects a caller with no relation to the decision (not assignee, structure member, or proposer)', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_org_unit_id: null, assigned_to_user_id: 7 })], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([[{ proposer_user_id: 55 }], null] as Tuple); // getProposerUserId -> shift_swap_requests, not the caller
+
+    const engine = new ApprovalEngineService(pool);
+    await expect(engine.getDecisionChain(501, 999)).rejects.toThrow(/Forbidden/);
+  });
+
+  it('lets the original proposer view the chain even when not the current assignee', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_org_unit_id: null, assigned_to_user_id: 7 })], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([[{ proposer_user_id: 55 }], null] as Tuple) // getProposerUserId -> matches caller
+      .mockResolvedValueOnce([[], null] as Tuple); // decision_reassignments — none
+
+    const engine = new ApprovalEngineService(pool);
+    const chain = await engine.getDecisionChain(501, 55);
+    expect(chain.assignedToOrgUnit).toBeNull();
+  });
+
+  it('lets any member of the assigned structure view the chain, even before it is opened to the whole team', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_org_unit_id: 3, assigned_to_user_id: 30, open_to_structure: 0 })], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([[{ dummy: 1 }], null] as Tuple) // user_org_units membership check -> found
+      .mockResolvedValueOnce([[{ id: 3, name: 'Emergency Department', manager_user_id: 30, head_name: 'Mara Demo' }], null] as Tuple) // org unit + head
+      .mockResolvedValueOnce([[], null] as Tuple); // decision_reassignments — none
+
+    const engine = new ApprovalEngineService(pool);
+    const chain = await engine.getDecisionChain(501, 999);
+    expect(chain.assignedToOrgUnit?.id).toBe(3);
   });
 });

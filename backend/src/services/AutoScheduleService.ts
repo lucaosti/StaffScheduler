@@ -9,8 +9,10 @@
  *   3. Build an OptimizationProblem, call ScheduleOptimizer.
  *   4. Persist resulting assignments inside a single transaction.
  *
- * Today we use the greedy fallback (no Python required); the OR-Tools
- * path is opt-in via OPTIMIZATION_ENGINE=or-tools.
+ * Defaults to the pure-TypeScript greedy fallback (no Python required).
+ * Set OPTIMIZATION_ENGINE=or-tools to route through the Python OR-Tools
+ * CP-SAT solver instead — see ScheduleOptimizer.optimize(), which itself
+ * falls back to greedy if Python is unavailable or times out.
  *
  * @author Luca Ostinelli
  */
@@ -19,6 +21,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
+import { config } from '../config';
 
 interface AutoScheduleResult {
   scheduleId: number;
@@ -155,7 +158,14 @@ export class AutoScheduleService {
       },
     };
 
-    const assignments = await optimizer.generateGreedySchedule(problem as never);
+    // config.optimization.engine === 'or-tools' routes through the Python
+    // CP-SAT solver (optimize() falls back to the greedy path itself if
+    // Python is unavailable or times out); any other value goes straight to
+    // the greedy fallback, skipping the child-process round-trip entirely.
+    const assignments =
+      config.optimization.engine === 'or-tools'
+        ? (await optimizer.optimize(problem as never)).assignments
+        : await optimizer.generateGreedySchedule(problem as never);
 
     // 4. Persist assignments.
     const conn = await this.pool.getConnection();

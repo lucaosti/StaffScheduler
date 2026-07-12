@@ -1,5 +1,5 @@
 /**
- * Manager actor ("responsabile thread").
+ * Manager actor ("responsible-party thread").
  *
  * Polls the pending approvals assigned to one head user and, for each item,
  * deterministically either:
@@ -10,9 +10,10 @@
  *     assignee, delegates it to a random member of that structure instead of
  *     deciding it (exercising the delegation chain built earlier).
  *
- * Delegated items are picked up later by the delegate's own actor turn
- * (see `runDelegateCheck` in index.ts) — that's what makes "i responsabili"
- * plural: a delegated employee becomes a deciding thread too.
+ * Delegated items are picked up later by the delegate's own actor turn (see
+ * `runDelegateCheck` in index.ts) — that's what makes the set of "deciding
+ * threads" open-ended rather than fixed to the org-unit heads: a delegated
+ * employee becomes a deciding thread too.
  *
  * @author Luca Ostinelli
  */
@@ -21,6 +22,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { PendingApprovalService } from '../../src/services/PendingApprovalService';
 import { ApprovalEngineService } from '../../src/services/ApprovalEngineService';
 import { dispatchPendingApprovalDecision } from '../../src/services/PendingApprovalDispatch';
+import { PendingApprovalWithContext } from '../../src/types';
 import { Rng } from './prng';
 import { MegaLog } from './megaLog';
 
@@ -31,6 +33,15 @@ export interface Decision {
   decision: 'approved' | 'rejected' | 'delegated';
   decidedBy: number;
   delegatedTo?: number;
+}
+
+function kindOf(item: PendingApprovalWithContext): Decision['kind'] {
+  switch (item.targetEntityType) {
+    case 'time_off_request': return 'time_off';
+    case 'employee_loan': return 'loan';
+    case 'shift_swap_request': return 'shift_swap';
+    default: return 'change_request';
+  }
 }
 
 async function membersOf(pool: Pool, orgUnitId: number): Promise<number[]> {
@@ -60,13 +71,7 @@ export async function runManagerActor(
 
   const items = await svc.listForUser(headUserId, 'pending');
   for (const item of items) {
-    const kind = item.targetEntityType === 'time_off_request'
-      ? 'time_off'
-      : item.targetEntityType === 'employee_loan'
-        ? 'loan'
-        : item.targetEntityType === 'shift_swap_request'
-          ? 'shift_swap'
-          : 'change_request';
+    const kind = kindOf(item);
 
     const isUnclaimedStructureItem =
       item.assignedToOrgUnitId !== null && item.assignedToUserId === headUserId && !item.openToStructure;
@@ -113,13 +118,7 @@ export async function runDelegateCheck(pool: Pool, log: MegaLog, userId: number)
   const items = await svc.listForUser(userId, 'pending');
   const decisions: Decision[] = [];
   for (const item of items) {
-    const kind = item.targetEntityType === 'time_off_request'
-      ? 'time_off'
-      : item.targetEntityType === 'employee_loan'
-        ? 'loan'
-        : item.targetEntityType === 'shift_swap_request'
-          ? 'shift_swap'
-          : 'change_request';
+    const kind = kindOf(item);
     decisions.push(await decideOne(pool, log, userId, item.id, kind, item.targetEntityId!));
   }
   return decisions;

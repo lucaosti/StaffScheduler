@@ -57,7 +57,11 @@ describe('ApprovalEngineService.processEscalations', () => {
     const result = await svc.processEscalations();
 
     expect(result.escalated).toBe(1);
-    expect(result.items[0]).toMatchObject({ pendingApprovalId: 1, changeRequestId: 10, escalatedToUserId: 7 });
+    expect(result.items[0]).toMatchObject({
+      pendingApprovalId: 1,
+      entityRef: { changeRequestId: 10 },
+      escalatedToUserId: 7,
+    });
 
     // UPDATE must set status = 'escalated'.
     const updateCall = execute.mock.calls[1];

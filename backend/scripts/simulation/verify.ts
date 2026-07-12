@@ -11,9 +11,9 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { EmployeeLoanService } from '../../src/services/EmployeeLoanService';
+import { DateUtils } from '../../src/utils';
 import { MegaLog } from './megaLog';
 import { SubmittedRequest } from './employeeActor';
-import { Decision } from './managerActor';
 
 async function verifyTimeOff(pool: Pool, log: MegaLog, req: SubmittedRequest): Promise<void> {
   const [rows] = await pool.execute<RowDataPacket[]>(
@@ -44,8 +44,8 @@ async function verifyTimeOff(pool: Pool, log: MegaLog, req: SubmittedRequest): P
     const ok =
       !!u &&
       u.user_id === req.userId &&
-      fmtDate(u.start_date) === req.startDate &&
-      fmtDate(u.end_date) === req.endDate;
+      toDateString(u.start_date) === req.startDate &&
+      toDateString(u.end_date) === req.endDate;
     log.verify(
       ok,
       `time_off #${req.id}`,
@@ -166,8 +166,7 @@ async function verifyShiftSwap(pool: Pool, log: MegaLog, req: SubmittedRequest):
 export async function verifyAllRequests(
   pool: Pool,
   log: MegaLog,
-  requests: SubmittedRequest[],
-  _decisions: Decision[]
+  requests: SubmittedRequest[]
 ): Promise<void> {
   log.section('VERIFY: request outcomes vs. actual database state');
   for (const req of requests) {
@@ -177,16 +176,8 @@ export async function verifyAllRequests(
   }
 }
 
-// mysql2 returns DATE columns as a JS Date at local midnight — building the
-// string from .toISOString() would shift it back a day in any UTC+ timezone.
-// Use local date components instead (same fix as Schedule.tsx's month view).
-function fmtDate(raw: unknown): string {
-  if (typeof raw === 'string') return raw.slice(0, 10);
-  const d = raw as Date;
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+function toDateString(raw: unknown): string {
+  return typeof raw === 'string' ? raw.slice(0, 10) : DateUtils.fromMySQLDate(raw as Date);
 }
 
 function midpointDate(start: string, end: string): string {

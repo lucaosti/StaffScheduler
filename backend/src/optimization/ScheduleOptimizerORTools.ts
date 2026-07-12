@@ -12,13 +12,19 @@
  *
  * Greedy algorithm complexity: O(shifts × employees) per run.
  *
- * Constraints enforced by the greedy fallback (in priority order):
- *   1. Skill requirements — employee must hold every skill the shift demands
- *   2. Declared unavailability — date-level blocks from user_unavailability
- *   3. No double-booking — time-overlap detection within a calendar day
- *   4. Daily hours cap — total hours already assigned on that date must not
+ * Constraints enforced by the greedy fallback (see evaluateCandidate, in
+ * evaluation order — the numbering matches that method's inline comments):
+ *   1. Staff cap — assignments per shift are capped at max_staff
+ *   2. No double-booking — time-overlap detection within a calendar day
+ *   2b. Minimum rest between shifts — same rule as ComplianceEngine's
+ *       checkMinRest, including across different (typically adjacent) days
+ *   3. Declared unavailability — date-level blocks from user_unavailability
+ *   4. Skill requirements — employee must hold every skill the shift demands
+ *   5. Daily hours cap — total hours already assigned on that date must not
  *      exceed the employee's daily budget (max_hours_per_week / 5)
- *   5. Staff cap — assignments per shift are capped at max_staff
+ *   6. Weekly hours cap — rolling 7-day window, matching
+ *      ComplianceEngine.checkMaxWeeklyHours
+ *   7. Max consecutive working days
  *
  * To add a new constraint:
  *   1. Add any needed state tracking in generateGreedySchedule (e.g. a new Map).
@@ -585,9 +591,11 @@ export class ScheduleOptimizer {
    * Known limitations:
    * - No backtracking — a locally greedy choice may block a later shift from
    *   being staffed. The CP-SAT path handles this globally.
-   * - Overlap detection only compares shifts that share the same date. An
-   *   overnight shift is detected against same-date shifts, but not against a
-   *   next-day shift it spills into. The CP-SAT path handles this globally.
+   * - Same-day overlap detection (_hasOverlappingShift) only compares shifts
+   *   sharing the same date, so an overnight shift is checked against
+   *   same-date shifts but not a next-day shift it spills into. This is a
+   *   separate concern from minimum rest between shifts, which
+   *   _wouldViolateMinRest does check across day boundaries.
    */
   async generateGreedySchedule(problem: OptimizationProblem): Promise<ScheduleAssignment[]> {
     logger.info('Generating greedy schedule as fallback');
