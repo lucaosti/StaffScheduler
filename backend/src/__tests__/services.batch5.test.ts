@@ -185,23 +185,16 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
     };
     execute
       .mockResolvedValueOnce([[matrixRow], null] as Tuple)            // ApprovalMatrixService.getByChangeType
+      .mockResolvedValueOnce([[], null] as Tuple)                     // getWorkflowByChangeType -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 5, affectedRows: 1 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow], null] as Tuple)              // getById
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)       // audit INSERT for loan.create
       .mockResolvedValueOnce([[{ id: 1, manager_user_id: null }], null] as Tuple); // fanOut org_units
-    // The fire-and-forget notifyAsync() call and the subsequent
-    // getWorkflowByChangeType('Loan.Request') check race on the microtask
-    // queue in a way that isn't worth pinning to an exact call index; resolve
-    // any further call generically, except the workflow lookup (matched by
-    // SQL content) which must report "not found" to skip pending_approval
-    // creation — this test is only about the notification fan-out.
-    execute.mockImplementation((sql: string) =>
-      Promise.resolve(
-        typeof sql === 'string' && sql.includes('approval_workflows')
-          ? [[], null]
-          : [{ insertId: 99, affectedRows: 1 }, null]
-      )
-    );
+    // The fire-and-forget notifyAsync() call races on the microtask queue in
+    // a way that isn't worth pinning to an exact call index; resolve any
+    // further call generically — this test is only about the notification
+    // fan-out.
+    execute.mockImplementation(() => Promise.resolve([{ insertId: 99, affectedRows: 1 }, null]));
 
     const svc = new EmployeeLoanService(pool);
     const result = await svc.create({

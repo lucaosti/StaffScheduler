@@ -1,14 +1,19 @@
 /**
  * Simulation org setup.
  *
- * Reuses a named department (default "Operations", looked up by name) and
- * its matching org unit as the simulated workforce, topping it up with as
- * many synthetic employees as the run asks for (on top of whatever demo
- * employees already exist there). Passing a different `--department` name
- * exercises a different structure and a different approving manager — if
- * the named department/org unit doesn't exist yet, both are created on the
- * fly with a fresh synthetic head, rather than being restricted to whatever
- * the demo seed happens to contain.
+ * Builds the simulated organization from a list of department specs
+ * (`name:count` pairs): each department gets (or reuses, when the demo seed
+ * already contains it) its own department row, org unit, and approving head
+ * — created on the fly with a fresh synthetic manager when missing — plus a
+ * roster topped up with synthetic employees until it reaches the requested
+ * size. Different specs across runs exercise different structures and
+ * different approving managers.
+ *
+ * A user already present in more than one department (e.g. the demo admin,
+ * who belongs to every demo department) is claimed by the first department
+ * that finds them and excluded from later rosters — otherwise the same user
+ * id would run as two concurrent employee actors sharing one deterministic
+ * RNG stream, filing duplicate requests.
  *
  * Schedule periods are NOT created here — the whole point of the rolling
  * simulation (see index.ts) is that nothing is pre-staffed. Every period's
@@ -25,7 +30,13 @@ import { MegaLog } from './megaLog';
 const SIM_EMAIL_PREFIX = 'simemp';
 const SIM_PASSWORD = 'simulation-not-a-real-login';
 
+export interface DepartmentSpec {
+  name: string;
+  count: number;
+}
+
 export interface SimOrg {
+  name: string;
   departmentId: number;
   orgUnitId: number;
   headUserId: number;
@@ -124,7 +135,8 @@ async function topUpEmployees(
   departmentId: number,
   orgUnitId: number,
   departmentName: string,
-  targetCount: number
+  targetCount: number,
+  claimedUserIds: Set<number>
 ): Promise<number[]> {
   const employeeRoleId = await (async () => {
     const [rows] = await pool.execute<RowDataPacket[]>(`SELECT id FROM roles WHERE name = 'Employee' LIMIT 1`);
@@ -132,13 +144,34 @@ async function topUpEmployees(
     return rows[0].id as number;
   })();
 
+  // Roster members must belong to the structure they act in: without a
+  // primary org-unit membership, no approver can be resolved for their
+  // requests (the services now reject such requests loudly at creation).
+  // Some demo-seeded department members have no membership at all — adopt
+  // them into this department's unit, exactly like HR fixing an incomplete
+  // record before the person starts filing requests.
+  const [adoptRes] = await pool.execute<ResultSetHeader>(
+    `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
+     SELECT u.id, ?, 1 FROM users u
+       JOIN user_departments ud ON ud.user_id = u.id
+      WHERE ud.department_id = ? AND u.is_active = 1
+        AND NOT EXISTS (SELECT 1 FROM user_org_units x WHERE x.user_id = u.id AND x.is_primary = 1)`,
+    [orgUnitId, departmentId]
+  );
+  if (adoptRes.affectedRows > 0) {
+    log.info(
+      `Adopted ${adoptRes.affectedRows} pre-existing "${departmentName}" member(s) without a primary org unit into unit id=${orgUnitId}.`
+    );
+  }
+
   const [existingRows] = await pool.execute<RowDataPacket[]>(
     `SELECT u.id FROM users u
        JOIN user_departments ud ON ud.user_id = u.id
       WHERE ud.department_id = ? AND u.is_active = 1`,
     [departmentId]
   );
-  const existingIds = existingRows.map((r) => r.id as number);
+  // A user already claimed by an earlier department keeps acting there only.
+  const existingIds = existingRows.map((r) => r.id as number).filter((id) => !claimedUserIds.has(id));
 
   const missing = targetCount - existingIds.length;
   if (missing <= 0) {
@@ -180,21 +213,29 @@ async function topUpEmployees(
   return [...existingIds, ...newIds];
 }
 
-/** Sets up (or tops up) the simulated org: department, org unit, roster.
- *  `departmentName` selects (or creates) the structure to simulate against —
- *  passing a different name exercises a different department/org-unit pair
- *  and a different approving manager. */
-export async function setupSimOrg(
-  pool: Pool,
-  log: MegaLog,
-  employeeCount: number,
-  departmentName = 'Operations'
-): Promise<SimOrg> {
+/** Sets up (or tops up) the whole simulated org: one department, org unit,
+ *  approving head, and roster per spec. Rosters are disjoint — a user found
+ *  in several departments acts only in the first one that claimed them. */
+export async function setupSimOrgs(pool: Pool, log: MegaLog, specs: DepartmentSpec[]): Promise<SimOrg[]> {
   log.section('SETUP: simulated organization');
-  const { departmentId, orgUnitId, headUserId } = await ensureOrg(pool, log, departmentName);
-  log.info(`Using department "${departmentName}" id=${departmentId}, org unit id=${orgUnitId}, head user id=${headUserId}.`);
+  log.info(`Structure: ${specs.map((s) => `${s.name}=${s.count}`).join(', ')} (${specs.length} departments).`);
 
-  const employeeUserIds = await topUpEmployees(pool, log, departmentId, orgUnitId, departmentName, employeeCount);
-
-  return { departmentId, orgUnitId, headUserId, employeeUserIds };
+  const claimedUserIds = new Set<number>();
+  const orgs: SimOrg[] = [];
+  for (const spec of specs) {
+    const { departmentId, orgUnitId, headUserId } = await ensureOrg(pool, log, spec.name);
+    log.info(`Using department "${spec.name}" id=${departmentId}, org unit id=${orgUnitId}, head user id=${headUserId}.`);
+    const employeeUserIds = await topUpEmployees(
+      pool,
+      log,
+      departmentId,
+      orgUnitId,
+      spec.name,
+      spec.count,
+      claimedUserIds
+    );
+    for (const id of employeeUserIds) claimedUserIds.add(id);
+    orgs.push({ name: spec.name, departmentId, orgUnitId, headUserId, employeeUserIds });
+  }
+  return orgs;
 }

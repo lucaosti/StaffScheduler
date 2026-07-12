@@ -100,6 +100,23 @@ export class TimeOffService {
       throw new Error('endDate must be on or after startDate');
     }
 
+    // Resolve the approval gate BEFORE inserting the request. A request
+    // whose configured workflow cannot attach an approver (e.g. the
+    // requester has no primary org unit for a unit-scoped step) would
+    // otherwise be inserted 'pending' with no pending_approvals row —
+    // permanently undecidable by anyone. Fail loudly instead.
+    const workflow = await this.engine.getWorkflowByChangeType('TimeOff.Request');
+    let workflowCtx: { actorUserId: number; orgUnitId: number | undefined } | null = null;
+    if (workflow && workflow.steps.length > 0) {
+      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.userId);
+      workflowCtx = { actorUserId: input.userId, orgUnitId: orgUnitId ?? undefined };
+      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+        throw new Error(
+          'No approver could be resolved for this time-off request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
+        );
+      }
+    }
+
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO time_off_requests (user_id, start_date, end_date, type, reason, status)
        VALUES (?, ?, ?, ?, ?, 'pending')`,
@@ -124,15 +141,20 @@ export class TimeOffService {
       after: { id: created.id, status: created.status, startDate: created.startDate, endDate: created.endDate },
     });
 
-    const workflow = await this.engine.getWorkflowByChangeType('TimeOff.Request');
-    if (workflow && workflow.steps.length > 0) {
-      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.userId);
-      await this.engine.createPendingApprovalForStep(
+    if (workflow && workflow.steps.length > 0 && workflowCtx) {
+      const pa = await this.engine.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { timeOffRequestId: created.id },
-        { actorUserId: input.userId, orgUnitId: orgUnitId ?? undefined }
+        workflowCtx
       );
+      if (!pa) {
+        // The pre-insert check passed but resolution changed underneath us
+        // (e.g. a concurrent membership removal). Never leave a stranded,
+        // undecidable request behind.
+        await this.pool.execute(`DELETE FROM time_off_requests WHERE id = ?`, [created.id]);
+        throw new Error('No approver could be resolved for this time-off request — approver resolution changed during creation. Please retry.');
+      }
     }
 
     return created;

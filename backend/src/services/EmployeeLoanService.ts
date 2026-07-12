@@ -112,6 +112,21 @@ export class EmployeeLoanService {
     const approverId = resolved.approverUserId;
     const reviewedAt = resolved.autoApprove ? new Date() : null;
 
+    // Resolve the approval gate BEFORE inserting the loan: a pending loan
+    // whose configured workflow cannot attach an approver (e.g. the target
+    // unit has no manager for a unit-scoped step) would otherwise be
+    // inserted with no pending_approvals row — permanently undecidable by
+    // anyone. Fail loudly instead.
+    const workflow = resolved.autoApprove ? null : await this.engine.getWorkflowByChangeType('Loan.Request');
+    const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
+    if (workflow && workflow.steps.length > 0) {
+      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+        throw new Error(
+          'No approver could be resolved for this loan request — the target organizational unit has no manager who can decide it. Ask an administrator to fix the assignment.'
+        );
+      }
+    }
+
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO employee_loans
          (user_id, from_org_unit_id, to_org_unit_id, start_date, end_date, reason,
@@ -148,15 +163,19 @@ export class EmployeeLoanService {
 
     await this.fanOutNotifications(created);
 
-    if (!resolved.autoApprove) {
-      const workflow = await this.engine.getWorkflowByChangeType('Loan.Request');
-      if (workflow && workflow.steps.length > 0) {
-        await this.engine.createPendingApprovalForStep(
-          workflow.id,
-          workflow.steps[0],
-          { employeeLoanId: created.id },
-          { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId }
-        );
+    if (workflow && workflow.steps.length > 0) {
+      const pa = await this.engine.createPendingApprovalForStep(
+        workflow.id,
+        workflow.steps[0],
+        { employeeLoanId: created.id },
+        workflowCtx
+      );
+      if (!pa) {
+        // The pre-insert check passed but resolution changed underneath us
+        // (e.g. the target unit's manager was concurrently removed). Never
+        // leave a stranded, undecidable request behind.
+        await this.pool.execute(`DELETE FROM employee_loans WHERE id = ?`, [created.id]);
+        throw new Error('No approver could be resolved for this loan request — approver resolution changed during creation. Please retry.');
       }
     }
 
