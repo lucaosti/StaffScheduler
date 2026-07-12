@@ -44,7 +44,7 @@ export interface PendingApprovalListResponse {
   total: number;
 }
 
-export type DecisionReassignmentAction = 'kept' | 'delegated_to_person' | 'opened_to_structure';
+type DecisionReassignmentAction = 'kept' | 'delegated_to_person' | 'opened_to_structure';
 
 export interface DecisionChain {
   pendingApprovalId: number;
