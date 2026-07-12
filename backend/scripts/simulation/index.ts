@@ -103,6 +103,12 @@ function parseArgs(): {
       }
       return { name: name.trim(), count };
     });
+    // A duplicated name would resolve to the same department/org unit and
+    // corrupt the per-department round bookkeeping.
+    const names = new Set(departments.map((d) => d.name));
+    if (names.size !== departments.length) {
+      throw new Error('Duplicate department names in --departments — every department must be distinct.');
+    }
   } else {
     departments = [{ name: getStr('department', 'Operations'), count: get('employees', 2000) }];
   }
@@ -385,6 +391,39 @@ async function main(): Promise<void> {
         state.previousLabel = `${org.name} ${label}`;
         state.previousAssignmentsByUser = await loadAssignmentsByUser(pool, scheduleId);
       }
+    }
+
+    // ---- FINAL CHECK: per-employee request minimum -----------------------
+    // The actor retries until it hits its per-round target, but the retry
+    // budget is finite — make the guarantee an explicit, automatic check
+    // instead of an assumption. Every employee must have submitted at least
+    // requestsMin × rounds requests across the whole run.
+    log.section('VERIFY: per-employee request minimum');
+    const guaranteedMinimum = requestsMin * rounds;
+    const submittedByUser = new Map<number, number>();
+    for (const req of allRequests) {
+      submittedByUser.set(req.userId, (submittedByUser.get(req.userId) ?? 0) + 1);
+    }
+    let belowMinimum = 0;
+    let observedMinimum = Number.POSITIVE_INFINITY;
+    for (const userId of allEmployeeUserIds) {
+      const submitted = submittedByUser.get(userId) ?? 0;
+      observedMinimum = Math.min(observedMinimum, submitted);
+      if (submitted < guaranteedMinimum) {
+        belowMinimum++;
+        log.verify(
+          false,
+          `employee #${userId}`,
+          `submitted only ${submitted} requests across the run — guaranteed minimum is ${guaranteedMinimum}`
+        );
+      }
+    }
+    if (belowMinimum === 0) {
+      log.verify(
+        true,
+        'per-employee request minimum',
+        `all ${allEmployeeUserIds.length} employees submitted at least ${guaranteedMinimum} requests (observed minimum: ${observedMinimum})`
+      );
     }
 
     // ---- SUMMARY ------------------------------------------------------------
