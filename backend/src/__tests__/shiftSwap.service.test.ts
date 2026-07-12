@@ -159,22 +159,14 @@ describe('ShiftSwapService.approve', () => {
   });
 
   /** Queues the pool.execute calls `ShiftSwapService.approve`'s upfront
-   *  `wouldBeFinalStep` check + compliance dry run make, before it ever calls
-   *  `decidePendingApproval` — getPendingApprovalById, the next-step lookup
-   *  (empty => final), then the assignment-pair read for the dry-run
-   *  compliance check. */
+   *  `wouldBeFinalStep` check makes — getPendingApprovalById, then the
+   *  next-step lookup (empty => final). The swap itself (compliance,
+   *  assignment updates) is now validated and applied entirely inside the
+   *  transaction, before decidePendingApproval is ever called. */
   const queueApprovePreChecks = (execute: jest.Mock) => {
     execute
       .mockResolvedValueOnce([[buildPendingApprovalRow()], null]) // wouldBeFinalStep: getPendingApprovalById
-      .mockResolvedValueOnce([[], null]) // wouldBeFinalStep: next-step lookup -> none (final)
-      .mockResolvedValueOnce([
-        [
-          { assignment_id: 100, user_id: 7, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
-          { assignment_id: 200, user_id: 8, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
-        ],
-        null,
-      ]) // dry-run checkSwapCompliance: assignment pair read
-      .mockResolvedValueOnce([[], null]); // dry-run checkSwapCompliance: duplicate-assignment check -> none
+      .mockResolvedValueOnce([[], null]); // wouldBeFinalStep: next-step lookup -> none (final)
   };
 
   it('rejects the approval without deciding the pending approval if the requester would violate compliance', async () => {
@@ -189,14 +181,49 @@ describe('ShiftSwapService.approve', () => {
       .mockResolvedValueOnce([[buildSwap()], null]) // getById
       .mockResolvedValueOnce([[{ id: 501 }], null]); // findPendingApprovalId
     queueApprovePreChecks(execute);
+    conn.execute
+      .mockResolvedValueOnce([[buildSwap()], null]) // SELECT swap FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
+      .mockResolvedValueOnce([
+        [
+          { assignment_id: 100, user_id: 7, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+          { assignment_id: 200, user_id: 8, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+        ],
+        null,
+      ]) // checkSwapCompliance: assignment pair read
+      .mockResolvedValueOnce([[], null]); // checkSwapCompliance: duplicate-assignment check -> none
 
     const service = new ShiftSwapService(pool);
     await expect(service.approve(1, 99)).rejects.toThrow(/Requester would violate compliance/);
-    // The dry-run compliance check fails before the workflow decision is
-    // ever committed and before any swap transaction opens — the request
-    // stays fully retryable instead of getting stuck "approved" with the
-    // swap never applied.
-    expect(conn.beginTransaction).not.toHaveBeenCalled();
+    // Compliance fails inside the transaction, before decidePendingApproval
+    // is ever called — the workflow decision is never committed, so the
+    // request stays fully retryable instead of getting stuck "approved"
+    // with the swap never applied.
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('rejects the approval if the requester assignment was reassigned to someone else since creation', async () => {
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap()], null]) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null]); // findPendingApprovalId
+    queueApprovePreChecks(execute);
+    conn.execute
+      .mockResolvedValueOnce([[buildSwap()], null]) // SELECT swap FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
+      .mockResolvedValueOnce([
+        [
+          // requester_user_id on the swap is 7, but assignment 100 now
+          // belongs to user 999 — reassigned by a different swap in the
+          // meantime.
+          { assignment_id: 100, user_id: 999, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+          { assignment_id: 200, user_id: 8, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+        ],
+        null,
+      ]); // checkSwapCompliance: assignment pair read
+
+    const service = new ShiftSwapService(pool);
+    await expect(service.approve(1, 99)).rejects.toThrow(/has been reassigned to another user/);
   });
 
   it('atomically swaps user_ids and marks the request approved', async () => {
@@ -205,22 +232,23 @@ describe('ShiftSwapService.approve', () => {
       .mockResolvedValueOnce([[buildSwap()], null]) // getById
       .mockResolvedValueOnce([[{ id: 501 }], null]); // findPendingApprovalId
     queueApprovePreChecks(execute);
-    queueDecideNoNextStep(execute, 'approved');
-    execute.mockResolvedValueOnce([[buildSwap({ status: 'approved' })], null]); // final getById after transaction
 
     conn.execute
-      .mockResolvedValueOnce([[buildSwap()], null])
+      .mockResolvedValueOnce([[buildSwap()], null]) // SELECT swap FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
       .mockResolvedValueOnce([
         [
           { assignment_id: 100, user_id: 7, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
           { assignment_id: 200, user_id: 8, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
         ],
         null,
-      ]) // locked re-check: assignment pair read
-      .mockResolvedValueOnce([[], null]) // locked re-check: duplicate-assignment check -> none
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+      ]) // checkSwapCompliance: assignment pair read
+      .mockResolvedValueOnce([[], null]) // checkSwapCompliance: duplicate-assignment check -> none
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE assignment 100
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE assignment 200
+    queueDecideNoNextStep(execute, 'approved');
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE shift_swap_requests
+    execute.mockResolvedValueOnce([[buildSwap({ status: 'approved' })], null]); // final getById after transaction
 
     const service = new ShiftSwapService(pool);
     const result = await service.approve(1, 99, 'OK');
