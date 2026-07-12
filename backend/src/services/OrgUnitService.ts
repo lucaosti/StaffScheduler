@@ -35,6 +35,28 @@ interface UserOrgUnit {
   assignedAt: string;
 }
 
+interface OrgUnitMemberDetail {
+  userId: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  position: string | null;
+  isPrimary: boolean;
+}
+
+interface ManagerRef {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+interface ManagerChainLink {
+  unitId: number;
+  unitName: string;
+  manager: ManagerRef | null;
+}
+
 interface CreateOrgUnitInput {
   name: string;
   description?: string;
@@ -220,6 +242,64 @@ export class OrgUnitService {
       [userId]
     );
     return rows.length === 0 ? null : mapUnit(rows[0]);
+  }
+
+  /** Members of a unit, with display-ready user details (name/email/position). */
+  async listMembersDetailed(orgUnitId: number): Promise<OrgUnitMemberDetail[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT u.id AS user_id, u.first_name, u.last_name, u.email, u.position, uou.is_primary
+         FROM user_org_units uou
+         JOIN users u ON u.id = uou.user_id
+        WHERE uou.org_unit_id = ?
+        ORDER BY uou.is_primary DESC, u.last_name ASC, u.first_name ASC`,
+      [orgUnitId]
+    );
+    return rows.map((r: any) => ({
+      userId: r.user_id,
+      firstName: r.first_name,
+      lastName: r.last_name,
+      email: r.email,
+      position: r.position ?? null,
+      isPrimary: Boolean(r.is_primary),
+    }));
+  }
+
+  /**
+   * The chain of superiors for a user: starting from their primary org unit,
+   * walks up `parent_id` to the root, resolving each unit's `manager_user_id`
+   * to a name. Index 0 is the user's own unit's manager (their most direct
+   * superior); the last entry is the top of the tree (e.g. general manager).
+   * A unit with no manager assigned yields `manager: null` for that link —
+   * the chain still continues past it to the next ancestor.
+   */
+  async getManagerChain(userId: number): Promise<ManagerChainLink[]> {
+    const primary = await this.getPrimaryUnitForUser(userId);
+    if (!primary) return [];
+
+    const chain: ManagerChainLink[] = [];
+    let current: OrgUnit | null = primary;
+    const seen = new Set<number>();
+    while (current && !seen.has(current.id)) {
+      seen.add(current.id);
+      let manager: ManagerRef | null = null;
+      if (current.managerUserId !== null) {
+        const [rows] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT id, first_name, last_name, email FROM users WHERE id = ? LIMIT 1`,
+          [current.managerUserId]
+        );
+        if (rows.length > 0) {
+          manager = {
+            id: rows[0].id as number,
+            firstName: rows[0].first_name as string,
+            lastName: rows[0].last_name as string,
+            email: rows[0].email as string,
+          };
+        }
+      }
+      chain.push({ unitId: current.id, unitName: current.name, manager });
+      current = current.parentId !== null ? await this.getById(current.parentId) : null;
+    }
+    return chain;
   }
 
   /** Adds a membership (idempotent on the unique key). */

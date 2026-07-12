@@ -134,6 +134,32 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
+  // Display-ready member list (name/email/position) for the "browse offices" view.
+  router.get('/units/:id/members/detailed', validateParams(idParam), async (_req: Request, res: Response) => {
+    try {
+      res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
+    } catch (err) {
+      logger.error('detailed members list failed', err);
+      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list members');
+    }
+  });
+
+  // Chain of superiors for a user, from their own unit's manager up to the top
+  // of the tree. Defaults to the caller; open to any authenticated user, same
+  // visibility as the rest of the org tree (org_unit.read).
+  router.get('/manager-chain/:userId?', async (req: Request, res: Response) => {
+    try {
+      const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
+      if (!Number.isInteger(targetId) || targetId <= 0) {
+        return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
+      }
+      res.json({ success: true, data: await units.getManagerChain(targetId) });
+    } catch (err) {
+      logger.error('manager chain failed', err);
+      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to resolve manager chain');
+    }
+  });
+
   router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
     try {
       const created = await units.addMember(
@@ -223,7 +249,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     } catch (err) {
       const msg = (err as Error).message;
       const status =
-        msg.includes('not found') ? 404 : msg === 'Forbidden' ? 403 : 409;
+        msg.includes('not found') ? 404 : msg === 'Forbidden' || msg.includes('Not authorized') ? 403 : 409;
       const code =
         status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
       respondError(res, status, code, msg);
@@ -237,7 +263,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     } catch (err) {
       const msg = (err as Error).message;
       const status =
-        msg.includes('not found') ? 404 : msg === 'Forbidden' ? 403 : 409;
+        msg.includes('not found') ? 404 : msg === 'Forbidden' || msg.includes('Not authorized') ? 403 : 409;
       const code =
         status === 404 ? 'NOT_FOUND' : status === 403 ? 'FORBIDDEN' : 'CONFLICT';
       respondError(res, status, code, msg);

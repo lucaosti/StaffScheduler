@@ -35,6 +35,9 @@ const Schedule: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  const [monthShifts, setMonthShifts] = useState<Shift[]>([]);
+  const [monthLoading, setMonthLoading] = useState(false);
+
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
   const [selectedDepartment, setSelectedDepartment] = useState('');
@@ -173,9 +176,89 @@ const Schedule: React.FC = () => {
 
   const navigateWeek = (direction: 'prev' | 'next') => {
     const newDate = new Date(selectedWeek);
-    newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
+    if (viewMode === 'month') {
+      newDate.setMonth(newDate.getMonth() + (direction === 'next' ? 1 : -1));
+    } else {
+      newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
+    }
     setSelectedWeek(newDate);
   };
+
+  // 6-week (42-cell) grid covering the selected month, padded with the tail
+  // of the previous month and the head of the next so every row is full.
+  const monthGridDates = useMemo(() => {
+    const first = new Date(selectedWeek.getFullYear(), selectedWeek.getMonth(), 1);
+    const gridStart = new Date(first);
+    gridStart.setDate(gridStart.getDate() - first.getDay());
+    const dates: Date[] = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      dates.push(d);
+    }
+    return dates;
+  }, [selectedWeek]);
+
+  const monthShiftsFiltered = useMemo(
+    () =>
+      monthShifts.filter(
+        (shift) =>
+          !selectedDepartment ||
+          String(shift.departmentId ?? shift.department) === selectedDepartment
+      ),
+    [monthShifts, selectedDepartment]
+  );
+
+  const shiftsByDate = useMemo(() => {
+    const index = new Map<string, Shift[]>();
+    for (const shift of monthShiftsFiltered) {
+      const dateStr = typeof shift.date === 'string' ? shift.date.slice(0, 10) : new Date(shift.date as unknown as string).toISOString().slice(0, 10);
+      const bucket = index.get(dateStr);
+      if (bucket) bucket.push(shift);
+      else index.set(dateStr, [shift]);
+    }
+    return index;
+  }, [monthShiftsFiltered]);
+
+  // Local calendar-date key (not toISOString, which shifts to UTC and can
+  // land a shift on the wrong day for any timezone ahead/behind UTC).
+  const toDateKey = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+  const todayKey = toDateKey(new Date());
+
+  // The month grid exercises the real date-range filter on GET /shifts
+  // (rather than client-side-filtering the whole unbounded shift list),
+  // so it scales independently of how many shifts exist overall.
+  useEffect(() => {
+    if (viewMode !== 'month') return;
+    let cancelled = false;
+    setMonthLoading(true);
+    shiftService
+      .getShifts({
+        startDate: toDateKey(monthGridDates[0]),
+        endDate: toDateKey(monthGridDates[monthGridDates.length - 1]),
+      })
+      .then((res) => {
+        // Department filtering stays client-side here, same as the week view's
+        // `filteredShifts` above — the frontend ShiftFilters type doesn't carry
+        // a departmentId param matching the backend's query field.
+        if (!cancelled && res.success && res.data) setMonthShifts(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setError('Failed to load shifts for the selected month');
+      })
+      .finally(() => {
+        if (!cancelled) setMonthLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedWeek]);
 
   const handleCreateSchedule = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -514,10 +597,73 @@ const Schedule: React.FC = () => {
 
       {viewMode === 'month' && (
         <div className="card">
-          <div className="card-body text-center py-5">
-            <i className="bi bi-calendar3 text-muted" style={{ fontSize: '3rem' }}></i>
-            <h5 className="mt-3">Monthly View</h5>
-            <p className="text-muted">Monthly calendar view coming soon</p>
+          <div className="card-body p-0">
+            {monthLoading && (
+              <div className="d-flex align-items-center justify-content-center py-2 border-bottom small text-muted">
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading month"></span>
+                Loading…
+              </div>
+            )}
+            <div className="table-responsive">
+              <table className="table table-bordered mb-0" role="table" aria-label="Monthly shift calendar">
+                <thead>
+                  <tr>
+                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label) => (
+                      <th key={label} className="text-center small text-muted" scope="col">
+                        {label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({ length: 6 }, (_, week) => (
+                    <tr key={week} style={{ height: '110px' }}>
+                      {monthGridDates.slice(week * 7, week * 7 + 7).map((date) => {
+                        const dateKey = toDateKey(date);
+                        const dayShifts = shiftsByDate.get(dateKey) ?? [];
+                        const isCurrentMonth = date.getMonth() === selectedWeek.getMonth();
+                        const isToday = dateKey === todayKey;
+                        return (
+                          <td
+                            key={dateKey}
+                            className={`align-top ${isCurrentMonth ? '' : 'bg-body-tertiary'}`}
+                            style={{ width: '14.28%', verticalAlign: 'top' }}
+                          >
+                            <div className="d-flex justify-content-between align-items-center mb-1">
+                              <span
+                                className={`small ${isCurrentMonth ? 'fw-semibold' : 'text-muted'}`}
+                                style={isToday ? { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: '50%', background: 'var(--bs-primary)', color: '#fff' } : undefined}
+                              >
+                                {date.getDate()}
+                              </span>
+                              {dayShifts.length > 0 && (
+                                <span className="badge bg-secondary" aria-label={`${dayShifts.length} shifts`}>
+                                  {dayShifts.length}
+                                </span>
+                              )}
+                            </div>
+                            <div className="d-flex flex-column gap-1">
+                              {dayShifts.slice(0, 3).map((shift) => (
+                                <span
+                                  key={shift.id}
+                                  className="badge bg-primary-subtle text-primary-emphasis text-truncate d-block text-start"
+                                  title={`${shift.startTime}–${shift.endTime}${shift.departmentName ? ` · ${shift.departmentName}` : ''}`}
+                                >
+                                  {shift.startTime} {shift.departmentName ?? ''}
+                                </span>
+                              ))}
+                              {dayShifts.length > 3 && (
+                                <span className="small text-muted">+{dayShifts.length - 3} more</span>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
