@@ -96,6 +96,9 @@ jest.mock('../middleware/auth', () => ({
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: () => true,
+  // buildApp() mounts routes/modules.ts, which reads this at router-construction
+  // time; no request in this file hits /api/modules so a stub is sufficient.
+  getModuleService: () => ({}),
 }));
 jest.mock('../services/ScheduleService');
 jest.mock('../config/database', () => ({

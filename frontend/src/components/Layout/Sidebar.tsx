@@ -103,6 +103,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'settings.manage',
     },
     {
+      path: '/attendance',
+      icon: 'bi-fingerprint',
+      label: 'Attendance',
+      requiredPermission: null,
+    },
+    {
       path: '/approvals/pending',
       icon: 'bi-inbox',
       label: 'Pending Approvals',

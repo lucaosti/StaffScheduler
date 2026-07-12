@@ -22,8 +22,11 @@ import { logger } from '../config/logger';
 import { database } from '../config/database';
 
 // Single ModuleService instance per process — shares the in-process cache.
+// Exported so routes that mutate module state (routes/modules.ts) invalidate
+// the same cache this middleware reads, instead of toggling a separate
+// instance whose change would never be observed here.
 let _moduleService: ModuleService | null = null;
-const getModuleService = (): ModuleService => {
+export const getModuleService = (): ModuleService => {
   if (!_moduleService) _moduleService = new ModuleService(database.getPool());
   return _moduleService;
 };

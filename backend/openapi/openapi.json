@@ -3707,6 +3707,143 @@
         }
       }
     },
+    "/modules/org/{org}": {
+      "get": {
+        "tags": [
+          "Modules"
+        ],
+        "summary": "List feature modules with per-org overrides applied",
+        "description": "Requires `settings.manage`.",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Module list with org-specific overrides applied."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/modules/{code}/org/{org}": {
+      "put": {
+        "tags": [
+          "Modules"
+        ],
+        "summary": "Create or update a per-org module override",
+        "description": "Requires `settings.manage`.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "isEnabled"
+                ],
+                "properties": {
+                  "isEnabled": {
+                    "type": "boolean"
+                  },
+                  "justification": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Module override updated."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Modules"
+        ],
+        "summary": "Remove a per-org module override, reverting to the global default",
+        "description": "Requires `settings.manage`.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Override removed."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/notifications": {
       "get": {
         "tags": [
@@ -7485,6 +7622,220 @@
         }
       }
     },
+    "/attendance/clock-in": {
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Clock in (self)",
+        "responses": {
+          "201": {
+            "description": "Clocked in."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "An open attendance record already exists for this user."
+          }
+        }
+      }
+    },
+    "/attendance/{id}/clock-out": {
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Clock out on own open attendance record",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Clocked out."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Record is already clocked out or not owned by the caller."
+          }
+        }
+      }
+    },
+    "/attendance": {
+      "get": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "List attendance records (own, or all for attendance.read/attendance.approve holders)",
+        "responses": {
+          "200": {
+            "description": "Attendance record list."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/attendance/cost-estimate": {
+      "get": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Planned vs. actual labor cost for a date range",
+        "description": "Requires `attendance.read` and the `payroll` module.",
+        "parameters": [
+          {
+            "name": "startDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "endDate",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
+            "name": "departmentId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cost estimate."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/attendance/{id}": {
+      "get": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Get one attendance record (own or approver)",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attendance record."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/attendance/{id}/approve": {
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Approve attendance record",
+        "description": "Requires `attendance.approve`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Approved."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Record is not pending or still clocked in."
+          }
+        }
+      }
+    },
+    "/attendance/{id}/reject": {
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Reject attendance record",
+        "description": "Requires `attendance.approve`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Rejected."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Record is not pending."
+          }
+        }
+      }
+    },
     "/time-off/{id}/reject": {
       "post": {
         "tags": [
@@ -7771,23 +8122,59 @@
     },
     "/roles/bulk-assign": {
       "post": {
-        "tags": ["Roles"],
+        "tags": [
+          "Roles"
+        ],
         "summary": "Bulk assign role to users",
         "description": "Assigns the same role to multiple users in a single request. Requires `role.manage`. Each assignment is individually audit-logged.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["roleId", "userIds"],
+                "required": [
+                  "roleId",
+                  "userIds"
+                ],
                 "properties": {
-                  "roleId": {"type": "integer", "description": "ID of the role to assign."},
-                  "userIds": {"type": "array", "items": {"type": "integer"}, "minItems": 1, "maxItems": 500, "description": "List of user IDs to assign the role to."},
-                  "scopeOrgUnitId": {"type": "integer", "nullable": true, "description": "Optional org-unit scope."},
-                  "expiresAt": {"type": "string", "format": "date-time", "nullable": true, "description": "Optional expiry."},
-                  "justification": {"type": "string", "maxLength": 1000, "nullable": true}
+                  "roleId": {
+                    "type": "integer",
+                    "description": "ID of the role to assign."
+                  },
+                  "userIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer"
+                    },
+                    "minItems": 1,
+                    "maxItems": 500,
+                    "description": "List of user IDs to assign the role to."
+                  },
+                  "scopeOrgUnitId": {
+                    "type": "integer",
+                    "nullable": true,
+                    "description": "Optional org-unit scope."
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "nullable": true,
+                    "description": "Optional expiry."
+                  },
+                  "justification": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "nullable": true
+                  }
                 }
               }
             }
@@ -7801,11 +8188,16 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
+                    "success": {
+                      "type": "boolean"
+                    },
                     "data": {
                       "type": "object",
                       "properties": {
-                        "assigned": {"type": "integer", "description": "Number of users who received the role."}
+                        "assigned": {
+                          "type": "integer",
+                          "description": "Number of users who received the role."
+                        }
                       }
                     }
                   }
@@ -7813,18 +8205,33 @@
               }
             }
           },
-          "400": {"$ref": "#/components/responses/ValidationError"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"}
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
         }
       }
     },
     "/responsibility-rules/matrix": {
       "get": {
-        "tags": ["Responsibilities"],
+        "tags": [
+          "Responsibilities"
+        ],
         "summary": "Get responsibility matrix",
         "description": "Returns a matrix of all responsibility rules grouped by entity type and org unit. Requires `responsibility.read`.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Responsibility matrix.",
@@ -7833,24 +8240,41 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
-                    "data": {"type": "array"}
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array"
+                    }
                   }
                 }
               }
             }
           },
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"}
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
         }
       }
     },
     "/responsibility-rules/my-responsibilities": {
       "get": {
-        "tags": ["Responsibilities"],
+        "tags": [
+          "Responsibilities"
+        ],
         "summary": "List my responsibilities",
         "description": "Returns the responsibility rules that apply to the authenticated user based on their role and org-unit membership.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Responsibilities for the current user.",
@@ -7859,34 +8283,53 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
-                    "data": {"type": "array"}
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array"
+                    }
                   }
                 }
               }
             }
           },
-          "401": {"$ref": "#/components/responses/Unauthorized"}
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/responsibility-rules/bulk": {
       "post": {
-        "tags": ["Responsibilities"],
+        "tags": [
+          "Responsibilities"
+        ],
         "summary": "Bulk create responsibility rules",
         "description": "Creates multiple responsibility rules in one request. Requires `responsibility.manage`.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["rules"],
+                "required": [
+                  "rules"
+                ],
                 "properties": {
                   "rules": {
                     "type": "array",
-                    "items": {"type": "object"}
+                    "items": {
+                      "type": "object"
+                    }
                   }
                 }
               }
@@ -7894,39 +8337,85 @@
           }
         },
         "responses": {
-          "201": {"description": "Rules created."},
-          "400": {"$ref": "#/components/responses/ValidationError"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"}
+          "201": {
+            "description": "Rules created."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
         }
       }
     },
     "/responsibility-rules/{id}/conflicts": {
       "get": {
-        "tags": ["Responsibilities"],
+        "tags": [
+          "Responsibilities"
+        ],
         "summary": "Get conflicts for a responsibility rule",
         "description": "Returns other rules that conflict with (overlap) the given rule. Requires `responsibility.read`.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
-        "parameters": [{"$ref": "#/components/parameters/id"}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "responses": {
-          "200": {"description": "List of conflicting rules."},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "403": {"$ref": "#/components/responses/Forbidden"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "200": {
+            "description": "List of conflicting rules."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       }
     },
     "/pending-approvals": {
       "get": {
-        "tags": ["Pending Approvals"],
+        "tags": [
+          "Pending Approvals"
+        ],
         "summary": "List pending approvals",
         "description": "Returns approval items assigned to the current user. Filter by `status` query param.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "parameters": [
           {
             "name": "status",
             "in": "query",
-            "schema": {"type": "string", "enum": ["pending", "approved", "rejected", "escalated"]},
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "escalated"
+              ]
+            },
             "description": "Filter by approval status. Omit to return all."
           }
         ],
@@ -7938,12 +8427,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
+                    "success": {
+                      "type": "boolean"
+                    },
                     "data": {
                       "type": "object",
                       "properties": {
-                        "items": {"type": "array"},
-                        "total": {"type": "integer"}
+                        "items": {
+                          "type": "array"
+                        },
+                        "total": {
+                          "type": "integer"
+                        }
                       }
                     }
                   }
@@ -7951,16 +8446,27 @@
               }
             }
           },
-          "401": {"$ref": "#/components/responses/Unauthorized"}
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/pending-approvals/count": {
       "get": {
-        "tags": ["Pending Approvals"],
+        "tags": [
+          "Pending Approvals"
+        ],
         "summary": "Count pending approvals",
         "description": "Returns the count of approval items currently in `pending` status for the authenticated user.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
         "responses": {
           "200": {
             "description": "Pending count.",
@@ -7969,71 +8475,129 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {"type": "boolean"},
+                    "success": {
+                      "type": "boolean"
+                    },
                     "data": {
                       "type": "object",
-                      "properties": {"count": {"type": "integer"}}
+                      "properties": {
+                        "count": {
+                          "type": "integer"
+                        }
+                      }
                     }
                   }
                 }
               }
             }
           },
-          "401": {"$ref": "#/components/responses/Unauthorized"}
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
         }
       }
     },
     "/pending-approvals/{id}/approve": {
       "post": {
-        "tags": ["Pending Approvals"],
+        "tags": [
+          "Pending Approvals"
+        ],
         "summary": "Approve a pending item",
         "description": "Records an approval decision for the given pending-approval item and advances the workflow step.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
-        "parameters": [{"$ref": "#/components/parameters/id"}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "note": {"type": "string", "nullable": true, "description": "Optional decision note recorded in audit log."}
+                  "note": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional decision note recorded in audit log."
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": {"description": "Decision recorded."},
-          "400": {"$ref": "#/components/responses/ValidationError"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "200": {
+            "description": "Decision recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       }
     },
     "/pending-approvals/{id}/reject": {
       "post": {
-        "tags": ["Pending Approvals"],
+        "tags": [
+          "Pending Approvals"
+        ],
         "summary": "Reject a pending item",
         "description": "Records a rejection decision for the given pending-approval item and closes the workflow step.",
-        "security": [{"bearerAuth": []}, {"cookieAuth": []}],
-        "parameters": [{"$ref": "#/components/parameters/id"}],
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "note": {"type": "string", "nullable": true, "description": "Optional rejection note."}
+                  "note": {
+                    "type": "string",
+                    "nullable": true,
+                    "description": "Optional rejection note."
+                  }
                 }
               }
             }
           }
         },
         "responses": {
-          "200": {"description": "Rejection recorded."},
-          "400": {"$ref": "#/components/responses/ValidationError"},
-          "401": {"$ref": "#/components/responses/Unauthorized"},
-          "404": {"$ref": "#/components/responses/NotFound"}
+          "200": {
+            "description": "Rejection recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
         }
       }
     }

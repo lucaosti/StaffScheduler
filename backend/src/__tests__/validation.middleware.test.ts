@@ -123,6 +123,7 @@ jest.mock('../middleware/auth', () => ({
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: () => false,
+  getModuleService: () => ({}),
 }));
 jest.mock('../services/ScheduleService');
 jest.mock('../services/UserService');
