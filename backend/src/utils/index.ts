@@ -78,6 +78,22 @@ export class DateUtils {
   }
 
   /**
+   * Extracts "YYYY-MM-DD" from a Date using its *local* calendar
+   * components, not `.toISOString()`. mysql2 materializes a DATE column as
+   * a JS Date at local midnight (not UTC midnight) — `.toISOString()` on
+   * that value converts to UTC and silently rolls back to the previous day
+   * in any positive UTC-offset timezone (e.g. Europe/Rome). Use this for
+   * every DATE column read back from the database; only use
+   * `.toISOString()` for values that are genuinely UTC-anchored.
+   */
+  static fromMySQLDate(date: Date): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  /**
    * Add days to a date
    */
   static addDays(date: Date, days: number): Date {
