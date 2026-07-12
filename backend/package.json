@@ -20,6 +20,7 @@
     "db:seed:demo": "npx ts-node scripts/seed-demo.ts",
     "db:seed:production": "npx ts-node scripts/seed-production.ts",
     "sim:run": "npx ts-node scripts/simulation/index.ts",
+    "sim:campaign": "npx ts-node scripts/simulation/campaign.ts",
     "deadcode": "knip",
     "clean": "rm -rf dist"
   },

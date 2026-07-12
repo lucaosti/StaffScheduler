@@ -2,13 +2,13 @@
  * Employee actor ("employee thread").
  *
  * Each employee independently decides — via its own deterministic child RNG,
- * derived from the run seed and its own user id — to file 5-8 requests per
- * round (time-off, shift-swap, loan), with randomly (but deterministically)
- * chosen parameters drawn from real data (its own baseline assignments,
- * another employee's assignment, another org unit). Requests are submitted
- * through the real service layer — the same code the HTTP routes call. Over
- * the default 4 rounds this guarantees at least 20 requests per employee
- * across the run.
+ * derived from the run seed and its own user id — to file a configurable
+ * number of requests per round (time-off, shift-swap, loan), with randomly
+ * (but deterministically) chosen parameters drawn from real data (its own
+ * baseline assignments, another employee's assignment, another org unit).
+ * Requests are submitted through the real service layer — the same code the
+ * HTTP routes call. The per-round bounds times the round count set the
+ * guaranteed per-employee minimum across the run.
  *
  * @author Luca Ostinelli
  */
@@ -47,6 +47,9 @@ export interface EmployeeActorContext {
   baselineAssignmentsByUser: Map<number, number[]>;
   futureStartDate: string;
   futureEndDate: string;
+  /** Inclusive bounds on how many requests each employee submits per round. */
+  requestsMin: number;
+  requestsMax: number;
   timeOffService: TimeOffService;
   loanService: EmployeeLoanService;
   shiftSwapService: ShiftSwapService;
@@ -66,19 +69,19 @@ function randomDateWithin(rng: Rng, start: string, end: string): [string, string
   return [s.toISOString().slice(0, 10), e.toISOString().slice(0, 10)];
 }
 
-/** Runs one employee's turn: files between 5 and 8 *successfully submitted*
- *  requests, logs each. A shift-swap pick with no baseline assignment to
- *  offer is a skip, not a submission — so the loop keeps drawing new
- *  attempts until the target is actually met, up to a generous attempt cap,
- *  rather than counting skipped/failed picks toward the target. Over the
- *  default 4 rounds this guarantees at least 20 submitted requests per
- *  employee across the run. */
+/** Runs one employee's turn: files between ctx.requestsMin and
+ *  ctx.requestsMax *successfully submitted* requests, logs each. A
+ *  shift-swap pick with no baseline assignment to offer is a skip, not a
+ *  submission — so the loop keeps drawing new attempts until the target is
+ *  actually met, up to a generous attempt cap, rather than counting
+ *  skipped/failed picks toward the target. The per-round bounds times the
+ *  round count set the guaranteed per-employee minimum across the run. */
 export async function runEmployeeActor(
   ctx: EmployeeActorContext,
   userId: number
 ): Promise<SubmittedRequest[]> {
   const rng = new Rng(ctx.runSeed).child(userId);
-  const targetCount = rng.int(5, 8);
+  const targetCount = rng.int(ctx.requestsMin, ctx.requestsMax);
   const maxAttempts = targetCount * 4;
   const submitted: SubmittedRequest[] = [];
 

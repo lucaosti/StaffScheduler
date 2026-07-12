@@ -81,10 +81,10 @@ describe('TimeOffService.create', () => {
   it('inserts a pending request and skips pending_approval creation when no workflow is configured', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[], null] as Tuple) // getWorkflowByChangeType('TimeOff.Request') -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT time_off_requests
       .mockResolvedValueOnce([[buildRow({ id: 42 })], null] as Tuple) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null] as Tuple) // audit insert
-      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType('TimeOff.Request') -> not found
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null] as Tuple); // audit insert
 
     const service = new TimeOffService(pool);
     const created = await service.create({
@@ -97,7 +97,38 @@ describe('TimeOffService.create', () => {
 
     expect(created.id).toBe(42);
     expect(created.status).toBe('pending');
-    expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO time_off_requests/);
+    expect(execute.mock.calls[1][0]).toMatch(/INSERT INTO time_off_requests/);
+  });
+
+  it('rejects creation when the workflow exists but no approver can be resolved', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 10, change_type: 'TimeOff.Request', require_all: 0, description: null }], null] as Tuple) // getWorkflowByChangeType
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 20,
+            workflow_id: 10,
+            step_order: 1,
+            approver_scope: 'unit_manager',
+            approver_role_id: null,
+            approver_user_id: null,
+            approver_permission_code: null,
+            auto_approve_for_owner: 1,
+            escalate_after_hours: 48,
+          },
+        ],
+        null,
+      ] as Tuple) // hydrate workflow steps
+      .mockResolvedValueOnce([[], null] as Tuple); // resolvePrimaryOrgUnitForUser -> no membership
+
+    const service = new TimeOffService(pool);
+    await expect(
+      service.create({ userId: 7, startDate: '2026-05-10', endDate: '2026-05-15' })
+    ).rejects.toThrow(/No approver could be resolved/);
+    // The entity row must never have been inserted.
+    const insertCalls = execute.mock.calls.filter((c) => String(c[0]).includes('INSERT INTO time_off_requests'));
+    expect(insertCalls).toHaveLength(0);
   });
 });
 

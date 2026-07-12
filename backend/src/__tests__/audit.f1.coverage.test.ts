@@ -167,9 +167,9 @@ describe('TimeOffService — audit log', () => {
   it('create writes time_off.create audit', async () => {
     const { pool, execute } = makeSimplePool();
     execute
+      .mockResolvedValueOnce([[], null] as Tuple) // getWorkflowByChangeType -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT
-      .mockResolvedValueOnce([[timeOffRow({ id: 42 })], null] as Tuple) // getById
-      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found, skip pending_approval
+      .mockResolvedValueOnce([[timeOffRow({ id: 42 })], null] as Tuple); // getById
 
     const service = new TimeOffService(pool);
     await service.create({ userId: 7, startDate: '2026-05-10', endDate: '2026-05-15', type: 'vacation', reason: 'Beach' });
@@ -266,13 +266,12 @@ describe('ShiftSwapService — audit log', () => {
 
   it('create writes shift_swap.create audit', async () => {
     const { pool, execute, conn } = makeConnPool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found (checked before insert)
     conn.execute
       .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null] as Tuple)
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple);
-    execute
-      .mockResolvedValueOnce([[swapRow({ id: 42 })], null] as Tuple) // getById
-      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found, skip pending_approval
+    execute.mockResolvedValueOnce([[swapRow({ id: 42 })], null] as Tuple); // getById
 
     const service = new ShiftSwapService(pool);
     await service.create({ requesterUserId: 7, requesterAssignmentId: 100, targetAssignmentId: 200 });

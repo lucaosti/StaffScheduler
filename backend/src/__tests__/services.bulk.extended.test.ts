@@ -469,7 +469,8 @@ describe('ShiftSwapService', () => {
   };
 
   it('create rejects when requester assignment missing', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found (checked before insert)
     conn.execute.mockResolvedValueOnce([[], null]);
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
@@ -478,7 +479,8 @@ describe('ShiftSwapService', () => {
   });
 
   it('create rejects when requester does not own the assignment', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found
     conn.execute.mockResolvedValueOnce([[{ id: 10, user_id: 99 }], null]);
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
@@ -487,7 +489,8 @@ describe('ShiftSwapService', () => {
   });
 
   it('create rejects when target assignment missing or same user', async () => {
-    const { pool, conn } = makePool();
+    const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found
     conn.execute
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[], null]);
@@ -496,6 +499,7 @@ describe('ShiftSwapService', () => {
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
     ).rejects.toThrow(/Target assignment not found/);
 
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found
     conn.execute
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[{ id: 20, user_id: 1 }], null]);
@@ -506,14 +510,14 @@ describe('ShiftSwapService', () => {
 
   it('create happy path', async () => {
     const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found (checked before insert)
     conn.execute
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[{ id: 20, user_id: 2 }], null])
       .mockResolvedValueOnce([{ insertId: 1 }, null]);
     execute
       .mockResolvedValueOnce([[swap], null] as Tuple) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null] as Tuple) // audit.write
-      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null] as Tuple); // audit.write
     const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.create({
       requesterUserId: 1,
@@ -526,11 +530,12 @@ describe('ShiftSwapService', () => {
 
   it('create throws when post-commit fetch is empty', async () => {
     const { pool, conn, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found (checked before insert)
     conn.execute
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[{ id: 20, user_id: 2 }], null])
       .mockResolvedValueOnce([{ insertId: 1 }, null]);
-    execute.mockResolvedValueOnce([[], null] as Tuple);
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getById -> empty
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(
       svc.create({ requesterUserId: 1, requesterAssignmentId: 10, targetAssignmentId: 20 })
