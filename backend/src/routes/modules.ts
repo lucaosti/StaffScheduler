@@ -10,8 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { z } from 'zod';
-import { ModuleService } from '../services/ModuleService';
-import { authenticate, requirePermission } from '../middleware/auth';
+import { authenticate, requirePermission, getModuleService } from '../middleware/auth';
 import { validateBody, validateParams } from '../middleware/validation';
 import { moduleEnabledBody, codeParam } from '../schemas';
 import { logger } from '../config/logger';
@@ -26,9 +25,9 @@ const orgOverrideBody = z.object({
   justification: z.string().max(1000).nullable().optional(),
 });
 
-export const createModulesRouter = (pool: Pool): Router => {
+export const createModulesRouter = (_pool: Pool): Router => {
   const router = Router();
-  const moduleService = new ModuleService(pool);
+  const moduleService = getModuleService();
 
   router.get('/', authenticate, requirePermission('settings.manage'), async (_req: Request, res: Response) => {
     try {

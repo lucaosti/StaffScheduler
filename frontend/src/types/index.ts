@@ -146,6 +146,32 @@ export interface Assignment {
   rejectedReason?: string;
 }
 
+// Attendance tracking (clock-in / clock-out) types
+export interface AttendanceRecord {
+  id: ID;
+  userId: ID;
+  shiftAssignmentId?: ID | null;
+  clockIn: string | Date;
+  clockOut?: string | Date | null;
+  status: 'pending' | 'approved' | 'rejected';
+  reviewerId?: ID | null;
+  reviewedAt?: string | Date | null;
+  reviewNotes?: string | null;
+  notes?: string | null;
+  createdAt: string | Date;
+  updatedAt: string | Date;
+}
+
+export interface AttendanceCostEstimate {
+  startDate: string;
+  endDate: string;
+  departmentId: number | null;
+  plannedHours: number;
+  plannedCost: number;
+  actualHours: number;
+  actualCost: number;
+}
+
 // Schedule management types
 export interface Schedule {
   id: ID;
