@@ -91,6 +91,28 @@ const loanRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const loanPendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 501,
+  change_request_id: null,
+  time_off_request_id: null,
+  employee_loan_id: 1,
+  shift_swap_request_id: null,
+  workflow_id: 10,
+  step_id: 20,
+  step_order: 1,
+  assigned_to_user_id: 99,
+  assigned_to_org_unit_id: null,
+  open_to_structure: 0,
+  decided_by_user_id: null,
+  status: 'pending',
+  decided_at: null,
+  decision_note: null,
+  escalated_at: null,
+  created_at: 't',
+  updated_at: 't',
+  ...overrides,
+});
+
 const orgUnitRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
   name: 'Unit',
@@ -763,17 +785,14 @@ describe('EmployeeLoanService extended', () => {
     expect(execute.mock.calls[0][0]).toMatch(/status/);
   });
 
-  it('approve returns Forbidden when actor is not approver', async () => {
+  it('approve returns Not authorized when actor is not the resolved assignee', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple)
-      .mockResolvedValueOnce([
-        [matrixRow({ change_type: 'Loan.Request', approver_scope: 'unit_manager' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([[{ manager_user_id: 5 }], null] as Tuple);
+      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[loanPendingApprovalRow({ assigned_to_user_id: 5 })], null] as Tuple); // getPendingApprovalById
     const svc = new EmployeeLoanService(pool);
-    await expect(svc.approve(1, 99)).rejects.toThrow(/Forbidden/);
+    await expect(svc.approve(1, 99)).rejects.toThrow(/Not authorized/);
   });
 
   it('approve raises when affected=0', async () => {
@@ -796,13 +815,13 @@ describe('EmployeeLoanService extended', () => {
   it('approve happy path notifies user', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple)
-      .mockResolvedValueOnce([
-        [matrixRow({ approver_scope: 'unit_manager' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([[{ manager_user_id: 99 }], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[loanPendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
+      .mockResolvedValueOnce([[loanPendingApprovalRow({ status: 'approved' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE employee_loans
       .mockResolvedValueOnce([
         [loanRow({ id: 1, status: 'approved' })],
         null,
@@ -829,46 +848,34 @@ describe('EmployeeLoanService extended', () => {
     expect(r.status).toBe('approved');
   });
 
-  it('reject Forbidden / not found / wrong status', async () => {
+  it('reject Not authorized / not found / wrong status', async () => {
     const { pool, execute } = makePool();
     const svc = new EmployeeLoanService(pool);
 
-    execute.mockResolvedValueOnce([[], null] as Tuple);
+    execute.mockResolvedValueOnce([[], null] as Tuple); // getById -> not found
     await expect(svc.reject(1, 1)).rejects.toThrow(/Loan not found/);
 
     execute
-      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple)
-      .mockResolvedValueOnce([
-        [matrixRow({ approver_scope: 'unit_manager' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([[{ manager_user_id: 5 }], null] as Tuple);
-    await expect(svc.reject(1, 99)).rejects.toThrow(/Forbidden/);
+      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[loanPendingApprovalRow({ assigned_to_user_id: 5 })], null] as Tuple); // getPendingApprovalById
+    await expect(svc.reject(1, 99)).rejects.toThrow(/Not authorized/);
 
-    execute
-      .mockResolvedValueOnce([
-        [loanRow({ id: 1, status: 'rejected' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([
-        [matrixRow({ approver_scope: 'unit_manager' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([[{ manager_user_id: 99 }], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple);
+    // Already decided — existing.status !== 'pending' short-circuits before
+    // any pending_approval lookup.
+    execute.mockResolvedValueOnce([[loanRow({ id: 1, status: 'rejected' })], null] as Tuple);
     await expect(svc.reject(1, 99)).rejects.toThrow(/Cannot reject/);
   });
 
   it('reject happy notifies requester', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple)
-      .mockResolvedValueOnce([
-        [matrixRow({ approver_scope: 'unit_manager' })],
-        null,
-      ] as Tuple)
-      .mockResolvedValueOnce([[{ manager_user_id: 99 }], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[loanRow({ id: 1 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[loanPendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[loanPendingApprovalRow({ status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE employee_loans
       .mockResolvedValueOnce([[loanRow({ id: 1, status: 'rejected' })], null] as Tuple)
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)
       .mockResolvedValueOnce([

@@ -83,7 +83,9 @@ describe('GET /api/calendar/department/:id.ics', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[{ user_id: 7 }], null] as Tuple) // resolveToken
-      .mockResolvedValueOnce([[{ role: 'employee', manager_id: null }], null] as Tuple);
+      .mockResolvedValueOnce([[], null] as Tuple) // RbacService.getEffectivePermissions: role permissions (none)
+      .mockResolvedValueOnce([[], null] as Tuple) // RbacService.getEffectivePermissions: delegations (none)
+      .mockResolvedValueOnce([[{ manager_id: null }], null] as Tuple); // department manager_id lookup
     const app = express();
     app.use('/api/calendar', createCalendarRouter(pool));
     const res = await request(app).get('/api/calendar/department/3.ics?token=abc');
@@ -94,12 +96,27 @@ describe('GET /api/calendar/department/:id.ics', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[{ user_id: 7 }], null] as Tuple) // resolveToken
-      .mockResolvedValueOnce([[{ role: 'manager', manager_id: 7 }], null] as Tuple) // role check
+      .mockResolvedValueOnce([[], null] as Tuple) // getEffectivePermissions: role permissions (none — not admin)
+      .mockResolvedValueOnce([[], null] as Tuple) // getEffectivePermissions: delegations (none)
+      .mockResolvedValueOnce([[{ manager_id: 7 }], null] as Tuple) // department manager_id lookup — matches
       .mockResolvedValueOnce([[], null] as Tuple); // department feed query
     const app = express();
     app.use('/api/calendar', createCalendarRouter(pool));
     const res = await request(app).get('/api/calendar/department/3.ics?token=abc');
     expect(res.status).toBe(200);
     expect(res.text).toContain('BEGIN:VCALENDAR');
+  });
+
+  it('returns 200 for an administrator regardless of department manager', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ user_id: 1 }], null] as Tuple) // resolveToken
+      .mockResolvedValueOnce([[{ code: 'settings.manage' }], null] as Tuple) // getEffectivePermissions: role permissions
+      .mockResolvedValueOnce([[], null] as Tuple) // getEffectivePermissions: delegations
+      .mockResolvedValueOnce([[], null] as Tuple); // department feed query (no manager_id lookup needed — admin short-circuits)
+    const app = express();
+    app.use('/api/calendar', createCalendarRouter(pool));
+    const res = await request(app).get('/api/calendar/department/3.ics?token=abc');
+    expect(res.status).toBe(200);
   });
 });

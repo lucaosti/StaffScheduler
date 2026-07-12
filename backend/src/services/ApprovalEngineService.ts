@@ -19,6 +19,8 @@ import {
   ApprovalStep,
   ApproverScope,
   CreateApprovalWorkflowRequest,
+  PendingApproval,
+  DecisionChain,
 } from '../types';
 import { logger } from '../config/logger';
 import { ResponsibilityRuleService } from './ResponsibilityRuleService';
@@ -38,7 +40,43 @@ interface ResolvedStep {
   autoApprove: boolean;
 }
 
+/** Exactly one of these must be set — identifies which entity a pending_approvals row decides on. */
+export interface PendingApprovalEntityRef {
+  changeRequestId?: number;
+  timeOffRequestId?: number;
+  employeeLoanId?: number;
+  shiftSwapRequestId?: number;
+}
+
+export interface DecidePendingApprovalResult {
+  pendingApproval: PendingApproval;
+  decision: 'approved' | 'rejected';
+  /** True when this was the last step (rejected, or approved with no further step). */
+  isFinalStep: boolean;
+}
+
 const MAX_ORG_DEPTH = 20;
+
+const mapPendingApprovalRow = (r: any): PendingApproval => ({
+  id: r.id,
+  changeRequestId: r.change_request_id ?? null,
+  timeOffRequestId: r.time_off_request_id ?? null,
+  employeeLoanId: r.employee_loan_id ?? null,
+  shiftSwapRequestId: r.shift_swap_request_id ?? null,
+  workflowId: r.workflow_id,
+  stepId: r.step_id,
+  stepOrder: r.step_order,
+  assignedToUserId: r.assigned_to_user_id ?? null,
+  assignedToOrgUnitId: r.assigned_to_org_unit_id ?? null,
+  openToStructure: Boolean(r.open_to_structure),
+  decidedByUserId: r.decided_by_user_id ?? null,
+  status: r.status,
+  decidedAt: r.decided_at ?? null,
+  decisionNote: r.decision_note ?? null,
+  escalatedAt: r.escalated_at ?? null,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
+});
 
 export class ApprovalEngineService {
   private responsibilitySvc: ResponsibilityRuleService;
@@ -273,6 +311,330 @@ export class ApprovalEngineService {
       }
     }
     return null;
+  }
+
+  // --------------------------------------------------------------------------
+  // Generic pending_approval lifecycle — shared by change requests, time-off,
+  // loans, and shift swaps (the four entity types a pending_approvals row can
+  // decide on; see PendingApprovalEntityRef).
+  // --------------------------------------------------------------------------
+
+  async getPendingApprovalById(id: number): Promise<PendingApproval | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT * FROM pending_approvals WHERE id = ? LIMIT 1',
+      [id]
+    );
+    return rows.length === 0 ? null : mapPendingApprovalRow(rows[0]);
+  }
+
+  /**
+   * Creates the pending_approvals row for one step of a workflow, for
+   * whichever entity type `entityRef` identifies. When the step's scope is
+   * `unit_structure`, assigns the decision to the org unit as a whole
+   * (defaulting `assigned_to_user_id` to that unit's head so it's
+   * immediately actionable without requiring an explicit "keep" action).
+   * Otherwise resolves a single person exactly as `resolveStepApprover` does.
+   * Returns null when a person-scoped step resolves to nobody (caller should
+   * skip creating an approval gate in that case, matching existing behavior).
+   */
+  async createPendingApprovalForStep(
+    workflowId: number,
+    step: ApprovalStep,
+    entityRef: PendingApprovalEntityRef,
+    ctx: ResolveContext
+  ): Promise<PendingApproval | null> {
+    let assignedToUserId: number | null;
+    let assignedToOrgUnitId: number | null = null;
+
+    if (step.approverScope === 'unit_structure') {
+      if (!ctx.orgUnitId) throw new Error("A 'unit_structure' step requires an org unit context");
+      assignedToOrgUnitId = ctx.orgUnitId;
+      assignedToUserId = await this.findUnitManager(ctx.orgUnitId);
+    } else {
+      assignedToUserId = await this.resolveStepApprover(step, ctx);
+      if (assignedToUserId === null) return null;
+    }
+
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO pending_approvals
+         (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id,
+          workflow_id, step_id, step_order, assigned_to_user_id, assigned_to_org_unit_id, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+      [
+        entityRef.changeRequestId ?? null,
+        entityRef.timeOffRequestId ?? null,
+        entityRef.employeeLoanId ?? null,
+        entityRef.shiftSwapRequestId ?? null,
+        workflowId,
+        step.id,
+        step.stepOrder,
+        assignedToUserId,
+        assignedToOrgUnitId,
+      ]
+    );
+    return this.getPendingApprovalById(result.insertId);
+  }
+
+  /** Primary org-unit membership for a user — used to resolve context for time-off/shift-swap decisions. */
+  async resolvePrimaryOrgUnitForUser(userId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT org_unit_id FROM user_org_units WHERE user_id = ? AND is_primary = 1 LIMIT 1`,
+      [userId]
+    );
+    return rows.length === 0 ? null : ((rows[0] as any).org_unit_id as number);
+  }
+
+  private async isAuthorizedToDecide(pa: PendingApproval, userId: number): Promise<boolean> {
+    if (pa.assignedToUserId === userId) return true;
+    if (pa.openToStructure && pa.assignedToOrgUnitId !== null) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT 1 FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
+        [userId, pa.assignedToOrgUnitId]
+      );
+      return rows.length > 0;
+    }
+    return false;
+  }
+
+  private entityRefFromPendingApproval(pa: PendingApproval): PendingApprovalEntityRef {
+    if (pa.changeRequestId !== null) return { changeRequestId: pa.changeRequestId };
+    if (pa.timeOffRequestId !== null) return { timeOffRequestId: pa.timeOffRequestId };
+    if (pa.employeeLoanId !== null) return { employeeLoanId: pa.employeeLoanId };
+    if (pa.shiftSwapRequestId !== null) return { shiftSwapRequestId: pa.shiftSwapRequestId };
+    throw new Error('Pending approval has no linked entity');
+  }
+
+  /**
+   * Read-only check for whether approving this pending approval would be
+   * the workflow's last step (no mutation — safe to call before doing any
+   * entity-specific validation that must not run if a compliance/business
+   * check should block the decision from ever committing).
+   */
+  async wouldBeFinalStep(pendingApprovalId: number): Promise<boolean> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+    const [nextRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM approval_steps WHERE workflow_id = ? AND step_order > ? ORDER BY step_order ASC LIMIT 1`,
+      [pa.workflowId, pa.stepOrder]
+    );
+    return nextRows.length === 0;
+  }
+
+  /**
+   * Decides a pending_approvals row: authorizes the caller (either the
+   * current assignee, or any member of the structure when opened), guards
+   * the status transition against a race the same way
+   * AssignmentOrchestrator/ChangeRequestService already do (WHERE
+   * status='pending' on the UPDATE itself), and — on approval — advances to
+   * the workflow's next step if one exists. Callers (TimeOffService,
+   * EmployeeLoanService, ShiftSwapService, ChangeRequestService) apply their
+   * own entity-specific side effects only when `isFinalStep` is true.
+   *
+   * `resolveNextStepCtx` supplies the ResolveContext for the next step, if
+   * any — entity-specific (e.g. re-deriving the proposer's org unit).
+   */
+  async decidePendingApproval(
+    pendingApprovalId: number,
+    userId: number,
+    decision: 'approved' | 'rejected',
+    note: string | null,
+    resolveNextStepCtx: (pa: PendingApproval) => Promise<ResolveContext>
+  ): Promise<DecidePendingApprovalResult> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+
+    const authorized = await this.isAuthorizedToDecide(pa, userId);
+    if (!authorized) throw new Error('Not authorized to act on this pending approval');
+
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE pending_approvals
+          SET status = ?, decided_at = CURRENT_TIMESTAMP, decision_note = ?,
+              decided_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'pending'`,
+      [decision, note, userId, pendingApprovalId]
+    );
+    if (result.affectedRows === 0) {
+      const current = await this.getPendingApprovalById(pendingApprovalId);
+      throw new Error(`Pending approval is already ${current?.status ?? pa.status}`);
+    }
+
+    if (decision === 'rejected') {
+      const updated = await this.getPendingApprovalById(pendingApprovalId);
+      return { pendingApproval: updated!, decision: 'rejected', isFinalStep: true };
+    }
+
+    const [nextRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
+              approver_user_id, approver_permission_code, auto_approve_for_owner, escalate_after_hours
+         FROM approval_steps WHERE workflow_id = ? AND step_order > ? ORDER BY step_order ASC LIMIT 1`,
+      [pa.workflowId, pa.stepOrder]
+    );
+    if (nextRows.length === 0) {
+      const updated = await this.getPendingApprovalById(pendingApprovalId);
+      return { pendingApproval: updated!, decision: 'approved', isFinalStep: true };
+    }
+
+    const r = nextRows[0] as any;
+    const nextStep: ApprovalStep = {
+      id: r.id,
+      workflowId: r.workflow_id,
+      stepOrder: r.step_order,
+      approverScope: r.approver_scope as ApproverScope,
+      approverRoleId: r.approver_role_id ?? null,
+      approverUserId: r.approver_user_id ?? null,
+      approverPermissionCode: r.approver_permission_code ?? null,
+      autoApproveForOwner: Boolean(r.auto_approve_for_owner),
+      escalateAfterHours: r.escalate_after_hours ?? null,
+    };
+    const nextCtx = await resolveNextStepCtx(pa);
+    await this.createPendingApprovalForStep(pa.workflowId, nextStep, this.entityRefFromPendingApproval(pa), nextCtx);
+    const updated = await this.getPendingApprovalById(pendingApprovalId);
+    return { pendingApproval: updated!, decision: 'approved', isFinalStep: false };
+  }
+
+  /** Verifies `headUserId` really is the head of the structure this decision is assigned to. */
+  private async requireStructureHead(pa: PendingApproval, headUserId: number): Promise<void> {
+    if (pa.assignedToOrgUnitId === null) throw new Error('This decision is not assigned to a structure');
+    if (pa.status !== 'pending') throw new Error(`Cannot reassign a decision in '${pa.status}' status`);
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT manager_user_id FROM org_units WHERE id = ? LIMIT 1`,
+      [pa.assignedToOrgUnitId]
+    );
+    const headId = rows.length > 0 ? ((rows[0] as any).manager_user_id as number | null) : null;
+    if (headId === null || headId !== headUserId) throw new Error('Forbidden');
+  }
+
+  /** The structure head explicitly decides to keep the decision themselves. Idempotent. */
+  async keepForSelf(pendingApprovalId: number, headUserId: number): Promise<PendingApproval> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+    await this.requireStructureHead(pa, headUserId);
+
+    const [existing] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM decision_reassignments WHERE pending_approval_id = ? LIMIT 1`,
+      [pendingApprovalId]
+    );
+    if (existing.length === 0) {
+      await this.pool.execute(
+        `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ?`,
+        [headUserId, pendingApprovalId]
+      );
+      await this.pool.execute(
+        `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'kept', ?)`,
+        [pendingApprovalId, headUserId]
+      );
+    }
+    return (await this.getPendingApprovalById(pendingApprovalId))!;
+  }
+
+  /** The structure head delegates the decision to one specific member of their team. */
+  async delegateToPerson(pendingApprovalId: number, headUserId: number, targetUserId: number): Promise<PendingApproval> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+    await this.requireStructureHead(pa, headUserId);
+
+    const [memberRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT 1 FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
+      [targetUserId, pa.assignedToOrgUnitId]
+    );
+    if (memberRows.length === 0) throw new Error('targetUserId must be a member of the structure');
+
+    await this.pool.execute(
+      `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ?`,
+      [targetUserId, pendingApprovalId]
+    );
+    await this.pool.execute(
+      `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id, target_user_id)
+       VALUES (?, 'delegated_to_person', ?, ?)`,
+      [pendingApprovalId, headUserId, targetUserId]
+    );
+    return (await this.getPendingApprovalById(pendingApprovalId))!;
+  }
+
+  /** The structure head opens the decision to anyone in their team. */
+  async openToStructure(pendingApprovalId: number, headUserId: number): Promise<PendingApproval> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+    await this.requireStructureHead(pa, headUserId);
+
+    await this.pool.execute(
+      `UPDATE pending_approvals SET assigned_to_user_id = NULL, open_to_structure = TRUE WHERE id = ?`,
+      [pendingApprovalId]
+    );
+    await this.pool.execute(
+      `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'opened_to_structure', ?)`,
+      [pendingApprovalId, headUserId]
+    );
+    return (await this.getPendingApprovalById(pendingApprovalId))!;
+  }
+
+  /** The full chain of command for a decision: structure → head's choice(s) → who decided. */
+  async getDecisionChain(pendingApprovalId: number): Promise<DecisionChain> {
+    const pa = await this.getPendingApprovalById(pendingApprovalId);
+    if (!pa) throw new Error('Pending approval not found');
+
+    let assignedToOrgUnit: DecisionChain['assignedToOrgUnit'] = null;
+    if (pa.assignedToOrgUnitId !== null) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT ou.id, ou.name, ou.manager_user_id,
+                CONCAT(u.first_name, ' ', u.last_name) AS head_name
+           FROM org_units ou
+           LEFT JOIN users u ON u.id = ou.manager_user_id
+          WHERE ou.id = ? LIMIT 1`,
+        [pa.assignedToOrgUnitId]
+      );
+      if (rows.length > 0) {
+        const r = rows[0] as any;
+        assignedToOrgUnit = {
+          id: r.id,
+          name: r.name,
+          headUserId: r.manager_user_id ?? null,
+          headName: r.head_name ?? null,
+        };
+      }
+    }
+
+    const [reassignRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT dr.id, dr.pending_approval_id, dr.action, dr.actor_user_id, dr.target_user_id, dr.created_at,
+              CONCAT(au.first_name, ' ', au.last_name) AS actor_name,
+              CONCAT(tu.first_name, ' ', tu.last_name) AS target_name
+         FROM decision_reassignments dr
+         JOIN users au ON au.id = dr.actor_user_id
+         LEFT JOIN users tu ON tu.id = dr.target_user_id
+        WHERE dr.pending_approval_id = ?
+        ORDER BY dr.created_at ASC`,
+      [pendingApprovalId]
+    );
+    const reassignments = (reassignRows as any[]).map((r) => ({
+      id: r.id,
+      pendingApprovalId: r.pending_approval_id,
+      action: r.action,
+      actorUserId: r.actor_user_id,
+      targetUserId: r.target_user_id ?? null,
+      createdAt: r.created_at,
+      actorName: r.actor_name,
+      targetName: r.target_name ?? null,
+    }));
+
+    let decidedByName: string | null = null;
+    if (pa.decidedByUserId !== null) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT CONCAT(first_name, ' ', last_name) AS name FROM users WHERE id = ? LIMIT 1`,
+        [pa.decidedByUserId]
+      );
+      decidedByName = rows.length > 0 ? ((rows[0] as any).name as string) : null;
+    }
+
+    return {
+      pendingApprovalId,
+      status: pa.status,
+      assignedToOrgUnit,
+      reassignments,
+      currentAssigneeUserId: pa.assignedToUserId,
+      openToStructure: pa.openToStructure,
+      decidedByUserId: pa.decidedByUserId,
+      decidedByName,
+    };
   }
 
   /**

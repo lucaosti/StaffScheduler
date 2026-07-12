@@ -5,19 +5,33 @@
  * The approver can approve or reject with an optional note, which is recorded
  * in the audit log and advances (or closes) the workflow.
  *
+ * When a decision is assigned to a structure (org unit) rather than a
+ * person, the structure's head sees three extra actions — keep it, delegate
+ * it to one team member, or open it to the whole team — and every row
+ * exposes a "Chain of command" panel (visible to everyone who can see the
+ * item) showing what happened: which structure it went to, what the head
+ * decided, and who ultimately acted on it.
+ *
  * Accessible to all authenticated users; the backend only returns items
- * assigned to the current user.
+ * assigned to the current user (directly, or via an opened structure).
  *
  * @author Luca Ostinelli
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   listPendingApprovals,
   approvePendingItem,
   rejectPendingItem,
+  keepPendingItem,
+  delegatePendingItem,
+  openPendingItemToStructure,
+  getDecisionChain,
   PendingApprovalItem,
+  DecisionChain,
 } from '../../services/pendingApprovalService';
+import { listMembersDetailed, OrgUnitMemberDetail } from '../../services/orgService';
 
 type DecisionMode = 'approve' | 'reject';
 
@@ -28,7 +42,16 @@ const STATUS_BADGE: Record<string, string> = {
   escalated: 'bg-secondary',
 };
 
+const REASSIGNMENT_LABEL: Record<string, string> = {
+  kept: 'kept it',
+  delegated_to_person: 'delegated it to',
+  opened_to_structure: 'opened it to the team',
+};
+
 const PendingApprovals: React.FC = () => {
+  const { user } = useAuth();
+  const currentUserId = user?.id ? Number(user.id) : null;
+
   const [items, setItems] = useState<PendingApprovalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,8 +64,14 @@ const PendingApprovals: React.FC = () => {
   const [deciding, setDeciding] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
 
-  // Expanded row for payload view
+  // Expanded row: chain-of-command panel + (for structure heads) delegation controls
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [chains, setChains] = useState<Record<number, DecisionChain>>({});
+  const [chainLoading, setChainLoading] = useState(false);
+  const [members, setMembers] = useState<OrgUnitMemberDetail[]>([]);
+  const [delegateTargetId, setDelegateTargetId] = useState<string>('');
+  const [delegating, setDelegating] = useState(false);
+  const [delegateError, setDelegateError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +90,36 @@ const PendingApprovals: React.FC = () => {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const toggleExpand = async (item: PendingApprovalItem) => {
+    if (expandedId === item.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(item.id);
+    setDelegateTargetId('');
+    setDelegateError(null);
+    setChainLoading(true);
+    try {
+      const res = await getDecisionChain(item.id);
+      if (res.data) setChains((prev) => ({ ...prev, [item.id]: res.data as DecisionChain }));
+      if (item.assignedToOrgUnitId) {
+        const membersRes = await listMembersDetailed(item.assignedToOrgUnitId);
+        setMembers(membersRes.data ?? []);
+      } else {
+        setMembers([]);
+      }
+    } catch (e) {
+      setError((e as Error).message ?? 'Failed to load chain of command.');
+    } finally {
+      setChainLoading(false);
+    }
+  };
+
+  const refreshChain = async (id: number) => {
+    const res = await getDecisionChain(id);
+    if (res.data) setChains((prev) => ({ ...prev, [id]: res.data as DecisionChain }));
+  };
 
   const openDecision = (item: PendingApprovalItem, mode: DecisionMode) => {
     setDecisionTarget(item);
@@ -88,9 +147,62 @@ const PendingApprovals: React.FC = () => {
     }
   };
 
+  const handleKeep = async (item: PendingApprovalItem) => {
+    setDelegating(true);
+    setDelegateError(null);
+    try {
+      await keepPendingItem(item.id);
+      await refreshChain(item.id);
+      await load();
+    } catch (e) {
+      setDelegateError((e as Error).message ?? 'Action failed.');
+    } finally {
+      setDelegating(false);
+    }
+  };
+
+  const handleDelegate = async (item: PendingApprovalItem) => {
+    const targetUserId = Number(delegateTargetId);
+    if (!targetUserId) return;
+    setDelegating(true);
+    setDelegateError(null);
+    try {
+      await delegatePendingItem(item.id, targetUserId);
+      await refreshChain(item.id);
+      await load();
+    } catch (e) {
+      setDelegateError((e as Error).message ?? 'Action failed.');
+    } finally {
+      setDelegating(false);
+    }
+  };
+
+  const handleOpenToStructure = async (item: PendingApprovalItem) => {
+    setDelegating(true);
+    setDelegateError(null);
+    try {
+      await openPendingItemToStructure(item.id);
+      await refreshChain(item.id);
+      await load();
+    } catch (e) {
+      setDelegateError((e as Error).message ?? 'Action failed.');
+    } finally {
+      setDelegating(false);
+    }
+  };
+
   const formatDate = (iso: string) => {
     try { return new Date(iso).toLocaleString(); } catch { return iso; }
   };
+
+  // A structure-assigned decision still sitting with its default assignee
+  // (the head, nobody has delegated/opened it yet) shows the delegation
+  // controls to that same head.
+  const canManageStructureDecision = (item: PendingApprovalItem): boolean =>
+    item.status === 'pending' &&
+    item.assignedToOrgUnitId !== null &&
+    item.assignedToUserId !== null &&
+    item.assignedToUserId === currentUserId;
 
   return (
     <div className="container-fluid py-4">
@@ -165,10 +277,13 @@ const PendingApprovals: React.FC = () => {
                         <td>
                           <button
                             className="btn btn-link btn-sm p-0 text-decoration-none fw-semibold text-start"
-                            onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                            onClick={() => void toggleExpand(item)}
                             aria-label={expandedId === item.id ? `Collapse details for item ${item.id}` : `Expand details for item ${item.id}`}
                           >
                             {item.changeType}
+                            {item.assignedToOrgUnitId !== null && (
+                              <span className="badge bg-info-subtle text-info-emphasis ms-2">Structure</span>
+                            )}
                             <i className={`bi ms-1 ${expandedId === item.id ? 'bi-chevron-up' : 'bi-chevron-down'}`} aria-hidden="true"></i>
                           </button>
                         </td>
@@ -215,12 +330,100 @@ const PendingApprovals: React.FC = () => {
                                   <span className="small">{item.justification}</span>
                                 </div>
                               )}
-                              <div className="mb-0">
+                              <div className="mb-3">
                                 <span className="fw-semibold small text-muted text-uppercase me-2">Proposed Payload</span>
                                 <pre className="bg-white border rounded p-2 small mb-0" style={{ maxHeight: 200, overflow: 'auto', fontSize: '0.75rem' }}>
                                   {JSON.stringify(item.proposedPayload, null, 2)}
                                 </pre>
                               </div>
+
+                              <div className="border-top pt-3">
+                                <span className="fw-semibold small text-muted text-uppercase d-block mb-2">Chain of command</span>
+                                {chainLoading && !chains[item.id] ? (
+                                  <span className="small text-muted">Loading…</span>
+                                ) : chains[item.id] ? (
+                                  <div className="small d-flex flex-wrap align-items-center gap-2">
+                                    {chains[item.id].assignedToOrgUnit ? (
+                                      <>
+                                        <span className="badge bg-secondary">{chains[item.id].assignedToOrgUnit!.name}</span>
+                                        <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
+                                        <span>
+                                          Head: <strong>{chains[item.id].assignedToOrgUnit!.headName ?? 'unassigned'}</strong>
+                                        </span>
+                                        {chains[item.id].reassignments.map((r) => (
+                                          <React.Fragment key={r.id}>
+                                            <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
+                                            <span>
+                                              {r.actorName} {REASSIGNMENT_LABEL[r.action] ?? r.action}
+                                              {r.targetName ? ` ${r.targetName}` : ''}
+                                            </span>
+                                          </React.Fragment>
+                                        ))}
+                                        <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
+                                        <span>
+                                          {chains[item.id].decidedByName
+                                            ? <>Decided by <strong>{chains[item.id].decidedByName}</strong></>
+                                            : chains[item.id].openToStructure
+                                              ? 'Open to the whole team — awaiting decision'
+                                              : 'Awaiting decision'}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="text-muted">Assigned directly to a person — no structure delegation involved.</span>
+                                    )}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              {canManageStructureDecision(item) && (
+                                <div className="border-top pt-3 mt-3">
+                                  <span className="fw-semibold small text-muted text-uppercase d-block mb-2">
+                                    You head this structure — decide what happens to it
+                                  </span>
+                                  {delegateError && (
+                                    <div className="alert alert-danger py-2 small" role="alert">{delegateError}</div>
+                                  )}
+                                  <div className="d-flex flex-wrap align-items-center gap-2">
+                                    <button
+                                      className="btn btn-sm btn-outline-primary"
+                                      disabled={delegating}
+                                      onClick={() => void handleKeep(item)}
+                                    >
+                                      Keep for myself
+                                    </button>
+                                    <select
+                                      className="form-select form-select-sm"
+                                      style={{ width: 'auto' }}
+                                      value={delegateTargetId}
+                                      onChange={(e) => setDelegateTargetId(e.target.value)}
+                                      aria-label="Delegate to team member"
+                                    >
+                                      <option value="">Delegate to…</option>
+                                      {members
+                                        .filter((m) => m.userId !== currentUserId)
+                                        .map((m) => (
+                                          <option key={m.userId} value={m.userId}>
+                                            {m.firstName} {m.lastName}
+                                          </option>
+                                        ))}
+                                    </select>
+                                    <button
+                                      className="btn btn-sm btn-outline-primary"
+                                      disabled={delegating || !delegateTargetId}
+                                      onClick={() => void handleDelegate(item)}
+                                    >
+                                      Delegate
+                                    </button>
+                                    <button
+                                      className="btn btn-sm btn-outline-secondary"
+                                      disabled={delegating}
+                                      onClick={() => void handleOpenToStructure(item)}
+                                    >
+                                      Open to my team
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
