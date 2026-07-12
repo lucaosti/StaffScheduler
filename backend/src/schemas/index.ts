@@ -177,6 +177,10 @@ export const createTimeOffBody = z.object({
   reason: z.string().optional(),
 });
 
+export const clockInBody = z.object({
+  notes: z.string().max(2000).optional(),
+});
+
 export const createShiftSwapBody = z.object({
   requesterAssignmentId: z.number().int().positive(),
   targetAssignmentId: z.number().int().positive(),

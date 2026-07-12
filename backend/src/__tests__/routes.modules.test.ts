@@ -48,6 +48,9 @@ jest.mock('../middleware/auth', () => ({
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
+  // routes/modules.ts uses the shared singleton so its ModuleService.prototype
+  // mocks (below) are the ones actually exercised by the route.
+  getModuleService: () => new (require('../services/ModuleService').ModuleService)(),
 }));
 
 jest.mock('../services/ModuleService');
