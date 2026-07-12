@@ -9,8 +9,10 @@
  *   3. Build an OptimizationProblem, call ScheduleOptimizer.
  *   4. Persist resulting assignments inside a single transaction.
  *
- * Today we use the greedy fallback (no Python required); the OR-Tools
- * path is opt-in via OPTIMIZATION_ENGINE=or-tools.
+ * Defaults to the pure-TypeScript greedy fallback (no Python required).
+ * Set OPTIMIZATION_ENGINE=or-tools to route through the Python OR-Tools
+ * CP-SAT solver instead — see ScheduleOptimizer.optimize(), which itself
+ * falls back to greedy if Python is unavailable or times out.
  *
  * @author Luca Ostinelli
  */
@@ -18,6 +20,8 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
+import { DateUtils } from '../utils';
+import { config } from '../config';
 
 interface AutoScheduleResult {
   scheduleId: number;
@@ -28,7 +32,7 @@ interface AutoScheduleResult {
 }
 
 const formatDate = (raw: unknown): string =>
-  typeof raw === 'string' ? raw : new Date(raw as Date).toISOString().slice(0, 10);
+  typeof raw === 'string' ? raw : DateUtils.fromMySQLDate(raw as Date);
 
 export class AutoScheduleService {
   constructor(private pool: Pool) {}
@@ -92,11 +96,36 @@ export class AutoScheduleService {
       const start = new Date(row.start_date as Date);
       const end = new Date(row.end_date as Date);
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        dates.push(d.toISOString().slice(0, 10));
+        dates.push(DateUtils.fromMySQLDate(d));
       }
       const userId = row.user_id as number;
       const existing = unavailableByUser.get(userId) || [];
       unavailableByUser.set(userId, [...existing, ...dates]);
+    }
+
+    // Assignments this employee already holds on *other* schedules, within
+    // reach of this one's rolling-window checks (±14 days, matching
+    // ComplianceEngine.evaluateAssignmentCompliance's own lookback/lookahead).
+    // Without this, back-to-back schedule periods are optimized in total
+    // isolation from each other — each can look individually compliant while
+    // an employee assigned late in period N and early in period N+1 quietly
+    // busts max-consecutive-days/max-weekly-hours across the boundary.
+    const [externalRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT sa.user_id, s.date, s.start_time, s.end_time
+         FROM shift_assignments sa
+         JOIN shifts s ON s.id = sa.shift_id
+        WHERE s.schedule_id != ?
+          AND sa.status IN ('pending', 'confirmed')
+          AND sa.user_id IN (SELECT user_id FROM user_departments WHERE department_id = ?)
+          AND s.date BETWEEN DATE_SUB(?, INTERVAL 14 DAY) AND DATE_ADD(?, INTERVAL 14 DAY)`,
+      [scheduleId, schedule.department_id, schedule.start_date, schedule.end_date]
+    );
+    const externalAssignmentsByUser = new Map<number, Array<{ date: string; start_time: string; end_time: string }>>();
+    for (const row of externalRows) {
+      const userId = row.user_id as number;
+      const list = externalAssignmentsByUser.get(userId) ?? [];
+      list.push({ date: formatDate(row.date), start_time: row.start_time as string, end_time: row.end_time as string });
+      externalAssignmentsByUser.set(userId, list);
     }
 
     // 3. Build problem and run greedy.
@@ -119,6 +148,7 @@ export class AutoScheduleService {
         max_consecutive_days: e.max_consecutive_days as number,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
+        existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
       })),
       preferences: [],
       constraints: {
@@ -128,7 +158,14 @@ export class AutoScheduleService {
       },
     };
 
-    const assignments = await optimizer.generateGreedySchedule(problem as never);
+    // config.optimization.engine === 'or-tools' routes through the Python
+    // CP-SAT solver (optimize() falls back to the greedy path itself if
+    // Python is unavailable or times out); any other value goes straight to
+    // the greedy fallback, skipping the child-process round-trip entirely.
+    const assignments =
+      config.optimization.engine === 'or-tools'
+        ? (await optimizer.optimize(problem as never)).assignments
+        : await optimizer.generateGreedySchedule(problem as never);
 
     // 4. Persist assignments.
     const conn = await this.pool.getConnection();

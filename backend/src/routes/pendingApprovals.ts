@@ -26,6 +26,7 @@ import { validateParams, validateBody } from '../middleware/validation';
 import { PendingApprovalService } from '../services/PendingApprovalService';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
+import { mapServiceError } from '../utils/httpErrors';
 import { logger } from '../config/logger';
 
 const idParams = z.object({ id: z.coerce.number().int().positive() });
@@ -78,18 +79,6 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
     note: string | null
   ): Promise<unknown> => dispatchPendingApprovalDecision(pool, id, userId, decision, note);
 
-  // Matches the fallback each per-entity route already used (shiftSwap.ts,
-  // timeOff.ts, org.ts loan routes, changeRequests.ts): 404/403 are the only
-  // statuses distinguished by message content, and everything else — status
-  // conflicts, compliance-check rejections, business-rule errors — is a 409,
-  // not a 500. These aren't application errors, so they shouldn't log as one.
-  const mapDecisionError = (error: any): { status: number; code: string; message: string } => {
-    const msg: string = error?.message ?? '';
-    if (msg.toLowerCase().includes('not found')) return { status: 404, code: 'NOT_FOUND', message: msg };
-    if (msg === 'Forbidden' || msg.includes('Not authorized')) return { status: 403, code: 'FORBIDDEN', message: msg };
-    return { status: 409, code: 'CONFLICT', message: msg };
-  };
-
   // POST /:id/approve — approve, whichever entity this decision belongs to
   router.post('/:id/approve', authenticate, validateParams(idParams), async (req, res) => {
     try {
@@ -98,9 +87,8 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
       const result = await dispatchDecision(id, req.user!.id, 'approved', note);
       res.json({ success: true, data: result });
     } catch (error: any) {
-      const { status, code, message } = mapDecisionError(error);
-      if (status === 500) logger.error('Failed to approve pending approval:', error);
-      res.status(status).json({ success: false, error: { code, message: status === 500 ? 'Failed to approve pending approval' : message } });
+      const { status, code, message } = mapServiceError(error);
+      res.status(status).json({ success: false, error: { code, message } });
     }
   });
 
@@ -112,9 +100,8 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
       const result = await dispatchDecision(id, req.user!.id, 'rejected', note);
       res.json({ success: true, data: result });
     } catch (error: any) {
-      const { status, code, message } = mapDecisionError(error);
-      if (status === 500) logger.error('Failed to reject pending approval:', error);
-      res.status(status).json({ success: false, error: { code, message: status === 500 ? 'Failed to reject pending approval' : message } });
+      const { status, code, message } = mapServiceError(error);
+      res.status(status).json({ success: false, error: { code, message } });
     }
   });
 
@@ -122,14 +109,15 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   // apply to any pending_approvals row (change request, time-off, loan, or
   // shift swap) that was assigned to a structure (`assigned_to_org_unit_id`).
 
+  // Same 404/403/409 ladder as mapServiceError, plus a 400 for the two
+  // delegation-specific validation messages that don't fit "not found" or
+  // "forbidden" but also aren't a status conflict.
   const mapDelegationError = (error: any): { status: number; code: string; message: string } => {
     const msg: string = error?.message ?? '';
-    if (msg.toLowerCase().includes('not found')) return { status: 404, code: 'NOT_FOUND', message: msg };
-    if (msg === 'Forbidden' || msg.includes('Not authorized')) return { status: 403, code: 'FORBIDDEN', message: msg };
     if (msg.includes('not assigned to a structure') || msg.includes('must be a member')) {
       return { status: 400, code: 'VALIDATION_ERROR', message: msg };
     }
-    return { status: 409, code: 'CONFLICT', message: msg };
+    return mapServiceError(error);
   };
 
   router.post('/:id/keep', authenticate, validateParams(idParams), async (req, res) => {
@@ -168,7 +156,7 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   router.get('/:id/chain', authenticate, validateParams(idParams), async (req, res) => {
     try {
       const engine = new ApprovalEngineService(pool);
-      const chain = await engine.getDecisionChain(Number(req.params.id));
+      const chain = await engine.getDecisionChain(Number(req.params.id), req.user!.id);
       res.json({ success: true, data: chain });
     } catch (error: any) {
       const { status, code, message } = mapDelegationError(error);
