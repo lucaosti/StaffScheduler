@@ -129,6 +129,11 @@ const dayDiff = (a: string, b: string): number => {
   return Math.round((da - db) / (24 * 60 * 60 * 1000));
 };
 
+const addIsoDays = (date: string, days: number): string => {
+  const d = new Date(Date.parse(`${date}T00:00:00Z`) + days * 24 * 60 * 60 * 1000);
+  return isoDay(d);
+};
+
 /* ------------------------------------------------------------------ */
 /* Individual rules                                                    */
 /* ------------------------------------------------------------------ */
@@ -215,32 +220,45 @@ const checkMinRest = (input: ComplianceInput): ComplianceViolation | null => {
 
 const checkMaxWeeklyHours = (input: ComplianceInput): ComplianceViolation | null => {
   const { candidate, existing, policy } = input;
-  const candidateStart = toDate(candidate.date, candidate.startTime);
 
-  // Rolling 7-day window: anything starting in [start - 6d, start + 6d] counts
-  // when assessed against the candidate. We use 6 days on either side because
-  // the candidate's own week can stretch in both directions; the policy is
-  // expressed as "no more than maxHoursPerWeek in any 7-day window".
-  const windowMs = 6 * 24 * 60 * 60 * 1000;
-  const windowStart = new Date(candidateStart.getTime() - windowMs);
-  const windowEnd = new Date(candidateStart.getTime() + windowMs);
+  const all = [
+    { date: candidate.date, hours: shiftDurationHours(candidate) },
+    ...existing.map((s) => ({ date: s.date, hours: shiftDurationHours(s) })),
+  ];
 
-  let totalHours = shiftDurationHours(candidate);
-  for (const other of existing) {
-    const otherStart = toDate(other.date, other.startTime);
-    if (otherStart >= windowStart && otherStart <= windowEnd) {
-      totalHours += shiftDurationHours(other);
+  // "No more than maxHoursPerWeek in any 7-day window" means checking every
+  // 7-day window that could contain the candidate's *day*, not one fixed
+  // span, and windows are calendar-day boundaries, not exact timestamps — an
+  // overnight shift starting at 23:00 must still be grouped with same-day
+  // morning shifts, not excluded by a few hours of clock time. A single
+  // window anchored ±6 days from the candidate covers 13 days, not 7, and
+  // over-counts hours from shifts a week or more apart — flagging perfectly
+  // normal, spread-out schedules as violations. Instead, slide a true 7-day
+  // window (by calendar day) across every offset that still contains the
+  // candidate's day and take the worst one.
+  let worstTotalHours = 0;
+  let worstWindowStart = candidate.date;
+  for (let offsetDays = -6; offsetDays <= 0; offsetDays++) {
+    const total = all
+      .filter((s) => {
+        const diff = dayDiff(s.date, candidate.date);
+        return diff >= offsetDays && diff <= offsetDays + 6;
+      })
+      .reduce((sum, s) => sum + s.hours, 0);
+    if (total > worstTotalHours) {
+      worstTotalHours = total;
+      worstWindowStart = addIsoDays(candidate.date, offsetDays);
     }
   }
 
-  if (totalHours > policy.maxHoursPerWeek) {
+  if (worstTotalHours > policy.maxHoursPerWeek) {
     return {
       code: 'MAX_WEEKLY_HOURS',
-      message: `Assignment would result in ${totalHours.toFixed(1)}h in a rolling 7-day window, exceeding the maximum of ${policy.maxHoursPerWeek}h.`,
+      message: `Assignment would result in ${worstTotalHours.toFixed(1)}h in a rolling 7-day window, exceeding the maximum of ${policy.maxHoursPerWeek}h.`,
       details: {
-        totalHours: Number(totalHours.toFixed(2)),
+        totalHours: Number(worstTotalHours.toFixed(2)),
         limit: policy.maxHoursPerWeek,
-        anchorDate: isoDay(candidateStart),
+        anchorDate: worstWindowStart,
       },
     };
   }

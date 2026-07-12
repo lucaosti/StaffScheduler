@@ -203,6 +203,23 @@ export class ShiftSwapService {
     const tgtRow = pairRows.find((r) => r.assignment_id === swap.targetAssignmentId);
     if (!reqRow || !tgtRow) throw new Error('Assignment row mismatch');
 
+    // Re-verify current ownership. A different swap approved between this
+    // request's creation and its decision can reassign one of these two
+    // rows to someone else entirely; blindly trusting the ids would silently
+    // overwrite that third party's shift without ever checking their
+    // compliance. Ownership must still match what the request was created
+    // against.
+    if (reqRow.user_id !== swap.requesterUserId) {
+      throw new Error(
+        `Requester's assignment (#${reqRow.assignment_id}) has been reassigned to another user since this request was created`
+      );
+    }
+    if (tgtRow.user_id !== swap.targetUserId) {
+      throw new Error(
+        `Target's assignment (#${tgtRow.assignment_id}) has been reassigned to another user since this request was created`
+      );
+    }
+
     // shift_assignments has a UNIQUE (shift_id, user_id) constraint. If
     // either party already holds a *different* assignment on the shift
     // they'd be swapped onto, completing the swap would collide with it —
@@ -271,34 +288,35 @@ export class ShiftSwapService {
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new Error('No pending approval found for this shift swap');
 
-    // Dry-run the compliance check before committing the workflow decision.
-    // decidePendingApproval finalizes the pending_approvals row immediately
-    // (its own auto-committed UPDATE, not part of the swap transaction
-    // below), so a compliance failure discovered only after that point would
-    // leave the decision permanently "approved" while the swap itself never
-    // applied — a stuck, unretryable request. Validating first means a
-    // rejection here never touches pending_approvals at all.
-    if (await this.engine.wouldBeFinalStep(pendingApprovalId)) {
-      await this.checkSwapCompliance(existingForAuth);
-    }
-
-    const decision = await this.engine.decidePendingApproval(
-      pendingApprovalId,
-      reviewerId,
-      'approved',
-      notes,
-      async () => {
-        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
-        return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
-      }
-    );
-    if (!decision.isFinalStep) {
+    // A non-final step (an earlier approver in a multi-step workflow) has no
+    // swap side effects to apply yet — just record the decision and let the
+    // next step take over.
+    if (!(await this.engine.wouldBeFinalStep(pendingApprovalId))) {
+      await this.engine.decidePendingApproval(
+        pendingApprovalId,
+        reviewerId,
+        'approved',
+        notes,
+        async () => {
+          const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
+          return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
+        }
+      );
       const refreshed = await this.getById(id);
       if (!refreshed) throw new Error('Failed to retrieve shift swap request');
       return refreshed;
     }
 
+    // Final step: validate and apply the swap itself *before* deciding the
+    // pending_approvals row. decidePendingApproval commits immediately via
+    // its own connection — deciding first and validating after would leave
+    // the decision permanently "approved" if the swap then failed
+    // compliance (or an ownership/concurrency check), a stuck, unretryable
+    // request (see managerActor.ts's handling of exactly this failure mode).
+    // Doing the real work first means the only way to end up decided-but-
+    // unapplied is the trivial status UPDATE below failing outright.
     const conn = await this.pool.getConnection();
+    let swap: ShiftSwapRequest;
     try {
       await conn.beginTransaction();
       const [rows] = await conn.execute<RowDataPacket[]>(
@@ -306,13 +324,25 @@ export class ShiftSwapService {
         [id]
       );
       if (rows.length === 0) throw new Error('Shift swap request not found');
-      const swap = mapRow(rows[0]);
+      swap = mapRow(rows[0]);
       if (swap.status !== 'pending') {
         throw new Error(`Cannot approve swap in status '${swap.status}'`);
       }
 
-      // Re-check compliance with the row lock held, in case the assignments
-      // changed between the dry run above and now.
+      // Lock every assignment currently held by either party before
+      // checking compliance. checkSwapCompliance only validates the two
+      // swapped shifts against each user's *total* weekly hours — a second,
+      // concurrently-approved swap touching a *different* assignment of the
+      // same user isn't visible to a plain (non-locking) read, so two swaps
+      // that each look compliant in isolation could jointly push a user over
+      // a weekly-hours limit. Locking the user's full assignment set forces
+      // any overlapping concurrent approval to wait for this one to commit
+      // (or roll back) before it can re-evaluate compliance itself.
+      await conn.execute<RowDataPacket[]>(
+        `SELECT id FROM shift_assignments WHERE user_id IN (?, ?) FOR UPDATE`,
+        [swap.requesterUserId, swap.targetUserId]
+      );
+
       await this.checkSwapCompliance(swap, conn);
 
       // Swap the user_id on both assignments.
@@ -323,6 +353,17 @@ export class ShiftSwapService {
       await conn.execute(
         `UPDATE shift_assignments SET user_id = ? WHERE id = ?`,
         [swap.requesterUserId, swap.targetAssignmentId]
+      );
+
+      await this.engine.decidePendingApproval(
+        pendingApprovalId,
+        reviewerId,
+        'approved',
+        notes,
+        async () => {
+          const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(swap.requesterUserId);
+          return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
+        }
       );
 
       await conn.execute(
