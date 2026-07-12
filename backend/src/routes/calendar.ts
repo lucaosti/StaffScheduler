@@ -20,6 +20,7 @@ import { authenticate } from '../middleware/auth';
 import { validateParams } from '../middleware/validation';
 import { idParam } from '../schemas';
 import { CalendarService } from '../services/CalendarService';
+import { RbacService } from '../services/RbacService';
 import { logger } from '../config/logger';
 
 const writeIcsResponse = (
@@ -43,6 +44,7 @@ const writeIcsResponse = (
 export const createCalendarRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new CalendarService(pool);
+  const rbac = new RbacService(pool);
 
   router.post('/token', authenticate, async (req: Request, res: Response) => {
     try {
@@ -98,27 +100,21 @@ export const createCalendarRouter = (pool: Pool): Router => {
       }
 
       // Authorisation: the token's user must be a full administrator (holds the
-      // `settings.manage` permission) OR the manager of the target department.
-      // Permissions are resolved with a correlated EXISTS to avoid pulling in the
-      // heavier UserService/RbacService for a read-only check.
+      // `settings.manage` permission, resolved the same way as every other
+      // permission check in the app — role grants + active delegations) OR
+      // the manager of the target department.
       const departmentId = res.locals.params.id;
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT d.manager_id,
-                EXISTS(
-                  SELECT 1 FROM user_roles ur
-                    JOIN role_permissions rp ON rp.role_id = ur.role_id
-                    JOIN permissions p ON p.id = rp.permission_id
-                   WHERE ur.user_id = u.id AND p.code = 'settings.manage'
-                     AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-                ) AS is_admin
-           FROM users u
-           LEFT JOIN departments d ON d.id = ?
-          WHERE u.id = ? LIMIT 1`,
-        [departmentId, userId]
-      );
-      const row = rows[0];
-      const allowed =
-        !!row && (Number(row.is_admin) === 1 || row.manager_id === userId);
+      const permissions = await rbac.getEffectivePermissions(userId);
+      const isAdmin = permissions.includes('settings.manage');
+
+      let allowed = isAdmin;
+      if (!allowed) {
+        const [deptRows] = await pool.execute<RowDataPacket[]>(
+          `SELECT manager_id FROM departments WHERE id = ? LIMIT 1`,
+          [departmentId]
+        );
+        allowed = deptRows.length > 0 && deptRows[0].manager_id === userId;
+      }
       if (!allowed) {
         res.status(403).type('text/plain').send('forbidden');
         return;
