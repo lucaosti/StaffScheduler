@@ -24,9 +24,10 @@
  *
  * Every employee is an independent "thread" (a concurrent async task — Node
  * is single-threaded, but the concurrency model is identical: independent
- * actors racing on the same database) that files 1-3 random requests. Every
- * org-unit head is a "thread" too, deciding or delegating; a delegate
- * becomes a deciding thread in turn.
+ * actors racing on the same database) that files 5-8 random requests per
+ * round — at least 20 over the default 4 rounds. Every org-unit head is a
+ * "thread" too, waking on every round to decide or delegate every pending
+ * approval; a delegate becomes a deciding thread in turn.
  *
  * No AI anywhere in this file or the modules it calls: all "randomness" is a
  * seeded, deterministic PRNG (prng.ts) — same seed, same run, byte for byte.

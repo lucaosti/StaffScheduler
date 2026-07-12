@@ -163,24 +163,26 @@ const pendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-/** Queues the pool.execute calls the new pre-transaction authorization path
+/** Queues the pool.execute calls the pre-transaction authorization path
  *  makes before ShiftSwapService.approve opens its conn-based transaction:
  *  getById, findPendingApprovalId, the upfront wouldBeFinalStep check
- *  (getPendingApprovalById + next-step lookup) and its compliance dry run
- *  (assignment-pair read), then ApprovalEngineService.decidePendingApproval
- *  (pre-fetch, guarded UPDATE, next-step lookup — none, since ShiftSwap.Request
- *  is single-step — and the post-decision fetch). */
+ *  (getPendingApprovalById + next-step lookup). The swap itself is now
+ *  validated and applied entirely inside the transaction, before
+ *  decidePendingApproval is ever called. */
 const queueApprovePreChecks = (execute: jest.Mock) => {
   execute
     .mockResolvedValueOnce([[swapRow], null] as Tuple) // getById
     .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
     .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
-    .mockResolvedValueOnce([[], null] as Tuple) // wouldBeFinalStep: next-step lookup -> none (final)
-    .mockResolvedValueOnce([[                 // dry-run checkSwapCompliance: assignment pair read
-      { assignment_id: 100, user_id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
-      { assignment_id: 200, user_id: 20, date: '2026-05-02', start_time: '09:00', end_time: '17:00' },
-    ], null] as Tuple)
-    .mockResolvedValueOnce([[], null] as Tuple) // dry-run checkSwapCompliance: duplicate-assignment check -> none
+    .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
+};
+
+/** Queues the pool.execute calls ApprovalEngineService.decidePendingApproval
+ *  makes once the swap itself has already been validated and applied inside
+ *  the transaction — pre-fetch, guarded UPDATE, next-step lookup (none,
+ *  since ShiftSwap.Request is single-step), and the post-decision fetch. */
+const queueDecideApproved = (execute: jest.Mock) => {
+  execute
     .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
     .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
     .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
@@ -200,6 +202,7 @@ describe('ShiftSwapService.approve — error paths', () => {
     queueApprovePreChecks(execute);
     conn.execute
       .mockResolvedValueOnce([[swapRow], null]) // SELECT swap → pending
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
       .mockResolvedValueOnce([[                 // pair query: 2 rows but neither matches
         { assignment_id: 999, user_id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
         { assignment_id: 888, user_id: 20, date: '2026-05-02', start_time: '09:00', end_time: '17:00' },
@@ -214,14 +217,16 @@ describe('ShiftSwapService.approve — error paths', () => {
     queueApprovePreChecks(execute);
     conn.execute
       .mockResolvedValueOnce([[swapRow], null]) // SELECT swap
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
       .mockResolvedValueOnce([[                 // pair query: correct IDs
         { assignment_id: 100, user_id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
         { assignment_id: 200, user_id: 20, date: '2026-05-02', start_time: '09:00', end_time: '17:00' },
       ], null])
-      .mockResolvedValueOnce([[], null]) // locked re-check: duplicate-assignment check -> none
+      .mockResolvedValueOnce([[], null]) // checkSwapCompliance: duplicate-assignment check -> none
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE assignment 100
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE assignment 200
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE swap status
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE assignment 200
+    queueDecideApproved(execute);
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE swap status
     // pool.execute for getById (post-transaction refresh) returns null
     execute.mockResolvedValueOnce([[], null] as Tuple);
     const svc = new ShiftSwapService(pool);
