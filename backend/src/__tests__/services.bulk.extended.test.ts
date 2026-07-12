@@ -386,6 +386,64 @@ describe('ShiftSwapService', () => {
     (evaluateAssignmentCompliance as jest.Mock).mockReset();
   });
 
+  const pendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 501,
+    change_request_id: null,
+    time_off_request_id: null,
+    employee_loan_id: null,
+    shift_swap_request_id: 1,
+    workflow_id: 10,
+    step_id: 20,
+    step_order: 1,
+    assigned_to_user_id: 9,
+    assigned_to_org_unit_id: null,
+    open_to_structure: 0,
+    decided_by_user_id: null,
+    status: 'pending',
+    decided_at: null,
+    decision_note: null,
+    escalated_at: null,
+    created_at: 't',
+    updated_at: 't',
+    ...overrides,
+  });
+
+  /** Queues the pool.execute calls `approve()` makes before it ever opens a
+   *  transaction: getById, findPendingApprovalId, the upfront
+   *  wouldBeFinalStep check (getPendingApprovalById + next-step lookup), and
+   *  its compliance dry run (an assignment-pair read via `pairRowsForDryRun`).
+   *  Stops there — for tests where the dry run itself is expected to throw,
+   *  so decidePendingApproval is never reached and no extra mocks are left
+   *  dangling in the queue for a subsequent call to trip over. */
+  const queueDryRunOnly = (execute: jest.Mock, pairRowsForDryRun: unknown[]) => {
+    execute
+      .mockResolvedValueOnce([[swap], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
+      .mockResolvedValueOnce([[], null] as Tuple) // wouldBeFinalStep: next-step lookup -> none (final)
+      .mockResolvedValueOnce([pairRowsForDryRun, null] as Tuple) // dry-run checkSwapCompliance: pair read
+      .mockResolvedValueOnce([[], null] as Tuple); // dry-run checkSwapCompliance: duplicate-assignment check -> none
+  };
+
+  /** Same as queueDryRunOnly, but the dry run is expected to pass, so also
+   *  queues ApprovalEngineService.decidePendingApproval's own calls:
+   *  getPendingApprovalById(pre) + guarded UPDATE + (approved only) next-step
+   *  lookup + getPendingApprovalById(post). */
+  const queueApprovePreChecks = (
+    execute: jest.Mock,
+    pairRowsForDryRun: unknown[],
+    decision: 'approved' | 'rejected' = 'approved'
+  ) => {
+    queueDryRunOnly(execute, pairRowsForDryRun);
+    execute
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple); // guarded UPDATE
+    if (decision === 'approved') {
+      execute.mockResolvedValueOnce([[], null] as Tuple); // next-step lookup -> none
+    }
+    execute.mockResolvedValueOnce([[pendingApprovalRow({ status: decision })], null] as Tuple); // post-decision fetch
+  };
+
   it('create rejects when requester assignment missing', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockResolvedValueOnce([[], null]);
@@ -428,7 +486,10 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([[{ id: 10, user_id: 1 }], null])
       .mockResolvedValueOnce([[{ id: 20, user_id: 2 }], null])
       .mockResolvedValueOnce([{ insertId: 1 }, null]);
-    execute.mockResolvedValueOnce([[swap], null] as Tuple);
+    execute
+      .mockResolvedValueOnce([[swap], null] as Tuple) // getById
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null] as Tuple) // audit.write
+      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found
     const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.create({
       requesterUserId: 1,
@@ -465,31 +526,33 @@ describe('ShiftSwapService', () => {
   });
 
   it('approve rolls back when not pending', async () => {
-    const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null]);
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple); // getById
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/Cannot approve swap/);
   });
 
   it('approve fails when assignments are gone', async () => {
-    const { pool, conn } = makePool();
-    conn.execute
-      .mockResolvedValueOnce([[swap], null])
-      .mockResolvedValueOnce([
-        [{ assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' }],
-        null,
-      ]);
+    const { pool, execute } = makePool();
+    // The dry-run compliance check reads the assignment pair via pool.execute
+    // (before any transaction opens) — a single row means "gone" is caught
+    // there, and the transaction is never reached.
+    queueDryRunOnly(execute, [
+      { assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' },
+    ]);
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/One or both assignments are gone/);
   });
 
   it('approve rejects when compliance fails for either side', async () => {
-    const { pool, conn } = makePool();
+    const { pool, execute } = makePool();
     const pair = [
       { assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' },
       { assignment_id: 20, user_id: 2, date: '2026-05-11', start_time: '08', end_time: '16' },
     ];
-    conn.execute.mockResolvedValueOnce([[swap], null]).mockResolvedValueOnce([pair, null]);
+    // Both cases are caught by the upfront dry run, before any transaction
+    // opens — decidePendingApproval and the swap transaction are never reached.
+    queueDryRunOnly(execute, pair);
     (evaluateAssignmentCompliance as jest.Mock).mockResolvedValueOnce({
       ok: false,
       violations: [{ code: 'OVER_HOURS' }],
@@ -497,7 +560,7 @@ describe('ShiftSwapService', () => {
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/Requester would violate/);
 
-    conn.execute.mockResolvedValueOnce([[swap], null]).mockResolvedValueOnce([pair, null]);
+    queueDryRunOnly(execute, pair);
     (evaluateAssignmentCompliance as jest.Mock)
       .mockResolvedValueOnce({ ok: true, violations: [] })
       .mockResolvedValueOnce({ ok: false, violations: [{ code: 'REST_BREAK' }] });
@@ -522,31 +585,55 @@ describe('ShiftSwapService', () => {
         end_time: '16',
       },
     ];
+    queueApprovePreChecks(execute, pair);
     conn.execute
       .mockResolvedValueOnce([[swap], null])
       .mockResolvedValueOnce([pair, null])
+      .mockResolvedValueOnce([[], null]) // locked re-check: duplicate-assignment check -> none
       .mockResolvedValueOnce([{ affectedRows: 1 }, null])
       .mockResolvedValueOnce([{ affectedRows: 1 }, null])
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     (evaluateAssignmentCompliance as jest.Mock)
-      .mockResolvedValueOnce({ ok: true, violations: [] })
-      .mockResolvedValueOnce({ ok: true, violations: [] });
+      .mockResolvedValueOnce({ ok: true, violations: [] }) // dry run: requester
+      .mockResolvedValueOnce({ ok: true, violations: [] }) // dry run: target
+      .mockResolvedValueOnce({ ok: true, violations: [] }) // locked re-check: requester
+      .mockResolvedValueOnce({ ok: true, violations: [] }); // locked re-check: target
     execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple);
     const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.approve(1, 9, 'OK');
     expect(out.status).toBe('approved');
   });
 
-  it('decline + cancel cover happy/forbidden/missing branches', async () => {
+  it('decline happy path, not-found, and already-decided branches', async () => {
+    const { pool, execute } = makePool();
+    // decline(1, 9, 'no') — happy path: getById, findPendingApprovalId, decide
+    // (pre-fetch, guarded UPDATE, post-fetch — rejected short-circuits before
+    // any next-step lookup), own UPDATE, final getById, audit.write.
+    execute
+      .mockResolvedValueOnce([[swap], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[pendingApprovalRow({ status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE shift_swap_requests
+      .mockResolvedValueOnce([[{ ...swap, status: 'declined' }], null] as Tuple) // final getById
+      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT
+      // decline(1, 9) — request no longer exists: getById returns nothing,
+      // which now short-circuits before any pending_approval lookup.
+      .mockResolvedValueOnce([[], null] as Tuple) // getById -> not found
+      // decline(1, 9) — already decided: getById reports a non-pending status,
+      // which now short-circuits immediately too.
+      .mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple); // getById -> approved
+
+    const svc = new ShiftSwapService(pool, noopNotifications);
+    expect((await svc.decline(1, 9, 'no')).status).toBe('declined');
+    await expect(svc.decline(1, 9)).rejects.toThrow(/not found/);
+    await expect(svc.decline(1, 9)).rejects.toThrow(/Cannot decline swap/);
+  });
+
+  it('cancel covers happy/forbidden/missing/already-decided branches', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
-      .mockResolvedValueOnce([[{ ...swap, status: 'declined' }], null] as Tuple)
-      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT for decline#1
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
-      .mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'cancelled' }], null] as Tuple)
       .mockResolvedValueOnce([{ insertId: 2 }, null] as Tuple) // audit INSERT for cancel#1
@@ -557,9 +644,6 @@ describe('ShiftSwapService', () => {
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[{ ...swap, status: 'declined' }], null] as Tuple);
     const svc = new ShiftSwapService(pool, noopNotifications);
-    expect((await svc.decline(1, 9, 'no')).status).toBe('declined');
-    await expect(svc.decline(1, 9)).rejects.toThrow(/not found/);
-    await expect(svc.decline(1, 9)).rejects.toThrow(/Cannot decline swap/);
     expect((await svc.cancel(1, 1)).status).toBe('cancelled');
     await expect(svc.cancel(1, 1)).rejects.toThrow(/not found/);
     await expect(svc.cancel(1, 1)).rejects.toThrow(/Forbidden/);

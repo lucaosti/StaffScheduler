@@ -231,6 +231,13 @@ describe('ChangeRequestService.create', () => {
       approver_role_id: null, approver_user_id: 20, approver_permission_code: null,
       auto_approve_for_owner: 0, escalate_after_hours: null,
     };
+    const paRow = {
+      id: 5, change_request_id: 7, time_off_request_id: null, employee_loan_id: null,
+      shift_swap_request_id: null, workflow_id: 1, step_id: 10, step_order: 1,
+      assigned_to_user_id: 20, assigned_to_org_unit_id: null, open_to_structure: 0,
+      decided_by_user_id: null, status: 'pending', decided_at: null, decision_note: null,
+      escalated_at: null, created_at: 't', updated_at: 't',
+    };
     execute
       .mockResolvedValueOnce([{ insertId: 7 }, null])          // INSERT change_request
       .mockResolvedValueOnce([[buildRow({ id: 7 })], null])     // getById
@@ -240,8 +247,11 @@ describe('ChangeRequestService.create', () => {
       .mockResolvedValueOnce([[], null])                         // resolveProposerContext — roles
       .mockResolvedValueOnce([[workflowRow], null])              // getWorkflowByChangeType
       .mockResolvedValueOnce([[stepRow], null])                  // hydrateWorkflow steps
-      .mockResolvedValueOnce([[stepRow], null])                  // resolveApproverForStep SELECT
-      .mockResolvedValueOnce([{ insertId: 5 }, null]);          // INSERT pending_approvals
+      // 'company_user' scope resolves step.approverUserId directly — no extra query —
+      // so the next call is the INSERT itself, followed by createPendingApprovalForStep's
+      // own getPendingApprovalById refresh.
+      .mockResolvedValueOnce([{ insertId: 5 }, null])          // INSERT pending_approvals
+      .mockResolvedValueOnce([[paRow], null]);                  // getPendingApprovalById(5)
 
     const svc = new ChangeRequestService(pool);
     await svc.create(
@@ -249,11 +259,13 @@ describe('ChangeRequestService.create', () => {
       10
     );
 
-    const lastCall = execute.mock.calls[execute.mock.calls.length - 1];
-    expect(lastCall[0]).toContain('INSERT INTO pending_approvals');
-    expect(lastCall[1]).toContain(7);   // change_request_id
-    expect(lastCall[1]).toContain(1);   // workflow_id
-    expect(lastCall[1]).toContain(20);  // assigned_to_user_id (company_user approver)
+    const insertCall = execute.mock.calls.find(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('INSERT INTO pending_approvals')
+    );
+    expect(insertCall).toBeDefined();
+    expect(insertCall[1]).toContain(7);   // change_request_id
+    expect(insertCall[1]).toContain(1);   // workflow_id
+    expect(insertCall[1]).toContain(20);  // assigned_to_user_id (company_user approver)
   });
 });
 
@@ -278,7 +290,10 @@ describe('ChangeRequestService.approve', () => {
 
   it('throws when request is not in pending status', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]) // guarded UPDATE matches nothing
+      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null]); // re-fetch for error message
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.approve(1, 20)).rejects.toThrow("Cannot approve");
@@ -290,6 +305,33 @@ describe('ChangeRequestService.approve', () => {
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.approve(999, 20)).rejects.toThrow('not found');
+  });
+
+  it('only the first of two concurrent approve calls succeeds (status guard is in the UPDATE, not just the prior read)', async () => {
+    const { pool, execute } = makePool();
+    // Both calls read the same pending row (simulating two requests racing
+    // before either has written). The UPDATE's WHERE status='pending' guard
+    // is what actually decides the winner: only one affects a row.
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // call A: getById
+      .mockResolvedValueOnce([[buildRow()], null]) // call B: getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // call A: UPDATE wins
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]) // call B: UPDATE loses
+      .mockResolvedValueOnce([[buildRow({ status: 'approved', approver_user_id: 20 })], null]) // A: getById after update
+      .mockResolvedValueOnce([[buildRow({ status: 'approved', approver_user_id: 20 })], null]) // B: re-fetch for error message
+      .mockResolvedValue([{ insertId: 1, affectedRows: 1 }, null]); // audit writes
+
+    const svc = new ChangeRequestService(pool);
+    const [resultA, resultB] = await Promise.allSettled([
+      svc.approve(1, 20),
+      svc.approve(1, 30),
+    ]);
+
+    expect(resultA.status).toBe('fulfilled');
+    expect(resultB.status).toBe('rejected');
+    if (resultB.status === 'rejected') {
+      expect(resultB.reason.message).toMatch(/Cannot approve a change request in 'approved' status/);
+    }
   });
 });
 
@@ -318,7 +360,10 @@ describe('ChangeRequestService.reject', () => {
 
   it('throws when request is not in pending status', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildRow({ status: 'approved' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'approved' })], null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[buildRow({ status: 'approved' })], null]);
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.reject(1, 20, 'reason')).rejects.toThrow("Cannot reject");
@@ -372,7 +417,10 @@ describe('ChangeRequestService.apply', () => {
 
   it('throws when request is not in approved status', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildRow({ status: 'pending' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'pending' })], null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[buildRow({ status: 'pending' })], null]);
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.apply(1, 20)).rejects.toThrow('Cannot apply');
@@ -407,7 +455,10 @@ describe('ChangeRequestService.cancel', () => {
 
   it('throws when request is not in pending status', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildRow({ status: 'applied' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'applied' })], null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[buildRow({ status: 'applied' })], null]);
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.cancel(1, 10)).rejects.toThrow('Cannot cancel');
@@ -468,7 +519,12 @@ describe('ChangeRequestService.advancePendingApproval', () => {
 
   it('throws when pending approval is not in pending status', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]);
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]) // pre-check getPendingApprovalById
+      .mockResolvedValueOnce([[buildRow()], null]) // getById change_request
+      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]) // decide's getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]) // guarded UPDATE matches nothing
+      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]); // re-fetch for error message
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.advancePendingApproval(1, 20, 'approved')).rejects.toThrow('already approved');
@@ -476,7 +532,10 @@ describe('ChangeRequestService.advancePendingApproval', () => {
 
   it('throws when user is not the assigned approver', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[buildPaRow({ assigned_to_user_id: 99 })], null]);
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_user_id: 99 })], null]) // pre-check
+      .mockResolvedValueOnce([[buildRow()], null]) // getById change_request
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_user_id: 99 })], null]); // decide's getPendingApprovalById
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.advancePendingApproval(1, 20, 'approved')).rejects.toThrow('Not authorized');
@@ -485,43 +544,44 @@ describe('ChangeRequestService.advancePendingApproval', () => {
   it('rejects the change_request when decision is rejected', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[buildPaRow()], null])             // getPendingApprovalById
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE pending_approval
-      .mockResolvedValueOnce([[buildRow()], null])                // getById change_request
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE change_request → rejected
-      .mockResolvedValueOnce([{ insertId: 1 }, null])            // audit.write
-      .mockResolvedValueOnce([[buildPaRow({ status: 'rejected' })], null])           // getPendingApprovalById (refresh)
-      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null]);            // getById (refresh)
+      .mockResolvedValueOnce([[buildPaRow()], null])              // 0: pre-check getPendingApprovalById
+      .mockResolvedValueOnce([[buildRow()], null])                 // 1: getById change_request
+      .mockResolvedValueOnce([[buildPaRow()], null])               // 2: decide's getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // 3: guarded UPDATE pending_approval
+      .mockResolvedValueOnce([[buildPaRow({ status: 'rejected' })], null]) // 4: decide's post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // 5: UPDATE change_request → rejected
+      .mockResolvedValueOnce([{ insertId: 1 }, null])              // 6: audit.write
+      .mockResolvedValueOnce([[buildRow({ status: 'rejected' })], null]); // 7: final getById
 
     const svc = new ChangeRequestService(pool);
     const { changeRequest } = await svc.advancePendingApproval(1, 20, 'rejected', 'Not acceptable');
     expect(changeRequest.status).toBe('rejected');
 
-    const [updateCrSql, updateCrParams] = execute.mock.calls[3];
+    const [updateCrSql, updateCrParams] = execute.mock.calls[5];
     expect(updateCrSql).toContain("'rejected'");
     expect(updateCrParams).toContain('Not acceptable');
   });
 
   it('creates next pending_approval when an additional workflow step exists', async () => {
     const { pool, execute } = makePool();
-    const nextStepRow = { id: 11, step_order: 2 };
     const nextStepFullRow = {
       id: 11, workflow_id: 1, step_order: 2, approver_scope: 'company_user',
       approver_role_id: null, approver_user_id: 30, approver_permission_code: null,
       auto_approve_for_owner: 0, escalate_after_hours: null,
     };
     execute
-      .mockResolvedValueOnce([[buildPaRow()], null])             // getPendingApprovalById
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE pending_approval → approved
-      .mockResolvedValueOnce([[buildRow()], null])                // getById change_request
-      .mockResolvedValueOnce([[nextStepRow], null])               // SELECT next step from approval_steps
-      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — orgUnit
-      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — depts
-      .mockResolvedValueOnce([[], null])                          // resolveProposerContext — roles
-      .mockResolvedValueOnce([[nextStepFullRow], null])           // resolveApproverForStep SELECT
-      .mockResolvedValueOnce([{ insertId: 6 }, null])            // INSERT next pending_approval
-      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null])  // getPendingApprovalById refresh
-      .mockResolvedValueOnce([[buildRow()], null]);               // getById change_request refresh
+      .mockResolvedValueOnce([[buildPaRow()], null])              // 0: pre-check getPendingApprovalById
+      .mockResolvedValueOnce([[buildRow()], null])                 // 1: getById change_request
+      .mockResolvedValueOnce([[buildPaRow()], null])               // 2: decide's getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // 3: guarded UPDATE pending_approval → approved
+      .mockResolvedValueOnce([[nextStepFullRow], null])            // 4: SELECT next step (full columns)
+      .mockResolvedValueOnce([[], null])                           // 5: resolveProposerContext — orgUnit
+      .mockResolvedValueOnce([[], null])                           // 6: resolveProposerContext — depts
+      .mockResolvedValueOnce([[], null])                           // 7: resolveProposerContext — roles
+      .mockResolvedValueOnce([{ insertId: 6 }, null])              // 8: INSERT next pending_approval
+      .mockResolvedValueOnce([[buildPaRow({ id: 6, step_order: 2, assigned_to_user_id: 30 })], null]) // 9: getPendingApprovalById(6)
+      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]) // 10: decide's final getPendingApprovalById(1)
+      .mockResolvedValueOnce([[buildRow()], null]);                // 11: advancePendingApproval's final getById
 
     const svc = new ChangeRequestService(pool);
     await svc.advancePendingApproval(1, 20, 'approved');
@@ -537,14 +597,15 @@ describe('ChangeRequestService.advancePendingApproval', () => {
   it('approves the change_request when the final step is approved', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[buildPaRow()], null])             // getPendingApprovalById
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE pending_approval → approved
-      .mockResolvedValueOnce([[buildRow()], null])                // getById change_request
-      .mockResolvedValueOnce([[], null])                         // SELECT next step → none (last step)
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])        // UPDATE change_request → approved
-      .mockResolvedValueOnce([{ insertId: 1 }, null])            // audit.write
-      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null])           // getPendingApprovalById refresh
-      .mockResolvedValueOnce([[buildRow({ status: 'approved', approver_user_id: 20 })], null]); // getById refresh
+      .mockResolvedValueOnce([[buildPaRow()], null])              // 0: pre-check getPendingApprovalById
+      .mockResolvedValueOnce([[buildRow()], null])                 // 1: getById change_request
+      .mockResolvedValueOnce([[buildPaRow()], null])               // 2: decide's getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // 3: guarded UPDATE pending_approval → approved
+      .mockResolvedValueOnce([[], null])                           // 4: SELECT next step → none (last step)
+      .mockResolvedValueOnce([[buildPaRow({ status: 'approved' })], null]) // 5: decide's post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])          // 6: UPDATE change_request → approved
+      .mockResolvedValueOnce([{ insertId: 1 }, null])              // 7: audit.write
+      .mockResolvedValueOnce([[buildRow({ status: 'approved', approver_user_id: 20 })], null]); // 8: final getById
 
     const svc = new ChangeRequestService(pool);
     const { changeRequest } = await svc.advancePendingApproval(1, 20, 'approved');

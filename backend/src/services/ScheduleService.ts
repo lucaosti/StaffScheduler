@@ -7,14 +7,17 @@ import {
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
+import { NotificationService } from './NotificationService';
 
 export class ScheduleService {
   private audit: AuditLogService;
   private orchestrator: ScheduleOptimizationOrchestrator;
+  private notifications: NotificationService;
 
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
     this.orchestrator = new ScheduleOptimizationOrchestrator(pool);
+    this.notifications = new NotificationService(pool);
   }
 
   async createSchedule(scheduleData: CreateScheduleRequest): Promise<Schedule> {
@@ -357,6 +360,26 @@ export class ScheduleService {
         after: { id, status: 'published' },
       });
 
+      // One notification per employee actually on the roster — this is the
+      // signal that "the schedule is available", not just an audit entry.
+      // In the simulation harness this same event is what an employee
+      // thread waits on before checking its own assignments for errors.
+      const [assignedRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT DISTINCT sa.user_id
+           FROM shift_assignments sa
+           JOIN shifts s ON s.id = sa.shift_id
+          WHERE s.schedule_id = ?`,
+        [id]
+      );
+      for (const row of assignedRows) {
+        this.notifications.notifyAsync({
+          userId: row.user_id as number,
+          type: 'schedule.published',
+          title: 'Schedule published',
+          body: `"${publishedSchedule.name}" is now available — check your assigned shifts.`,
+        });
+      }
+
       return publishedSchedule;
     } catch (error) {
       await connection.rollback();
@@ -372,12 +395,40 @@ export class ScheduleService {
     try {
       await connection.beginTransaction();
 
-      await connection.execute(
-        `UPDATE schedules
-        SET status = 'archived', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status IN ('draft', 'published')`,
+      const [scheduleRows] = await connection.execute<RowDataPacket[]>(
+        'SELECT status FROM schedules WHERE id = ? LIMIT 1 FOR UPDATE',
         [id]
       );
+      if (scheduleRows.length === 0) throw new Error('Schedule not found');
+      const previousStatus = scheduleRows[0].status as string;
+      if (previousStatus !== 'draft' && previousStatus !== 'published') {
+        throw new Error(`Cannot archive schedule in '${previousStatus}' status`);
+      }
+
+      // Archiving abandons any shift invite that hasn't been answered yet —
+      // block until those are resolved (confirmed/completed/cancelled) rather
+      // than silently orphaning them.
+      const [pendingRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS pending_count
+           FROM shift_assignments sa
+           JOIN shifts sh ON sa.shift_id = sh.id
+          WHERE sh.schedule_id = ? AND sa.status = 'pending'`,
+        [id]
+      );
+      const pendingCount = pendingRows[0].pending_count as number;
+      if (pendingCount > 0) {
+        throw new Error(
+          `Cannot archive schedule with ${pendingCount} pending shift assignment(s); resolve or cancel them first`
+        );
+      }
+
+      const [result] = await connection.execute<ResultSetHeader>(
+        `UPDATE schedules
+        SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = ?`,
+        [id, previousStatus]
+      );
+      if (result.affectedRows === 0) throw new Error('Schedule not found');
 
       await connection.commit();
       logger.info(`Schedule archived successfully: ${id}`);
@@ -391,7 +442,7 @@ export class ScheduleService {
         entityType: 'schedule',
         entityId: id,
         description: `Schedule archived: ${archivedSchedule.name}`,
-        before: { id, status: 'published' },
+        before: { id, status: previousStatus },
         after: { id, status: 'archived' },
       });
 

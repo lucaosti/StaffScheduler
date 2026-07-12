@@ -353,7 +353,10 @@ describe('ScheduleService convenience helpers', () => {
 describe('ScheduleService.archiveSchedule error path', () => {
   it('throws when schedule disappears after archiving', async () => {
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    conn.execute
+      .mockResolvedValueOnce([[{ status: 'published' }], null])
+      .mockResolvedValueOnce([[{ pending_count: 0 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     execute.mockResolvedValueOnce([[], null] as Tuple);
     const svc = new ScheduleService(pool);
     await expect(svc.archiveSchedule(1)).rejects.toThrow(/Schedule not found after archiving/);

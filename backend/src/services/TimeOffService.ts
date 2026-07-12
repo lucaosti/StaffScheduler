@@ -2,9 +2,17 @@
  * Time-off / leave management (F02).
  *
  * Workflow:
- *   1. Employee creates a `time_off_requests` row with status `pending`.
- *   2. Manager reviews. Approval inserts a row into `user_unavailability`
- *      and links it back via `unavailability_id`.
+ *   1. Employee creates a `time_off_requests` row with status `pending`,
+ *      plus the first `pending_approvals` row for the `TimeOff.Request`
+ *      workflow (see ApprovalEngineService). That step is `unit_manager` by
+ *      default, so it resolves straight to the requester's unit manager —
+ *      but the workflow can be reconfigured to `unit_structure`, in which
+ *      case the unit's head decides whether to keep, delegate, or open the
+ *      decision to their team (ApprovalEngineService.keepForSelf /
+ *      delegateToPerson / openToStructure).
+ *   2. Whoever is authorized to decide the pending_approvals row approves or
+ *      rejects it. Approval inserts a row into `user_unavailability` and
+ *      links it back via `unavailability_id`.
  *   3. Rejected and cancelled requests stay in the table for the audit trail
  *      but never produce an unavailability block.
  *
@@ -13,9 +21,12 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { ApprovalEngineService } from './ApprovalEngineService';
+import { NotificationService } from './NotificationService';
+import { DateUtils } from '../utils';
 
 type TimeOffType = 'vacation' | 'sick' | 'personal' | 'other';
 type TimeOffStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -56,13 +67,9 @@ const mapRow = (row: RowDataPacket): TimeOffRequest => ({
   id: row.id as number,
   userId: row.user_id as number,
   startDate:
-    typeof row.start_date === 'string'
-      ? row.start_date
-      : new Date(row.start_date).toISOString().slice(0, 10),
+    typeof row.start_date === 'string' ? row.start_date : DateUtils.fromMySQLDate(row.start_date),
   endDate:
-    typeof row.end_date === 'string'
-      ? row.end_date
-      : new Date(row.end_date).toISOString().slice(0, 10),
+    typeof row.end_date === 'string' ? row.end_date : DateUtils.fromMySQLDate(row.end_date),
   type: row.type as TimeOffType,
   reason: (row.reason as string) ?? null,
   status: row.status as TimeOffStatus,
@@ -76,8 +83,12 @@ const mapRow = (row: RowDataPacket): TimeOffRequest => ({
 
 export class TimeOffService {
   private audit: AuditLogService;
+  private engine: ApprovalEngineService;
+  private notifications: NotificationService;
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
+    this.engine = new ApprovalEngineService(pool);
+    this.notifications = new NotificationService(pool);
   }
 
   /** Creates a new pending request. Range is validated; reason is optional. */
@@ -112,6 +123,18 @@ export class TimeOffService {
       justification: input.reason ?? null,
       after: { id: created.id, status: created.status, startDate: created.startDate, endDate: created.endDate },
     });
+
+    const workflow = await this.engine.getWorkflowByChangeType('TimeOff.Request');
+    if (workflow && workflow.steps.length > 0) {
+      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.userId);
+      await this.engine.createPendingApprovalForStep(
+        workflow.id,
+        workflow.steps[0],
+        { timeOffRequestId: created.id },
+        { actorUserId: input.userId, orgUnitId: orgUnitId ?? undefined }
+      );
+    }
+
     return created;
   }
 
@@ -148,29 +171,89 @@ export class TimeOffService {
     return rows.map(mapRow);
   }
 
+  private async findPendingApprovalId(timeOffRequestId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM pending_approvals WHERE time_off_request_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+      [timeOffRequestId]
+    );
+    return rows.length === 0 ? null : ((rows[0] as any).id as number);
+  }
+
   /**
-   * Approves a pending request. Atomic: the unavailability row and the
-   * status update happen in the same transaction, and the request links
-   * to the unavailability row it produced.
+   * Approves a pending request. Authorization is delegated to
+   * `ApprovalEngineService.decidePendingApproval` (assignee, or any member
+   * of the structure once opened). Only once the workflow is fully resolved
+   * (`isFinalStep`) does this insert the `user_unavailability` row — atomic
+   * with the status flip, in the same transaction.
    */
+  /**
+   * Throws if `userId` already has a `user_unavailability` row for the exact
+   * same range (the table's unique constraint). Called both as an upfront
+   * dry run (before the workflow decision commits) and again with the row
+   * lock held, mirroring the same fix applied to
+   * ShiftSwapService.approve — see that file's `checkSwapCompliance` for the
+   * original bug this pattern fixes: without the dry run, a duplicate-range
+   * request could get its pending_approval committed "approved" and then
+   * fail on the INSERT, leaving it permanently stuck (approved decision,
+   * never-applied side effect, unretryable).
+   */
+  private async checkNoDuplicateUnavailability(
+    conn: Pool | PoolConnection,
+    userId: number,
+    startDate: string,
+    endDate: string
+  ): Promise<void> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id FROM user_unavailability WHERE user_id = ? AND start_date = ? AND end_date = ? LIMIT 1`,
+      [userId, startDate, endDate]
+    );
+    if (rows.length > 0) {
+      throw new Error(`User already has unavailability recorded for ${startDate}..${endDate}`);
+    }
+  }
+
   async approve(
     id: number,
     reviewerId: number,
     notes: string | null = null
   ): Promise<TimeOffRequest> {
+    const existing = await this.getById(id);
+    if (!existing) throw new Error('Time-off request not found');
+    if (existing.status !== 'pending') {
+      throw new Error(`Cannot approve request in status '${existing.status}'`);
+    }
+
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) {
+      throw new Error('No pending approval found for this time-off request');
+    }
+
+    await this.checkNoDuplicateUnavailability(this.pool, existing.userId, existing.startDate, existing.endDate);
+
+    const decision = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'approved',
+      notes,
+      async () => ({ actorUserId: reviewerId })
+    );
+
+    if (!decision.isFinalStep) {
+      const refreshed = await this.getById(id);
+      if (!refreshed) throw new Error('Failed to retrieve time-off request');
+      return refreshed;
+    }
+
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
-
       const [rows] = await conn.execute<RowDataPacket[]>(
         `SELECT * FROM time_off_requests WHERE id = ? FOR UPDATE`,
         [id]
       );
       if (rows.length === 0) throw new Error('Time-off request not found');
       const current = mapRow(rows[0]);
-      if (current.status !== 'pending') {
-        throw new Error(`Cannot approve request in status '${current.status}'`);
-      }
+      await this.checkNoDuplicateUnavailability(conn, current.userId, current.startDate, current.endDate);
 
       const [unavailRes] = await conn.execute<ResultSetHeader>(
         `INSERT INTO user_unavailability (user_id, start_date, end_date, reason)
@@ -213,6 +296,12 @@ export class TimeOffService {
       justification: notes ?? null,
       after: { status: 'approved', reviewerId, unavailabilityId: refreshed.unavailabilityId },
     });
+    this.notifications.notifyAsync({
+      userId: refreshed.userId,
+      type: 'time_off.approved',
+      title: 'Time-off request approved',
+      body: `Your ${refreshed.type} request for ${refreshed.startDate} to ${refreshed.endDate} has been approved.`,
+    });
     return refreshed;
   }
 
@@ -221,6 +310,26 @@ export class TimeOffService {
     reviewerId: number,
     notes: string | null = null
   ): Promise<TimeOffRequest> {
+    const existing = await this.getById(id);
+    if (!existing) throw new Error('Time-off request not found');
+    if (existing.status !== 'pending') {
+      throw new Error(`Cannot reject request in status '${existing.status}'`);
+    }
+
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) {
+      throw new Error('No pending approval found for this time-off request');
+    }
+
+    const decision = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'rejected',
+      notes,
+      async () => ({ actorUserId: reviewerId })
+    );
+    void decision;
+
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE time_off_requests
           SET status = 'rejected',
@@ -231,9 +340,8 @@ export class TimeOffService {
       [reviewerId, notes, id]
     );
     if (result.affectedRows === 0) {
-      const existing = await this.getById(id);
-      if (!existing) throw new Error('Time-off request not found');
-      throw new Error(`Cannot reject request in status '${existing.status}'`);
+      const current = await this.getById(id);
+      throw new Error(`Cannot reject request in status '${current?.status ?? existing.status}'`);
     }
     logger.info(`Time-off request rejected: id=${id} reviewer=${reviewerId}`);
     const refreshed = await this.getById(id);
@@ -246,6 +354,12 @@ export class TimeOffService {
       description: `Time-off request rejected`,
       justification: notes ?? null,
       after: { status: 'rejected', reviewerId },
+    });
+    this.notifications.notifyAsync({
+      userId: refreshed.userId,
+      type: 'time_off.rejected',
+      title: 'Time-off request rejected',
+      body: notes ?? `Your ${refreshed.type} request for ${refreshed.startDate} to ${refreshed.endDate} was rejected.`,
     });
     return refreshed;
   }

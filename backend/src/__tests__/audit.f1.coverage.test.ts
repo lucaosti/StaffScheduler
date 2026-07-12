@@ -112,6 +112,28 @@ const loanRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
+const pendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 501,
+  change_request_id: null,
+  time_off_request_id: null,
+  employee_loan_id: null,
+  shift_swap_request_id: null,
+  workflow_id: 10,
+  step_id: 20,
+  step_order: 1,
+  assigned_to_user_id: 99,
+  assigned_to_org_unit_id: null,
+  open_to_structure: 0,
+  decided_by_user_id: null,
+  status: 'pending',
+  decided_at: null,
+  decision_note: null,
+  escalated_at: null,
+  created_at: 't',
+  updated_at: 't',
+  ...overrides,
+});
+
 const assignmentRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
   shift_id: 10,
@@ -145,8 +167,9 @@ describe('TimeOffService — audit log', () => {
   it('create writes time_off.create audit', async () => {
     const { pool, execute } = makeSimplePool();
     execute
-      .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple)
-      .mockResolvedValueOnce([[timeOffRow({ id: 42 })], null] as Tuple);
+      .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT
+      .mockResolvedValueOnce([[timeOffRow({ id: 42 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found, skip pending_approval
 
     const service = new TimeOffService(pool);
     await service.create({ userId: 7, startDate: '2026-05-10', endDate: '2026-05-15', type: 'vacation', reason: 'Beach' });
@@ -163,8 +186,13 @@ describe('TimeOffService — audit log', () => {
   it('reject writes time_off.reject audit', async () => {
     const { pool, execute } = makeSimplePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
-      .mockResolvedValueOnce([[timeOffRow({ id: 1, status: 'rejected' })], null] as Tuple);
+      .mockResolvedValueOnce([[timeOffRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[pendingApprovalRow({ status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE time_off_requests
+      .mockResolvedValueOnce([[timeOffRow({ id: 1, status: 'rejected' })], null] as Tuple); // final getById
 
     const service = new TimeOffService(pool);
     await service.reject(1, 99, 'No cover');
@@ -197,11 +225,20 @@ describe('TimeOffService — audit log', () => {
 
   it('approve writes time_off.approve audit', async () => {
     const { pool, execute, conn } = makeConnPool();
+    execute
+      .mockResolvedValueOnce([[timeOffRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
+      .mockResolvedValueOnce([[pendingApprovalRow({ status: 'approved' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([[timeOffRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple); // final getById
     conn.execute
       .mockResolvedValueOnce([[timeOffRow()], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (locked re-check) -> none
       .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple);
-    execute.mockResolvedValueOnce([[timeOffRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple);
 
     const service = new TimeOffService(pool);
     await service.approve(1, 99, 'OK');
@@ -231,7 +268,9 @@ describe('ShiftSwapService — audit log', () => {
       .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null] as Tuple)
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple);
-    execute.mockResolvedValueOnce([[swapRow({ id: 42 })], null] as Tuple);
+    execute
+      .mockResolvedValueOnce([[swapRow({ id: 42 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[], null] as Tuple); // getWorkflowByChangeType -> not found, skip pending_approval
 
     const service = new ShiftSwapService(pool);
     await service.create({ requesterUserId: 7, requesterAssignmentId: 100, targetAssignmentId: 200 });
@@ -247,8 +286,13 @@ describe('ShiftSwapService — audit log', () => {
   it('decline writes shift_swap.decline audit', async () => {
     const { pool, execute } = makeSimplePool();
     execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
-      .mockResolvedValueOnce([[swapRow({ id: 1, status: 'declined' })], null] as Tuple);
+      .mockResolvedValueOnce([[swapRow()], null] as Tuple) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[pendingApprovalRow({ shift_swap_request_id: 1 })], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
+      .mockResolvedValueOnce([[pendingApprovalRow({ shift_swap_request_id: 1, status: 'rejected' })], null] as Tuple) // post-decision fetch
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE shift_swap_requests
+      .mockResolvedValueOnce([[swapRow({ id: 1, status: 'declined' })], null] as Tuple); // final getById
 
     const service = new ShiftSwapService(pool);
     await service.decline(1, 99, 'Not possible');

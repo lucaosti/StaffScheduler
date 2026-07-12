@@ -151,20 +151,19 @@ export class ChangeRequestService {
     const workflow = await this.engine.getWorkflowByChangeType(input.changeType);
     if (workflow && workflow.steps.length > 0) {
       const firstStep = workflow.steps[0];
-      const approverUserId = await this.engine.resolveApproverForStep(firstStep.id, {
-        actorUserId: proposerUserId,
-        orgUnitId: proposerCtx.orgUnitId ?? undefined,
-        subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
-        subjectRoleIds: proposerCtx.subjectRoleIds,
-      });
-      if (approverUserId !== null) {
-        await this.pool.execute(
-          `INSERT INTO pending_approvals
-             (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
-           VALUES (?, ?, ?, ?, ?, 'pending')`,
-          [created.id, workflow.id, firstStep.id, firstStep.stepOrder, approverUserId]
-        );
-        logger.info(`Pending approval created: cr=${created.id} step=${firstStep.stepOrder} assignee=${approverUserId}`);
+      const pa = await this.engine.createPendingApprovalForStep(
+        workflow.id,
+        firstStep,
+        { changeRequestId: created.id },
+        {
+          actorUserId: proposerUserId,
+          orgUnitId: proposerCtx.orgUnitId ?? undefined,
+          subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
+          subjectRoleIds: proposerCtx.subjectRoleIds,
+        }
+      );
+      if (pa) {
+        logger.info(`Pending approval created: cr=${created.id} step=${firstStep.stepOrder} assignee=${pa.assignedToUserId ?? `org_unit:${pa.assignedToOrgUnitId}`}`);
       }
     }
 
@@ -206,17 +205,22 @@ export class ChangeRequestService {
   async approve(id: number, approverUserId: number, justification?: string | null): Promise<ChangeRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Change request not found');
-    if (existing.status !== 'pending') {
-      throw new Error(`Cannot approve a change request in '${existing.status}' status`);
-    }
 
-    await this.pool.execute(
+    // The status guard lives in the UPDATE's WHERE clause (not just the read
+    // above) so two concurrent approve calls can't both succeed: only the
+    // first UPDATE affects a row, the second sees affectedRows === 0 and
+    // reports the real (already-transitioned) status instead of double-applying.
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
           SET status = 'approved', approver_user_id = ?, approved_at = CURRENT_TIMESTAMP,
               updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
+        WHERE id = ? AND status = 'pending'`,
       [approverUserId, id]
     );
+    if (result.affectedRows === 0) {
+      const current = await this.getById(id);
+      throw new Error(`Cannot approve a change request in '${current?.status ?? existing.status}' status`);
+    }
 
     const updated = await this.getById(id);
     if (!updated) throw new Error('Failed to retrieve updated change request');
@@ -238,17 +242,18 @@ export class ChangeRequestService {
   async reject(id: number, approverUserId: number, rejectionReason: string): Promise<ChangeRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Change request not found');
-    if (existing.status !== 'pending') {
-      throw new Error(`Cannot reject a change request in '${existing.status}' status`);
-    }
 
-    await this.pool.execute(
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
           SET status = 'rejected', approver_user_id = ?, rejected_at = CURRENT_TIMESTAMP,
               rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
+        WHERE id = ? AND status = 'pending'`,
       [approverUserId, rejectionReason, id]
     );
+    if (result.affectedRows === 0) {
+      const current = await this.getById(id);
+      throw new Error(`Cannot reject a change request in '${current?.status ?? existing.status}' status`);
+    }
 
     const updated = await this.getById(id);
     if (!updated) throw new Error('Failed to retrieve updated change request');
@@ -279,19 +284,20 @@ export class ChangeRequestService {
   async apply(id: number, actorUserId: number, justification?: string | null): Promise<ChangeRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Change request not found');
-    if (existing.status !== 'approved') {
-      throw new Error(`Cannot apply a change request in '${existing.status}' status — must be approved first`);
-    }
 
     const authorityHolder = existing.approverUserId ?? actorUserId;
 
-    await this.pool.execute(
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
           SET status = 'applied', applied_at = CURRENT_TIMESTAMP,
               on_behalf_of_user_id = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
+        WHERE id = ? AND status = 'approved'`,
       [existing.proposerUserId, id]
     );
+    if (result.affectedRows === 0) {
+      const current = await this.getById(id);
+      throw new Error(`Cannot apply a change request in '${current?.status ?? existing.status}' status — must be approved first`);
+    }
 
     const updated = await this.getById(id);
     if (!updated) throw new Error('Failed to retrieve updated change request');
@@ -316,16 +322,17 @@ export class ChangeRequestService {
   async cancel(id: number, requestorUserId: number): Promise<ChangeRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new Error('Change request not found');
-    if (existing.status !== 'pending') {
-      throw new Error(`Cannot cancel a change request in '${existing.status}' status`);
-    }
 
-    await this.pool.execute(
+    const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
           SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
+        WHERE id = ? AND status = 'pending'`,
       [id]
     );
+    if (result.affectedRows === 0) {
+      const current = await this.getById(id);
+      throw new Error(`Cannot cancel a change request in '${current?.status ?? existing.status}' status`);
+    }
 
     const updated = await this.getById(id);
     if (!updated) throw new Error('Failed to retrieve updated change request');
@@ -349,7 +356,10 @@ export class ChangeRequestService {
    * the change_request to 'approved'.  When rejected the change_request is
    * immediately set to 'rejected'.
    *
-   * Only the user who is assigned to the step may act on it.
+   * The generic authorization/transition/next-step machinery lives in
+   * `ApprovalEngineService.decidePendingApproval` (shared with time-off,
+   * loans, and shift-swap decisions); this method only applies the
+   * change_request-specific side effect once the workflow is fully resolved.
    */
   async advancePendingApproval(
     pendingApprovalId: number,
@@ -357,68 +367,46 @@ export class ChangeRequestService {
     decision: 'approved' | 'rejected',
     note?: string | null
   ): Promise<{ pendingApproval: PendingApproval; changeRequest: ChangeRequest }> {
-    const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
-    if (pa.status !== 'pending') throw new Error(`Pending approval is already ${pa.status}`);
-    if (pa.assignedToUserId !== userId) throw new Error('Not authorized to act on this pending approval');
-
-    await this.pool.execute(
-      `UPDATE pending_approvals
-          SET status = ?, decided_at = CURRENT_TIMESTAMP, decision_note = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`,
-      [decision, note ?? null, pendingApprovalId]
-    );
+    const pa = await this.engine.getPendingApprovalById(pendingApprovalId);
+    if (!pa || pa.changeRequestId === null) throw new Error('Pending approval not found');
 
     const cr = await this.getById(pa.changeRequestId);
     if (!cr) throw new Error('Change request not found');
 
-    if (decision === 'rejected') {
-      await this.pool.execute(
-        `UPDATE change_requests
-            SET status = 'rejected', approver_user_id = ?, rejected_at = CURRENT_TIMESTAMP,
-                rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`,
-        [userId, note ?? null, pa.changeRequestId]
-      );
-      await this.audit.write({
-        actorId: userId,
-        action: 'change_request.reject',
-        entityType: 'change_request',
-        entityId: pa.changeRequestId,
-        description: `Change request rejected via workflow step ${pa.stepOrder}: ${cr.changeType}`,
-        before: cr as unknown as Record<string, unknown>,
-      });
-    } else {
-      // Approved — look for next step in the same workflow.
-      const [nextRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT id, step_order
-           FROM approval_steps
-          WHERE workflow_id = ? AND step_order > ?
-          ORDER BY step_order ASC LIMIT 1`,
-        [pa.workflowId, pa.stepOrder]
-      );
-
-      if (nextRows.length > 0) {
-        const nextStepId = (nextRows[0] as any).id as number;
-        const nextStepOrder = (nextRows[0] as any).step_order as number;
-        // Resolve proposer context for responsibility-rule-based lookup.
+    const result = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      userId,
+      decision,
+      note ?? null,
+      async () => {
         const proposerCtx = await this.resolveProposerContext(cr.proposerUserId);
-        const nextApproverUserId = await this.engine.resolveApproverForStep(nextStepId, {
+        return {
           actorUserId: userId,
           orgUnitId: proposerCtx.orgUnitId ?? undefined,
           subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
           subjectRoleIds: proposerCtx.subjectRoleIds,
+        };
+      }
+    );
+
+    if (result.isFinalStep) {
+      if (result.decision === 'rejected') {
+        await this.pool.execute(
+          `UPDATE change_requests
+              SET status = 'rejected', approver_user_id = ?, rejected_at = CURRENT_TIMESTAMP,
+                  rejection_reason = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?`,
+          [userId, note ?? null, pa.changeRequestId]
+        );
+        await this.audit.write({
+          actorId: userId,
+          action: 'change_request.reject',
+          entityType: 'change_request',
+          entityId: pa.changeRequestId,
+          description: `Change request rejected via workflow step ${pa.stepOrder}: ${cr.changeType}`,
+          before: cr as unknown as Record<string, unknown>,
         });
-        if (nextApproverUserId !== null) {
-          await this.pool.execute(
-            `INSERT INTO pending_approvals
-               (change_request_id, workflow_id, step_id, step_order, assigned_to_user_id, status)
-             VALUES (?, ?, ?, ?, ?, 'pending')`,
-            [pa.changeRequestId, pa.workflowId, nextStepId, nextStepOrder, nextApproverUserId]
-          );
-        }
       } else {
-        // No more steps — all approved; transition change_request.
         await this.pool.execute(
           `UPDATE change_requests
               SET status = 'approved', approver_user_id = ?, approved_at = CURRENT_TIMESTAMP,
@@ -437,31 +425,7 @@ export class ChangeRequestService {
       }
     }
 
-    const updatedPa = await this.getPendingApprovalById(pendingApprovalId);
     const updatedCr = await this.getById(pa.changeRequestId);
-    return { pendingApproval: updatedPa!, changeRequest: updatedCr! };
-  }
-
-  private async getPendingApprovalById(id: number): Promise<PendingApproval | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      'SELECT * FROM pending_approvals WHERE id = ? LIMIT 1',
-      [id]
-    );
-    if (rows.length === 0) return null;
-    const r = rows[0] as any;
-    return {
-      id: r.id,
-      changeRequestId: r.change_request_id,
-      workflowId: r.workflow_id,
-      stepId: r.step_id,
-      stepOrder: r.step_order,
-      assignedToUserId: r.assigned_to_user_id,
-      status: r.status,
-      decidedAt: r.decided_at ?? null,
-      decisionNote: r.decision_note ?? null,
-      escalatedAt: r.escalated_at ?? null,
-      createdAt: r.created_at,
-      updatedAt: r.updated_at,
-    };
+    return { pendingApproval: result.pendingApproval, changeRequest: updatedCr! };
   }
 }
