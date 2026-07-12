@@ -8,13 +8,22 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import OrgChart from './OrgChart';
 
-jest.mock('../../services/orgService', () => ({
-  getTree: jest.fn(),
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, email: 'admin@demo.staffscheduler.local' } }),
 }));
 
-const { getTree: mockGetTree } = jest.requireMock('../../services/orgService') as {
-  getTree: jest.Mock;
-};
+jest.mock('../../services/orgService', () => ({
+  getTree: jest.fn(),
+  getManagerChain: jest.fn(),
+  listMembersDetailed: jest.fn(),
+}));
+
+const { getTree: mockGetTree, getManagerChain: mockGetManagerChain, listMembersDetailed: mockListMembersDetailed } =
+  jest.requireMock('../../services/orgService') as {
+    getTree: jest.Mock;
+    getManagerChain: jest.Mock;
+    listMembersDetailed: jest.Mock;
+  };
 
 const TREE = [
   {
@@ -48,10 +57,12 @@ const TREE = [
   },
 ];
 
-const makeResponse = (data = TREE) => ({ success: true, data });
+const makeResponse = (data: unknown = TREE) => ({ success: true, data });
 
 beforeEach(() => {
   mockGetTree.mockResolvedValue(makeResponse());
+  mockGetManagerChain.mockResolvedValue(makeResponse([]));
+  mockListMembersDetailed.mockResolvedValue(makeResponse([]));
 });
 
 afterEach(() => jest.clearAllMocks());
@@ -64,7 +75,7 @@ describe('<OrgChart />', () => {
 
   it('renders all nodes after loading', async () => {
     render(<OrgChart />);
-    expect(await screen.findByRole('button', { name: /engineering/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /^engineering/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /backend/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /frontend/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hr/i })).toBeInTheDocument();
@@ -87,48 +98,59 @@ describe('<OrgChart />', () => {
     expect(await screen.findByRole('img', { name: /organisation chart/i })).toBeInTheDocument();
   });
 
-  it('parent node shows expanded aria state', async () => {
+  it('parent node exposes an expand/collapse toggle', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
-    const engBtn = screen.getByRole('button', { name: /engineering/i });
-    expect(engBtn).toHaveAttribute('aria-expanded', 'true');
+    await screen.findByRole('button', { name: /^engineering/i });
+    expect(screen.getByRole('button', { name: /collapse engineering/i })).toBeInTheDocument();
   });
 
-  it('collapses children when parent node is clicked', async () => {
+  it('collapses children when the toggle control is clicked', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
+    await screen.findByRole('button', { name: /^engineering/i });
 
-    // Click the Engineering node to collapse it
-    await userEvent.click(screen.getByRole('button', { name: /engineering/i }));
+    await userEvent.click(screen.getByRole('button', { name: /collapse engineering/i }));
 
-    // After collapse, Engineering should be aria-expanded=false and Backend/Frontend hidden
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /engineering/i })).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByRole('button', { name: /expand engineering/i })).toBeInTheDocument();
     });
-    expect(screen.queryByRole('button', { name: /backend/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^backend/i })).not.toBeInTheDocument();
   });
 
   it('re-expands on second click', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
+    await screen.findByRole('button', { name: /^engineering/i });
 
-    await userEvent.click(screen.getByRole('button', { name: /engineering/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /engineering/i })).toHaveAttribute('aria-expanded', 'false'));
+    await userEvent.click(screen.getByRole('button', { name: /collapse engineering/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /expand engineering/i })).toBeInTheDocument());
 
-    await userEvent.click(screen.getByRole('button', { name: /engineering/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /engineering/i })).toHaveAttribute('aria-expanded', 'true'));
-    expect(screen.getByRole('button', { name: /backend/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /expand engineering/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /collapse engineering/i })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /^backend/i })).toBeInTheDocument();
   });
 
-  it('leaf nodes do not have aria-expanded', async () => {
+  it('leaf nodes do not expose an expand/collapse toggle', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /hr/i });
-    expect(screen.getByRole('button', { name: /hr/i })).not.toHaveAttribute('aria-expanded');
+    await screen.findByRole('button', { name: /^hr/i });
+    expect(screen.queryByRole('button', { name: /expand hr|collapse hr/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking a node opens its member detail panel', async () => {
+    mockListMembersDetailed.mockResolvedValue(makeResponse([
+      { userId: 9, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Engineer', isPrimary: true },
+    ]));
+    render(<OrgChart />);
+    await screen.findByRole('button', { name: /^engineering/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /^engineering/i }));
+
+    expect(await screen.findByRole('dialog', { name: /engineering details/i })).toBeInTheDocument();
+    expect(await screen.findByText('Mario Rossi')).toBeInTheDocument();
+    expect(mockListMembersDetailed).toHaveBeenCalledWith(1);
   });
 
   it('Collapse all button collapses all parent nodes', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
+    await screen.findByRole('button', { name: /^engineering/i });
 
     await userEvent.click(screen.getByRole('button', { name: /collapse all nodes/i }));
     await waitFor(() => expect(screen.queryByRole('button', { name: /backend/i })).not.toBeInTheDocument());
@@ -136,7 +158,7 @@ describe('<OrgChart />', () => {
 
   it('Expand all button restores all nodes', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
+    await screen.findByRole('button', { name: /^engineering/i });
 
     await userEvent.click(screen.getByRole('button', { name: /collapse all nodes/i }));
     await waitFor(() => expect(screen.queryByRole('button', { name: /backend/i })).not.toBeInTheDocument());
@@ -147,7 +169,7 @@ describe('<OrgChart />', () => {
 
   it('Refresh button reloads tree', async () => {
     render(<OrgChart />);
-    await screen.findByRole('button', { name: /engineering/i });
+    await screen.findByRole('button', { name: /^engineering/i });
 
     await userEvent.click(screen.getByRole('button', { name: /refresh org chart/i }));
     await waitFor(() => expect(mockGetTree).toHaveBeenCalledTimes(2));

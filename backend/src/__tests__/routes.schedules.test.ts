@@ -452,6 +452,28 @@ describe('schedules router PATCH /:id/archive', () => {
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
+
+  it('returns 409 when the schedule has pending shift assignments', async () => {
+    (ScheduleService.prototype.archiveSchedule as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new Error('Cannot archive schedule with 3 pending shift assignment(s); resolve or cancel them first'));
+
+    const res = await request(mountApp()).patch('/api/schedules/5/archive');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+
+  it('returns 409 when the schedule is already archived', async () => {
+    (ScheduleService.prototype.archiveSchedule as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new Error("Cannot archive schedule in 'archived' status"));
+
+    const res = await request(mountApp()).patch('/api/schedules/5/archive');
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
 });
 
 // ── POST /:id/duplicate ───────────────────────────────────────────────────────

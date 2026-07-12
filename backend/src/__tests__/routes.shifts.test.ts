@@ -279,6 +279,26 @@ describe('shifts router GET /', () => {
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
+
+  it('forwards startDate/endDate/departmentId/status query params to the service', async () => {
+    const getAllShifts = jest.fn().mockResolvedValue([]);
+    (ShiftService.prototype.getAllShifts as jest.Mock) = getAllShifts;
+
+    await request(mountApp()).get('/api/shifts?startDate=2026-07-01&endDate=2026-07-31&departmentId=3&status=confirmed');
+
+    expect(getAllShifts).toHaveBeenCalledWith(
+      { startDate: '2026-07-01', endDate: '2026-07-31', departmentId: 3, status: 'confirmed' }
+    );
+  });
+
+  it('omits date-range filters entirely when no query params are given', async () => {
+    const getAllShifts = jest.fn().mockResolvedValue([]);
+    (ShiftService.prototype.getAllShifts as jest.Mock) = getAllShifts;
+
+    await request(mountApp()).get('/api/shifts');
+
+    expect(getAllShifts).toHaveBeenCalledWith({});
+  });
 });
 
 describe('shifts router GET /:id', () => {

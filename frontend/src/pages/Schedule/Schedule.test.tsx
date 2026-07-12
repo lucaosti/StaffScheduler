@@ -155,7 +155,7 @@ describe('<Schedule />', () => {
 
     // Toggle month view (branch)
     await userEvent.click(screen.getByRole('button', { name: /month/i }));
-    expect(screen.getByText(/Monthly View/i)).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: /monthly shift calendar/i })).toBeInTheDocument();
 
     // Generate modal is enabled when schedules exist; submit with selected schedule -> ok
     await userEvent.click(screen.getAllByRole('button', { name: /^generate$/i })[0]);
@@ -163,6 +163,63 @@ describe('<Schedule />', () => {
     const dialog = screen.getByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: /^generate$/i }));
     expect(mockGenerateSchedule).toHaveBeenCalled();
+  });
+
+  const findChevron = (className: string): HTMLElement => {
+    const icon = document.querySelector(className);
+    if (!icon) throw new Error(`icon ${className} not found`);
+    const button = icon.closest('button');
+    if (!button) throw new Error(`no button ancestor for ${className}`);
+    return button;
+  };
+
+  it("renders today's shift in the monthly calendar grid", async () => {
+    render(<Schedule />);
+    await screen.findByRole('heading', { name: /schedule management/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /month/i }));
+    const table = await screen.findByRole('table', { name: /monthly shift calendar/i });
+
+    // The fixture shift starts at 08:00 in department "Emergency Medicine" (id 10),
+    // dated today — it should render as a badge somewhere in the grid.
+    expect(within(table).getAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length).toBeGreaterThan(0);
+  });
+
+  it('fetches a fresh date range when navigating to the next month', async () => {
+    render(<Schedule />);
+    await screen.findByRole('heading', { name: /schedule management/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /month/i }));
+    await screen.findByRole('table', { name: /monthly shift calendar/i });
+    const callsBefore = mockGetShifts.mock.calls.length;
+
+    await userEvent.click(findChevron('.bi-chevron-right'));
+
+    expect(mockGetShifts.mock.calls.length).toBeGreaterThan(callsBefore);
+    const lastCallArgs = mockGetShifts.mock.calls[mockGetShifts.mock.calls.length - 1][0];
+    expect(lastCallArgs).toHaveProperty('startDate');
+    expect(lastCallArgs).toHaveProperty('endDate');
+  });
+
+  it('filters the monthly grid by department', async () => {
+    mockGetDepartments.mockResolvedValueOnce(
+      ok([
+        { id: 10, name: 'Emergency Medicine' },
+        { id: 20, name: 'Operations' },
+      ])
+    );
+
+    render(<Schedule />);
+    await screen.findByRole('heading', { name: /schedule management/i });
+
+    await userEvent.click(screen.getByRole('button', { name: /month/i }));
+    const table = await screen.findByRole('table', { name: /monthly shift calendar/i });
+    expect(within(table).getAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length).toBeGreaterThan(0);
+
+    // The fixture shift belongs to department 10; selecting the unrelated
+    // department 20 should empty the grid.
+    await userEvent.selectOptions(screen.getByRole('combobox'), '20');
+    expect(within(table).queryAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length).toBe(0);
   });
 });
 

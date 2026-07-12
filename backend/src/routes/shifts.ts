@@ -136,7 +136,14 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 router.get('/', authenticate, requirePermission('schedule.read'), async (req: Request, res: Response) => {
   try {
     const scope = req.user?.allowedOrgUnitIds;
-    const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
+    const filters = {
+      ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
+      ...(req.query.scheduleId ? { scheduleId: Number(req.query.scheduleId) } : {}),
+      ...(req.query.departmentId ? { departmentId: Number(req.query.departmentId) } : {}),
+      ...(req.query.startDate ? { startDate: req.query.startDate as string } : {}),
+      ...(req.query.endDate ? { endDate: req.query.endDate as string } : {}),
+      ...(req.query.status ? { status: req.query.status as string } : {}),
+    };
     const pagination = parsePagination(req);
     if (pagination) {
       const [total, shifts] = await Promise.all([
