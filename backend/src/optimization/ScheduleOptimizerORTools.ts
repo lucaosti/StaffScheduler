@@ -71,6 +71,16 @@ interface Employee {
   skills: string[];
   unavailable_dates: string[];
   max_consecutive_days?: number;
+  /**
+   * Shifts this employee already holds on *other* schedules, within reach of
+   * this problem's rolling-window checks. Without these, back-to-back
+   * schedule periods get optimized in total isolation — each can look
+   * individually compliant while an employee assigned late in one period and
+   * early in the next quietly busts max-consecutive-days/max-weekly-hours
+   * across the boundary. Counted toward those checks but never themselves
+   * reassignable (they aren't part of `problem.shifts`).
+   */
+  existing_assignments?: Array<{ date: string; start_time: string; end_time: string }>;
 }
 
 interface Shift {
@@ -132,6 +142,8 @@ export interface CandidateContext {
   dailyHoursMap: Map<string, number>;
   /** Assignments already committed to this shift (for max_staff check). */
   currentShiftAssignmentCount: number;
+  /** Minimum rest hours required between two shifts (mirrors ComplianceEngine's policy). */
+  minRestHoursBetweenShifts: number;
 }
 
 export class ScheduleOptimizer {
@@ -411,6 +423,14 @@ export class ScheduleOptimizer {
       return false;
     }
 
+    // 2b. Minimum rest between shifts — same rule as ComplianceEngine's
+    //     checkMinRest, e.g. an overnight shift ending 07:00 followed
+    //     immediately by a 07:00 shift the next day is a same-day-overlap
+    //     miss (different dates) but a real rest-hours violation.
+    if (this._wouldViolateMinRest(shift, ctx)) {
+      return false;
+    }
+
     // 3. Declared unavailability
     if (emp.unavailable_dates.includes(shift.date)) {
       return false;
@@ -435,7 +455,120 @@ export class ScheduleOptimizer {
       return false;
     }
 
+    // 6. Weekly hours cap — sum hours already assigned to this employee in
+    //    the trailing 7-day window ending on this shift's date, matching
+    //    ComplianceEngine.checkMaxWeeklyHours (the same rule enforced
+    //    elsewhere, e.g. ShiftSwapService.approve) so a greedily-generated
+    //    schedule can't violate the constraint the rest of the app assumes
+    //    every assignment respects.
+    if (this._wouldExceedWeeklyHours(emp, shift, ctx)) {
+      return false;
+    }
+
+    // 7. Max consecutive working days — reject if taking this shift would
+    //    extend an unbroken run of worked days past emp.max_consecutive_days.
+    if (this._wouldExceedConsecutiveDays(emp, shift, ctx)) {
+      return false;
+    }
+
     return true;
+  }
+
+  private _getShiftsById(allShifts: Shift[]): Map<string, Shift> {
+    let shiftsById = this._shiftsByIdCache.get(allShifts);
+    if (!shiftsById) {
+      shiftsById = new Map(allShifts.map((s) => [s.id, s]));
+      this._shiftsByIdCache.set(allShifts, shiftsById);
+    }
+    return shiftsById;
+  }
+
+  /**
+   * The rolling window this mirrors (ComplianceEngine.checkMaxWeeklyHours) is
+   * *centered* on whichever assignment is being evaluated (±6 days), not
+   * trailing-only. A single forward greedy pass only knows about shifts
+   * already assigned *before* the candidate in date order — checking just
+   * the candidate's own backward-looking window lets a later assignment
+   * retroactively push an earlier one over the limit (e.g. day 26 and day 27
+   * each look fine 6 days back, but day 19..28 combined isn't).
+   *
+   * Fix: whenever a candidate is added, re-verify every already-assigned
+   * shift within reach of it too — not just the candidate's own window.
+   * Each such shift already passed its own check without this candidate; the
+   * only thing that changed is this candidate now also falls inside it.
+   * Checking all of them here, every time, maintains the invariant
+   * inductively: by the time a later shift is being added, every earlier
+   * shift's window was already re-verified against everything before it.
+   */
+  private _wouldExceedWeeklyHours(emp: Employee, shift: Shift, ctx: CandidateContext): boolean {
+    if (!emp.max_hours_per_week) return false;
+    const shiftsById = this._getShiftsById(ctx.allShifts);
+    const assigned = [...ctx.assignedShiftIds]
+      .map((id) => shiftsById.get(id))
+      .filter((s): s is Shift => s !== undefined);
+
+    const withinWeek = (a: Shift, b: Shift): boolean =>
+      Math.abs(this._dateToMs(a.date) - this._dateToMs(b.date)) / 86_400_000 < 7;
+
+    const anchors = [shift, ...assigned.filter((s) => withinWeek(s, shift))];
+    for (const anchor of anchors) {
+      let total = this._calculateShiftHours(anchor);
+      for (const other of assigned) {
+        if (other !== anchor && withinWeek(anchor, other)) total += this._calculateShiftHours(other);
+      }
+      if (anchor !== shift && withinWeek(anchor, shift)) total += this._calculateShiftHours(shift);
+      if (total > emp.max_hours_per_week) return true;
+    }
+    return false;
+  }
+
+  private _wouldExceedConsecutiveDays(emp: Employee, shift: Shift, ctx: CandidateContext): boolean {
+    if (!emp.max_consecutive_days) return false;
+    const shiftsById = this._getShiftsById(ctx.allShifts);
+    const workedDates = new Set<string>([shift.date]);
+    for (const shiftId of ctx.assignedShiftIds) {
+      const assigned = shiftsById.get(shiftId);
+      if (assigned) workedDates.add(assigned.date);
+    }
+    const sortedMs = [...workedDates].map((d) => this._dateToMs(d)).sort((a, b) => a - b);
+
+    let longestRun = 1;
+    let currentRun = 1;
+    for (let i = 1; i < sortedMs.length; i++) {
+      const dayGap = (sortedMs[i] - sortedMs[i - 1]) / 86_400_000;
+      currentRun = dayGap === 1 ? currentRun + 1 : 1;
+      longestRun = Math.max(longestRun, currentRun);
+    }
+    return longestRun > emp.max_consecutive_days;
+  }
+
+  private _dateToMs(date: string): number {
+    return new Date(`${date}T00:00:00Z`).getTime();
+  }
+
+  /** [start, end] as absolute timestamps, rolling an overnight shift's end into the next day. */
+  private _shiftBoundsMs(shift: Shift): [number, number] {
+    const dayMs = this._dateToMs(shift.date);
+    const start = dayMs + this._timeToMinutes(shift.start_time) * 60_000;
+    let end = dayMs + this._timeToMinutes(shift.end_time) * 60_000;
+    if (end <= start) end += 24 * 60 * 60_000;
+    return [start, end];
+  }
+
+  private _wouldViolateMinRest(shift: Shift, ctx: CandidateContext): boolean {
+    const [candStart, candEnd] = this._shiftBoundsMs(shift);
+    const shiftsById = this._getShiftsById(ctx.allShifts);
+    for (const shiftId of ctx.assignedShiftIds) {
+      const other = shiftsById.get(shiftId);
+      if (!other) continue;
+      const [otherStart, otherEnd] = this._shiftBoundsMs(other);
+      let restMs: number;
+      if (candEnd <= otherStart) restMs = otherStart - candEnd;
+      else if (otherEnd <= candStart) restMs = candStart - otherEnd;
+      else continue; // overlap is handled by _hasOverlappingShift, not double-flagged here
+      if (restMs / 3_600_000 < ctx.minRestHoursBetweenShifts) return true;
+    }
+    return false;
   }
 
   /**
@@ -452,8 +585,6 @@ export class ScheduleOptimizer {
    * Known limitations:
    * - No backtracking — a locally greedy choice may block a later shift from
    *   being staffed. The CP-SAT path handles this globally.
-   * - Weekly hours are not tracked across the full schedule period; only the
-   *   per-day budget is enforced here.
    * - Overlap detection only compares shifts that share the same date. An
    *   overnight shift is detected against same-date shifts, but not against a
    *   next-day shift it spills into. The CP-SAT path handles this globally.
@@ -469,12 +600,45 @@ export class ScheduleOptimizer {
       return a.start_time.localeCompare(b.start_time);
     });
 
+    // Synthetic stubs for each employee's assignments on *other* schedules
+    // (see Employee.existing_assignments) — included in the lookup table so
+    // overlap/rest/weekly-hours/consecutive-days checks see them, but never
+    // added to sortedShifts, so they're never themselves up for assignment.
+    const externalShiftsByEmployee = new Map<string, Shift[]>();
+    const externalShifts: Shift[] = [];
+    for (const emp of problem.employees) {
+      const stubs = (emp.existing_assignments ?? []).map((a, i) => ({
+        id: `ext:${emp.id}:${i}`,
+        date: a.date,
+        start_time: a.start_time,
+        end_time: a.end_time,
+        min_staff: 0,
+        max_staff: 0,
+      }));
+      externalShiftsByEmployee.set(emp.id, stubs);
+      externalShifts.push(...stubs);
+    }
+    const allShiftsForLookup = [...sortedShifts, ...externalShifts];
+
     // Track which shift IDs each employee has been assigned to (for overlap detection)
     const employeeAssignments = new Map<string, Set<string>>();
-    problem.employees.forEach((emp) => employeeAssignments.set(emp.id, new Set()));
+    problem.employees.forEach((emp) =>
+      employeeAssignments.set(emp.id, new Set(externalShiftsByEmployee.get(emp.id)!.map((s) => s.id)))
+    );
 
     // Track hours already assigned per employee per date ("empId|date" -> hours)
     const dailyHoursMap = new Map<string, number>();
+    for (const emp of problem.employees) {
+      for (const stub of externalShiftsByEmployee.get(emp.id) ?? []) {
+        const key = `${emp.id}|${stub.date}`;
+        dailyHoursMap.set(key, (dailyHoursMap.get(key) ?? 0) + this._calculateShiftHours(stub));
+      }
+    }
+
+    const minRestHoursBetweenShifts: number =
+      typeof problem.constraints?.min_hours_between_shifts === 'number'
+        ? problem.constraints.min_hours_between_shifts
+        : 8;
 
     // Assign employees to shifts greedily
     for (const shift of sortedShifts) {
@@ -485,8 +649,9 @@ export class ScheduleOptimizer {
         this.evaluateCandidate(emp, {
           shift,
           assignedShiftIds: employeeAssignments.get(emp.id)!,
-          allShifts: sortedShifts,
+          allShifts: allShiftsForLookup,
           dailyHoursMap,
+          minRestHoursBetweenShifts,
           // Pass 0 here — max_staff is re-enforced in the assignment loop below
           // so we collect all eligible candidates first.
           currentShiftAssignmentCount: 0,
@@ -525,11 +690,7 @@ export class ScheduleOptimizer {
     assignedShiftIds: Set<string>,
     allShifts: Shift[]
   ): boolean {
-    let shiftsById = this._shiftsByIdCache.get(allShifts);
-    if (!shiftsById) {
-      shiftsById = new Map(allShifts.map((s) => [s.id, s]));
-      this._shiftsByIdCache.set(allShifts, shiftsById);
-    }
+    const shiftsById = this._getShiftsById(allShifts);
     for (const shiftId of assignedShiftIds) {
       const assignedShift = shiftsById.get(shiftId);
       if (assignedShift && assignedShift.date === shift.date) {

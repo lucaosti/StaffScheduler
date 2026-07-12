@@ -140,6 +140,16 @@ const wipeAll = async (conn: mysql.Connection): Promise<void> => {
   const tables = [
     'audit_logs',
     'notifications',
+    // Instance data for the generic approval engine — must go before the
+    // entity tables below (change_requests, time_off_requests,
+    // employee_loans, shift_swap_requests) so a reseed never leaves
+    // orphaned pending_approvals/decision_reassignments rows pointing at
+    // entity ids that no longer exist once those tables are truncated.
+    // (approval_workflows/approval_steps are static config seeded once by
+    // init.sql, not demo data, so they are intentionally not wiped here.)
+    'decision_reassignments',
+    'pending_approvals',
+    'change_requests',
     'shift_swap_requests',
     'time_off_requests',
     'on_call_assignments',
