@@ -39,7 +39,7 @@ export interface OrgUnitMemberDetail {
   isPrimary: boolean;
 }
 
-export interface ManagerRef {
+interface ManagerRef {
   id: number;
   firstName: string;
   lastName: string;
