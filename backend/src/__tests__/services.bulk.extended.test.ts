@@ -410,31 +410,54 @@ describe('ShiftSwapService', () => {
 
   /** Queues the pool.execute calls `approve()` makes before it ever opens a
    *  transaction: getById, findPendingApprovalId, the upfront
-   *  wouldBeFinalStep check (getPendingApprovalById + next-step lookup), and
-   *  its compliance dry run (an assignment-pair read via `pairRowsForDryRun`).
-   *  Stops there — for tests where the dry run itself is expected to throw,
-   *  so decidePendingApproval is never reached and no extra mocks are left
-   *  dangling in the queue for a subsequent call to trip over. */
-  const queueDryRunOnly = (execute: jest.Mock, pairRowsForDryRun: unknown[]) => {
+   *  wouldBeFinalStep check (getPendingApprovalById + next-step lookup). */
+  const queueApprovePreChecks = (execute: jest.Mock) => {
     execute
       .mockResolvedValueOnce([[swap], null] as Tuple) // getById
       .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
       .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
-      .mockResolvedValueOnce([[], null] as Tuple) // wouldBeFinalStep: next-step lookup -> none (final)
-      .mockResolvedValueOnce([pairRowsForDryRun, null] as Tuple) // dry-run checkSwapCompliance: pair read
-      .mockResolvedValueOnce([[], null] as Tuple); // dry-run checkSwapCompliance: duplicate-assignment check -> none
+      .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
   };
 
-  /** Same as queueDryRunOnly, but the dry run is expected to pass, so also
-   *  queues ApprovalEngineService.decidePendingApproval's own calls:
-   *  getPendingApprovalById(pre) + guarded UPDATE + (approved only) next-step
-   *  lookup + getPendingApprovalById(post). */
-  const queueApprovePreChecks = (
+  /** Queues the conn.execute calls the transaction makes for the swap-row
+   *  lock, the assignment lock, and checkSwapCompliance's pair read — for
+   *  tests where a bad pair (gone/reassigned) throws right after, so the
+   *  duplicate-assignment check and beyond are never reached. Pass
+   *  `includeDupCheck: true` when the pair itself is fine and the test
+   *  expects to fail later, at the evaluateAssignmentCompliance mock. */
+  const queueTransactionChecksOnly = (
+    conn: { execute: jest.Mock },
+    pairRows: unknown[],
+    includeDupCheck = false
+  ) => {
+    conn.execute
+      .mockResolvedValueOnce([[swap], null]) // SELECT swap FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
+      .mockResolvedValueOnce([pairRows, null]); // checkSwapCompliance: pair read
+    if (includeDupCheck) {
+      conn.execute.mockResolvedValueOnce([[], null]); // checkSwapCompliance: duplicate-assignment check -> none
+    }
+  };
+
+  /** Queues the conn.execute calls the transaction makes up through a
+   *  successful checkSwapCompliance (pair read + duplicate check -> none)
+   *  and the two assignment UPDATEs, plus the pool.execute calls
+   *  ApprovalEngineService.decidePendingApproval makes once that succeeds:
+   *  getPendingApprovalById(pre) + guarded UPDATE + (approved only)
+   *  next-step lookup + getPendingApprovalById(post). */
+  const queueApproveTransactionAndDecide = (
+    conn: { execute: jest.Mock },
     execute: jest.Mock,
-    pairRowsForDryRun: unknown[],
+    pairRows: unknown[],
     decision: 'approved' | 'rejected' = 'approved'
   ) => {
-    queueDryRunOnly(execute, pairRowsForDryRun);
+    conn.execute
+      .mockResolvedValueOnce([[swap], null]) // SELECT swap FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // lock both users' current assignments
+      .mockResolvedValueOnce([pairRows, null]) // checkSwapCompliance: pair read
+      .mockResolvedValueOnce([[], null]) // checkSwapCompliance: duplicate-assignment check -> none
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE assignment (requester)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE assignment (target)
     execute
       .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple); // guarded UPDATE
@@ -442,6 +465,7 @@ describe('ShiftSwapService', () => {
       execute.mockResolvedValueOnce([[], null] as Tuple); // next-step lookup -> none
     }
     execute.mockResolvedValueOnce([[pendingApprovalRow({ status: decision })], null] as Tuple); // post-decision fetch
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE shift_swap_requests
   };
 
   it('create rejects when requester assignment missing', async () => {
@@ -533,11 +557,12 @@ describe('ShiftSwapService', () => {
   });
 
   it('approve fails when assignments are gone', async () => {
-    const { pool, execute } = makePool();
-    // The dry-run compliance check reads the assignment pair via pool.execute
-    // (before any transaction opens) — a single row means "gone" is caught
-    // there, and the transaction is never reached.
-    queueDryRunOnly(execute, [
+    const { pool, conn, execute } = makePool();
+    queueApprovePreChecks(execute);
+    // checkSwapCompliance's pair read happens inside the transaction now —
+    // a single row means "gone" is caught there, before any assignment
+    // UPDATE or decidePendingApproval call.
+    queueTransactionChecksOnly(conn, [
       { assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' },
     ]);
     const svc = new ShiftSwapService(pool, noopNotifications);
@@ -545,14 +570,15 @@ describe('ShiftSwapService', () => {
   });
 
   it('approve rejects when compliance fails for either side', async () => {
-    const { pool, execute } = makePool();
+    const { pool, conn, execute } = makePool();
     const pair = [
       { assignment_id: 10, user_id: 1, date: '2026-05-10', start_time: '08', end_time: '16' },
       { assignment_id: 20, user_id: 2, date: '2026-05-11', start_time: '08', end_time: '16' },
     ];
-    // Both cases are caught by the upfront dry run, before any transaction
-    // opens — decidePendingApproval and the swap transaction are never reached.
-    queueDryRunOnly(execute, pair);
+    // Both cases are caught inside the transaction, before decidePendingApproval
+    // or any assignment UPDATE is ever reached.
+    queueApprovePreChecks(execute);
+    queueTransactionChecksOnly(conn, pair, true);
     (evaluateAssignmentCompliance as jest.Mock).mockResolvedValueOnce({
       ok: false,
       violations: [{ code: 'OVER_HOURS' }],
@@ -560,7 +586,8 @@ describe('ShiftSwapService', () => {
     const svc = new ShiftSwapService(pool, noopNotifications);
     await expect(svc.approve(1, 9)).rejects.toThrow(/Requester would violate/);
 
-    queueDryRunOnly(execute, pair);
+    queueApprovePreChecks(execute);
+    queueTransactionChecksOnly(conn, pair, true);
     (evaluateAssignmentCompliance as jest.Mock)
       .mockResolvedValueOnce({ ok: true, violations: [] })
       .mockResolvedValueOnce({ ok: false, violations: [{ code: 'REST_BREAK' }] });
@@ -585,19 +612,11 @@ describe('ShiftSwapService', () => {
         end_time: '16',
       },
     ];
-    queueApprovePreChecks(execute, pair);
-    conn.execute
-      .mockResolvedValueOnce([[swap], null])
-      .mockResolvedValueOnce([pair, null])
-      .mockResolvedValueOnce([[], null]) // locked re-check: duplicate-assignment check -> none
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    queueApprovePreChecks(execute);
+    queueApproveTransactionAndDecide(conn, execute, pair);
     (evaluateAssignmentCompliance as jest.Mock)
-      .mockResolvedValueOnce({ ok: true, violations: [] }) // dry run: requester
-      .mockResolvedValueOnce({ ok: true, violations: [] }) // dry run: target
-      .mockResolvedValueOnce({ ok: true, violations: [] }) // locked re-check: requester
-      .mockResolvedValueOnce({ ok: true, violations: [] }); // locked re-check: target
+      .mockResolvedValueOnce({ ok: true, violations: [] }) // requester
+      .mockResolvedValueOnce({ ok: true, violations: [] }); // target
     execute.mockResolvedValueOnce([[{ ...swap, status: 'approved' }], null] as Tuple);
     const svc = new ShiftSwapService(pool, noopNotifications);
     const out = await svc.approve(1, 9, 'OK');

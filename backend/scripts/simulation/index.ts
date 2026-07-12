@@ -24,23 +24,29 @@
  *
  * Every employee is an independent "thread" (a concurrent async task — Node
  * is single-threaded, but the concurrency model is identical: independent
- * actors racing on the same database) that files 1-3 random requests. Every
- * org-unit head is a "thread" too, deciding or delegating; a delegate
- * becomes a deciding thread in turn.
+ * actors racing on the same database) that files 5-8 random requests per
+ * round — at least 20 over the default 4 rounds. Every org-unit head is a
+ * "thread" too, waking on every round to decide or delegate every pending
+ * approval; a delegate becomes a deciding thread in turn.
  *
  * No AI anywhere in this file or the modules it calls: all "randomness" is a
  * seeded, deterministic PRNG (prng.ts) — same seed, same run, byte for byte.
  *
  * Usage:
  *   npx ts-node scripts/simulation/index.ts \
- *     [--employees=2000] [--seed=42] [--concurrency=24] [--rounds=4] [--periodDays=14]
+ *     [--employees=2000] [--seed=42] [--concurrency=24] [--rounds=4] [--periodDays=14] \
+ *     [--department=Operations]
+ *
+ * `--department` selects (or creates, if not already seeded) the
+ * department/org-unit structure to simulate against — pass a different name
+ * to exercise a different structure and a different approving manager.
  *
  * @author Luca Ostinelli
  */
 
 import dotenv from 'dotenv';
 import * as path from 'path';
-import { createPool } from 'mysql2/promise';
+import { createPool, RowDataPacket } from 'mysql2/promise';
 import { config } from '../../src/config';
 import { TimeOffService } from '../../src/services/TimeOffService';
 import { EmployeeLoanService } from '../../src/services/EmployeeLoanService';
@@ -63,11 +69,16 @@ function parseArgs(): {
   concurrency: number;
   rounds: number;
   periodDays: number;
+  department: string;
 } {
   const args = process.argv.slice(2);
   const get = (name: string, def: number): number => {
     const arg = args.find((a) => a.startsWith(`--${name}=`));
     return arg ? Number(arg.split('=')[1]) : def;
+  };
+  const getStr = (name: string, def: string): string => {
+    const arg = args.find((a) => a.startsWith(`--${name}=`));
+    return arg ? arg.split('=').slice(1).join('=') : def;
   };
   return {
     employees: get('employees', 2000),
@@ -75,6 +86,7 @@ function parseArgs(): {
     concurrency: get('concurrency', 24),
     rounds: get('rounds', 4),
     periodDays: get('periodDays', 14),
+    department: getStr('department', 'Operations'),
   };
 }
 
@@ -97,7 +109,20 @@ async function runDecisionPhase(
   for (const headUserId of distinctHeadUserIds) {
     decisions.push(...(await runManagerActor(pool, log, seed, headUserId)));
   }
-  const delegateDecisionsPerEmployee = await runWithConcurrency(employeeUserIds, concurrency, (userId) =>
+
+  // A head can delegate a structure-assigned item to *any* member of that
+  // structure — including a cross-department loan target's own roster,
+  // which isn't necessarily part of this run's `employeeUserIds`. Delegate
+  // threads must cover every user who currently holds a delegated item, not
+  // just our own simulated roster, or a delegated decision never gets made.
+  const [delegateRows] = await pool.query<RowDataPacket[]>(
+    `SELECT DISTINCT assigned_to_user_id AS id FROM pending_approvals
+      WHERE status = 'pending' AND assigned_to_user_id IS NOT NULL`
+  );
+  const delegateUserIds = [
+    ...new Set([...employeeUserIds, ...delegateRows.map((r) => r.id as number)]),
+  ];
+  const delegateDecisionsPerEmployee = await runWithConcurrency(delegateUserIds, concurrency, (userId) =>
     runDelegateCheck(pool, log, userId)
   );
   decisions.push(...delegateDecisionsPerEmployee.flat());
@@ -134,7 +159,7 @@ async function loadAssignmentsByUser(
 }
 
 async function main(): Promise<void> {
-  const { employees, seed, concurrency, rounds, periodDays } = parseArgs();
+  const { employees, seed, concurrency, rounds, periodDays, department } = parseArgs();
   const startedAt = new Date();
   const logPath = path.join(
     __dirname,
@@ -144,7 +169,7 @@ async function main(): Promise<void> {
   const log = new MegaLog(logPath);
 
   log.section(
-    `FULL WORKFORCE SIMULATION (rolling) — seed=${seed}, employees=${employees}, concurrency=${concurrency}, rounds=${rounds}, periodDays=${periodDays}`
+    `FULL WORKFORCE SIMULATION (rolling) — seed=${seed}, employees=${employees}, concurrency=${concurrency}, rounds=${rounds}, periodDays=${periodDays}, department=${department}`
   );
   log.info(`Log file: ${logPath}`);
   log.info(`Started at: ${startedAt.toISOString()}`);
@@ -172,7 +197,7 @@ async function main(): Promise<void> {
     await pool.execute('SELECT 1');
 
     // ---- SETUP: org + roster only — no schedules yet ---------------------
-    const org = await setupSimOrg(pool, log, employees);
+    const org = await setupSimOrg(pool, log, employees, department);
     log.info(
       `Org ready: ${org.employeeUserIds.length} employees, department id=${org.departmentId}, ` +
         `org unit id=${org.orgUnitId}, head user id=${org.headUserId}.`

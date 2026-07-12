@@ -120,35 +120,52 @@ describe('TimeOffService.approve', () => {
     await expect(service.approve(1, 99)).rejects.toThrow(/No pending approval found/);
   });
 
+  /** Queues the pool.execute calls approve()'s upfront `wouldBeFinalStep`
+   *  check makes — getPendingApprovalById, then the next-step lookup (empty
+   *  => final). The request itself (unavailability insert) is now validated
+   *  and applied entirely inside the transaction, before decidePendingApproval
+   *  is ever called. */
+  const queueApprovePreChecks = (execute: jest.Mock) => {
+    execute
+      .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
+      .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
+  };
+
   it('refuses when the caller is not the assignee', async () => {
-    const { pool, execute } = makePool();
+    const { pool, conn, execute } = makePool();
     execute
       .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
-      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
-      .mockResolvedValueOnce([[buildPendingApprovalRow({ assigned_to_user_id: 5 })], null] as Tuple); // engine.getPendingApprovalById
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple); // findPendingApprovalId
+    queueApprovePreChecks(execute);
+    conn.execute
+      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability -> none
+      .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple); // INSERT user_unavailability
+    // decidePendingApproval's own getPendingApprovalById sees a different assignee.
+    execute.mockResolvedValueOnce([[buildPendingApprovalRow({ assigned_to_user_id: 5 })], null] as Tuple);
 
     const service = new TimeOffService(pool);
     await expect(service.approve(1, 99)).rejects.toThrow(/Not authorized/);
+    expect(conn.rollback).toHaveBeenCalled();
   });
 
   it('writes the unavailability row and links it back to the request', async () => {
     const { pool, conn, execute } = makePool();
     execute
       .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
-      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple); // findPendingApprovalId
+    queueApprovePreChecks(execute);
+    conn.execute
+      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability -> none
+      .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple); // INSERT user_unavailability
+    execute
       .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // engine.getPendingApprovalById (pre-decision)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
       .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
-      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'approved', decided_by_user_id: 99 })], null] as Tuple) // getPendingApprovalById (post-decision)
-      .mockResolvedValueOnce([[buildRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple); // final getById
-
-    conn.execute
-      .mockResolvedValueOnce([[buildRow()], null] as Tuple) // SELECT ... FOR UPDATE
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (locked re-check) -> none
-      .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple) // INSERT user_unavailability
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple); // UPDATE time_off_requests
+      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'approved', decided_by_user_id: 99 })], null] as Tuple); // getPendingApprovalById (post-decision)
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple); // UPDATE time_off_requests
+    execute.mockResolvedValueOnce([[buildRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple); // final getById
 
     const service = new TimeOffService(pool);
     const result = await service.approve(1, 99, 'OK');
