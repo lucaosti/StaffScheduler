@@ -33,6 +33,7 @@ import healthRoutes from './routes/health';
 import { createDepartmentsRouter } from './routes/departments';
 import { createSystemRouter } from './routes/system';
 import { createTimeOffRouter } from './routes/timeOff';
+import { createAttendanceRouter } from './routes/attendance';
 import { createShiftSwapRouter } from './routes/shiftSwap';
 import { createPreferencesRouter } from './routes/preferences';
 import { createAuditLogsRouter } from './routes/auditLogs';
@@ -169,6 +170,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/assignments`, createAssignmentsRouter(pool));
     app.use(`${prefix}/settings`, createSystemSettingsRouter(pool));
     app.use(`${prefix}/time-off`, createTimeOffRouter(pool));
+    app.use(`${prefix}/attendance`, createAttendanceRouter(pool));
     app.use(`${prefix}/shift-swap`, createShiftSwapRouter(pool));
     app.use(`${prefix}/preferences`, createPreferencesRouter(pool));
     app.use(`${prefix}/audit-logs`, createAuditLogsRouter(pool));

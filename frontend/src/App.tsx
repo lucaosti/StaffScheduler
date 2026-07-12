@@ -37,6 +37,7 @@ const Delegations = lazy(() => import('./pages/Delegations/Delegations'));
 const AuditLogs = lazy(() => import('./pages/Admin/AuditLogs'));
 const ApprovalWorkflows = lazy(() => import('./pages/Admin/ApprovalWorkflows'));
 const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
+const Attendance = lazy(() => import('./pages/Attendance/Attendance'));
 
 /**
  * Main Application Component
@@ -134,6 +135,7 @@ const App: React.FC = () => {
               <RaciMatrix />
             </PermissionRoute>
           } />
+          <Route path="attendance" element={<Attendance />} />
           <Route path="approvals/pending" element={<PendingApprovals />} />
           <Route path="change-requests" element={<ChangeRequests />} />
           <Route path="delegations" element={
