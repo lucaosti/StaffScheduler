@@ -81,8 +81,9 @@ describe('TimeOffService.create extra branches', () => {
   it('throws when post-insert fetch fails', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple);
+      .mockResolvedValueOnce([[], null] as Tuple) // getWorkflowByChangeType -> not found (checked before insert)
+      .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT time_off_requests
+      .mockResolvedValueOnce([[], null] as Tuple); // getById -> empty
     const svc = new TimeOffService(pool);
     await expect(
       svc.create({ userId: 1, startDate: '2026-05-10', endDate: '2026-05-15' })

@@ -24,10 +24,10 @@
  *
  * Every employee is an independent "thread" (a concurrent async task — Node
  * is single-threaded, but the concurrency model is identical: independent
- * actors racing on the same database) that files 5-8 random requests per
- * round — at least 20 over the default 4 rounds. Every org-unit head is a
- * "thread" too, waking on every round to decide or delegate every pending
- * approval; a delegate becomes a deciding thread in turn.
+ * actors racing on the same database) that files a configurable number of
+ * random requests per round. Every org-unit head is a "thread" too, waking
+ * on every round to decide or delegate every pending approval; a delegate
+ * becomes a deciding thread in turn.
  *
  * No AI anywhere in this file or the modules it calls: all "randomness" is a
  * seeded, deterministic PRNG (prng.ts) — same seed, same run, byte for byte.
@@ -35,11 +35,19 @@
  * Usage:
  *   npx ts-node scripts/simulation/index.ts \
  *     [--employees=2000] [--seed=42] [--concurrency=24] [--rounds=4] [--periodDays=14] \
- *     [--department=Operations]
+ *     [--department=Operations | --departments="Emergency:800,Surgery:700,Nursing:500"] \
+ *     [--requestsMin=5] [--requestsMax=8]
  *
- * `--department` selects (or creates, if not already seeded) the
- * department/org-unit structure to simulate against — pass a different name
- * to exercise a different structure and a different approving manager.
+ * `--departments` describes the whole simulated structure: a comma-separated
+ * list of `name:employeeCount` pairs. Each department gets its own org unit,
+ * its own approving head (created on the fly when not already seeded), its
+ * own roster, and its own schedule per round — so every run can exercise a
+ * different structure, different department sizes, and different approving
+ * managers. `--department`+`--employees` is the single-department shorthand.
+ *
+ * `--requestsMin`/`--requestsMax` bound how many requests each employee
+ * submits per round; times `--rounds`, they set the guaranteed per-employee
+ * total (e.g. 13-16 × 4 rounds ≥ 52).
  *
  * @author Luca Ostinelli
  */
@@ -53,7 +61,7 @@ import { EmployeeLoanService } from '../../src/services/EmployeeLoanService';
 import { ShiftSwapService } from '../../src/services/ShiftSwapService';
 import { AutoScheduleService } from '../../src/services/AutoScheduleService';
 import { MegaLog } from './megaLog';
-import { setupSimOrg } from './setup';
+import { setupSimOrgs, DepartmentSpec } from './setup';
 import { createEmptySchedulePeriod } from './schedulePeriod';
 import { runEmployeeActor, SubmittedRequest, EmployeeActorContext } from './employeeActor';
 import { runManagerActor, runDelegateCheck, Decision } from './managerActor';
@@ -64,12 +72,13 @@ import { runWithConcurrency } from './concurrency';
 dotenv.config();
 
 function parseArgs(): {
-  employees: number;
+  departments: DepartmentSpec[];
   seed: number;
   concurrency: number;
   rounds: number;
   periodDays: number;
-  department: string;
+  requestsMin: number;
+  requestsMax: number;
 } {
   const args = process.argv.slice(2);
   const get = (name: string, def: number): number => {
@@ -80,13 +89,38 @@ function parseArgs(): {
     const arg = args.find((a) => a.startsWith(`--${name}=`));
     return arg ? arg.split('=').slice(1).join('=') : def;
   };
+
+  // --departments="Name:count,Name:count" wins; --department+--employees is
+  // the single-department shorthand it degenerates to.
+  const departmentsSpec = getStr('departments', '');
+  let departments: DepartmentSpec[];
+  if (departmentsSpec) {
+    departments = departmentsSpec.split(',').map((pair) => {
+      const [name, countStr] = pair.split(':');
+      const count = Number(countStr);
+      if (!name || !Number.isInteger(count) || count <= 0) {
+        throw new Error(`Bad --departments entry "${pair}" — expected "Name:count" with a positive integer count.`);
+      }
+      return { name: name.trim(), count };
+    });
+  } else {
+    departments = [{ name: getStr('department', 'Operations'), count: get('employees', 2000) }];
+  }
+
+  const requestsMin = get('requestsMin', 5);
+  const requestsMax = get('requestsMax', 8);
+  if (requestsMin < 1 || requestsMax < requestsMin) {
+    throw new Error(`Bad request bounds: --requestsMin=${requestsMin} --requestsMax=${requestsMax}.`);
+  }
+
   return {
-    employees: get('employees', 2000),
+    departments,
     seed: get('seed', 424242),
     concurrency: get('concurrency', 24),
     rounds: get('rounds', 4),
     periodDays: get('periodDays', 14),
-    department: getStr('department', 'Operations'),
+    requestsMin,
+    requestsMax,
   };
 }
 
@@ -158,8 +192,16 @@ async function loadAssignmentsByUser(
   return map;
 }
 
+/** Per-department carry-over between rounds: last generated schedule and who
+ *  owns which assignment on it (what next round's shift swaps act on). */
+interface DeptRoundState {
+  previousScheduleId: number | null;
+  previousLabel: string;
+  previousAssignmentsByUser: Map<number, number[]>;
+}
+
 async function main(): Promise<void> {
-  const { employees, seed, concurrency, rounds, periodDays, department } = parseArgs();
+  const { departments, seed, concurrency, rounds, periodDays, requestsMin, requestsMax } = parseArgs();
   const startedAt = new Date();
   const logPath = path.join(
     __dirname,
@@ -168,8 +210,10 @@ async function main(): Promise<void> {
   );
   const log = new MegaLog(logPath);
 
+  const structureLabel = departments.map((d) => `${d.name}:${d.count}`).join(',');
   log.section(
-    `FULL WORKFORCE SIMULATION (rolling) — seed=${seed}, employees=${employees}, concurrency=${concurrency}, rounds=${rounds}, periodDays=${periodDays}, department=${department}`
+    `FULL WORKFORCE SIMULATION (rolling) — seed=${seed}, departments=${structureLabel}, ` +
+      `concurrency=${concurrency}, rounds=${rounds}, periodDays=${periodDays}, requests/round=${requestsMin}-${requestsMax}`
   );
   log.info(`Log file: ${logPath}`);
   log.info(`Started at: ${startedAt.toISOString()}`);
@@ -196,16 +240,16 @@ async function main(): Promise<void> {
   try {
     await pool.execute('SELECT 1');
 
-    // ---- SETUP: org + roster only — no schedules yet ---------------------
-    const org = await setupSimOrg(pool, log, employees, department);
+    // ---- SETUP: org + rosters only — no schedules yet ---------------------
+    const orgs = await setupSimOrgs(pool, log, departments);
+    const allEmployeeUserIds = orgs.flatMap((o) => o.employeeUserIds);
     log.info(
-      `Org ready: ${org.employeeUserIds.length} employees, department id=${org.departmentId}, ` +
-        `org unit id=${org.orgUnitId}, head user id=${org.headUserId}.`
+      `Org ready: ${allEmployeeUserIds.length} employees across ${orgs.length} department(s): ` +
+        orgs.map((o) => `${o.name}=${o.employeeUserIds.length} (head #${o.headUserId})`).join(', ')
     );
 
     const [orgUnitRows] = await pool.query(`SELECT id, manager_user_id FROM org_units`);
     const allOrgUnits = orgUnitRows as Array<{ id: number; manager_user_id: number | null }>;
-    const otherOrgUnitIds = allOrgUnits.map((u) => u.id).filter((id) => id !== org.orgUnitId);
     const distinctHeadUserIds = [
       ...new Set(allOrgUnits.map((u) => u.manager_user_id).filter((id): id is number => id !== null)),
     ];
@@ -220,9 +264,12 @@ async function main(): Promise<void> {
 
     const allRequests: SubmittedRequest[] = [];
     const allDecisions: Decision[] = [];
-    let previousScheduleId: number | null = null;
-    let previousLabel = '';
-    let previousAssignmentsByUser = new Map<number, number[]>();
+    const deptState = new Map<number, DeptRoundState>(
+      orgs.map((o) => [
+        o.departmentId,
+        { previousScheduleId: null, previousLabel: '', previousAssignmentsByUser: new Map() },
+      ])
+    );
     const today = new Date();
 
     for (let round = 0; round < rounds; round++) {
@@ -231,37 +278,56 @@ async function main(): Promise<void> {
       const label = `period ${round + 1}/${rounds} (${periodStart}..${periodEnd})`;
 
       log.section(`ROUND ${round + 1}/${rounds}: ${label}`);
-      const scheduleId = await createEmptySchedulePeriod(
-        pool,
-        org.departmentId,
-        org.headUserId,
-        `[SIM] ${label}`,
-        periodStart,
-        periodEnd,
-        org.employeeUserIds.length
-      );
-      log.info(
-        `Created empty schedule id=${scheduleId} for ${label}. ` +
-          (round === 0
-            ? 'No prior assignments exist yet — shift-swap requests will be skipped this round.'
-            : `Shift-swap requests this round act on the ${previousLabel} schedule (id=${previousScheduleId}).`)
-      );
+
+      // One empty schedule per department, all covering the same period.
+      const scheduleIdByDept = new Map<number, number>();
+      for (const org of orgs) {
+        const scheduleId = await createEmptySchedulePeriod(
+          pool,
+          org.departmentId,
+          org.headUserId,
+          `[SIM] ${org.name} ${label}`,
+          periodStart,
+          periodEnd,
+          org.employeeUserIds.length
+        );
+        scheduleIdByDept.set(org.departmentId, scheduleId);
+        const state = deptState.get(org.departmentId)!;
+        log.info(
+          `Created empty schedule id=${scheduleId} for ${org.name} ${label}. ` +
+            (state.previousScheduleId === null
+              ? 'No prior assignments exist yet — shift-swap requests will be skipped this round.'
+              : `Shift-swap requests this round act on the ${state.previousLabel} schedule (id=${state.previousScheduleId}).`)
+        );
+      }
 
       // ---- PHASE 1: employees file requests ------------------------------
-      log.info(`PHASE 1: ${org.employeeUserIds.length} employee threads file requests (concurrency=${concurrency})`);
-      const actorCtx: EmployeeActorContext = {
-        pool,
-        log,
-        runSeed: seed + round * 1_000_003, // distinct-but-deterministic RNG stream per round
-        orgUnitId: org.orgUnitId,
-        otherOrgUnitIds,
-        baselineAssignmentsByUser: previousAssignmentsByUser,
-        futureStartDate: periodStart,
-        futureEndDate: periodEnd,
-        ...services,
-      };
-      const perEmployeeRequests = await runWithConcurrency(org.employeeUserIds, concurrency, (userId) =>
-        runEmployeeActor(actorCtx, userId)
+      log.info(
+        `PHASE 1: ${allEmployeeUserIds.length} employee threads file requests (concurrency=${concurrency}, ${requestsMin}-${requestsMax} each)`
+      );
+      // Flatten every department's roster into one task list so the global
+      // DB concurrency stays bounded at `concurrency` regardless of how many
+      // departments the structure has.
+      const actorTasks: Array<{ ctx: EmployeeActorContext; userId: number }> = [];
+      for (const org of orgs) {
+        const state = deptState.get(org.departmentId)!;
+        const ctx: EmployeeActorContext = {
+          pool,
+          log,
+          runSeed: seed + round * 1_000_003, // distinct-but-deterministic RNG stream per round
+          orgUnitId: org.orgUnitId,
+          otherOrgUnitIds: allOrgUnits.map((u) => u.id).filter((id) => id !== org.orgUnitId),
+          baselineAssignmentsByUser: state.previousAssignmentsByUser,
+          futureStartDate: periodStart,
+          futureEndDate: periodEnd,
+          requestsMin,
+          requestsMax,
+          ...services,
+        };
+        for (const userId of org.employeeUserIds) actorTasks.push({ ctx, userId });
+      }
+      const perEmployeeRequests = await runWithConcurrency(actorTasks, concurrency, (task) =>
+        runEmployeeActor(task.ctx, task.userId)
       );
       const requestsThisRound = perEmployeeRequests.flat();
       allRequests.push(...requestsThisRound);
@@ -274,7 +340,7 @@ async function main(): Promise<void> {
         log,
         seed + round * 1_000_003,
         distinctHeadUserIds,
-        org.employeeUserIds,
+        allEmployeeUserIds,
         concurrency
       );
       allDecisions.push(...decisionsThisRound);
@@ -283,26 +349,42 @@ async function main(): Promise<void> {
       // ---- PHASE 3: verify this round's request outcomes -----------------
       await verifyAllRequests(pool, log, requestsThisRound);
 
-      // ---- PHASE 4: generate this period's schedule ----------------------
-      log.info(`PHASE 4: generate schedule for ${label} (after this round's decisions have landed)`);
-      const genResult = await auto.generate(scheduleId, org.headUserId);
-      log.info(
-        `Schedule generated for ${label}: ${genResult.assignmentsCreated}/${genResult.totalShifts} shifts filled ` +
-          `(${genResult.coveragePercentage}%), status=${genResult.status}.`
-      );
-      log.count('schedule.assignments_created', genResult.assignmentsCreated);
+      // ---- PHASE 4: generate every department's schedule -----------------
+      log.info(`PHASE 4: generate ${orgs.length} schedule(s) for ${label} (after this round's decisions have landed)`);
+      for (const org of orgs) {
+        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
+        const genResult = await auto.generate(scheduleId, org.headUserId);
+        log.info(
+          `Schedule generated for ${org.name} ${label}: ${genResult.assignmentsCreated}/${genResult.totalShifts} shifts filled ` +
+            `(${genResult.coveragePercentage}%), status=${genResult.status}.`
+        );
+        log.count('schedule.assignments_created', genResult.assignmentsCreated);
+      }
 
       // ---- PHASE 5: verify constraints -----------------------------------
       log.info('PHASE 5: verify scheduling constraints (compliance engine)');
-      await verifyComplianceForSchedule(pool, log, scheduleId, label);
-      if (previousScheduleId !== null) {
-        await verifyComplianceForSchedule(pool, log, previousScheduleId, `${previousLabel} (post-swaps this round)`);
+      for (const org of orgs) {
+        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
+        const state = deptState.get(org.departmentId)!;
+        await verifyComplianceForSchedule(pool, log, scheduleId, `${org.name} ${label}`);
+        if (state.previousScheduleId !== null) {
+          await verifyComplianceForSchedule(
+            pool,
+            log,
+            state.previousScheduleId,
+            `${state.previousLabel} (post-swaps this round)`
+          );
+        }
       }
 
       // ---- prepare for next round -----------------------------------------
-      previousScheduleId = scheduleId;
-      previousLabel = label;
-      previousAssignmentsByUser = await loadAssignmentsByUser(pool, scheduleId);
+      for (const org of orgs) {
+        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
+        const state = deptState.get(org.departmentId)!;
+        state.previousScheduleId = scheduleId;
+        state.previousLabel = `${org.name} ${label}`;
+        state.previousAssignmentsByUser = await loadAssignmentsByUser(pool, scheduleId);
+      }
     }
 
     // ---- SUMMARY ------------------------------------------------------------

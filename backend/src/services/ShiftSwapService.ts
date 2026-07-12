@@ -77,6 +77,23 @@ export class ShiftSwapService {
    * different user, and resolves the target user from the row.
    */
   async create(input: CreateSwapInput): Promise<ShiftSwapRequest> {
+    // Resolve the approval gate BEFORE inserting the request: a swap whose
+    // configured workflow cannot attach an approver (e.g. the requester has
+    // no primary org unit for a unit-scoped step) would otherwise be
+    // inserted 'pending' with no pending_approvals row — permanently
+    // undecidable by anyone. Fail loudly instead.
+    const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
+    let workflowCtx: { actorUserId: number; orgUnitId: number | undefined } | null = null;
+    if (workflow && workflow.steps.length > 0) {
+      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
+      workflowCtx = { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined };
+      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+        throw new Error(
+          'No approver could be resolved for this shift swap request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
+        );
+      }
+    }
+
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -126,15 +143,20 @@ export class ShiftSwapService {
         after: { id: created.id, status: 'pending', targetUserId: created.targetUserId },
       });
 
-      const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
-      if (workflow && workflow.steps.length > 0) {
-        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
-        await this.engine.createPendingApprovalForStep(
+      if (workflow && workflow.steps.length > 0 && workflowCtx) {
+        const pa = await this.engine.createPendingApprovalForStep(
           workflow.id,
           workflow.steps[0],
           { shiftSwapRequestId: created.id },
-          { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined }
+          workflowCtx
         );
+        if (!pa) {
+          // The pre-insert check passed but resolution changed underneath
+          // us (e.g. a concurrent membership removal). Never leave a
+          // stranded, undecidable request behind.
+          await this.pool.execute(`DELETE FROM shift_swap_requests WHERE id = ?`, [created.id]);
+          throw new Error('No approver could be resolved for this shift swap request — approver resolution changed during creation. Please retry.');
+        }
       }
 
       return created;
