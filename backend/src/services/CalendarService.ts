@@ -28,6 +28,7 @@
 
 import { createHash, randomBytes } from 'crypto';
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { DateUtils } from '../utils';
 
 export interface CalendarEvent {
   uid: string;
@@ -106,7 +107,7 @@ const computeEtag = (...parts: Array<string | number | null | undefined>): strin
 };
 
 const isoDate = (raw: unknown): string =>
-  typeof raw === 'string' ? raw : new Date(raw as Date).toISOString().slice(0, 10);
+  typeof raw === 'string' ? raw : DateUtils.fromMySQLDate(raw as Date);
 
 export class CalendarService {
   constructor(private pool: Pool) {}

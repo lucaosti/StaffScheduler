@@ -13,6 +13,7 @@
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { DateUtils } from '../utils';
 
 type OnCallStatus = 'open' | 'assigned' | 'cancelled';
 type OnCallAssignmentStatus = 'pending' | 'confirmed' | 'cancelled';
@@ -71,9 +72,7 @@ const mapPeriod = (row: RowDataPacket): OnCallPeriod => ({
   departmentId: row.department_id as number,
   departmentName: (row.department_name as string | undefined) ?? undefined,
   date:
-    typeof row.date === 'string'
-      ? row.date
-      : new Date(row.date as Date).toISOString().slice(0, 10),
+    typeof row.date === 'string' ? row.date : DateUtils.fromMySQLDate(row.date as Date),
   startTime: row.start_time as string,
   endTime: row.end_time as string,
   minStaff: row.min_staff as number,

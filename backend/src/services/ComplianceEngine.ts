@@ -21,6 +21,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { DateUtils } from '../utils';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
 export interface CandidateShift {
@@ -343,7 +344,7 @@ export const evaluateAssignmentCompliance = async (
     .filter((row: any) => options.excludeAssignmentId !== row.id)
     .map((row: any) => ({
       id: row.id,
-      date: typeof row.date === 'string' ? row.date : new Date(row.date).toISOString().slice(0, 10),
+      date: typeof row.date === 'string' ? row.date : DateUtils.fromMySQLDate(row.date),
       startTime: row.start_time,
       endTime: row.end_time,
     }));
