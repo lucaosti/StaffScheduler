@@ -243,7 +243,12 @@ async function applyVariantSql(dbName: string, variantIndex: number): Promise<vo
 /** Runs a ts-node script as a child process against the lane's database,
  *  streaming all output to `logStream`. Resolves with the exit code, or
  *  rejects only on spawn failure; a timeout kills the child and returns
- *  the sentinel exit code -2. */
+ *  the sentinel exit code -2.
+ *
+ *  Spawns node directly on ts-node's entry point instead of going through
+ *  `npx`: killing an npx wrapper does not reliably kill the node process it
+ *  spawned, and an orphaned simulation still writing while the lane drops
+ *  and recreates its database would corrupt every subsequent run. */
 function runChild(
   scriptArgs: string[],
   dbName: string,
@@ -251,8 +256,9 @@ function runChild(
   timeoutMs: number
 ): Promise<number> {
   const root = rootCredentials();
+  const tsNodeBin = path.join(BACKEND_DIR, 'node_modules', 'ts-node', 'dist', 'bin.js');
   return new Promise((resolve, reject) => {
-    const child = spawn('npx', ['ts-node', ...scriptArgs], {
+    const child = spawn(process.execPath, [tsNodeBin, ...scriptArgs], {
       cwd: BACKEND_DIR,
       env: {
         ...process.env,
@@ -329,7 +335,9 @@ async function executeRun(config: RunConfig, dbName: string, campaignDir: string
       `--requestsMax=${config.requestsMax}`,
     ];
     const simCode = await runChild(simArgs, dbName, logStream, 3 * 60 * 60_000);
-    logStream.end();
+    // Wait for the stream to flush before reading the file back — end()
+    // alone is asynchronous, and a truncated read would misclassify the run.
+    await new Promise<void>((res) => logStream.end(res));
 
     const counters = parseCounters(logPath);
     const outcome: RunResult['outcome'] =
@@ -337,7 +345,7 @@ async function executeRun(config: RunConfig, dbName: string, campaignDir: string
     return { config, exitCode: simCode, wallClockMs: Date.now() - startedAt, counters, outcome };
   } catch (err) {
     logStream.write(`[campaign] run crashed: ${(err as Error).message}\n`);
-    logStream.end();
+    await new Promise<void>((res) => logStream.end(res));
     return {
       config,
       exitCode: -1,
