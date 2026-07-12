@@ -1478,6 +1478,13 @@
             }
           },
           {
+            "name": "onBehalfOfUserId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
             "name": "action",
             "in": "query",
             "schema": {
@@ -1492,19 +1499,35 @@
             }
           },
           {
-            "name": "startDate",
+            "name": "entityId",
             "in": "query",
             "schema": {
-              "type": "string",
-              "format": "date"
+              "type": "integer"
             }
           },
           {
-            "name": "endDate",
+            "name": "fromDate",
             "in": "query",
             "schema": {
               "type": "string",
               "format": "date"
+            },
+            "description": "Inclusive lower bound (YYYY-MM-DD)."
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive upper bound (YYYY-MM-DD)."
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           },
           {
@@ -1523,6 +1546,22 @@
               "type": "integer",
               "default": 0
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "1-based page number; use together with pageSize for the paginated envelope."
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Page size; use together with page for the paginated envelope."
           }
         ],
         "responses": {
@@ -1546,6 +1585,135 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/audit-logs/export": {
+      "get": {
+        "tags": [
+          "Audit Logs"
+        ],
+        "summary": "Export audit log entries",
+        "description": "Requires `audit.read`. Returns all matching entries without row limit (same filters as the list endpoint, no `limit`/`offset`). Use `fromDate`/`toDate` to scope exports.",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "json",
+                "csv"
+              ],
+              "default": "json"
+            },
+            "description": "`csv` returns `text/csv` with `Content-Disposition: attachment`."
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "onBehalfOfUserId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityType",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "fromDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive lower bound (YYYY-MM-DD)."
+          },
+          {
+            "name": "toDate",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date"
+            },
+            "description": "Inclusive upper bound (YYYY-MM-DD)."
+          },
+          {
+            "name": "requestId",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching audit entries, as JSON envelope or CSV attachment.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditLogEntry"
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "integer"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -4653,7 +4821,7 @@
           "Org Units"
         ],
         "summary": "List members of an org unit with display details",
-        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position — used by the org-chart view and the structure-decision delegate picker.",
+        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position \u2014 used by the org-chart view and the structure-decision delegate picker.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -5876,6 +6044,38 @@
       }
     },
     "/roles/users/{userId}": {
+      "get": {
+        "tags": [
+          "RBAC"
+        ],
+        "summary": "List a user's role assignments",
+        "description": "Requires `role.manage`.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role assignments for the user."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
       "post": {
         "tags": [
           "RBAC"
@@ -8679,7 +8879,7 @@
           "Pending Approvals"
         ],
         "summary": "Structure head keeps a decision for themselves",
-        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent — a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
+        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent \u2014 a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
         "security": [
           {
             "bearerAuth": []
@@ -8815,7 +9015,7 @@
           "Pending Approvals"
         ],
         "summary": "Chain of command for a decision",
-        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure — not just whoever is authorized to decide it.",
+        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure \u2014 not just whoever is authorized to decide it.",
         "security": [
           {
             "bearerAuth": []

@@ -107,7 +107,7 @@ export const config = {
     cleanupDays: parseInt(process.env.REPORT_CLEANUP_DAYS || '30'),
   },
   optimization: {
-    engine: process.env.OPTIMIZATION_ENGINE || 'javascript', // 'javascript' | 'or-tools' | 'pulp'
+    engine: process.env.OPTIMIZATION_ENGINE || 'javascript', // 'javascript' (TS fallback) | 'or-tools' (Python CP-SAT)
     timeout: parseInt(process.env.OPTIMIZATION_TIMEOUT || '300000'), // 5 minutes
     maxIterations: parseInt(process.env.OPTIMIZATION_MAX_ITERATIONS || '10000'),
     populationSize: parseInt(process.env.OPTIMIZATION_POPULATION_SIZE || '100'),
