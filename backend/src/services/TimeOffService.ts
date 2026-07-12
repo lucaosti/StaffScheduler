@@ -228,22 +228,28 @@ export class TimeOffService {
       throw new Error('No pending approval found for this time-off request');
     }
 
-    await this.checkNoDuplicateUnavailability(this.pool, existing.userId, existing.startDate, existing.endDate);
-
-    const decision = await this.engine.decidePendingApproval(
-      pendingApprovalId,
-      reviewerId,
-      'approved',
-      notes,
-      async () => ({ actorUserId: reviewerId })
-    );
-
-    if (!decision.isFinalStep) {
+    // A non-final step has no entity side effects to apply yet — just
+    // record the decision and let the next step take over.
+    if (!(await this.engine.wouldBeFinalStep(pendingApprovalId))) {
+      await this.engine.decidePendingApproval(
+        pendingApprovalId,
+        reviewerId,
+        'approved',
+        notes,
+        async () => ({ actorUserId: reviewerId })
+      );
       const refreshed = await this.getById(id);
       if (!refreshed) throw new Error('Failed to retrieve time-off request');
       return refreshed;
     }
 
+    // Final step: validate and apply the unavailability insert *before*
+    // deciding the pending_approvals row. decidePendingApproval commits
+    // immediately via its own connection — deciding first and validating
+    // after would leave the decision permanently "approved" while the
+    // time-off request itself stays "pending" forever if the duplicate
+    // check then failed (see managerActor.ts's handling of exactly this
+    // failure mode for the analogous ShiftSwapService bug).
     const conn = await this.pool.getConnection();
     try {
       await conn.beginTransaction();
@@ -253,6 +259,9 @@ export class TimeOffService {
       );
       if (rows.length === 0) throw new Error('Time-off request not found');
       const current = mapRow(rows[0]);
+      if (current.status !== 'pending') {
+        throw new Error(`Cannot approve request in status '${current.status}'`);
+      }
       await this.checkNoDuplicateUnavailability(conn, current.userId, current.startDate, current.endDate);
 
       const [unavailRes] = await conn.execute<ResultSetHeader>(
@@ -264,6 +273,14 @@ export class TimeOffService {
           current.endDate,
           `[time-off-request:${id}] ${current.reason ?? current.type}`,
         ]
+      );
+
+      await this.engine.decidePendingApproval(
+        pendingApprovalId,
+        reviewerId,
+        'approved',
+        notes,
+        async () => ({ actorUserId: reviewerId })
       );
 
       await conn.execute(

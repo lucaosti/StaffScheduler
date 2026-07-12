@@ -142,17 +142,19 @@ describe('TimeOffService.approve extra paths', () => {
     execute
       .mockResolvedValueOnce([[buildRow()], null] as Tuple) // getById
       .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
+      .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
+      .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
+    conn.execute
+      .mockResolvedValueOnce([[buildRow()], null]) // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // checkNoDuplicateUnavailability -> none
+      .mockResolvedValueOnce([{ insertId: 555 }, null]); // INSERT user_unavailability
+    execute
       .mockResolvedValueOnce([[buildPendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
       .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
-      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'approved' })], null] as Tuple) // getPendingApprovalById (post)
-      .mockResolvedValueOnce([[], null] as Tuple); // final getById -> not found
-    conn.execute
-      .mockResolvedValueOnce([[buildRow()], null])
-      .mockResolvedValueOnce([[], null]) // checkNoDuplicateUnavailability (locked re-check) -> none
-      .mockResolvedValueOnce([{ insertId: 555 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+      .mockResolvedValueOnce([[buildPendingApprovalRow({ status: 'approved' })], null] as Tuple); // getPendingApprovalById (post)
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE time_off_requests
+    execute.mockResolvedValueOnce([[], null] as Tuple); // final getById -> not found
     const svc = new TimeOffService(pool);
     await expect(svc.approve(1, 99)).rejects.toThrow(/Failed to retrieve approved request/);
   });

@@ -228,17 +228,19 @@ describe('TimeOffService — audit log', () => {
     execute
       .mockResolvedValueOnce([[timeOffRow()], null] as Tuple) // getById
       .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (dry run) -> none
-      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // wouldBeFinalStep: getPendingApprovalById
+      .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
+    conn.execute
+      .mockResolvedValueOnce([[timeOffRow()], null] as Tuple) // SELECT ... FOR UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability -> none
+      .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple); // INSERT user_unavailability
+    execute
+      .mockResolvedValueOnce([[pendingApprovalRow()], null] as Tuple) // getPendingApprovalById (pre)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // guarded UPDATE pending_approvals
       .mockResolvedValueOnce([[], null] as Tuple) // next-step lookup -> none
-      .mockResolvedValueOnce([[pendingApprovalRow({ status: 'approved' })], null] as Tuple) // post-decision fetch
-      .mockResolvedValueOnce([[timeOffRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple); // final getById
-    conn.execute
-      .mockResolvedValueOnce([[timeOffRow()], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple) // checkNoDuplicateUnavailability (locked re-check) -> none
-      .mockResolvedValueOnce([{ insertId: 555 }, null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple);
+      .mockResolvedValueOnce([[pendingApprovalRow({ status: 'approved' })], null] as Tuple); // post-decision fetch
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple); // UPDATE time_off_requests
+    execute.mockResolvedValueOnce([[timeOffRow({ status: 'approved', unavailability_id: 555 })], null] as Tuple); // final getById
 
     const service = new TimeOffService(pool);
     await service.approve(1, 99, 'OK');
