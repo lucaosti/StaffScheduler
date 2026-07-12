@@ -49,7 +49,6 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
       DB_USER: ${MYSQL_USER:-scheduler_user}
       DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
-      SESSION_SECRET: ${SESSION_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
@@ -85,7 +84,6 @@ services:
         condition: service_healthy
     environment:
       REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001/api}
-      REACT_APP_APP_NAME: ${REACT_APP_APP_NAME:-Staff Scheduler}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     networks:
