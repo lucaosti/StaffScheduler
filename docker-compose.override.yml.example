@@ -9,6 +9,14 @@ services:
       - NODE_ENV=development
       - LOG_LEVEL=debug
 
-  db:
+  mysql:
     ports:
       - "3306:3306"
+    # The base compose ships demo-sized limits (512m / 0.5 cpus). Development
+    # workloads — in particular the simulation campaign (npm run sim:campaign),
+    # which runs several 2000+-employee simulations on parallel databases
+    # against this one server — need real headroom: under the demo limits
+    # mysqld gets OOM-killed mid-campaign (container restart with XA crash
+    # recovery), taking every connected run down with it.
+    mem_limit: 3g
+    cpus: 3.0

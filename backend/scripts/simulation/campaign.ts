@@ -33,11 +33,14 @@
  * Usage:
  *   DB_ROOT_PASSWORD=... npx ts-node scripts/simulation/campaign.ts \
  *     [--runs=40] [--baseSeed=20260712] [--lanes=4] [--concurrency=24] \
- *     [--minEmployees=2000] [--minRequests=50]
+ *     [--minEmployees=2000] [--minRequests=50] [--only=1,3,4]
  *
  * `--minEmployees`/`--minRequests` exist for quick smoke tests of the
  * campaign machinery itself (e.g. --runs=2 --minEmployees=60 --minRequests=8);
- * the defaults are the real campaign spec.
+ * the defaults are the real campaign spec. `--only` re-executes just the
+ * listed run numbers — their configs derive from (baseSeed, index) exactly
+ * as in the full campaign, so a partial re-run reproduces the same
+ * structures and seeds.
  *
  * @author Luca Ostinelli
  */
@@ -136,17 +139,36 @@ interface RunResult {
   outcome: 'PASS' | 'FAIL' | 'CRASH' | 'TIMEOUT';
 }
 
-function parseArgs(): { runs: number; baseSeed: number; lanes: number; concurrency: number; spec: CampaignSpec } {
+function parseArgs(): {
+  runs: number;
+  baseSeed: number;
+  lanes: number;
+  concurrency: number;
+  only: number[] | null;
+  spec: CampaignSpec;
+} {
   const args = process.argv.slice(2);
   const get = (name: string, def: number): number => {
     const arg = args.find((a) => a.startsWith(`--${name}=`));
     return arg ? Number(arg.split('=')[1]) : def;
   };
+  // --only=1,3,4 re-executes just those run numbers (1-based). Their configs
+  // are derived from (baseSeed, index) exactly as in the full campaign, so a
+  // partial re-run reproduces the same structures and seeds.
+  const onlyArg = args.find((a) => a.startsWith('--only='));
+  const only = onlyArg
+    ? onlyArg
+        .split('=')[1]
+        .split(',')
+        .map((s) => Number(s))
+        .filter((n) => Number.isInteger(n) && n >= 1)
+    : null;
   return {
     runs: get('runs', 40),
     baseSeed: get('baseSeed', 20260712),
     lanes: get('lanes', 4),
     concurrency: get('concurrency', 24),
+    only,
     spec: {
       minEmployees: get('minEmployees', 2000),
       minRequests: get('minRequests', 50),
@@ -211,14 +233,29 @@ function rootCredentials(): { user: string; password: string; host: string; port
   };
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((res) => setTimeout(res, ms));
+
+/** Drops and recreates the lane's database. Retries with backoff for a few
+ *  minutes: a transient server outage (e.g. the MySQL container restarting)
+ *  must pause the lane, not instantly burn through its whole run queue with
+ *  back-to-back connection failures. */
 async function resetLaneDatabase(dbName: string): Promise<void> {
   const root = rootCredentials();
-  const conn = await createConnection({ host: root.host, port: root.port, user: root.user, password: root.password });
-  try {
-    await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
-    await conn.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
-  } finally {
-    await conn.end();
+  const maxAttempts = 20;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const conn = await createConnection({ host: root.host, port: root.port, user: root.user, password: root.password });
+      try {
+        await conn.query(`DROP DATABASE IF EXISTS \`${dbName}\``);
+        await conn.query(`CREATE DATABASE \`${dbName}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+        return;
+      } finally {
+        await conn.end();
+      }
+    } catch (err) {
+      if (attempt >= maxAttempts) throw err;
+      await sleep(15_000);
+    }
   }
 }
 
@@ -300,9 +337,15 @@ function parseCounters(logPath: string): Record<string, number> {
   return counters;
 }
 
-async function executeRun(config: RunConfig, dbName: string, campaignDir: string, concurrency: number): Promise<RunResult> {
+async function executeRun(
+  config: RunConfig,
+  dbName: string,
+  campaignDir: string,
+  concurrency: number,
+  attempt = 1
+): Promise<RunResult> {
   const runLabel = String(config.runIndex + 1).padStart(2, '0');
-  const logPath = path.join(campaignDir, `run-${runLabel}.log`);
+  const logPath = path.join(campaignDir, `run-${runLabel}${attempt > 1 ? `-retry${attempt - 1}` : ''}.log`);
   const logStream = fs.createWriteStream(logPath);
   const startedAt = Date.now();
 
@@ -378,7 +421,7 @@ function summaryLine(r: RunResult): string {
 }
 
 async function main(): Promise<void> {
-  const { runs, baseSeed, lanes, concurrency, spec } = parseArgs();
+  const { runs, baseSeed, lanes, concurrency, only, spec } = parseArgs();
   rootCredentials(); // fail fast if credentials are missing
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -391,23 +434,33 @@ async function main(): Promise<void> {
     fs.appendFileSync(summaryPath, line + '\n');
   };
 
+  const runIndexes = (only ?? Array.from({ length: runs }, (_, i) => i + 1))
+    .filter((n) => n <= runs)
+    .map((n) => n - 1);
   log(
-    `CAMPAIGN: ${runs} runs, baseSeed=${baseSeed}, ${lanes} parallel lanes, sim concurrency=${concurrency}/lane, ` +
+    `CAMPAIGN: ${runIndexes.length} runs (${only ? `--only=${only.join(',')}` : `1..${runs}`}), baseSeed=${baseSeed}, ` +
+      `${lanes} parallel lanes, sim concurrency=${concurrency}/lane, ` +
       `>=${spec.minEmployees} employees and >=${spec.minRequests} requests/employee per run`
   );
   log(`Output: ${campaignDir}`);
 
-  const configs = Array.from({ length: runs }, (_, i) => buildRunConfig(baseSeed, i, spec));
-  const results: RunResult[] = new Array(runs);
+  const results: RunResult[] = [];
 
   // Round-robin the runs over the lanes; each lane owns one database and
-  // processes its share strictly sequentially.
-  const laneWorkers = Array.from({ length: Math.min(lanes, runs) }, (_, lane) =>
+  // processes its share strictly sequentially. A crashed run (infrastructure
+  // hiccup, not a verification failure) is retried once on a fresh database
+  // before being reported.
+  const laneWorkers = Array.from({ length: Math.min(lanes, runIndexes.length) }, (_, lane) =>
     (async () => {
       const dbName = `staff_scheduler_simlane${lane + 1}`;
-      for (let i = lane; i < runs; i += lanes) {
-        const result = await executeRun(configs[i], dbName, campaignDir, concurrency);
-        results[i] = result;
+      for (let pos = lane; pos < runIndexes.length; pos += lanes) {
+        const config = buildRunConfig(baseSeed, runIndexes[pos], spec);
+        let result = await executeRun(config, dbName, campaignDir, concurrency);
+        if (result.outcome === 'CRASH' || result.outcome === 'TIMEOUT') {
+          log(`${summaryLine(result)}  [retrying once]`);
+          result = await executeRun(config, dbName, campaignDir, concurrency, 2);
+        }
+        results.push(result);
         log(summaryLine(result));
       }
     })()
@@ -418,7 +471,9 @@ async function main(): Promise<void> {
   const totalPass = results.reduce((a, r) => a + (r.counters['verify.pass'] ?? 0), 0);
   const totalFail = results.reduce((a, r) => a + (r.counters['verify.fail'] ?? 0), 0);
   log('');
-  log(`CAMPAIGN RESULT: ${runs - failed.length}/${runs} runs fully passed — ${totalPass} verifications passed, ${totalFail} failed.`);
+  log(
+    `CAMPAIGN RESULT: ${results.length - failed.length}/${results.length} runs fully passed — ${totalPass} verifications passed, ${totalFail} failed.`
+  );
   if (failed.length > 0) {
     log(`Runs needing analysis: ${failed.map((r) => String(r.config.runIndex + 1).padStart(2, '0')).join(', ')} (see run-XX.log).`);
   }
