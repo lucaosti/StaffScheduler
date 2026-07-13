@@ -28,7 +28,10 @@ import bcrypt from 'bcrypt';
 import { MegaLog } from './megaLog';
 
 const SIM_EMAIL_PREFIX = 'simemp';
-const SIM_PASSWORD = 'simulation-not-a-real-login';
+// Exported so HTTP actors (httpAuth.ts) can log in as any synthetic user
+// this module creates — every synthetic user is hashed with this same
+// plaintext.
+export const SIM_PASSWORD = 'simulation-not-a-real-login';
 
 export interface DepartmentSpec {
   name: string;
