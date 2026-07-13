@@ -36,7 +36,15 @@
  *   npx ts-node scripts/simulation/index.ts \
  *     [--employees=2000] [--seed=42] [--concurrency=24] [--rounds=4] [--periodDays=14] \
  *     [--department=Operations | --departments="Emergency:800,Surgery:700,Nursing:500"] \
- *     [--requestsMin=5] [--requestsMax=8]
+ *     [--requestsMin=5] [--requestsMax=8] [--transport=service|http|mixed]
+ *
+ * `--transport` (default `service`) selects how actors submit requests:
+ * `service` calls TypeScript service classes directly, in-process (today's
+ * behavior, 0 HTTP/auth/RBAC coverage but proven correct on business rules);
+ * `http`/`mixed` additionally boot the real Express app in-process
+ * (`buildApp` + `app.listen(0)`) and route calls through it, exercising the
+ * full auth/RBAC/validation middleware chain — requires `NODE_ENV=test`
+ * (the login rate limiter otherwise rejects the volume of synthetic logins).
  *
  * `--departments` describes the whole simulated structure: a comma-separated
  * list of `name:employeeCount` pairs. Each department gets its own org unit,
@@ -61,13 +69,15 @@ import { EmployeeLoanService } from '../../src/services/EmployeeLoanService';
 import { ShiftSwapService } from '../../src/services/ShiftSwapService';
 import { AutoScheduleService } from '../../src/services/AutoScheduleService';
 import { MegaLog } from './megaLog';
-import { setupSimOrgs, DepartmentSpec } from './setup';
+import { setupSimOrgs, DepartmentSpec, SIM_PASSWORD } from './setup';
 import { createEmptySchedulePeriod } from './schedulePeriod';
 import { runEmployeeActor, SubmittedRequest, EmployeeActorContext } from './employeeActor';
 import { runManagerActor, runDelegateCheck, Decision } from './managerActor';
 import { verifyAllRequests } from './verify';
 import { verifyComplianceForSchedule } from './complianceReport';
 import { runWithConcurrency } from './concurrency';
+import { HttpClient } from './httpClient';
+import { establishSession } from './httpAuth';
 
 dotenv.config();
 
@@ -79,6 +89,7 @@ function parseArgs(): {
   periodDays: number;
   requestsMin: number;
   requestsMax: number;
+  transport: 'service' | 'http' | 'mixed';
 } {
   const args = process.argv.slice(2);
   const get = (name: string, def: number): number => {
@@ -119,12 +130,18 @@ function parseArgs(): {
     throw new Error(`Bad request bounds: --requestsMin=${requestsMin} --requestsMax=${requestsMax}.`);
   }
 
+  const transport = getStr('transport', 'service');
+  if (transport !== 'service' && transport !== 'http' && transport !== 'mixed') {
+    throw new Error(`Bad --transport="${transport}" — must be one of: service, http, mixed.`);
+  }
+
   return {
     departments,
     seed: get('seed', 424242),
     concurrency: get('concurrency', 24),
     rounds: get('rounds', 4),
     periodDays: get('periodDays', 14),
+    transport: transport as 'service' | 'http' | 'mixed',
     requestsMin,
     requestsMax,
   };
@@ -207,7 +224,7 @@ interface DeptRoundState {
 }
 
 async function main(): Promise<void> {
-  const { departments, seed, concurrency, rounds, periodDays, requestsMin, requestsMax } = parseArgs();
+  const { departments, seed, concurrency, rounds, periodDays, requestsMin, requestsMax, transport } = parseArgs();
   const startedAt = new Date();
   const logPath = path.join(
     __dirname,
@@ -243,6 +260,31 @@ async function main(): Promise<void> {
     connectTimeout: config.database.connectTimeout,
   });
 
+  // ---- HTTP transport: boot the real Express app in-process --------------
+  // `service` transport (the default) never touches this; `http`/`mixed`
+  // route actor calls through the full middleware stack (auth, RBAC,
+  // validation) instead of calling service classes directly. Bound to an
+  // OS-assigned ephemeral port (0) so multiple campaign lanes never collide.
+  let httpBaseUrl: string | null = null;
+  let httpServer: import('http').Server | null = null;
+  if (transport !== 'service') {
+    if (config.server.env !== 'test') {
+      throw new Error(
+        `--transport=${transport} requires NODE_ENV=test (loginLimiter allows only 10 attempts/15min otherwise — ` +
+          `thousands of synthetic actor logins would 429 almost immediately).`
+      );
+    }
+    const { buildApp } = await import('../../src/app');
+    const app = buildApp(pool, { silent: true });
+    httpServer = await new Promise<import('http').Server>((resolve) => {
+      const server = app.listen(0, () => resolve(server));
+    });
+    const address = httpServer.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    httpBaseUrl = `http://127.0.0.1:${port}/api`;
+    log.info(`HTTP transport enabled: app listening on ${httpBaseUrl} (transport=${transport}).`);
+  }
+
   try {
     await pool.execute('SELECT 1');
 
@@ -260,6 +302,27 @@ async function main(): Promise<void> {
       ...new Set(allOrgUnits.map((u) => u.manager_user_id).filter((id): id is number => id !== null)),
     ];
     log.info(`Distinct org-unit heads who will run as manager threads: ${distinctHeadUserIds.join(', ')}`);
+
+    // ---- HTTP transport smoke check -----------------------------------
+    // Proves the whole chain end to end before any actor relies on it:
+    // real login against the first department head, a locally-minted
+    // bearer session, and one authenticated call through the full
+    // middleware stack.
+    if (httpBaseUrl) {
+      const smokeHeadId = orgs[0].headUserId;
+      const [headRows] = await pool.execute<RowDataPacket[]>(`SELECT email FROM users WHERE id = ?`, [smokeHeadId]);
+      const smokeClient = new HttpClient(httpBaseUrl);
+      await establishSession(smokeClient, log, headRows[0].email as string, SIM_PASSWORD);
+      const healthRes = await smokeClient.get('/health');
+      if (healthRes.status !== 200 && healthRes.status !== 503) {
+        throw new Error(`HTTP transport smoke check failed: GET /health returned ${healthRes.status}`);
+      }
+      const verifyRes = await smokeClient.get<{ id: number }>('/auth/verify');
+      if (verifyRes.status !== 200 || verifyRes.body.data?.id !== smokeHeadId) {
+        throw new Error(`HTTP transport smoke check failed: GET /auth/verify returned ${JSON.stringify(verifyRes)}`);
+      }
+      log.info(`HTTP transport smoke check passed: login + bearer session + authenticated call all verified.`);
+    }
 
     const services = {
       timeOffService: new TimeOffService(pool),
@@ -439,6 +502,9 @@ async function main(): Promise<void> {
     await log.close();
     process.exitCode = failCount === 0 ? 0 : 1;
   } finally {
+    if (httpServer) {
+      await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
+    }
     await pool.end();
   }
 }
