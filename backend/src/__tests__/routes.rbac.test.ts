@@ -34,6 +34,7 @@ jest.mock('../middleware/auth', () => ({
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
+  invalidateAuthContext: jest.fn(),
 }));
 
 jest.mock('../services/RbacService');

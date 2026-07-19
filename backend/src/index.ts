@@ -8,24 +8,17 @@
  * @author Luca Ostinelli
  */
 
-import { createPool } from 'mysql2/promise';
 import { config } from './config';
+import { database } from './config/database';
 import { logger } from './config/logger';
 import { buildApp } from './app';
 
 export async function startServer(): Promise<void> {
   try {
-    const pool = createPool({
-      host: config.database.host,
-      port: config.database.port,
-      user: config.database.user,
-      password: config.database.password,
-      database: config.database.database,
-      waitForConnections: true,
-      connectionLimit: config.database.connectionLimit,
-      queueLimit: config.database.queueLimit,
-      connectTimeout: config.database.connectTimeout,
-    });
+    // Single process-wide pool: the same one the `database` singleton exposes
+    // to health checks and the auth middleware. Creating a second pool here
+    // would double the configured connection budget against MySQL.
+    const pool = database.getPool();
 
     try {
       await pool.execute('SELECT 1');

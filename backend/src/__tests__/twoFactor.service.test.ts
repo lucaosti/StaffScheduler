@@ -105,11 +105,39 @@ describe('TwoFactorService.verifyCode', () => {
     expect(await service.verifyCode(7, '123456')).toBe(false);
   });
 
-  it('returns true on a fresh TOTP code', async () => {
+  it('returns true on a fresh TOTP code and persists the matched counter', async () => {
     const secret = generateSecret();
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[{ totp_secret: secret, totp_enabled: 1 }], null]);
+    execute
+      .mockResolvedValueOnce([[{ totp_secret: secret, totp_enabled: 1, totp_last_counter: null }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     const service = new TwoFactorService(pool);
     expect(await service.verifyCode(7, totp(secret))).toBe(true);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(String(execute.mock.calls[1][0])).toContain('totp_last_counter');
+  });
+
+  it('rejects a replayed code (counter already recorded)', async () => {
+    const secret = generateSecret();
+    const currentCounter = Math.floor(Date.now() / 1000 / 30);
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ totp_secret: secret, totp_enabled: 1, totp_last_counter: currentCounter + 1 }],
+      null,
+    ]);
+    const service = new TwoFactorService(pool);
+    expect(await service.verifyCode(7, totp(secret))).toBe(false);
+    // No UPDATE issued: the replay is rejected before the compare-and-set.
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects the code when a concurrent login wins the compare-and-set', async () => {
+    const secret = generateSecret();
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ totp_secret: secret, totp_enabled: 1, totp_last_counter: null }], null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    const service = new TwoFactorService(pool);
+    expect(await service.verifyCode(7, totp(secret))).toBe(false);
   });
 });

@@ -44,9 +44,8 @@ const unescape = (value: string): string =>
 const fold = (line: string): string => {
   if (line.length <= 75) return line;
   const parts: string[] = [];
-  let i = 0;
   parts.push(line.slice(0, 75));
-  i = 75;
+  let i = 75;
   while (i < line.length) {
     parts.push(' ' + line.slice(i, i + 74));
     i += 74;

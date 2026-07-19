@@ -406,8 +406,9 @@ describe('AssignmentService — audit log', () => {
     const { pool, execute, conn } = makeConnPool();
     // shift lookup + user lookup + required skills + INSERT (all inside transaction via conn)
     conn.execute
-      .mockResolvedValueOnce([[{ id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', max_staff: 5, current_assignments: 2, department_id: 3, schedule_id: 1 }], null] as Tuple)
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', max_staff: 5, department_id: 3, schedule_id: 1 }], null] as Tuple)
+      .mockResolvedValueOnce([[{ current_assignments: 2 }], null] as Tuple) // COUNT current assignments
+      .mockResolvedValueOnce([[{ id: 7 }], null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple)  // required skills
       .mockResolvedValueOnce([{ insertId: 55 }, null] as Tuple);
     // getAssignmentById after commit (pool.execute)

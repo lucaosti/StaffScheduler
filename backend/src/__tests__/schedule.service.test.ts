@@ -205,7 +205,7 @@ describe('ScheduleService.generateOptimizedSchedule', () => {
     }));
     // Re-import to pick up the mock.
     jest.resetModules();
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+
     const { ScheduleService: Reloaded } = require('../services/ScheduleService');
     const service = new Reloaded(pool);
     const out = await service.generateOptimizedSchedule(1, 99);

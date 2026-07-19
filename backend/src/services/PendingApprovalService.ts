@@ -38,7 +38,7 @@ const mapRow = (r: any): PendingApprovalWithContext => {
 
   const justification = r.cr_justification ?? r.tor_reason ?? r.el_reason ?? r.ssr_notes ?? null;
 
-  let proposedPayload: Record<string, unknown> = {};
+  let proposedPayload: Record<string, unknown>;
   if (targetEntityType === 'change_request') {
     try {
       proposedPayload =

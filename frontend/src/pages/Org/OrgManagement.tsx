@@ -113,7 +113,7 @@ const OrgManagement: React.FC = () => {
     Promise.all([refreshUnits(), refreshLoans()])
       .catch(err => setError(err instanceof Error ? err.message : 'Failed to refresh data'))
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, []);
 
   useEffect(() => {

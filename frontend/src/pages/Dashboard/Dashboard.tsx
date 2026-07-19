@@ -239,15 +239,18 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="col-xl-3 col-md-6">
-            <div className="card border-0 shadow-sm h-100">
-              <div className="card-body text-center">
-                <h6 className="card-title text-muted mb-3">Monthly Cost</h6>
-                <h2 className="text-success mb-0">{formatCurrency(stats.monthlyCost)}</h2>
-                <small className="text-muted">labor costs</small>
+          {/* Labor cost requires report.read; the backend sends null otherwise. */}
+          {stats.monthlyCost !== null && (
+            <div className="col-xl-3 col-md-6">
+              <div className="card border-0 shadow-sm h-100">
+                <div className="card-body text-center">
+                  <h6 className="card-title text-muted mb-3">Monthly Cost</h6>
+                  <h2 className="text-success mb-0">{formatCurrency(stats.monthlyCost)}</h2>
+                  <small className="text-muted">labor costs</small>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           <div className="col-xl-3 col-md-6">
             <div className="card border-0 shadow-sm h-100">

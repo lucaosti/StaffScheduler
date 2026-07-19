@@ -1,325 +1,352 @@
 /**
  * Dashboard Routes
- * 
+ *
  * Provides dashboard data and analytics endpoints for the application.
  * Includes statistics, metrics, and real-time information display.
- * 
- * Features:
- * - Real-time statistics and KPIs
- * - Department-specific metrics
- * - Monthly performance analytics
- * - Trend analysis and reporting
- * 
+ *
+ * Authorization model:
+ * - Aggregate counters are visible to every authenticated user.
+ * - Monthly labor cost is only computed for holders of `report.read`;
+ *   other users receive `monthlyCost: null`.
+ * - The recent-activities feed reads from `audit_logs` and is therefore
+ *   guarded exactly like /api/audit-logs: `audit` module + `audit.read`.
+ *
  * @author Luca Ostinelli
  */
 
 import { Router, Request, Response } from 'express';
-import { authenticate } from '../middleware/auth';
-import { database } from '../config/database';
+import { Pool, RowDataPacket } from 'mysql2/promise';
+import {
+  authenticate,
+  requirePermission,
+  requireModuleForUser,
+  userHasPermission,
+} from '../middleware/auth';
 import { logger } from '../config/logger';
 
-const router = Router();
+// Sargable month window: [first day of current month, first day of next month).
+// Keeps idx_date usable, unlike MONTH(...)/YEAR(...) predicates.
+const MONTH_WINDOW = `s.date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+        AND s.date < DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')`;
 
-/**
- * Get Dashboard Statistics Endpoint
- * 
- * Retrieves key performance indicators and statistics for the dashboard.
- * Provides real-time data for administrative oversight.
- * 
- * @route GET /api/dashboard/stats
- * @returns {Object} Dashboard statistics and KPIs
- */
-router.get('/stats', authenticate, async (_req: Request, res: Response) => {
-  try {
-    // Every active user is schedulable staff, so the headcount is the count
-    // of active users.
-    const totalEmployeesQuery =
-      'SELECT COUNT(*) as count FROM users WHERE is_active = TRUE';
+export const createDashboardRouter = (pool: Pool) => {
+  const router = Router();
 
-    const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
+  const queryOne = async <T>(sql: string): Promise<T | null> => {
+    const [rows] = await pool.execute<RowDataPacket[]>(sql);
+    return rows.length > 0 ? (rows[0] as T) : null;
+  };
 
-    const todayShiftsQuery = `
-      SELECT COUNT(*) as count
-      FROM shifts
-      WHERE DATE(date) = CURDATE() AND status IN ('open', 'assigned', 'confirmed')
-    `;
+  const queryAll = async <T>(sql: string): Promise<T[]> => {
+    const [rows] = await pool.execute<RowDataPacket[]>(sql);
+    return rows as T[];
+  };
 
-    const pendingApprovalsQuery = `
-      SELECT COUNT(*) as count
-      FROM shift_assignments
-      WHERE status = 'pending'
-    `;
+  /**
+   * Get Dashboard Statistics Endpoint
+   *
+   * Retrieves key performance indicators and statistics for the dashboard.
+   * `monthlyCost` requires `report.read` and is null otherwise.
+   *
+   * @route GET /api/dashboard/stats
+   * @returns {Object} Dashboard statistics and KPIs
+   */
+  router.get('/stats', authenticate, async (req: Request, res: Response) => {
+    try {
+      // Every active user is schedulable staff, so the headcount is the count
+      // of active users.
+      const totalEmployeesQuery =
+        'SELECT COUNT(*) as count FROM users WHERE is_active = TRUE';
 
-    const monthlyHoursQuery = `
-      SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR,
-        CONCAT(s.date, ' ', s.start_time),
-        CONCAT(s.date, ' ', s.end_time)
-      )), 0) as total_hours
-      FROM shift_assignments sa
-      JOIN shifts s ON sa.shift_id = s.id
-      WHERE MONTH(s.date) = MONTH(CURDATE())
-        AND YEAR(s.date) = YEAR(CURDATE())
-        AND sa.status = 'confirmed'
-    `;
+      const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
 
-    const monthlyCostQuery = `
-      SELECT COALESCE(SUM(
-        TIMESTAMPDIFF(HOUR,
+      const todayShiftsQuery = `
+        SELECT COUNT(*) as count
+        FROM shifts
+        WHERE date = CURDATE() AND status IN ('open', 'assigned', 'confirmed')
+      `;
+
+      const pendingApprovalsQuery = `
+        SELECT COUNT(*) as count
+        FROM shift_assignments
+        WHERE status = 'pending'
+      `;
+
+      const monthlyHoursQuery = `
+        SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR,
           CONCAT(s.date, ' ', s.start_time),
           CONCAT(s.date, ' ', s.end_time)
-        ) * u.hourly_rate
-      ), 0) as total_cost
-      FROM shift_assignments sa
-      JOIN shifts s ON sa.shift_id = s.id
-      JOIN users u ON sa.user_id = u.id
-      WHERE MONTH(s.date) = MONTH(CURDATE())
-        AND YEAR(s.date) = YEAR(CURDATE())
-        AND sa.status = 'confirmed'
-    `;
+        )), 0) as total_hours
+        FROM shift_assignments sa
+        JOIN shifts s ON sa.shift_id = s.id
+        WHERE ${MONTH_WINDOW}
+          AND sa.status = 'confirmed'
+      `;
 
-    const coverageQuery = `
-      SELECT
-        COUNT(DISTINCT s.id) as total_shifts,
-        COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
-      FROM shifts s
-      LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status = 'confirmed'
-      WHERE MONTH(s.date) = MONTH(CURDATE())
-        AND YEAR(s.date) = YEAR(CURDATE())
-    `;
+      // Labor cost derives from hourly rates: restricted to report readers.
+      const canSeeCost = userHasPermission(req.user, 'report.read');
+      const monthlyCostQuery = `
+        SELECT COALESCE(SUM(
+          TIMESTAMPDIFF(HOUR,
+            CONCAT(s.date, ' ', s.start_time),
+            CONCAT(s.date, ' ', s.end_time)
+          ) * u.hourly_rate
+        ), 0) as total_cost
+        FROM shift_assignments sa
+        JOIN shifts s ON sa.shift_id = s.id
+        JOIN users u ON sa.user_id = u.id
+        WHERE ${MONTH_WINDOW}
+          AND sa.status = 'confirmed'
+      `;
 
-    // Preference-match satisfaction: ratio of this month's assignments where the
-    // assigned shift appears in the employee's preferred_shifts list.
-    const satisfactionQuery = `
-      SELECT
-        COUNT(*) AS total_assignments,
-        SUM(
-          CASE
-            WHEN up.preferred_shifts IS NOT NULL
-              AND JSON_LENGTH(up.preferred_shifts) > 0
-              AND JSON_CONTAINS(up.preferred_shifts, CAST(sa.shift_id AS JSON))
-            THEN 1 ELSE 0
-          END
-        ) AS preferred_assignments
-      FROM shift_assignments sa
-      JOIN shifts s ON sa.shift_id = s.id
-      LEFT JOIN user_preferences up ON up.user_id = sa.user_id
-      WHERE MONTH(s.date) = MONTH(CURDATE())
-        AND YEAR(s.date) = YEAR(CURDATE())
-        AND sa.status IN ('confirmed', 'completed')
-    `;
+      const coverageQuery = `
+        SELECT
+          COUNT(DISTINCT s.id) as total_shifts,
+          COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
+        FROM shifts s
+        LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status = 'confirmed'
+        WHERE ${MONTH_WINDOW}
+      `;
 
-    // The eight aggregates are independent, so run them concurrently.
-    const [
-      totalEmployees,
-      activeSchedules,
-      todayShifts,
-      pendingApprovals,
-      monthlyHoursResult,
-      monthlyCostResult,
-      coverageResult,
-      satisfactionResult,
-    ] = await Promise.all([
-      database.queryOne<{ count: number }>(totalEmployeesQuery),
-      database.queryOne<{ count: number }>(activeSchedulesQuery),
-      database.queryOne<{ count: number }>(todayShiftsQuery),
-      database.queryOne<{ count: number }>(pendingApprovalsQuery),
-      database.queryOne<{ total_hours: number }>(monthlyHoursQuery),
-      database.queryOne<{ total_cost: number }>(monthlyCostQuery),
-      database.queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
-      database.queryOne<{ total_assignments: number; preferred_assignments: number }>(satisfactionQuery),
-    ]);
+      // Preference-match satisfaction: ratio of this month's assignments where the
+      // assigned shift appears in the employee's preferred_shifts list.
+      const satisfactionQuery = `
+        SELECT
+          COUNT(*) AS total_assignments,
+          SUM(
+            CASE
+              WHEN up.preferred_shifts IS NOT NULL
+                AND JSON_LENGTH(up.preferred_shifts) > 0
+                AND JSON_CONTAINS(up.preferred_shifts, CAST(sa.shift_id AS JSON))
+              THEN 1 ELSE 0
+            END
+          ) AS preferred_assignments
+        FROM shift_assignments sa
+        JOIN shifts s ON sa.shift_id = s.id
+        LEFT JOIN user_preferences up ON up.user_id = sa.user_id
+        WHERE ${MONTH_WINDOW}
+          AND sa.status IN ('confirmed', 'completed')
+      `;
 
-    const monthlyHours = monthlyHoursResult?.total_hours || 0;
-    const monthlyCost = monthlyCostResult?.total_cost || 0;
-    const coverageRate = coverageResult && coverageResult.total_shifts > 0
-      ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
-      : 0;
-    const employeeSatisfaction =
-      satisfactionResult && satisfactionResult.total_assignments > 0
-        ? (satisfactionResult.preferred_assignments / satisfactionResult.total_assignments) * 100
+      // The aggregates are independent, so run them concurrently.
+      const [
+        totalEmployees,
+        activeSchedules,
+        todayShifts,
+        pendingApprovals,
+        monthlyHoursResult,
+        monthlyCostResult,
+        coverageResult,
+        satisfactionResult,
+      ] = await Promise.all([
+        queryOne<{ count: number }>(totalEmployeesQuery),
+        queryOne<{ count: number }>(activeSchedulesQuery),
+        queryOne<{ count: number }>(todayShiftsQuery),
+        queryOne<{ count: number }>(pendingApprovalsQuery),
+        queryOne<{ total_hours: number }>(monthlyHoursQuery),
+        canSeeCost ? queryOne<{ total_cost: number }>(monthlyCostQuery) : Promise.resolve(null),
+        queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
+        queryOne<{ total_assignments: number; preferred_assignments: number }>(satisfactionQuery),
+      ]);
+
+      const monthlyHours = monthlyHoursResult?.total_hours || 0;
+      const monthlyCost = canSeeCost ? monthlyCostResult?.total_cost || 0 : null;
+      const coverageRate = coverageResult && coverageResult.total_shifts > 0
+        ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
         : 0;
+      const employeeSatisfaction =
+        satisfactionResult && satisfactionResult.total_assignments > 0
+          ? (satisfactionResult.preferred_assignments / satisfactionResult.total_assignments) * 100
+          : 0;
 
-    const stats = {
-      totalEmployees: totalEmployees?.count || 0,
-      activeSchedules: activeSchedules?.count || 0,
-      todayShifts: todayShifts?.count || 0,
-      pendingApprovals: pendingApprovals?.count || 0,
-      monthlyHours: Math.round(monthlyHours),
-      monthlyCost: Math.round(monthlyCost * 100) / 100,
-      coverageRate: Math.round(coverageRate * 10) / 10,
-      employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10,
-    };
+      const stats = {
+        totalEmployees: totalEmployees?.count || 0,
+        activeSchedules: activeSchedules?.count || 0,
+        todayShifts: todayShifts?.count || 0,
+        pendingApprovals: pendingApprovals?.count || 0,
+        monthlyHours: Math.round(monthlyHours),
+        monthlyCost: monthlyCost === null ? null : Math.round(monthlyCost * 100) / 100,
+        coverageRate: Math.round(coverageRate * 10) / 10,
+        employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10,
+      };
 
-    res.json({
-      success: true,
-      data: stats
-    });
-  } catch (error) {
-    logger.error('Dashboard stats error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch dashboard statistics' },
-    });
-  }
-});
+      res.json({
+        success: true,
+        data: stats
+      });
+    } catch (error) {
+      logger.error('Dashboard stats error:', error);
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch dashboard statistics' },
+      });
+    }
+  });
 
-// Get recent activities
-router.get('/activities', authenticate, async (_req: Request, res: Response) => {
-  try {
-    // Fetch real activities from audit_logs table
-    const activitiesQuery = `
-      SELECT 
-        al.id,
-        al.action as type,
-        al.description as message,
-        al.created_at as timestamp,
-        CONCAT(u.first_name, ' ', u.last_name) as user
-      FROM audit_logs al
-      LEFT JOIN users u ON al.user_id = u.id
-      ORDER BY al.created_at DESC
-      LIMIT 10
-    `;
-    
-    const activities = await database.query<{
-      id: number;
-      type: string;
-      message: string;
-      timestamp: Date;
-      user: string | null;
-    }>(activitiesQuery);
+  // Get recent activities. Reads audit_logs, so it carries the same guards as
+  // /api/audit-logs: audit module enabled for the caller's org + audit.read.
+  router.get(
+    '/activities',
+    authenticate,
+    requireModuleForUser('audit'),
+    requirePermission('audit.read'),
+    async (_req: Request, res: Response) => {
+    try {
+      // Fetch real activities from audit_logs table
+      const activitiesQuery = `
+        SELECT
+          al.id,
+          al.action as type,
+          al.description as message,
+          al.created_at as timestamp,
+          CONCAT(u.first_name, ' ', u.last_name) as user
+        FROM audit_logs al
+        LEFT JOIN users u ON al.user_id = u.id
+        ORDER BY al.created_at DESC
+        LIMIT 10
+      `;
 
-    // Format activities for response
-    const formattedActivities = activities.map(activity => ({
-      id: activity.id.toString(),
-      type: activity.type,
-      message: activity.message,
-      timestamp: activity.timestamp.toISOString(),
-      user: activity.user || 'System'
-    }));
+      const activities = await queryAll<{
+        id: number;
+        type: string;
+        message: string;
+        timestamp: Date;
+        user: string | null;
+      }>(activitiesQuery);
 
-    res.json({
-      success: true,
-      data: formattedActivities
-    });
-  } catch (error) {
-    logger.error('Dashboard activities error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to load recent activities' },
-    });
-  }
-});
+      // Format activities for response
+      const formattedActivities = activities.map(activity => ({
+        id: activity.id.toString(),
+        type: activity.type,
+        message: activity.message,
+        timestamp: activity.timestamp.toISOString(),
+        user: activity.user || 'System'
+      }));
 
-// Get upcoming shifts
-router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
-  try {
-    // Query upcoming shifts with assignment information (using correct schema)
-    const query = `
-      SELECT 
-        s.id,
-        CONCAT(d.name, ' - ', DATE_FORMAT(s.date, '%Y-%m-%d')) as name,
-        d.name as department,
-        s.start_time,
-        s.end_time,
-        s.min_staff as required_employees,
-        COUNT(sa.id) as assigned_employees
-      FROM shifts s
-      JOIN departments d ON s.department_id = d.id
-      LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
-      WHERE s.date >= CURDATE() AND s.date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
-        AND s.status IN ('open', 'assigned', 'confirmed')
-      GROUP BY s.id, d.name, s.date, s.start_time, s.end_time, s.min_staff
-      ORDER BY s.date, s.start_time
-      LIMIT 10
-    `;
+      res.json({
+        success: true,
+        data: formattedActivities
+      });
+    } catch (error) {
+      logger.error('Dashboard activities error:', error);
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to load recent activities' },
+      });
+    }
+  });
 
-    const rows = await database.query<{
-      id: number;
-      name: string;
-      department: string;
-      start_time: string;
-      end_time: string;
-      required_employees: number;
-      assigned_employees: number;
-    }>(query);
-    
-    const upcomingShifts = rows.map(row => ({
-      id: row.id.toString(),
-      name: row.name,
-      department: row.department,
-      startTime: row.start_time,
-      endTime: row.end_time,
-      assignedEmployees: row.assigned_employees || 0,
-      requiredEmployees: row.required_employees,
-      status: row.assigned_employees < row.required_employees ? 'understaffed' :
-              row.assigned_employees > row.required_employees ? 'overstaffed' : 'adequate'
-    }));
+  // Get upcoming shifts
+  router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
+    try {
+      // Query upcoming shifts with assignment information (using correct schema)
+      const query = `
+        SELECT
+          s.id,
+          CONCAT(d.name, ' - ', DATE_FORMAT(s.date, '%Y-%m-%d')) as name,
+          d.name as department,
+          s.start_time,
+          s.end_time,
+          s.min_staff as required_employees,
+          COUNT(sa.id) as assigned_employees
+        FROM shifts s
+        JOIN departments d ON s.department_id = d.id
+        LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
+        WHERE s.date >= CURDATE() AND s.date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
+          AND s.status IN ('open', 'assigned', 'confirmed')
+        GROUP BY s.id, d.name, s.date, s.start_time, s.end_time, s.min_staff
+        ORDER BY s.date, s.start_time
+        LIMIT 10
+      `;
 
-    res.json({
-      success: true,
-      data: upcomingShifts
-    });
-  } catch (error) {
-    logger.error('Dashboard upcoming shifts error:', error);
-    
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to load upcoming shifts' },
-    });
-  }
-});
+      const rows = await queryAll<{
+        id: number;
+        name: string;
+        department: string;
+        start_time: string;
+        end_time: string;
+        required_employees: number;
+        assigned_employees: number;
+      }>(query);
 
-// Get department overview
-router.get('/departments', authenticate, async (_req: Request, res: Response) => {
-  try {
-    // Query department statistics using correct schema (departments + users + user_departments)
-    const query = `
-      SELECT 
-        d.name as department,
-        COUNT(DISTINCT u.id) as total_employees,
-        COUNT(DISTINCT CASE WHEN u.is_active = TRUE THEN u.id END) as active_employees,
-        COUNT(DISTINCT CASE WHEN NOT EXISTS (
-          SELECT 1 FROM user_roles ur
-            JOIN role_permissions rp ON rp.role_id = ur.role_id
-            JOIN permissions p ON p.id = rp.permission_id
-           WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
-             AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-        ) THEN u.id END) as employee_count,
-        COUNT(DISTINCT CASE WHEN EXISTS (
-          SELECT 1 FROM user_roles ur
-            JOIN role_permissions rp ON rp.role_id = ur.role_id
-            JOIN permissions p ON p.id = rp.permission_id
-           WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
-             AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-        ) THEN u.id END) as manager_count
-      FROM departments d
-      LEFT JOIN user_departments ud ON d.id = ud.department_id
-      LEFT JOIN users u ON ud.user_id = u.id
-      WHERE d.is_active = TRUE
-      GROUP BY d.id, d.name
-      ORDER BY total_employees DESC
-    `;
+      const upcomingShifts = rows.map(row => ({
+        id: row.id.toString(),
+        name: row.name,
+        department: row.department,
+        startTime: row.start_time,
+        endTime: row.end_time,
+        assignedEmployees: row.assigned_employees || 0,
+        requiredEmployees: row.required_employees,
+        status: row.assigned_employees < row.required_employees ? 'understaffed' :
+                row.assigned_employees > row.required_employees ? 'overstaffed' : 'adequate'
+      }));
 
-    const departments = await database.query<{
-      department: string;
-      total_employees: number;
-      active_employees: number;
-      employee_count: number;
-      manager_count: number;
-    }>(query);
-    
-    res.json({
-      success: true,
-      data: departments
-    });
-  } catch (error) {
-    logger.error('Dashboard departments error:', error);
-    
-    res.status(500).json({
-      success: false,
-      error: { code: 'INTERNAL_ERROR', message: 'Failed to load department overview' },
-    });
-  }
-});
+      res.json({
+        success: true,
+        data: upcomingShifts
+      });
+    } catch (error) {
+      logger.error('Dashboard upcoming shifts error:', error);
 
-export default router;
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to load upcoming shifts' },
+      });
+    }
+  });
+
+  // Get department overview
+  router.get('/departments', authenticate, async (_req: Request, res: Response) => {
+    try {
+      // Query department statistics using correct schema (departments + users + user_departments)
+      const query = `
+        SELECT
+          d.name as department,
+          COUNT(DISTINCT u.id) as total_employees,
+          COUNT(DISTINCT CASE WHEN u.is_active = TRUE THEN u.id END) as active_employees,
+          COUNT(DISTINCT CASE WHEN NOT EXISTS (
+            SELECT 1 FROM user_roles ur
+              JOIN role_permissions rp ON rp.role_id = ur.role_id
+              JOIN permissions p ON p.id = rp.permission_id
+             WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
+               AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+          ) THEN u.id END) as employee_count,
+          COUNT(DISTINCT CASE WHEN EXISTS (
+            SELECT 1 FROM user_roles ur
+              JOIN role_permissions rp ON rp.role_id = ur.role_id
+              JOIN permissions p ON p.id = rp.permission_id
+             WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
+               AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+          ) THEN u.id END) as manager_count
+        FROM departments d
+        LEFT JOIN user_departments ud ON d.id = ud.department_id
+        LEFT JOIN users u ON ud.user_id = u.id
+        WHERE d.is_active = TRUE
+        GROUP BY d.id, d.name
+        ORDER BY total_employees DESC
+      `;
+
+      const departments = await queryAll<{
+        department: string;
+        total_employees: number;
+        active_employees: number;
+        employee_count: number;
+        manager_count: number;
+      }>(query);
+
+      res.json({
+        success: true,
+        data: departments
+      });
+    } catch (error) {
+      logger.error('Dashboard departments error:', error);
+
+      res.status(500).json({
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Failed to load department overview' },
+      });
+    }
+  });
+
+  return router;
+};

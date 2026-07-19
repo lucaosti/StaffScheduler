@@ -22,6 +22,47 @@ export const changeTypeParam = z.object({ changeType: shortString });
 export const categoryParam = z.object({ category: shortString });
 export const categoryKeyParam = z.object({ category: shortString, key: z.string().min(1).max(128) });
 
+// ── Shared field formats ──────────────────────────────────────────────────────
+
+/** 24-hour wall-clock time, "HH:MM" or "HH:MM:SS". */
+const timeString = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Time must be in 24-hour HH:MM format');
+
+/** Calendar date, "YYYY-MM-DD". */
+const dateString = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format');
+
+/**
+ * Cross-field rules shared by shift-like payloads. Each check only fires when
+ * both fields are present, so the same helpers work for create (required
+ * fields) and update (optional fields) schemas.
+ *
+ * Overnight shifts (endTime <= startTime) are rejected: conflict detection
+ * and hour accounting assume a shift starts and ends on the same calendar day.
+ */
+const timeOrder = (data: { startTime?: string; endTime?: string }): boolean =>
+  data.startTime === undefined || data.endTime === undefined || data.startTime < data.endTime;
+const TIME_ORDER_MESSAGE = {
+  message: 'endTime must be after startTime (overnight shifts are not supported)',
+  path: ['endTime'],
+};
+
+const dateOrder = (data: { startDate?: string; endDate?: string }): boolean =>
+  data.startDate === undefined || data.endDate === undefined || data.startDate <= data.endDate;
+const DATE_ORDER_MESSAGE = {
+  message: 'endDate must not be before startDate',
+  path: ['endDate'],
+};
+
+const staffOrder = (data: { minStaff?: number; maxStaff?: number }): boolean =>
+  data.minStaff === undefined || data.maxStaff === undefined || data.minStaff <= data.maxStaff;
+const STAFF_ORDER_MESSAGE = {
+  message: 'maxStaff must be greater than or equal to minStaff',
+  path: ['maxStaff'],
+};
+
 // ── Body schemas ──────────────────────────────────────────────────────────────
 
 export const createUserBody = z.object({
@@ -40,31 +81,31 @@ export const createUserBody = z.object({
 
 export const createScheduleBody = z.object({
   name: z.string().min(1, 'Name is required'),
-  startDate: z.string().min(1, 'Start date is required'),
-  endDate: z.string().min(1, 'End date is required'),
+  startDate: dateString,
+  endDate: dateString,
   departmentId: z.number().int().positive(),
   templateIds: z.array(z.number().int().positive()).optional(),
   notes: z.string().optional(),
-});
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const duplicateScheduleBody = z.object({
   name: z.string().min(1, 'Name is required'),
-  startDate: z.string().min(1, 'Start date is required'),
-  endDate: z.string().min(1, 'End date is required'),
-});
+  startDate: dateString,
+  endDate: dateString,
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const createShiftBody = z.object({
   scheduleId: z.number().int().positive(),
   departmentId: z.number().int().positive(),
-  date: z.string().min(1, 'Date is required'),
-  startTime: z.string().min(1, 'Start time is required'),
-  endTime: z.string().min(1, 'End time is required'),
+  date: dateString,
+  startTime: timeString,
+  endTime: timeString,
   minStaff: z.number().int().nonnegative(),
   maxStaff: z.number().int().positive(),
   templateId: z.number().int().positive().optional(),
   requiredSkillIds: z.array(z.number().int().positive()).optional(),
   notes: z.string().optional(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 export const createAssignmentBody = z.object({
   shiftId: z.number().int().positive(),
@@ -108,12 +149,12 @@ export const updateUserBody = z.object({
 
 export const updateScheduleBody = z.object({
   name: z.string().min(1).optional(),
-  startDate: z.string().optional(),
-  endDate: z.string().optional(),
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
   status: z.enum(['draft', 'published', 'archived']).optional(),
   departmentId: z.number().int().positive().optional(),
   notes: z.string().optional(),
-});
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const updateAssignmentBody = z.object({
   status: z.string().optional(),
@@ -125,20 +166,20 @@ export const createShiftTemplateBody = z.object({
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
   departmentId: z.number().int().positive(),
-  startTime: z.string().min(1, 'Start time is required'),
-  endTime: z.string().min(1, 'End time is required'),
+  startTime: timeString,
+  endTime: timeString,
   minStaff: z.number().int().nonnegative(),
   maxStaff: z.number().int().positive(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 export const updateShiftTemplateBody = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+  startTime: timeString.optional(),
+  endTime: timeString.optional(),
   minStaff: z.number().int().nonnegative().optional(),
   maxStaff: z.number().int().positive().optional(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 const approvalStepBody = z.object({
   stepOrder: z.number().int().positive(),
@@ -171,11 +212,11 @@ export const updateDepartmentBody = z.object({
 });
 
 export const createTimeOffBody = z.object({
-  startDate: z.string().min(1, 'Start date is required'),
-  endDate: z.string().min(1, 'End date is required'),
+  startDate: dateString,
+  endDate: dateString,
   type: z.enum(['vacation', 'sick', 'personal', 'other']).optional(),
   reason: z.string().optional(),
-});
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const clockInBody = z.object({
   notes: z.string().max(2000).optional(),
@@ -197,24 +238,24 @@ export const createDelegationBody = z.object({
 
 export const createOnCallPeriodBody = z.object({
   departmentId: z.number().int().positive(),
-  date: z.string().min(1, 'Date is required'),
-  startTime: z.string().min(1, 'Start time is required'),
-  endTime: z.string().min(1, 'End time is required'),
+  date: dateString,
+  startTime: timeString,
+  endTime: timeString,
   scheduleId: z.number().int().positive().nullable().optional(),
   minStaff: z.number().int().nonnegative().optional(),
   maxStaff: z.number().int().positive().optional(),
   notes: z.string().optional(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 export const updateOnCallPeriodBody = z.object({
-  date: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+  date: dateString.optional(),
+  startTime: timeString.optional(),
+  endTime: timeString.optional(),
   minStaff: z.number().int().nonnegative().optional(),
   maxStaff: z.number().int().positive().optional(),
   notes: z.string().nullable().optional(),
   status: z.enum(['open', 'assigned', 'cancelled']).optional(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 export const onCallAssignBody = z.object({
   userId: z.number().int().positive(),
@@ -222,15 +263,15 @@ export const onCallAssignBody = z.object({
 });
 
 export const updateShiftBody = z.object({
-  date: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+  date: dateString.optional(),
+  startTime: timeString.optional(),
+  endTime: timeString.optional(),
   minStaff: z.number().int().nonnegative().optional(),
   maxStaff: z.number().int().positive().optional(),
   status: z.enum(['open', 'assigned', 'confirmed', 'cancelled']).optional(),
   requiredSkillIds: z.array(z.number().int().positive()).optional(),
   notes: z.string().nullable().optional(),
-});
+}).refine(timeOrder, TIME_ORDER_MESSAGE).refine(staffOrder, STAFF_ORDER_MESSAGE);
 
 export const addEmployeeSkillBody = z.object({
   skillId: z.number().int().positive(),
@@ -273,10 +314,10 @@ export const createLoanBody = z.object({
   userId: z.number().int().positive(),
   fromOrgUnitId: z.number().int().positive(),
   toOrgUnitId: z.number().int().positive(),
-  startDate: z.string().min(1, 'Start date is required'),
-  endDate: z.string().min(1, 'End date is required'),
+  startDate: dateString,
+  endDate: dateString,
   reason: z.string().optional(),
-});
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const createPolicyExceptionBody = z.object({
   policyId: z.number().int().positive(),
