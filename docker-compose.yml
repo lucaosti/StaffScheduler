@@ -77,13 +77,16 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: production
+      args:
+        # Vite bakes this at build time. Relative default: the frontend nginx
+        # proxies /api to the backend, so the SPA works on any host without
+        # knowing the backend's address.
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api}
     container_name: staff_scheduler_frontend
     restart: unless-stopped
     depends_on:
       backend:
         condition: service_healthy
-    environment:
-      REACT_APP_API_URL: ${REACT_APP_API_URL:-http://localhost:3001/api}
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     networks:

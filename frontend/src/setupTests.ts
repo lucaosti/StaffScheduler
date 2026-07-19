@@ -9,6 +9,11 @@
 import '@testing-library/jest-dom';
 import { TextDecoder, TextEncoder } from 'util';
 
+// The app's runtime default API base is the relative '/api' (proxied by Vite
+// in dev and nginx in production). Node's fetch rejects relative URLs, so unit
+// tests pin an absolute base that the MSW handlers register against.
+process.env.REACT_APP_API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+
 if (typeof (globalThis as { TextEncoder?: unknown }).TextEncoder === 'undefined') {
   (globalThis as unknown as { TextEncoder: typeof TextEncoder }).TextEncoder = TextEncoder;
 }

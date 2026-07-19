@@ -50,6 +50,16 @@ const Schedule: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | number | null>(null);
 
+  // Guards state updates from fetches that resolve after the component
+  // unmounted (route change while the initial load is in flight).
+  const mountedRef = React.useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -62,6 +72,7 @@ const Schedule: React.FC = () => {
           shiftService.getShifts({}),
           departmentService.getDepartments(),
         ]);
+      if (!mountedRef.current) return;
 
       if (schedulesResponse.success && schedulesResponse.data) {
         setSchedules(schedulesResponse.data);
@@ -88,6 +99,7 @@ const Schedule: React.FC = () => {
       ) {
         const firstSchedule = schedulesResponse.data[0];
         const scheduleDetails = await scheduleService.getScheduleWithShifts(firstSchedule.id);
+        if (!mountedRef.current) return;
         if (scheduleDetails.success && scheduleDetails.data) {
           const allAssignments: Assignment[] = [];
           const detailShifts = scheduleDetails.data.shifts;
@@ -102,10 +114,11 @@ const Schedule: React.FC = () => {
         }
       }
     } catch (err) {
+      if (!mountedRef.current) return;
       const message = err instanceof ApiError ? err.message : 'Failed to load schedule data';
       setError(message);
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
