@@ -7,7 +7,7 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 
 interface Props {
   show: boolean;
@@ -28,6 +28,16 @@ const ConfirmModal: React.FC<Props> = ({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
 }) => {
+  // Close on Escape, matching native dialog behavior for keyboard users.
+  useEffect(() => {
+    if (!show) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [show, onCancel]);
+
   if (!show) return null;
 
   return (
@@ -36,6 +46,7 @@ const ConfirmModal: React.FC<Props> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
+      aria-describedby="confirm-modal-message"
       style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
     >
       <div className="modal-dialog">
@@ -52,7 +63,7 @@ const ConfirmModal: React.FC<Props> = ({
             />
           </div>
           <div className="modal-body">
-            <p className="mb-0">{message}</p>
+            <p className="mb-0" id="confirm-modal-message">{message}</p>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-secondary" onClick={onCancel}>
