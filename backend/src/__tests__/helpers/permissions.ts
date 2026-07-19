@@ -19,7 +19,7 @@ export const ALL_PERMISSIONS: string[] = [
   'timeoff.approve', 'shiftswap.approve',
   'preferences.manage',
   'report.read', 'audit.read',
-  'user.read', 'user.manage',
+  'user.read', 'user.read_all', 'user.manage',
   'settings.manage', 'role.manage',
 ];
 

@@ -15,7 +15,7 @@ import { createShiftsRouter } from '../routes/shifts';
 import { createDepartmentsRouter } from '../routes/departments';
 import { createAssignmentsRouter } from '../routes/assignments';
 import { createSystemSettingsRouter } from '../routes/settings';
-import dashboardRouter from '../routes/dashboard';
+import { createDashboardRouter } from '../routes/dashboard';
 
 interface Mount {
   prefix: string;
@@ -114,7 +114,7 @@ const mounts: Mount[] = [
   },
   {
     prefix: '/api/dashboard',
-    router: () => dashboardRouter,
+    router: () => createDashboardRouter(fakePool as never),
     paths: [
       { method: 'get', url: '/stats' },
       { method: 'get', url: '/activities' },

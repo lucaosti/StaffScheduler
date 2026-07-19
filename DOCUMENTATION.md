@@ -805,6 +805,19 @@ CI job: `Frontend e2e (Playwright)` in `.github/workflows/ci.yml`. Boots a `mysq
 | `schedule.spec.ts` | Admin creates a schedule via the UI |
 | `theme.spec.ts` | Theme toggle cycles between light and dark |
 
+### Workforce simulation harness
+
+`backend/scripts/simulation/` contains a database-level simulation harness that complements the Playwright UI smoke tests:
+
+```bash
+cd backend
+npm run sim:run        # one full simulation against the configured database
+npm run sim:campaign   # many simulations, each on a freshly created database
+```
+
+- `sim:run` simulates a whole organization in rolling rounds: employee actors file time-off / employee-loan / shift-swap requests, manager actors decide or delegate every pending approval, the period schedule is generated with the real `AutoScheduleService`, and every outcome is verified against actual database state plus the production `ComplianceEngine`.
+- `sim:campaign` fans out N runs over parallel lanes. Each run derives its org structure, pacing, and approval-authorization model deterministically from `--baseSeed`, and gets a fresh per-lane database (drop, re-create, schema init, demo seed). Requires root credentials via `DB_ROOT_PASSWORD` (or `MYSQL_ROOT_PASSWORD`). Results land in `backend/scripts/simulation/output/campaign-<timestamp>/` (`run-XX.log` per run plus `summary.log`); the exit code is non-zero if any run reports a verification failure.
+
 ---
 
 ## 17. Future roadmap

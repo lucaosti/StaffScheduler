@@ -572,7 +572,7 @@ describe('schedules router (extended)', () => {
       .mockRejectedValue(new Error('x'));
     res = await request(app())
       .post('/api/schedules/1/duplicate')
-      .send({ name: 'C', startDate: 'a', endDate: 'b' });
+      .send({ name: 'C', startDate: '2026-06-01', endDate: '2026-06-30' });
     expect(res.status).toBe(500);
   });
 

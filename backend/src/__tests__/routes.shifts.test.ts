@@ -119,11 +119,13 @@ describe('shifts router GET /templates/:id', () => {
 });
 
 describe('shifts router POST /templates', () => {
+  // Note: overnight ranges (e.g. 22:00 → 06:00) are rejected by validation —
+  // conflict detection and hour accounting assume same-day shifts.
   const validTemplateBody = {
-    name: 'Night',
+    name: 'Evening',
     departmentId: 1,
-    startTime: '22:00',
-    endTime: '06:00',
+    startTime: '15:00',
+    endTime: '23:00',
     minStaff: 1,
     maxStaff: 3,
   };

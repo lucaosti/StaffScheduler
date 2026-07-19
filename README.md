@@ -421,6 +421,10 @@ npm test                   # full Jest suite
 npm run test:coverage      # coverage report
 npm run lint               # ESLint
 npm run lint:fix
+npm run deadcode           # dead-code check (knip)
+
+npm run sim:run            # workforce simulation harness (needs a seeded MySQL)
+npm run sim:campaign       # multi-run simulation campaign (needs MySQL root credentials)
 ```
 
 ### Frontend
