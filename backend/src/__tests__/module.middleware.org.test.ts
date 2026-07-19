@@ -27,7 +27,7 @@ jest.mock('../config/database', () => ({
 }));
 
 // Import after mocks are in place
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+ 
 const { requireModuleForUser } = require('../middleware/auth') as typeof import('../middleware/auth');
 
 const makeReq = (user?: Partial<{ organizationName: string | null }>) =>

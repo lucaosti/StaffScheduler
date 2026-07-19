@@ -34,7 +34,7 @@ class ErrorBoundary extends React.Component<Props, State> {
       // console.error is intentional here: this is a class-based error boundary and
       // React's error lifecycle methods have no hook equivalent, so the Winston logger
       // (a module-level singleton) cannot be reached from this context.
-      // eslint-disable-next-line no-console
+
       console.error('[ErrorBoundary]', error, info.componentStack);
     }
   }

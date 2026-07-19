@@ -268,7 +268,6 @@ export class ScheduleOptimizationOrchestrator {
     status: string;
   }> {
     // Lazy require to avoid a circular dependency at module load.
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { AutoScheduleService } = require('./AutoScheduleService');
     const auto = new AutoScheduleService(this.pool);
     const result = await auto.generate(scheduleId, createdBy);
