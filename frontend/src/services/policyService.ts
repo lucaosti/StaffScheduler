@@ -50,8 +50,8 @@ export interface ApprovalMatrixRow {
   id: number;
   changeType: string;
   approverScope: ApproverScope;
-  // Configurable role string from the DB; not restricted to a fixed set.
-  approverRole: string | null;
+  // FK to roles.id — matches the backend's approval_matrix.approver_role_id.
+  approverRoleId: number | null;
   approverUserId: number | null;
   autoApproveForOwner: boolean;
   description: string | null;

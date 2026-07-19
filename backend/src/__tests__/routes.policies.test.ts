@@ -94,14 +94,20 @@ describe('approval matrix', () => {
     expect(res.status).toBe(500);
   });
 
-  it('PUT 200 on update', async () => {
-    (ApprovalMatrixService.prototype.update as jest.Mock) = jest
-      .fn()
-      .mockResolvedValue({ changeType: 'a' });
+  it('PUT 200 on update and forwards approverRoleId to the service', async () => {
+    const update = jest.fn().mockResolvedValue({ changeType: 'a' });
+    (ApprovalMatrixService.prototype.update as jest.Mock) = update;
     const res = await request(mountApp())
       .put('/api/policies/approval-matrix/policy_change')
-      .send({ approverRole: 'admin' });
+      .send({ approverScope: 'company_role', approverRoleId: 3 });
     expect(res.status).toBe(200);
+    // Regression guard: the frontend contract is approverRoleId (a roles.id
+    // FK). A stale field name here would be silently stripped by Zod and
+    // this assertion is what would have caught it.
+    expect(update).toHaveBeenCalledWith(
+      'policy_change',
+      expect.objectContaining({ approverRoleId: 3 })
+    );
   });
 
   it('PUT 404 on not found', async () => {
