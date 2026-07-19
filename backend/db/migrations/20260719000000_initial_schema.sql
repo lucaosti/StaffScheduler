@@ -1,3 +1,5 @@
+-- migrate:up
+
 -- ================================================================
 -- Staff Scheduler Database Schema
 -- Simplified and optimized schema - keeping only essential features
@@ -1251,12 +1253,11 @@ CREATE TABLE IF NOT EXISTS decision_reassignments (
 -- Added here because they reference tables defined later than the source table.
 --
 -- NOTE: everything from this header down is NOT idempotent on its own
--- (MySQL has no ADD CONSTRAINT / CREATE INDEX ... IF NOT EXISTS).
--- scripts/init-database.ts splits the file on this exact header and guards
--- each statement below with an information_schema existence check, so
--- `npm run db:init` stays a valid upgrade path for existing databases.
--- Fresh-database consumers (docker-entrypoint-initdb.d, CI, the integration
--- suite) run the whole file as-is.
+-- (MySQL has no ADD CONSTRAINT / CREATE INDEX ... IF NOT EXISTS). That is
+-- fine under dbmate: a migration runs exactly once per database, tracked in
+-- schema_migrations. Databases created BEFORE the migration system existed
+-- must adopt the baseline by recording this version as already applied —
+-- see "Adopting migrations on a pre-existing database" in DOCUMENTATION.md.
 -- ================================================================
 
 -- departments.org_unit_id → org_units (org_units is defined after departments)
@@ -1275,12 +1276,59 @@ ALTER TABLE departments
 --   shift_assignments: idx_assignment_user_status   (user_id, status)
 
 -- Additional composite indexes for common query patterns.
--- MySQL does not support CREATE INDEX IF NOT EXISTS; on existing databases
--- these are applied conditionally by scripts/init-database.ts (see the
--- DEFERRED FOREIGN KEYS header above).
+-- MySQL does not support CREATE INDEX IF NOT EXISTS; safe here because a
+-- migration runs exactly once per database (see the DEFERRED FOREIGN KEYS
+-- header above).
 -- shift_assignments has shift_id (not schedule_id); route joins via shifts.schedule_id.
 CREATE INDEX idx_shift_assignments_shift_status ON shift_assignments(shift_id, status);
 CREATE INDEX idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);
 CREATE INDEX idx_audit_logs_user_created ON audit_logs(user_id, created_at);
 CREATE INDEX idx_cr_created_status ON change_requests(created_at DESC, status);
 CREATE INDEX idx_responsibility_subject_perm ON responsibility_rules(subject_type, subject_id, permission_code, is_active);
+
+-- migrate:down
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS tenants;
+DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS roles;
+DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS user_roles;
+DROP TABLE IF EXISTS departments;
+DROP TABLE IF EXISTS user_departments;
+DROP TABLE IF EXISTS skills;
+DROP TABLE IF EXISTS user_skills;
+DROP TABLE IF EXISTS shift_templates;
+DROP TABLE IF EXISTS shift_template_skills;
+DROP TABLE IF EXISTS schedules;
+DROP TABLE IF EXISTS shifts;
+DROP TABLE IF EXISTS shift_skills;
+DROP TABLE IF EXISTS shift_assignments;
+DROP TABLE IF EXISTS attendance_records;
+DROP TABLE IF EXISTS on_call_periods;
+DROP TABLE IF EXISTS on_call_assignments;
+DROP TABLE IF EXISTS user_custom_fields;
+DROP TABLE IF EXISTS user_unavailability;
+DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS user_calendar_tokens;
+DROP TABLE IF EXISTS shift_swap_requests;
+DROP TABLE IF EXISTS time_off_requests;
+DROP TABLE IF EXISTS user_preferences;
+DROP TABLE IF EXISTS system_settings;
+DROP TABLE IF EXISTS modules;
+DROP TABLE IF EXISTS organization_module_overrides;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS org_units;
+DROP TABLE IF EXISTS user_org_units;
+DROP TABLE IF EXISTS employee_loans;
+DROP TABLE IF EXISTS policies;
+DROP TABLE IF EXISTS policy_exception_requests;
+DROP TABLE IF EXISTS approval_matrix;
+DROP TABLE IF EXISTS approval_workflows;
+DROP TABLE IF EXISTS approval_steps;
+DROP TABLE IF EXISTS delegations;
+DROP TABLE IF EXISTS responsibility_rules;
+DROP TABLE IF EXISTS change_requests;
+DROP TABLE IF EXISTS pending_approvals;
+DROP TABLE IF EXISTS decision_reassignments;
+SET FOREIGN_KEY_CHECKS = 1;
