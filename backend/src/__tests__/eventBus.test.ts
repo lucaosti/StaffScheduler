@@ -23,7 +23,7 @@ const fakeResponse = () => {
 describe('EventBus', () => {
   afterEach(() => {
     // Reset internal state between tests.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     (eventBus as any).subscribers = new Map();
   });
 

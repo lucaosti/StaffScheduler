@@ -27,7 +27,7 @@ export const errorMessage = (err: unknown, fallback: string = 'Unexpected error'
  */
 export const notifyError = (context: string, err?: unknown): void => {
   const detail = err ? `: ${errorMessage(err)}` : '';
-  // eslint-disable-next-line no-alert
+
   window.alert(`${context}${detail}`);
 };
 
@@ -35,6 +35,6 @@ export const notifyError = (context: string, err?: unknown): void => {
  * Shows a success notification.
  */
 export const notifySuccess = (message: string): void => {
-  // eslint-disable-next-line no-alert
+
   window.alert(message);
 };

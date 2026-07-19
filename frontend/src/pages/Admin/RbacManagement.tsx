@@ -115,7 +115,7 @@ const RbacManagement: React.FC = () => {
     if (!q.trim()) { setEmployees([]); return; }
     setEmpLoading(true);
     try {
-      const res = await getEmployees({ search: q.trim() } as any);
+      const res = await getEmployees({ search: q.trim() });
       if (res.success && res.data) setEmployees(res.data);
     } catch {
       setEmployees([]);

@@ -144,9 +144,9 @@ describe('POST /api/auth/login — rate limiting', () => {
     let limitedBody: any;
 
     await jest.isolateModulesAsync(async () => {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { UserService: IsolatedUserService } = require('../services/UserService');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
+       
       const { createAuthRouter: isolatedCreateAuthRouter } = require('../routes/auth');
 
       (IsolatedUserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue(null);
