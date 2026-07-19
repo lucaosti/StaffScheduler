@@ -15,6 +15,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 BACKEND_DIR="${ROOT_DIR}/backend"
 
+# docker compose loads ROOT_DIR/.env on its own for variable substitution
+# inside docker-compose.yml, but this script's own `${MYSQL_ROOT_PASSWORD}`
+# read below runs in the host shell, which does not see it automatically.
+# Extract just the keys we need instead of `source`-ing the file: .env allows
+# unquoted values with spaces (e.g. REACT_APP_APP_NAME=Staff Scheduler),
+# which is valid for docker compose's own parser but not for bash `source`.
+env_file_value() {
+  local key="$1" file="${ROOT_DIR}/.env"
+  [ -f "$file" ] || return 0
+  grep -E "^${key}=" "$file" | tail -1 | cut -d= -f2-
+}
+: "${MYSQL_ROOT_PASSWORD:=$(env_file_value MYSQL_ROOT_PASSWORD)}"
+: "${MYSQL_DATABASE:=$(env_file_value MYSQL_DATABASE)}"
+
 require_compose() {
   if ! command -v docker >/dev/null 2>&1; then
     echo "docker is required" >&2
@@ -30,7 +44,7 @@ wait_for_mysql() {
   echo "Waiting for MySQL to accept connections…"
   local i
   for i in $(seq 1 60); do
-    if docker compose -f "${COMPOSE_FILE}" exec -T database mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1; then
+    if docker compose -f "${COMPOSE_FILE}" exec -T mysql mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1; then
       echo "MySQL is up."
       return 0
     fi
@@ -80,10 +94,10 @@ cmd_status() {
   docker compose -f "${COMPOSE_FILE}" ps || true
   echo
   echo "Demo mode marker:"
-  if docker compose -f "${COMPOSE_FILE}" exec -T database \
-      mysql -uroot -p"${DB_PASSWORD:-}" -N -e \
+  if docker compose -f "${COMPOSE_FILE}" exec -T mysql \
+      mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-}" -N -e \
       "SELECT category, \`key\`, value FROM \
-       ${DB_NAME:-staff_scheduler}.system_settings \
+       ${MYSQL_DATABASE:-staff_scheduler}.system_settings \
        WHERE category='runtime' AND \`key\`='mode'" 2>/dev/null; then
     :
   else
