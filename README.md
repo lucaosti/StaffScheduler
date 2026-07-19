@@ -474,12 +474,15 @@ RATE_LIMIT_MAX_REQUESTS=100
 OPTIMIZATION_ENGINE=typescript   # Scheduler engine: typescript (default) or or-tools
 DB_POOL_LIMIT=30                 # MySQL connection pool size (default: 30)
 DB_QUEUE_LIMIT=100               # Max queued connection requests (default: 100)
+AUTH_PERMISSION_CACHE_TTL_MS=0   # Per-user auth-context cache; 0 (default) = resolve on every request
 ```
 
 Frontend env vars:
 
 ```env
-REACT_APP_API_URL=http://localhost:3001/api
+# Defaults to the relative '/api' (proxied by Vite in dev and nginx in Docker).
+# Set only when the API lives on a different origin than the SPA.
+REACT_APP_API_URL=/api
 ```
 
 ## Testing
