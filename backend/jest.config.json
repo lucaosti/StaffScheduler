@@ -6,6 +6,10 @@
     "**/__tests__/**/*.test.ts",
     "**/meta-jest-verification.test.ts"
   ],
+  "testPathIgnorePatterns": [
+    "/node_modules/",
+    "\\.integration\\.test\\.ts$"
+  ],
   "transform": {
     "^.+\\.ts$": "ts-jest"
   },
