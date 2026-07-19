@@ -1,5 +1,6 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment, CreateAssignmentRequest } from '../types';
+import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { PolicyValidator } from './PolicyValidator';
@@ -35,7 +36,7 @@ export class AssignmentService {
         [assignmentData.shiftId]
       );
 
-      if (shiftRows.length === 0) throw new Error('Shift not found');
+      if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
 
       const shift = shiftRows[0];
 
@@ -47,14 +48,14 @@ export class AssignmentService {
       );
       const currentAssignments = Number((countRows[0] as any).current_assignments);
 
-      if (currentAssignments >= shift.max_staff) throw new Error('Shift is already at maximum capacity');
+      if (currentAssignments >= shift.max_staff) throw new ConflictError('Shift is already at maximum capacity');
 
       const [userRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
         [assignmentData.userId]
       );
 
-      if (userRows.length === 0) throw new Error('User not found or inactive');
+      if (userRows.length === 0) throw new NotFoundError('User not found or inactive');
 
       const conflicts = await this.validator.checkConflicts(
         assignmentData.userId,
@@ -65,7 +66,7 @@ export class AssignmentService {
       );
 
       if (conflicts.length > 0) {
-        throw new Error(`User has conflicting assignment: ${conflicts[0].shiftDate} ${conflicts[0].startTime}-${conflicts[0].endTime}`);
+        throw new ConflictError(`User has conflicting assignment: ${conflicts[0].shiftDate} ${conflicts[0].startTime}-${conflicts[0].endTime}`);
       }
 
       const isAvailable = await this.validator.checkUserAvailability(
@@ -74,7 +75,7 @@ export class AssignmentService {
         connection
       );
 
-      if (!isAvailable) throw new Error('User is not available during this time');
+      if (!isAvailable) throw new ConflictError('User is not available during this time');
 
       const [requiredSkills] = await connection.execute<RowDataPacket[]>(
         'SELECT skill_id FROM shift_skills WHERE shift_id = ?',
@@ -93,7 +94,7 @@ export class AssignmentService {
           [assignmentData.userId, ...skillIds]
         );
         if ((userSkills as RowDataPacket[]).length < requiredSkills.length) {
-          throw new Error('User does not have all required skills for this shift');
+          throw new ConflictError('User does not have all required skills for this shift');
         }
       }
 
@@ -274,7 +275,7 @@ export class AssignmentService {
         'DELETE FROM shift_assignments WHERE id = ?',
         [id]
       );
-      if (result.affectedRows === 0) throw new Error('Assignment not found');
+      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found');
       await connection.commit();
       logger.info(`Assignment deleted successfully: ${id}`);
       await this.audit.write({
@@ -299,7 +300,7 @@ export class AssignmentService {
   async updateAssignment(id: number, updateData: { status?: string; notes?: string; actorId?: number; reason?: string }): Promise<ShiftAssignment> {
     try {
       const existing = await this.getAssignmentById(id);
-      if (!existing) throw new Error('Assignment not found');
+      if (!existing) throw new NotFoundError('Assignment not found');
 
       const updates: string[] = [];
       const values: any[] = [];

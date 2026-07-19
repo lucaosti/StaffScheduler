@@ -82,6 +82,8 @@ import { createBulkImportRouter } from '../routes/bulkImport';
 import { createNotificationsRouter } from '../routes/notifications';
 import { createAuthRouter } from '../routes/auth';
 import { RbacService } from '../services/RbacService';
+import { ConflictError, NotFoundError } from '../errors';
+import { mountRouter } from './helpers/mountRouter';
 
 const fakePool = {} as never;
 
@@ -104,12 +106,8 @@ beforeEach(() => {
   }
 });
 
-const mountApp = (prefix: string, router: express.Router): express.Express => {
-  const app = express();
-  app.use(express.json());
-  app.use(prefix, router);
-  return app;
-};
+const mountApp = (prefix: string, router: express.Router): express.Express =>
+  mountRouter(prefix, router);
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -182,7 +180,7 @@ describe('assignments router (extended)', () => {
   it('PUT /:id 404 when not found', async () => {
     (AssignmentService.prototype.updateAssignment as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Assignment not found'));
+      .mockRejectedValue(new NotFoundError('Assignment not found'));
     const res = await request(app()).put('/api/assignments/9').send({});
     expect(res.status).toBe(404);
   });
@@ -211,7 +209,7 @@ describe('assignments router (extended)', () => {
   it('DELETE /:id 404 when not found', async () => {
     (AssignmentService.prototype.deleteAssignment as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Assignment not found'));
+      .mockRejectedValue(new NotFoundError('Assignment not found'));
     const res = await request(app()).delete('/api/assignments/9');
     expect(res.status).toBe(404);
   });
@@ -330,7 +328,7 @@ describe('assignments router (extended)', () => {
         } else {
           // complete has no pre-flight; trigger 404 via the action method.
           (AssignmentService.prototype[method] as jest.Mock).mockRejectedValue(
-            new Error('Assignment not found')
+            new NotFoundError('Assignment not found')
           );
         }
         const res = await request(app()).patch(`/api/assignments/1/${action}`);
@@ -340,7 +338,7 @@ describe('assignments router (extended)', () => {
       if (action === 'confirm') {
         it('409 already confirmed', async () => {
           (AssignmentService.prototype.confirmAssignment as jest.Mock).mockRejectedValue(
-            new Error('Already confirmed')
+            new ConflictError('Already confirmed')
           );
           const res = await request(app()).patch(`/api/assignments/1/${action}`);
           expect(res.status).toBe(409);

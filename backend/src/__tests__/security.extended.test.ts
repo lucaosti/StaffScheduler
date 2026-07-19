@@ -71,6 +71,7 @@ import { UserDirectoryService } from '../services/UserDirectoryService';
 import { createAssignmentsRouter } from '../routes/assignments';
 import { createSchedulesRouter } from '../routes/schedules';
 import { createDirectoryRouter } from '../routes/directory';
+import { mountRouter } from './helpers/mountRouter';
 
 const fakePool = {} as never;
 
@@ -78,12 +79,8 @@ const fakePool = {} as never;
 // App factories
 // ─────────────────────────────────────────────────────────────────────────────
 
-const assignmentsApp = (): express.Express => {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/assignments', createAssignmentsRouter(fakePool));
-  return app;
-};
+const assignmentsApp = (): express.Express =>
+  mountRouter('/api/assignments', createAssignmentsRouter(fakePool));
 
 const schedulesApp = (): express.Express => {
   const app = express();

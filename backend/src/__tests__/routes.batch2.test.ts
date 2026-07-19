@@ -56,15 +56,11 @@ import { createUsersRouter } from '../routes/users';
 import { createShiftsRouter } from '../routes/shifts';
 import { createAssignmentsRouter } from '../routes/assignments';
 import { createAuditLogsRouter } from '../routes/auditLogs';
+import { mountRouter } from './helpers/mountRouter';
 
 const fakePool = {} as never;
 
-const mount = (prefix: string, router: express.Router) => {
-  const app = express();
-  app.use(express.json());
-  app.use(prefix, router);
-  return app;
-};
+const mount = (prefix: string, router: express.Router) => mountRouter(prefix, router);
 
 // ─── routes/users.ts ─────────────────────────────────────────────────────────
 
