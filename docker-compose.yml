@@ -13,7 +13,6 @@ services:
       - "${DB_PORT:-3306}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./backend/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./mysql/conf.d:/etc/mysql/conf.d:ro
     command: >
       --default-authentication-plugin=mysql_native_password
@@ -30,6 +29,27 @@ services:
       retries: 10
       start_period: 40s
 
+  # One-shot schema migration runner: applies pending dbmate migrations and
+  # exits. The backend only starts after this completes successfully, so the
+  # schema is always up to date before the API accepts traffic.
+  # Note: MYSQL_USER and MYSQL_PASSWORD are interpolated into DATABASE_URL —
+  # characters that are special in URLs (@ / : #) must be percent-encoded in
+  # .env if used in the password.
+  migrate:
+    image: amacneil/dbmate:2
+    container_name: staff_scheduler_migrate
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: mysql://${MYSQL_USER:-scheduler_user}:${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}@mysql:3306/${MYSQL_DATABASE:-staff_scheduler}
+      DBMATE_NO_DUMP_SCHEMA: "true"
+    command: --wait up
+    volumes:
+      - ./backend/db/migrations:/db/migrations:ro
+    networks:
+      - staff_scheduler_network
+
   # Backend API Service
   backend:
     build:
@@ -41,6 +61,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3001

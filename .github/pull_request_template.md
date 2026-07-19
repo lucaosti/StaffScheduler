@@ -28,7 +28,7 @@
 
 - [ ] Backend (Express API, services, optimizer bridge)
 - [ ] Frontend (React SPA)
-- [ ] Database schema (`backend/database/init.sql`)
+- [ ] Database schema (`backend/db/migrations/`)
 - [ ] Demo seed (`backend/scripts/seed-demo.ts`)
 - [ ] CI workflows (`.github/workflows/*`)
 - [ ] Documentation (`README.md`, `TECHNICAL.md`, `CONTRIBUTING.md`, ...)

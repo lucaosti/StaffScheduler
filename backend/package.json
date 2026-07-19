@@ -16,13 +16,17 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src/**/*.ts",
-    "db:init": "npx ts-node scripts/init-database.ts",
+    "db:init": "npx ts-node scripts/db-migrate.ts up",
     "db:seed:demo": "npx ts-node scripts/seed-demo.ts",
     "db:seed:production": "npx ts-node scripts/seed-production.ts",
     "sim:run": "npx ts-node scripts/simulation/index.ts",
     "sim:campaign": "npx ts-node scripts/simulation/campaign.ts",
     "deadcode": "knip",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "db:migrate": "npx ts-node scripts/db-migrate.ts up",
+    "db:migrate:status": "npx ts-node scripts/db-migrate.ts status",
+    "db:migrate:rollback": "npx ts-node scripts/db-migrate.ts rollback",
+    "db:migrate:new": "npx ts-node scripts/db-migrate.ts new"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -53,6 +57,7 @@
     "@types/supertest": "^2.0.12",
     "@typescript-eslint/eslint-plugin": "^8.60.1",
     "@typescript-eslint/parser": "^8.61.1",
+    "dbmate": "^2.34.1",
     "eslint": "^9.39.5",
     "globals": "^17.7.0",
     "jest": "^29.6.1",
