@@ -147,6 +147,13 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     });
     app.use(limiter);
 
+    // Credential-bearing query parameters must never reach the access log:
+    // calendar feeds authenticate via ?token=... (calendar clients cannot set
+    // headers), and the default 'combined' format logs the full request URL.
+    morgan.token('url', (req) => {
+      const original = (req as express.Request).originalUrl || req.url || '';
+      return original.replace(/([?&]token=)[^&]*/gi, '$1[REDACTED]');
+    });
     app.use(
       morgan('combined', {
         stream: { write: (message) => logger.info(message.trim()) },

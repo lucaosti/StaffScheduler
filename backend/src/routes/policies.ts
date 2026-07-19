@@ -165,7 +165,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
 
   // ------------- Policies CRUD -------------
 
-  router.get('/', async (_req, res: Response) => {
+  router.get('/', requirePermission('policy.read'), async (_req, res: Response) => {
     try {
       res.json({ success: true, data: await policies.list() });
     } catch (err) {
@@ -174,7 +174,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/:id', requirePermission('policy.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       const p = await policies.getById(res.locals.params.id);
       if (!p) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');

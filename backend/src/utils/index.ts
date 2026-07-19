@@ -130,6 +130,23 @@ export class DateUtils {
 
 export class ValidationUtils {
   /**
+   * Parses a DB-stored JSON string expected to contain an array of strings.
+   * Returns [] on malformed JSON or a non-array value instead of throwing,
+   * so one corrupted row can never take down a whole request (the RBAC
+   * delegation path runs on every authenticated request).
+   */
+  static parseStringArray(raw: unknown): string[] {
+    if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string');
+    if (typeof raw !== 'string' || raw.length === 0) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
    * Validate email format
    */
   static isValidEmail(email: string): boolean {

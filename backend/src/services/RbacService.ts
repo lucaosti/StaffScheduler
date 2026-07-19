@@ -25,6 +25,7 @@ import {
 } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { ValidationUtils } from '../utils';
 
 export class RbacService {
   private audit: AuditLogService;
@@ -97,7 +98,7 @@ export class RbacService {
 
       // For each active delegation, cap the granted codes to what the delegator still holds.
       for (const row of delegRows as any[]) {
-        const delegatedCodes: string[] = JSON.parse(row.permission_codes as string);
+        const delegatedCodes = ValidationUtils.parseStringArray(row.permission_codes);
         const allowedCodes = delegatedCodes.filter(
           (c) => (delegatorPerms.get(row.delegator_id) ?? new Set()).has(c)
         );
@@ -450,7 +451,7 @@ export class RbacService {
     // scope_org_unit_id to include all descendants.
     const merged = new Map<string, Set<number>>();
     for (const row of rows as any[]) {
-      const codes: string[] = JSON.parse(row.permission_codes as string);
+      const codes = ValidationUtils.parseStringArray(row.permission_codes);
       const scopeId: number = row.scope_org_unit_id as number;
       const allowed = await this.getDescendantOrgUnitIds(scopeId);
       for (const code of codes) {
