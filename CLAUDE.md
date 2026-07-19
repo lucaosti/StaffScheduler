@@ -44,7 +44,7 @@ npx jest --testNamePattern="should create assignment"
 ```bash
 npm start            # Dev server; proxies /api/* to http://localhost:3001
 npm run build        # Production bundle
-npm test             # Interactive test runner
+npm test             # Run all tests (Jest, single pass — not a watch mode)
 npm run test:coverage
 npm run lint
 ```

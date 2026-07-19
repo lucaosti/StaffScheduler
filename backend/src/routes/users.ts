@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
-import { authenticate, userHasPermission } from '../middleware/auth';
+import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody } from '../middleware/validation';
 import { idParam, createUserBody, updateUserBody } from '../schemas';
@@ -46,7 +46,10 @@ export const createUsersRouter = (pool: Pool) => {
       };
       const pagination = parsePagination(req);
 
-      if (userHasPermission(user, 'settings.manage')) {
+      // The unscoped directory requires the dedicated user.read_all grant
+      // (Administrator by default). Everyone else — including managers with
+      // user.read — falls through to the department-scoped listing below.
+      if (userHasPermission(user, 'user.read_all')) {
         if (pagination) {
           const [total, users] = await Promise.all([
             userService.countUsers(filters),
@@ -206,6 +209,9 @@ export const createUsersRouter = (pool: Pool) => {
       }
 
       const updatedUser = await userService.updateUser(userId, updateData, user.id);
+
+      // Role changes must not linger in the auth-context cache.
+      if (updateData.roleIds !== undefined) invalidateAuthContext(userId);
 
       if (!updatedUser) {
         return res.status(404).json({

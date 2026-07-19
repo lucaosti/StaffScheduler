@@ -564,11 +564,12 @@ export class ShiftService {
           const shiftId = result.insertId;
           createdShiftIds.push(shiftId);
 
-          // Add required skills
-          for (const skillId of skillIds) {
+          // Add required skills in one multi-row INSERT per shift.
+          if (skillIds.length > 0) {
+            const placeholders = skillIds.map(() => '(?, ?)').join(', ');
             await connection.execute(
-              'INSERT INTO shift_skills (shift_id, skill_id) VALUES (?, ?)',
-              [shiftId, skillId]
+              `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${placeholders}`,
+              skillIds.flatMap((skillId) => [shiftId, skillId])
             );
           }
         }

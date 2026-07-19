@@ -17,6 +17,7 @@ jest.mock('../middleware/auth', () => ({
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: () => true,
+  invalidateAuthContext: jest.fn(),
 }));
 
 jest.mock('../services/EmployeeService');

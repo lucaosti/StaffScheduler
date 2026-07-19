@@ -9,12 +9,13 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import {
   buildOtpauthUri,
   generateRecoveryCodes,
   generateSecret,
+  matchTotpCounter,
   verifyTotp,
 } from '../utils/totp';
 import { config } from '../config';
@@ -39,7 +40,7 @@ export class TwoFactorService {
   async beginSetup(userId: number, accountLabel: string): Promise<TwoFactorSetupPayload> {
     const secret = generateSecret();
     await this.pool.execute(
-      `UPDATE users SET totp_secret = ?, totp_enabled = 0 WHERE id = ?`,
+      `UPDATE users SET totp_secret = ?, totp_enabled = 0, totp_last_counter = NULL WHERE id = ?`,
       [secret, userId]
     );
     const otpauthUri = buildOtpauthUri({
@@ -81,22 +82,44 @@ export class TwoFactorService {
 
   async disable(userId: number): Promise<void> {
     await this.pool.execute(
-      `UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL WHERE id = ?`,
+      `UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL, totp_last_counter = NULL WHERE id = ?`,
       [userId]
     );
     logger.info(`2FA disabled for user ${userId}`);
   }
 
-  /** Returns true iff `code` is a current TOTP for the user. */
+  /**
+   * Returns true iff `code` is a current TOTP for the user AND has not been
+   * used before. The matched time-step counter is persisted with a
+   * compare-and-set guard, so a code accepted once cannot be replayed within
+   * its validity window — not even by a concurrent login racing this one.
+   */
   async verifyCode(userId: number, code: string): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT totp_secret, totp_enabled FROM users WHERE id = ? LIMIT 1`,
+      `SELECT totp_secret, totp_enabled, totp_last_counter FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
     if (rows.length === 0) return false;
     const secret = rows[0].totp_secret as string | null;
     if (!secret || !rows[0].totp_enabled) return false;
-    return verifyTotp(secret, code);
+
+    const counter = matchTotpCounter(secret, code);
+    if (counter === null) return false;
+
+    const lastCounter = rows[0].totp_last_counter as number | null;
+    if (lastCounter !== null && counter <= Number(lastCounter)) {
+      logger.warn(`Replayed TOTP code rejected for user ${userId}`);
+      return false;
+    }
+
+    // Compare-and-set: only wins if no concurrent login recorded this (or a
+    // later) step first. affectedRows = 0 means we lost the race → replay.
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE users SET totp_last_counter = ?
+        WHERE id = ? AND (totp_last_counter IS NULL OR totp_last_counter < ?)`,
+      [counter, userId, counter]
+    );
+    return result.affectedRows > 0;
   }
 
   /**
@@ -118,15 +141,19 @@ export class TwoFactorService {
       return false;
     }
     for (let i = 0; i < codes.length; i++) {
-      // eslint-disable-next-line no-await-in-loop
       const matches = await bcrypt.compare(code, codes[i]);
       if (matches) {
-        codes.splice(i, 1);
-        await this.pool.execute(
-          `UPDATE users SET totp_recovery_codes = ? WHERE id = ?`,
-          [JSON.stringify(codes), userId]
+        const remaining = [...codes.slice(0, i), ...codes.slice(i + 1)];
+        // Compare-and-set on the previous value: if a concurrent login
+        // consumed a code in the meantime the stored JSON no longer matches,
+        // affectedRows is 0 and this attempt is rejected instead of silently
+        // resurrecting the concurrently-consumed code.
+        const [result] = await this.pool.execute<ResultSetHeader>(
+          `UPDATE users SET totp_recovery_codes = ?
+            WHERE id = ? AND totp_recovery_codes = ?`,
+          [JSON.stringify(remaining), userId, stored]
         );
-        return true;
+        return result.affectedRows > 0;
       }
     }
     return false;

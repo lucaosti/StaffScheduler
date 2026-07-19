@@ -34,7 +34,10 @@ const JWT_COOKIE_NAME = 'token';
 const JWT_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: isProduction,
-  sameSite: 'lax' as const,
+  // 'strict' is safe for an SPA: the HTML shell is public, and all
+  // authenticated calls are same-site XHR/fetch from the app's own origin.
+  // It closes the residual CSRF window 'lax' leaves for top-level GETs.
+  sameSite: 'strict' as const,
   // Keep the cookie lifetime in lockstep with the JWT expiry so the cookie
   // never outlives (or prematurely drops) a still-valid token.
   maxAge: config.jwt.expiresInMs,

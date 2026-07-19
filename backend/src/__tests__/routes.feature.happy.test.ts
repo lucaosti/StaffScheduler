@@ -299,7 +299,7 @@ describe('on-call router', () => {
     (OnCallService.prototype.createPeriod as jest.Mock) = jest.fn().mockResolvedValue({ id: 1 });
     const res = await request(mountApp('/api/on-call', createOnCallRouter(fakePool)))
       .post('/api/on-call/periods')
-      .send({ departmentId: 3, date: '2026-05-01', startTime: '20:00', endTime: '08:00' });
+      .send({ departmentId: 3, date: '2026-05-01', startTime: '20:00', endTime: '23:00' });
     expect(res.status).toBe(201);
   });
 

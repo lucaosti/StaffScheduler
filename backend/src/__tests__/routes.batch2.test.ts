@@ -36,6 +36,7 @@ jest.mock('../middleware/auth', () => ({
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user?.permissions?.includes(code)),
+  invalidateAuthContext: jest.fn(),
 }));
 
 // ── Service mocks ─────────────────────────────────────────────────────────────
@@ -128,7 +129,7 @@ describe('users route — GET / pagination branches', () => {
 
   it('admin with pagination calls countUsers and returns paginated response', async () => {
     authMock.authenticate = (req: any, _res: any, next: any) => {
-      req.user = { id: 1, email: 'a@x', isActive: true, permissions: ['settings.manage'], allowedOrgUnitIds: null };
+      req.user = { id: 1, email: 'a@x', isActive: true, permissions: ['user.read_all'], allowedOrgUnitIds: null };
       next();
     };
     const app = mount('/api/users', createUsersRouter(fakePool));
@@ -140,7 +141,7 @@ describe('users route — GET / pagination branches', () => {
 
   it('admin without pagination returns flat list', async () => {
     authMock.authenticate = (req: any, _res: any, next: any) => {
-      req.user = { id: 1, email: 'a@x', isActive: true, permissions: ['settings.manage'], allowedOrgUnitIds: null };
+      req.user = { id: 1, email: 'a@x', isActive: true, permissions: ['user.read_all'], allowedOrgUnitIds: null };
       next();
     };
     const app = mount('/api/users', createUsersRouter(fakePool));

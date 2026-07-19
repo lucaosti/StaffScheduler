@@ -87,15 +87,18 @@ export const totp = (
 };
 
 /**
- * Verifies a candidate code against the current TOTP, allowing a configurable
+ * Matches a candidate code against the current TOTP, allowing a configurable
  * window of clock skew (default ±1 step). Constant-time comparison for the
  * actual digit match.
+ *
+ * Returns the matched time-step counter (so callers can persist it and reject
+ * replays of the same or earlier steps), or null when nothing matches.
  */
-export const verifyTotp = (
+export const matchTotpCounter = (
   secretBase32: string,
   code: string,
   options: { window?: number; stepSeconds?: number; digits?: number; nowSeconds?: number } = {}
-): boolean => {
+): number | null => {
   const window = options.window ?? 1;
   const step = options.stepSeconds ?? 30;
   const digits = options.digits ?? 6;
@@ -103,10 +106,17 @@ export const verifyTotp = (
   const counter = Math.floor(now / step);
   for (let i = -window; i <= window; i++) {
     const expected = hotp(secretBase32, counter + i, digits);
-    if (constantTimeEqual(expected, code)) return true;
+    if (constantTimeEqual(expected, code)) return counter + i;
   }
-  return false;
+  return null;
 };
+
+/** Boolean convenience wrapper over `matchTotpCounter`. */
+export const verifyTotp = (
+  secretBase32: string,
+  code: string,
+  options: { window?: number; stepSeconds?: number; digits?: number; nowSeconds?: number } = {}
+): boolean => matchTotpCounter(secretBase32, code, options) !== null;
 
 const constantTimeEqual = (a: string, b: string): boolean => {
   if (a.length !== b.length) return false;
