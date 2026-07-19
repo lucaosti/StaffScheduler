@@ -22,7 +22,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { z } from 'zod';
-import { authenticate, requirePermission } from '../middleware/auth';
+import { authenticate, requirePermission, invalidateAuthContext } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
 import { idParam, userIdParam, userIdAndRoleIdParam, createRoleBody, updateRoleBody } from '../schemas';
@@ -169,6 +169,9 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
         req.user?.id,
         justification ?? null
       );
+      // Drop any cached auth context so the new grant applies immediately
+      // on this instance even when the permission cache is enabled.
+      invalidateAuthContext(res.locals.params.userId);
       res.status(201).json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
@@ -184,6 +187,7 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
       })() : null;
       const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
       await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
+      invalidateAuthContext(res.locals.params.userId);
       res.json({ success: true });
     } catch (err) {
       respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);

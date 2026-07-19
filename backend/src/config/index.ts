@@ -85,6 +85,14 @@ export const config = {
     expiresIn: process.env.JWT_EXPIRES_IN || '24h',
     expiresInMs: parseDurationMs(process.env.JWT_EXPIRES_IN || '24h', 24 * 60 * 60 * 1000),
   },
+  auth: {
+    // TTL (ms) for the per-user auth context cache in the authenticate
+    // middleware. 0 (default) disables caching: permissions are resolved from
+    // the database on every request, so grants/revocations apply immediately.
+    // Setting a small TTL (e.g. 5000) trades that immediacy for a large cut
+    // in per-request query load; revocations then take up to TTL to apply.
+    permissionCacheTtlMs: Math.max(0, parseInt(process.env.AUTH_PERMISSION_CACHE_TTL_MS || '0')),
+  },
   email: {
     host: process.env.EMAIL_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.EMAIL_PORT || '587'),
