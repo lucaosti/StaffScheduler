@@ -934,6 +934,7 @@ INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
 ('policy.manage',     'policy',    'manage',  'Create, update and delete policies'),
 ('policy.approve',    'policy',    'approve', 'Approve or reject policy exception requests'),
 ('approval.manage',   'approval',  'manage',  'Configure the approval matrix / workflows'),
+('delegation.manage', 'delegation','manage',  'Create and revoke delegations of one''s own permissions'),
 ('loan.request',      'loan',      'request', 'Create employee loan requests'),
 ('loan.approve',      'loan',      'approve', 'Approve or reject employee loan requests'),
 ('timeoff.approve',   'timeoff',   'approve', 'Approve or reject time-off requests'),
@@ -974,6 +975,7 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'employee.read','employee.manage','schedule.read','schedule.manage','schedule.publish',
   'schedule.optimize','assignment.manage','shift.manage','department.read','department.manage',
   'org_unit.read','oncall.manage','policy.read','policy.manage','policy.approve',
+  'delegation.manage',
   'loan.request','loan.approve','timeoff.approve','shiftswap.approve','preferences.manage',
   'report.read','audit.read','user.read','user.manage',
   'responsibility.read','responsibility.manage',
@@ -1247,6 +1249,14 @@ CREATE TABLE IF NOT EXISTS decision_reassignments (
 -- ================================================================
 -- DEFERRED FOREIGN KEYS
 -- Added here because they reference tables defined later than the source table.
+--
+-- NOTE: everything from this header down is NOT idempotent on its own
+-- (MySQL has no ADD CONSTRAINT / CREATE INDEX ... IF NOT EXISTS).
+-- scripts/init-database.ts splits the file on this exact header and guards
+-- each statement below with an information_schema existence check, so
+-- `npm run db:init` stays a valid upgrade path for existing databases.
+-- Fresh-database consumers (docker-entrypoint-initdb.d, CI, the integration
+-- suite) run the whole file as-is.
 -- ================================================================
 
 -- departments.org_unit_id → org_units (org_units is defined after departments)
@@ -1264,9 +1274,10 @@ ALTER TABLE departments
 --   user_org_units:    idx_user_org_primary         (user_id, is_primary)
 --   shift_assignments: idx_assignment_user_status   (user_id, status)
 
--- Additional composite indexes for common query patterns
--- Note: MySQL does not support CREATE INDEX IF NOT EXISTS as a standalone statement;
--- these run once on a fresh schema (init.sql is never applied to an existing DB).
+-- Additional composite indexes for common query patterns.
+-- MySQL does not support CREATE INDEX IF NOT EXISTS; on existing databases
+-- these are applied conditionally by scripts/init-database.ts (see the
+-- DEFERRED FOREIGN KEYS header above).
 -- shift_assignments has shift_id (not schedule_id); route joins via shifts.schedule_id.
 CREATE INDEX idx_shift_assignments_shift_status ON shift_assignments(shift_id, status);
 CREATE INDEX idx_time_off_requests_user_dates ON time_off_requests(user_id, start_date, end_date);

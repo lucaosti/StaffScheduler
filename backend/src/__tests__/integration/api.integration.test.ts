@@ -39,17 +39,18 @@ const DB = {
 
 const ADMIN_EMAIL = 'itest-admin@example.com';
 const ADMIN_PASSWORD = 'itest-password-123';
+const DELEGATEE_EMAIL = 'itest-delegatee@example.com';
+const DELEGATEE_PASSWORD = 'itest-password-456';
 
 let admin: mysql.Connection;
 let app: Express;
 let closeAppPool: () => Promise<void>;
 let userId: number;
+let delegateeId: number;
 let shiftId: number;
 
-const authCookie = async (): Promise<string> => {
-  const res = await request(app)
-    .post('/api/auth/login')
-    .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+const loginCookie = async (email: string, password: string): Promise<string> => {
+  const res = await request(app).post('/api/auth/login').send({ email, password });
   expect(res.status).toBe(200);
   const setCookie = res.headers['set-cookie'];
   expect(setCookie).toBeDefined();
@@ -57,6 +58,8 @@ const authCookie = async (): Promise<string> => {
     .map((c: string) => c.split(';')[0])
     .join('; ');
 };
+
+const authCookie = (): Promise<string> => loginCookie(ADMIN_EMAIL, ADMIN_PASSWORD);
 
 beforeAll(async () => {
   admin = await mysql.createConnection({ ...DB, multipleStatements: true });
@@ -84,6 +87,14 @@ beforeAll(async () => {
      SELECT ?, id FROM roles WHERE name = 'Administrator'`,
     [userId]
   );
+  // A second, role-less user: the target of the delegation-flow tests.
+  const delegateeHash = await bcrypt.hash(DELEGATEE_PASSWORD, 4);
+  const [delegateeRes] = await admin.query<mysql.ResultSetHeader>(
+    `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+     VALUES (?, ?, 'Itest', 'Delegatee', 1)`,
+    [DELEGATEE_EMAIL, delegateeHash]
+  );
+  delegateeId = delegateeRes.insertId;
   const [deptRes] = await admin.query<mysql.ResultSetHeader>(
     `INSERT INTO departments (name, description, is_active) VALUES ('Itest Dept', 'integration', 1)`
   );
@@ -169,6 +180,45 @@ describe('assignments (real DB) — regression for the users.role column drift',
       .set('Cookie', cookie)
       .send({ shiftId, userId });
     expect(res.status).toBeGreaterThanOrEqual(400);
+  });
+});
+
+describe('delegations (real DB) — regression for the missing delegation.manage catalog entry', () => {
+  let delegationId: number;
+
+  it('lets an administrator create a delegation of their own permissions', async () => {
+    const cookie = await authCookie();
+    // MySQL DATETIME format: strict mode rejects the ISO 'T'/'Z' variants.
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 19)
+      .replace('T', ' ');
+    const res = await request(app)
+      .post('/api/delegations')
+      .set('Cookie', cookie)
+      .send({ delegateeId, permissionCodes: ['schedule.read'], expiresAt });
+    expect(res.status).toBe(201);
+    delegationId = res.body.data.id;
+  });
+
+  it('the delegatee holds the delegated permission at authentication time', async () => {
+    const cookie = await loginCookie(DELEGATEE_EMAIL, DELEGATEE_PASSWORD);
+    const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    expect(me.status).toBe(200);
+    expect(me.body.data.permissions).toContain('schedule.read');
+  });
+
+  it('revoking the delegation removes the permission', async () => {
+    const adminCookie = await authCookie();
+    const del = await request(app)
+      .delete(`/api/delegations/${delegationId}`)
+      .set('Cookie', adminCookie);
+    expect(del.status).toBe(200);
+
+    const cookie = await loginCookie(DELEGATEE_EMAIL, DELEGATEE_PASSWORD);
+    const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    expect(me.status).toBe(200);
+    expect(me.body.data.permissions).not.toContain('schedule.read');
   });
 });
 

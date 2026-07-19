@@ -45,7 +45,7 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Org units -------------
 
-  router.get('/units', async (_req, res: Response) => {
+  router.get('/units', requirePermission('org_unit.read'), async (_req, res: Response) => {
     try {
       res.json({ success: true, data: await units.list() });
     } catch (err) {
@@ -54,7 +54,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/units/tree', async (_req, res: Response) => {
+  router.get('/units/tree', requirePermission('org_unit.read'), async (_req, res: Response) => {
     try {
       res.json({ success: true, data: await units.tree() });
     } catch (err) {
@@ -63,7 +63,7 @@ export const createOrgRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/units/:id', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/units/:id', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       const u = await units.getById(res.locals.params.id);
       if (!u) return respondError(res, 404, 'NOT_FOUND', 'Org unit not found');
@@ -126,7 +126,7 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Memberships -------------
 
-  router.get('/units/:id/members', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
     } catch (err) {
@@ -136,7 +136,7 @@ export const createOrgRouter = (pool: Pool): Router => {
   });
 
   // Display-ready member list (name/email/position) for the "browse offices" view.
-  router.get('/units/:id/members/detailed', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
     } catch (err) {

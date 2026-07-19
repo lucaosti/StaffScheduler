@@ -16,6 +16,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { Delegation, CreateDelegationRequest } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { ValidationUtils } from '../utils';
 
 export class DelegationService {
   private audit: AuditLogService;
@@ -136,8 +137,7 @@ export class DelegationService {
 
     const codes = new Set<string>();
     for (const row of rows as any[]) {
-      const parsed: string[] = JSON.parse(row.permission_codes as string);
-      parsed.forEach((c) => codes.add(c));
+      ValidationUtils.parseStringArray(row.permission_codes).forEach((c) => codes.add(c));
     }
     return [...codes];
   }
@@ -161,7 +161,7 @@ export class DelegationService {
       id: r.id,
       delegatorId: r.delegator_id,
       delegateeId: r.delegatee_id,
-      permissionCodes: JSON.parse(r.permission_codes as string) as string[],
+      permissionCodes: ValidationUtils.parseStringArray(r.permission_codes),
       scopeOrgUnitId: r.scope_org_unit_id ?? null,
       startsAt: r.starts_at,
       expiresAt: r.expires_at,
