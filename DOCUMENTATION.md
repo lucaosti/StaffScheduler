@@ -283,6 +283,7 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `oncall.manage` | Manage on-call |
 | `policy.read` / `policy.manage` / `policy.approve` | Policies |
 | `approval.manage` | Configure approval matrix/workflows |
+| `delegation.manage` | Create and revoke delegations of one's own permissions |
 | `loan.request` / `loan.approve` | Employee loans |
 | `timeoff.approve` | Approve time-off |
 | `shiftswap.approve` | Approve shift swaps |
@@ -442,6 +443,7 @@ DELETE /api/delegations/:id       revoke (delegator only)
 ```
 
 Rules:
+- Creating and revoking require the `delegation.manage` permission (granted to Administrator and Manager by default); listing one's own delegations only requires authentication.
 - `permissionCodes` must be a subset of the delegator's current permissions.
 - Self-delegation is rejected.
 - Expired delegations are excluded automatically from `getEffectivePermissions`.

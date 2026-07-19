@@ -417,8 +417,9 @@ npm start                  # run compiled server
 npm run db:init            # initialize schema (no data)
 npm run db:seed:demo       # seed demo data (idempotent)
 
-npm test                   # full Jest suite
+npm test                   # full Jest suite (mocked DB)
 npm run test:coverage      # coverage report
+npm run test:integration   # integration suite against a real MySQL (uses DB_* env vars)
 npm run lint               # ESLint
 npm run lint:fix
 npm run deadcode           # dead-code check (knip)
