@@ -1004,7 +1004,7 @@ Legend: ✅ Fully supported / ⚠️ Partial or limited / ❌ Not present
 | **Time-off requests and approval** | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Shift swap requests** | ✅ (managed) | ✅ | ✅ | ✅ | ✅ |
 | **Self-service shift swap marketplace** | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **In-app notifications** | ✅ (SSE) | ✅ | ✅ | ✅ | ✅ |
+| **In-app notifications** | ✅ (polling; SSE stream exists but is not yet wired to any UI) | ✅ | ✅ | ✅ | ✅ |
 | **Mobile app (iOS/Android)** | ❌ | ✅ | ✅ | ✅ | ✅ |
 | **Configurable RBAC** | ✅ (full, data-driven) | ⚠️ | ⚠️ | ⚠️ | ✅ |
 | **Multi-department / multi-location** | ✅ | ✅ | ✅ | ✅ | ✅ |
