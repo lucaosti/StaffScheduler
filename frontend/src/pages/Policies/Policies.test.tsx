@@ -12,6 +12,7 @@ const mockRejectException = jest.fn();
 const mockCancelException = jest.fn();
 const mockListMatrix = jest.fn();
 const mockUpdateMatrix = jest.fn();
+const mockListRoles = jest.fn();
 
 jest.mock('../../services/policyService', () => ({
   __esModule: true,
@@ -26,6 +27,11 @@ jest.mock('../../services/policyService', () => ({
   cancelException: (...args: unknown[]) => mockCancelException(...args),
   listMatrix: (...args: unknown[]) => mockListMatrix(...args),
   updateMatrix: (...args: unknown[]) => mockUpdateMatrix(...args),
+}));
+
+jest.mock('../../services/rbacService', () => ({
+  __esModule: true,
+  listRoles: (...args: unknown[]) => mockListRoles(...args),
 }));
 
 jest.mock('../../contexts/AuthContext', () => ({
@@ -78,7 +84,7 @@ describe('<Policies />', () => {
         {
           changeType: 'policy_update',
           approverScope: 'global',
-          approverRole: 'admin',
+          approverRoleId: 7,
           approverUserId: null,
           autoApproveForOwner: false,
           description: 'desc',
@@ -94,6 +100,9 @@ describe('<Policies />', () => {
     mockRejectException.mockResolvedValue(ok({ id: 10 }));
     mockCancelException.mockResolvedValue(ok({ id: 10 }));
     mockUpdateMatrix.mockResolvedValue(ok({ id: 1 }));
+    mockListRoles.mockResolvedValue(
+      ok([{ id: 7, name: 'Administrator', isSystem: true }])
+    );
   });
 
   afterEach(() => {

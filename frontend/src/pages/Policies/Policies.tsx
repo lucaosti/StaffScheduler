@@ -14,12 +14,14 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import * as policyService from '../../services/policyService';
+import * as rbacService from '../../services/rbacService';
 import type {
   Policy,
   PolicyExceptionRequest,
   ApprovalMatrixRow,
   PolicyScope,
 } from '../../services/policyService';
+import type { Role } from '../../types';
 import PolicyList from '../Policies/PolicyList';
 import ExceptionList from '../Policies/ExceptionList';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -49,6 +51,7 @@ const Policies: React.FC = () => {
   const [policies, setPolicies] = useState<Policy[]>([]);
   const [exceptions, setExceptions] = useState<PolicyExceptionRequest[]>([]);
   const [matrix, setMatrix] = useState<ApprovalMatrixRow[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
 
   const [policyForm, setPolicyForm] = useState({
     scopeType: 'global' as PolicyScope,
@@ -74,16 +77,20 @@ const Policies: React.FC = () => {
 
   const refresh = async () => {
     try {
-      const [p, e, m] = await Promise.all([
+      const [p, e, m, r] = await Promise.all([
         policyService.listPolicies(),
         policyService.listExceptions(),
         isAdmin
           ? policyService.listMatrix()
           : Promise.resolve({ success: true as const, data: [] as ApprovalMatrixRow[] }),
+        isAdmin
+          ? rbacService.listRoles()
+          : Promise.resolve({ success: true as const, data: [] as Role[] }),
       ]);
       setPolicies(p.data ?? []);
       setExceptions(e.data ?? []);
       setMatrix(m.data ?? []);
+      setRoles(r.data ?? []);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -231,7 +238,8 @@ const Policies: React.FC = () => {
     try {
       await policyService.updateMatrix(row.changeType, {
         approverScope: patch.approverScope ?? row.approverScope,
-        approverRole: patch.approverRole !== undefined ? patch.approverRole : row.approverRole,
+        approverRoleId:
+          patch.approverRoleId !== undefined ? patch.approverRoleId : row.approverRoleId,
         approverUserId:
           patch.approverUserId !== undefined ? patch.approverUserId : row.approverUserId,
         autoApproveForOwner:
@@ -374,18 +382,18 @@ const Policies: React.FC = () => {
                     <td>
                       <select
                         className="form-select form-select-sm"
-                        value={row.approverRole ?? ''}
+                        value={row.approverRoleId ?? ''}
                         onChange={(e) =>
                           handleMatrixChange(row, {
-                            approverRole: e.target.value || null,
+                            approverRoleId: e.target.value ? Number(e.target.value) : null,
                           })
                         }
                         disabled={busy}
                       >
                         <option value="">-</option>
-                        <option value="admin">admin</option>
-                        <option value="manager">manager</option>
-                        <option value="employee">employee</option>
+                        {roles.map((r) => (
+                          <option key={r.id} value={r.id}>{r.name}</option>
+                        ))}
                       </select>
                     </td>
                     <td>
