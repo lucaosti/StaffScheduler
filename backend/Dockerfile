@@ -40,9 +40,13 @@ RUN mkdir -p logs reports uploads && \
 # Switch to non-root user
 USER nodejs
 
-# Health check
+# Health check. The health route is only mounted under /api (see src/app.ts),
+# never at the bare path — this must stay in sync with docker-compose.yml's
+# healthcheck, which is what actually runs under `docker compose up` (compose
+# overrides the image's HEALTHCHECK). This one is what standalone `docker run`
+# / non-compose orchestrators see.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "const http = require('http'); http.get('http://localhost:3001/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))" || exit 1
+  CMD node -e "const http = require('http'); http.get('http://localhost:3001/api/health', (res) => process.exit(res.statusCode === 200 ? 0 : 1))" || exit 1
 
 EXPOSE 3001
 
