@@ -432,6 +432,19 @@ Required permissions: `attendance.approve` (approve/reject), `attendance.read` (
 
 ---
 
+## 7b. Business policies
+
+Configurable rules (`policies` table, `PolicyService`/`PolicyValidator`) scoped to `global`, an org unit, a schedule, or a shift template. `policyKey` is a free-text field — the catalog is not a fixed enum — but `PolicyValidator.evaluate()` only assigns real blocking behavior to specific keys:
+
+| `policyKey` | Enforcement |
+|---|---|
+| `manual_assignment_locked` | **Enforced.** Blocks `POST /api/assignments` outright unless the target has an approved `PolicyExceptionRequest`. |
+| `min_rest_hours`, `max_hours_week`, `max_consecutive_days`, `staffing_min`, `skill_required` | **Not enforced by the policy engine.** These keys are accepted by `POST /api/policies` and stored, but `PolicyValidator` treats them as informational only — creating one does not block anything. The equivalent working-time limits (rest hours, weekly hours, consecutive days) **are** enforced separately and unconditionally by `ComplianceEngine.evaluateAssignmentCompliance` (§6, driven by `system_settings` / `user_preferences`, not by the `policies` table), so assignments are still protected — but through a different, non-configurable-per-scope mechanism. `staffing_min` and `skill_required` have no equivalent enforcement anywhere today. |
+
+Implication: an administrator who creates a `max_hours_week` (or `staffing_min` / `skill_required`) policy through the Policies UI gets no error, but the policy has no effect — this is a known gap, not yet surfaced in the UI. Extending `PolicyValidator.evaluate()` to cover the remaining keys (or wiring `ComplianceEngine`'s thresholds to read from `policies` instead of `system_settings`) is open work; `manual_assignment_locked` is the only key to treat as load-bearing today.
+
+---
+
 ## 8. Delegation framework
 
 User A can grant User B a time-bounded subset of their own permissions.
