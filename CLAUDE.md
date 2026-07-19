@@ -8,7 +8,7 @@ Staff Scheduler is an enterprise workforce management system.
 
 - **Backend**: Node.js/Express/TypeScript REST API — runs on port **3001**
 - **Frontend**: React 18/TypeScript SPA (Vite) — runs on port **3000**
-- **Database**: MySQL 8.0 (44 tables, schema in `backend/database/init.sql`)
+- **Database**: MySQL 8.0 (44 tables, schema in `backend/db/migrations/` — dbmate SQL migrations)
 - **Optimizer**: Python 3.8+ with Google OR-Tools CP-SAT, invoked via `child_process` from `backend/src/optimization/ScheduleOptimizerORTools.ts`
 
 ## Commands
@@ -19,7 +19,11 @@ Staff Scheduler is an enterprise workforce management system.
 npm run dev          # Start dev server with hot reload (nodemon + ts-node)
 npm run build        # Compile TypeScript → dist/
 npm run start        # Run compiled production build
-npm run db:init             # Initialize DB schema (no data)
+npm run db:init             # Apply all pending schema migrations (alias of db:migrate)
+npm run db:migrate          # Apply all pending schema migrations (dbmate up)
+npm run db:migrate:status   # Show applied/pending migrations
+npm run db:migrate:new -- <name>  # Create a new empty migration file
+npm run db:migrate:rollback # Roll back the most recent migration
 npm run db:seed:demo        # Populate with realistic demo data (idempotent)
 npm run db:seed:production  # Seed from scripts/fixtures/production/config.json (first deployment)
 npm test             # Run all tests (Jest + ts-jest)
@@ -138,7 +142,7 @@ The `code` field is required in all error responses.
 - **Language**: All code, comments, UI strings, and documentation must be in **English**.
 - **Logging**: Backend routes must use `logger.error(...)` (Winston). Never use `console.error`.
 - **Type safety**: No `@ts-ignore`. No local type duplicates — import from `types/index.ts` (frontend) or `src/types/index.ts` (backend).
-- **Database**: No ORM. Raw SQL with `mysql2/promise`. All schema changes go in `backend/database/init.sql`. The password column is `password_hash` (never `password`).
+- **Database**: No ORM. Raw SQL with `mysql2/promise`. All schema changes are dbmate migrations in `backend/db/migrations/` (create one with `npm run db:migrate:new -- <name>`; every migration needs both `-- migrate:up` and `-- migrate:down` sections). Never edit an already-merged migration. The password column is `password_hash` (never `password`).
 - **Auth**: Protected routes apply `authenticate` middleware first, then `requirePermission('permission.key')` for the required permission code. Do not use `requireAdmin`, `requireManager`, or `requireRole` — these do not exist. Permission gating is always code-based.
 - **Validation**: Use `validateBody(schema)` / `validateParams(schema)` from `src/middleware/validation.ts` with Zod schemas defined in `src/schemas/`. Do not use `express-validator`.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
