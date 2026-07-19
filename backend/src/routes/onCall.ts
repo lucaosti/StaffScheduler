@@ -48,7 +48,9 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/periods', async (req: Request, res: Response) => {
+  // Read access mirrors GET /shifts (schedule.read): on-call periods are
+  // schedule-adjacent data, not privileged like reports/audit/settings.
+  router.get('/periods', requirePermission('schedule.read'), async (req: Request, res: Response) => {
     try {
       const rangeStart = req.query.start as string | undefined;
       const rangeEnd = req.query.end as string | undefined;
@@ -76,7 +78,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/periods/:id', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/periods/:id', requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       const period = await service.getPeriodById(res.locals.params.id);
       if (!period) return error(res, 404, 'NOT_FOUND', 'On-call period not found');
@@ -107,7 +109,7 @@ export const createOnCallRouter = (pool: Pool): Router => {
     }
   });
 
-  router.get('/periods/:id/assignments', validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/periods/:id/assignments', requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     try {
       const data = await service.listAssignments(res.locals.params.id);
       res.json({ success: true, data });
