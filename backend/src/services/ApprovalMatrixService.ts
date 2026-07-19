@@ -6,7 +6,7 @@
  * any) and whether the actor is allowed to auto-approve.
  *
  * The matrix itself is configured in the `approval_matrix` table; defaults are
- * seeded by `database/init.sql`.
+ * seeded by the schema migrations.
  *
  * Approver scopes:
  *   - `policy_owner`        owner of the policy at hand

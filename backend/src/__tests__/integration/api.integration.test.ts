@@ -2,8 +2,8 @@
  * API integration tests against a REAL MySQL server.
  *
  * Unlike the unit suites (which mock the pool), these tests execute the actual
- * SQL against the actual schema, so column drift between `database/init.sql`
- * and service queries fails here instead of in production. Historical example:
+ * SQL against the actual schema, so column drift between the migrations in
+ * `db/migrations` and service queries fails here instead of in production. Historical example:
  * `SELECT id, role FROM users` survived 1900+ mocked tests after the `role`
  * column was dropped — this suite exists so that class of bug cannot recur.
  *
@@ -23,12 +23,11 @@ const ITEST_DB = process.env.ITEST_DB_NAME || 'staff_scheduler_itest';
 process.env.DB_NAME = ITEST_DB;
 process.env.NODE_ENV = 'test';
 
-import * as fs from 'fs';
-import * as path from 'path';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import request from 'supertest';
 import type { Express } from 'express';
+import { migrationUpSql } from '../helpers/schema';
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -68,11 +67,7 @@ beforeAll(async () => {
     `CREATE DATABASE \`${ITEST_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
   );
   await admin.query(`USE \`${ITEST_DB}\``);
-  const schemaSql = fs.readFileSync(
-    path.join(__dirname, '../../../database/init.sql'),
-    'utf8'
-  );
-  await admin.query(schemaSql);
+  await admin.query(migrationUpSql());
 
   // Fixtures: an administrator, a department, a published schedule, one shift.
   const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 4);

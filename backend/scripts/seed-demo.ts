@@ -146,7 +146,8 @@ const wipeAll = async (conn: mysql.Connection): Promise<void> => {
     // orphaned pending_approvals/decision_reassignments rows pointing at
     // entity ids that no longer exist once those tables are truncated.
     // (approval_workflows/approval_steps are static config seeded once by
-    // init.sql, not demo data, so they are intentionally not wiped here.)
+    // the schema migrations, not demo data, so they are intentionally not
+    // wiped here.)
     'decision_reassignments',
     'pending_approvals',
     'change_requests',

@@ -1,8 +1,8 @@
 /**
  * Test helper: maps the legacy role shorthand used by the test fixtures
  * ('admin' | 'manager' | 'employee') to the effective permission codes the
- * corresponding seeded role grants. Mirrors the grants defined in
- * `database/init.sql` so route tests can exercise permission-based handlers
+ * corresponding seeded role grants. Mirrors the grants seeded by the schema
+ * migrations so route tests can exercise permission-based handlers
  * without standing up the real RBAC tables.
  */
 

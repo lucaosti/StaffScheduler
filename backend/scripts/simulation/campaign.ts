@@ -360,8 +360,8 @@ async function executeRun(
     await resetLaneDatabase(dbName);
     logStream.write('[campaign] database reset done.\n');
 
-    const initCode = await runChild(['scripts/init-database.ts'], dbName, logStream, 5 * 60_000);
-    if (initCode !== 0) throw new Error(`init-database exited ${initCode}`);
+    const initCode = await runChild(['scripts/db-migrate.ts', 'up'], dbName, logStream, 5 * 60_000);
+    if (initCode !== 0) throw new Error(`db-migrate exited ${initCode}`);
     const seedCode = await runChild(['scripts/seed-demo.ts'], dbName, logStream, 5 * 60_000);
     if (seedCode !== 0) throw new Error(`seed-demo exited ${seedCode}`);
     await applyVariantSql(dbName, config.variantIndex);

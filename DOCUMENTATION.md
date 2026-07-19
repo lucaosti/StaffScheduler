@@ -119,9 +119,22 @@ All service files import `handleResponse` and `getAuthHeaders` from `./apiUtils`
 
 ## 3. Database schema
 
-Source of truth: [`backend/database/init.sql`](./backend/database/init.sql)
+Source of truth: [`backend/db/migrations/`](./backend/db/migrations) — dbmate SQL migrations, applied in filename order and tracked in the `schema_migrations` table.
 
-Bootstrap (schema only, no data): `cd backend && npm run db:init`
+Apply pending migrations (schema only, no data): `cd backend && npm run db:migrate` (alias: `db:init`)
+
+Create a new migration: `npm run db:migrate:new -- <snake_case_name>`; check state with `npm run db:migrate:status`; undo the latest with `npm run db:migrate:rollback`. Every migration must define both `-- migrate:up` and `-- migrate:down` sections (CI verifies the down path with a rollback + reapply pass). Under Docker Compose, a one-shot `migrate` service applies pending migrations before the backend starts.
+
+#### Adopting migrations on a pre-existing database
+
+Databases created before the migration system existed already contain the full baseline schema, so the baseline migration must be recorded as applied — **not** executed — exactly once, before the first `dbmate up`:
+
+```sql
+CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(128) PRIMARY KEY);
+INSERT IGNORE INTO schema_migrations (version) VALUES ('20260719000000');
+```
+
+After this one-time step, `npm run db:migrate` (or the compose `migrate` service) applies only newer migrations. Fresh databases need nothing special: the baseline simply runs as the first migration.
 
 Demo data (idempotent): `npm run db:seed:demo`
 
@@ -131,7 +144,7 @@ Demo data (idempotent): `npm run db:seed:demo`
 - **`users.role` removed** — the legacy `ENUM('admin','manager','employee')` was replaced in PR #102 by the configurable RBAC tables (`permissions`, `roles`, `role_permissions`, `user_roles`).
 - **`departments.org_unit_id`** — optional FK added in PR #103 to enable org-tree scoping of schedules and shifts.
 - **`audit_logs.before_snapshot` / `after_snapshot`** — JSON columns for field-level change capture.
-- **Deferred FKs** — FKs that reference tables defined later in the file are added via `ALTER TABLE` at the end of `init.sql`.
+- **Deferred FKs** — FKs that reference tables defined later in the baseline are added via `ALTER TABLE` at the end of the initial migration.
 
 ---
 
@@ -594,13 +607,13 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 
 ### Adding a new permission
 
-1. Add an `INSERT IGNORE INTO permissions` row in `backend/database/init.sql`.
+1. Add an `INSERT IGNORE INTO permissions` row in a new migration (`npm run db:migrate:new -- add_<code>_permission`).
 2. Assign it to the appropriate role(s) via `role_permissions` seed rows.
 3. Reference the code string in your route / middleware.
 
 ### Adding a new module
 
-1. Add an `INSERT IGNORE INTO modules` row in `init.sql`.
+1. Add an `INSERT IGNORE INTO modules` row in a new migration.
 2. Apply `requireModule('my-module')` to the relevant router.
 
 ---
@@ -715,10 +728,11 @@ Route tests mock `../middleware/auth` with `authenticate`, `requirePermission`, 
 
 ### Database schema changes
 
-All schema changes go in `backend/database/init.sql`. This file is the single source of truth for the schema — it is run from scratch on CI.
+All schema changes are dbmate migrations in `backend/db/migrations/`. The migration chain is the single source of truth for the schema — CI applies it from scratch and also verifies the rollback path.
 
 Guidelines:
-- Use `CREATE TABLE IF NOT EXISTS` and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` patterns where possible.
+- One migration per PR-sized schema change, created with `npm run db:migrate:new -- <name>`; never edit a migration that has already been merged.
+- Every migration defines both `-- migrate:up` and `-- migrate:down`.
 - Add foreign key constraints and indexes for every join column.
 - If a migration changes existing data, add a note at the top of the PR describing the manual migration step needed for existing deployments.
 
@@ -836,7 +850,7 @@ cd backend
 DB_HOST=127.0.0.1 DB_USER=root DB_PASSWORD=... npm run test:integration
 ```
 
-The suite provisions a throwaway `staff_scheduler_itest` database from `init.sql`, seeds minimal fixtures, exercises login/logout (including JTI revocation), `POST /api/assignments`, the user directory and the dashboard aggregates, then drops the database. It is excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside the e2e job, which already provides a MySQL service.
+The suite provisions a throwaway `staff_scheduler_itest` database from the migration chain, seeds minimal fixtures, exercises login/logout (including JTI revocation), `POST /api/assignments`, the user directory and the dashboard aggregates, then drops the database. It is excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside the e2e job, which already provides a MySQL service.
 
 ### Workforce simulation harness
 
@@ -932,7 +946,7 @@ Everything. A single process with a pool of 10 connections is more than sufficie
 
 **What still works**
 
-- Single MySQL instance handles this load. A schedule query joining `schedules → shifts → shift_assignments → users` with proper indexes (all join columns are indexed in `init.sql`) executes well under 100 ms.
+- Single MySQL instance handles this load. A schedule query joining `schedules → shifts → shift_assignments → users` with proper indexes (all join columns are indexed in the schema) executes well under 100 ms.
 - Horizontal scaling is not yet needed; stateless JWT means it is possible at any point.
 - OR-Tools optimization is infrequent enough that serialized spawns are acceptable.
 

@@ -394,9 +394,9 @@ StaffScheduler/
 │   │   ├── services/              # business logic (per-feature service)
 │   │   ├── optimization/          # OR-Tools bridge
 │   │   └── types/
-│   ├── database/init.sql          # schema source of truth
+│   ├── db/migrations/             # schema source of truth (dbmate SQL migrations)
 │   ├── scripts/
-│   │   ├── init-database.ts       # schema bootstrap
+│   │   ├── db-migrate.ts          # dbmate wrapper (builds DATABASE_URL from DB_* env)
 │   │   └── seed-demo.ts           # idempotent demo seed
 │   └── openapi/openapi.json       # API contract (canonical)
 ├── frontend/                      # React + TypeScript SPA

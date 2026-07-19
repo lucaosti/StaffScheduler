@@ -204,8 +204,21 @@ jobs:
           done
           echo "mysql did not become ready"; exit 1
 
-      - name: Initialize database schema
-        run: mysql -h 127.0.0.1 -uroot -pdemo1234 staff_scheduler < backend/database/init.sql
+      - name: Apply database migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql://root:demo1234@127.0.0.1:3306/staff_scheduler
+        run: |
+          npx dbmate --no-dump-schema up
+          npx dbmate --no-dump-schema status
+
+      - name: Verify down migrations (rollback + reapply)
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql://root:demo1234@127.0.0.1:3306/staff_scheduler
+        run: |
+          npx dbmate --no-dump-schema rollback
+          npx dbmate --no-dump-schema up
 
       - name: Backend integration tests (real MySQL)
         working-directory: backend
