@@ -69,6 +69,42 @@ const _isBlacklisted = (jti: string): boolean => {
   return true;
 };
 
+// Optional per-user auth-context cache (permissions, roles, org scope).
+// Disabled by default (TTL = 0): every request resolves fresh from the DB so
+// role/permission changes take effect immediately. Deployments that accept a
+// bounded staleness window can set AUTH_PERMISSION_CACHE_TTL_MS to cut the
+// ~6 queries this middleware otherwise issues per authenticated request.
+const AUTH_CACHE_MAX_ENTRIES = 10_000;
+const _authContextCache = new Map<number, { user: User; expiresAt: number }>();
+
+const _getCachedAuthContext = (userId: number): User | null => {
+  const ttl = config.auth.permissionCacheTtlMs;
+  if (ttl <= 0) return null;
+  const entry = _authContextCache.get(userId);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    _authContextCache.delete(userId);
+    return null;
+  }
+  // Shallow copy so per-request mutations never leak into the cache.
+  return { ...entry.user };
+};
+
+const _setCachedAuthContext = (userId: number, user: User): void => {
+  const ttl = config.auth.permissionCacheTtlMs;
+  if (ttl <= 0) return;
+  if (_authContextCache.size >= AUTH_CACHE_MAX_ENTRIES) {
+    const firstKey = _authContextCache.keys().next().value;
+    if (firstKey !== undefined) _authContextCache.delete(firstKey);
+  }
+  _authContextCache.set(userId, { user: { ...user }, expiresAt: Date.now() + ttl });
+};
+
+/** Drops a user's cached auth context (call after changing their grants). */
+export const invalidateAuthContext = (userId: number): void => {
+  _authContextCache.delete(userId);
+};
+
 // Extend Express Request to include user and token JTI
 declare module 'express-serve-static-core' {
   interface Request {
@@ -157,6 +193,13 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     if (isNaN(userId) || userId <= 0) {
       return res.status(401).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'Invalid token payload' } });
     }
+
+    const cachedUser = _getCachedAuthContext(userId);
+    if (cachedUser) {
+      req.user = cachedUser;
+      return next();
+    }
+
     const user = await userService.getUserById(userId);
     if (!user || !user.isActive) {
       return res.status(401).json({
@@ -185,6 +228,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // Empty array is the common case — no extra work when no scoped delegations exist.
     user.delegationScopes = await rbac.getEffectiveDelegationScopes(userId);
 
+    _setCachedAuthContext(userId, user);
     req.user = user;
 
     logger.debug('User authenticated', { userId: user.id });

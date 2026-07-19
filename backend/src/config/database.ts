@@ -42,6 +42,7 @@ class Database {
       waitForConnections: true,
       connectionLimit: config.database.connectionLimit,
       queueLimit: config.database.queueLimit,
+      connectTimeout: config.database.connectTimeout,
     });
   }
 
@@ -66,7 +67,9 @@ class Database {
    */
   async getConnection(): Promise<mysql.PoolConnection> {
     return this.pool.getConnection();
-  }  /**
+  }
+
+  /**
    * Test Database Connection
    * 
    * Validates database connectivity by sending a ping command.
