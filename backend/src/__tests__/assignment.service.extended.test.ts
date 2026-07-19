@@ -93,10 +93,9 @@ describe('AssignmentService.createAssignment guards', () => {
 
   it('throws when shift is full', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([
-      [shiftRow({ current_assignments: 5, max_staff: 5 })],
-      null,
-    ]);
+    conn.execute
+      .mockResolvedValueOnce([[shiftRow({ max_staff: 5 })], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ current_assignments: 5 }], null]); // COUNT
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /maximum capacity/
@@ -107,6 +106,7 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
       .mockResolvedValueOnce([[], null]);
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
@@ -115,22 +115,23 @@ describe('AssignmentService.createAssignment guards', () => {
   });
 
   it('throws on conflicting assignment', async () => {
-    const { pool, conn, execute } = makePool();
+    const { pool, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([[shiftRow()], null]) // shift
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null]); // user
-    execute.mockResolvedValueOnce([
-      [
-        {
-          id: 1,
-          shift_date: '2026-05-01',
-          start_time: '08:00',
-          end_time: '16:00',
-          department_name: 'D',
-        },
-      ],
-      null,
-    ]);
+      .mockResolvedValueOnce([[shiftRow()], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 1,
+            shift_date: '2026-05-01',
+            start_time: '08:00',
+            end_time: '16:00',
+            department_name: 'D',
+          },
+        ],
+        null,
+      ]); // checkConflicts (runs on the transaction connection)
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /conflicting assignment/
@@ -138,11 +139,11 @@ describe('AssignmentService.createAssignment guards', () => {
   });
 
   it('throws when user not available', async () => {
-    const { pool, conn, execute } = makePool();
+    const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null]);
-    execute
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null])
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[{ id: 99 }], null]); // availability hit
     const svc = new AssignmentService(pool);
@@ -152,15 +153,15 @@ describe('AssignmentService.createAssignment guards', () => {
   });
 
   it('throws when missing required skills', async () => {
-    const { pool, conn, execute } = makePool();
+    const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null])
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[], null]) // checkConflicts
+      .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[{ skill_id: 1 }, { skill_id: 2 }], null]) // shift_skills
       .mockResolvedValueOnce([[{ skill_id: 1 }], null]); // user_skills (missing one)
-    execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /required skills/
@@ -172,14 +173,14 @@ describe('AssignmentService.createAssignment guards', () => {
       ok: false,
       violations: [{ code: 'REST', message: 'Insufficient rest' }],
     });
-    const { pool, conn, execute } = makePool();
+    const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null])
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[], null]) // checkConflicts
+      .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[], null]); // no required skills
-    execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /Compliance violation/
@@ -199,14 +200,14 @@ describe('AssignmentService.createAssignment guards', () => {
         ],
       }),
     }));
-    const { pool, conn, execute } = makePool();
+    const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null])
-      .mockResolvedValueOnce([[], null]);
-    execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[], null]) // checkConflicts
+      .mockResolvedValueOnce([[], null]) // availability
+      .mockResolvedValueOnce([[], null]); // no required skills
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /Policy violation/
@@ -216,14 +217,14 @@ describe('AssignmentService.createAssignment guards', () => {
   it('inserts and returns assignment on success', async () => {
     const { pool, conn, execute } = makePool();
     conn.execute
-      .mockResolvedValueOnce([[shiftRow()], null]) // shift
-      .mockResolvedValueOnce([[{ id: 7, role: 'employee' }], null]) // user
-      .mockResolvedValueOnce([[], null]) // shift_skills empty
-      .mockResolvedValueOnce([{ insertId: 42 }, null]); // INSERT
-    execute
+      .mockResolvedValueOnce([[shiftRow()], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[], null]) // checkAvailability
-      .mockResolvedValueOnce([[assignmentRow({ id: 42 })], null]); // getAssignmentById
+      .mockResolvedValueOnce([[], null]) // shift_skills empty
+      .mockResolvedValueOnce([{ insertId: 42 }, null]); // INSERT
+    execute.mockResolvedValueOnce([[assignmentRow({ id: 42 })], null]); // getAssignmentById
     const svc = new AssignmentService(pool);
     const r = await svc.createAssignment({ shiftId: 10, userId: 7 } as never);
     expect(r.id).toBe(42);
@@ -484,21 +485,21 @@ describe('AssignmentService.checkUserAvailability', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as Tuple);
     const svc = new AssignmentService(pool);
-    expect(await svc.checkUserAvailability(7, '2026-05-01', '08:00', '16:00')).toBe(true);
+    expect(await svc.checkUserAvailability(7, '2026-05-01')).toBe(true);
   });
 
   it('returns false when row present', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[{ id: 1 }], null] as Tuple);
     const svc = new AssignmentService(pool);
-    expect(await svc.checkUserAvailability(7, '2026-05-01', '08:00', '16:00')).toBe(false);
+    expect(await svc.checkUserAvailability(7, '2026-05-01')).toBe(false);
   });
 
   it('bubbles DB errors', async () => {
     const { pool, execute } = makePool();
     execute.mockRejectedValueOnce(new Error('boom'));
     const svc = new AssignmentService(pool);
-    await expect(svc.checkUserAvailability(7, '2026-05-01', '08:00', '16:00')).rejects.toThrow(
+    await expect(svc.checkUserAvailability(7, '2026-05-01')).rejects.toThrow(
       /boom/
     );
   });

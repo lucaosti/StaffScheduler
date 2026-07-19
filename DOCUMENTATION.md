@@ -167,7 +167,7 @@ POST /api/auth/logout      blacklists the JTI and clears the cookie
 
 JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry. The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
 
-**Two-factor authentication**: when an account has TOTP enabled (`POST /api/auth/2fa/setup` + `/enable`), login additionally requires `totpCode` — a current TOTP code or an unused recovery code. A password-valid login without the code answers 401 `TOTP_REQUIRED`; a wrong code answers 401 `TOTP_INVALID`. Disabling 2FA (`POST /api/auth/2fa/disable`) likewise requires a valid code.
+**Two-factor authentication**: when an account has TOTP enabled (`POST /api/auth/2fa/setup` + `/enable`), login additionally requires `totpCode` — a current TOTP code or an unused recovery code. A password-valid login without the code answers 401 `TOTP_REQUIRED`; a wrong code answers 401 `TOTP_INVALID`. Disabling 2FA (`POST /api/auth/2fa/disable`) likewise requires a valid code. Accepted TOTP codes are single-use: the matched time-step counter is stored in `users.totp_last_counter` with a compare-and-set update, so an intercepted code cannot be replayed within its validity window; recovery-code consumption uses the same compare-and-set pattern.
 
 ### Core endpoints (summary)
 
@@ -224,7 +224,7 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
 
 ```
-permissions  — fixed catalog of capability codes (32 codes, cannot be added at runtime)
+permissions  — fixed catalog of capability codes (cannot be added at runtime)
 roles        — configurable named bundles (Administrator, Manager, Employee + any custom)
 role_permissions — M:N, which permissions a role grants
 user_roles   — user ↔ role grant, optionally scoped to an org-unit subtree, optionally time-bound
@@ -260,6 +260,8 @@ if (!userHasPermission(req.user, 'schedule.publish')) { ... }
 5. Calls `RbacService.computeAllowedOrgUnitIds(roles)` — `null` (full access) or subtree IDs
 6. Attaches `user.permissions`, `user.roles`, `user.allowedOrgUnitIds` to `req.user`
 
+By default this resolution runs on **every request**, so grants and revocations apply immediately. Deployments that accept a bounded staleness window can set `AUTH_PERMISSION_CACHE_TTL_MS` (default `0` = off) to cache the resolved auth context per user for that many milliseconds; role-grant endpoints call `invalidateAuthContext(userId)` so changes made through the API still apply immediately on the serving instance.
+
 ### Org-unit scoping
 
 A role granted with `user_roles.scope_org_unit_id = X` limits the user to data within org unit X and its descendants. Affected list endpoints: `GET /employees`, `GET /schedules`, `GET /shifts`. `GET /schedules/:id` returns 403 for out-of-scope resources.
@@ -285,9 +287,10 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `timeoff.approve` | Approve time-off |
 | `shiftswap.approve` | Approve shift swaps |
 | `preferences.manage` | Manage preferences |
-| `report.read` | Reports |
-| `audit.read` | Audit logs |
+| `report.read` | Reports (also gates the dashboard's monthly labor cost) |
+| `audit.read` | Audit logs (including the dashboard recent-activity feed) |
 | `user.read` / `user.manage` | User accounts |
+| `user.read_all` | List the complete, unscoped user directory (Administrator only by default; managers without it get a department-scoped list) |
 | `settings.manage` | System settings + module toggles |
 | `role.manage` | Role and permission management |
 | `responsibility.read` / `responsibility.manage` | View / manage responsibility matrix |
@@ -723,12 +726,16 @@ Feature requests are welcome — describe the use case, not just the solution.
 |---|---|
 | Permission-based RBAC (no hardcoded roles) | Roles are customer data. Hard-wiring `admin`/`manager`/`employee` prevents multi-tier hierarchies. `user_roles` grants are scoped and time-bound, supporting org-unit subtree access and temporary elevation. |
 | JWT in httpOnly cookie + JTI blacklist | The cookie prevents XSS from stealing the token. The `jti` claim in each token enables server-side revocation on logout via an in-memory `Map<jti, expiresAt>` with lazy TTL expiry — lightweight and sufficient for single-instance deployments. |
+| Auth cookie is `SameSite=Strict` | The SPA's HTML shell is public and all authenticated calls are same-site fetches, so Strict costs nothing and closes the residual CSRF window Lax leaves for top-level GET navigations. |
+| Single MySQL pool per process | `src/index.ts` reuses the pool owned by the `database` singleton (`config/database.ts`) instead of creating a second one, so the configured `DB_POOL_LIMIT` is the real ceiling against MySQL. |
+| Overnight shifts are rejected at validation | Conflict detection, hour accounting and the dashboard aggregates all assume a shift starts and ends on the same calendar day. Zod time schemas enforce `startTime < endTime` so the invariant is explicit at the boundary instead of silently violated downstream. |
 | Hard cutover (no backward-compat shim) | The 3-role ENUM was the root of every hardcoded check. A migration shim would perpetuate the pattern. The seeded bootstrap roles (Administrator/Manager/Employee) reproduce prior behaviour without any shim. |
 | `requireModule` returns 404 | A 401 leaks that the route exists. 404 is the correct response when an entire feature is absent; no information is disclosed. |
 | In-process module cache | Module state changes infrequently. A per-request DB lookup for a static flag is wasteful. Cache invalidation on `setEnabled` is a single line. |
 | `AuditLogService.write` swallows errors | An audit write failure must never block a business operation. The audit log is observability, not a transaction requirement. |
 | `WITH RECURSIVE` CTE for org-unit subtrees | Fetches the entire subtree in one query. No N+1. Depth is bounded by the org tree (typically < 10 levels). |
 | `approval_matrix` preserved alongside `approval_workflows` | Removing it would break existing service tests and the `policies` route that still calls `ApprovalMatrixService`. A future PR can migrate these callers and drop the legacy table. |
+| Deliberate major-version holds: express 4, helmet 7, express-rate-limit 7, jest 29, dotenv 16 | All are actively maintained with zero known vulnerabilities (`npm audit` gate in CI). Their next majors are API-breaking (e.g. Express 5 changes wildcard routing) with no security payoff today; upgrades should be dedicated PRs, not drive-by bumps. ESLint, by contrast, was EOL on v8 and has been migrated to v9 flat config. |
 
 ---
 
@@ -804,6 +811,30 @@ CI job: `Frontend e2e (Playwright)` in `.github/workflows/ci.yml`. Boots a `mysq
 | `auth.spec.ts` | Admin and manager sign in and reach the dashboard |
 | `schedule.spec.ts` | Admin creates a schedule via the UI |
 | `theme.spec.ts` | Theme toggle cycles between light and dark |
+
+### Backend integration tests (real MySQL)
+
+The mocked unit suites cannot catch drift between service SQL and the actual schema, so `backend/src/__tests__/integration/` runs the real Express app against a real MySQL server:
+
+```bash
+cd backend
+DB_HOST=127.0.0.1 DB_USER=root DB_PASSWORD=... npm run test:integration
+```
+
+The suite provisions a throwaway `staff_scheduler_itest` database from `init.sql`, seeds minimal fixtures, exercises login/logout (including JTI revocation), `POST /api/assignments`, the user directory and the dashboard aggregates, then drops the database. It is excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside the e2e job, which already provides a MySQL service.
+
+### Workforce simulation harness
+
+`backend/scripts/simulation/` contains a database-level simulation harness that complements the Playwright UI smoke tests:
+
+```bash
+cd backend
+npm run sim:run        # one full simulation against the configured database
+npm run sim:campaign   # many simulations, each on a freshly created database
+```
+
+- `sim:run` simulates a whole organization in rolling rounds: employee actors file time-off / employee-loan / shift-swap requests, manager actors decide or delegate every pending approval, the period schedule is generated with the real `AutoScheduleService`, and every outcome is verified against actual database state plus the production `ComplianceEngine`.
+- `sim:campaign` fans out N runs over parallel lanes. Each run derives its org structure, pacing, and approval-authorization model deterministically from `--baseSeed`, and gets a fresh per-lane database (drop, re-create, schema init, demo seed). Requires root credentials via `DB_ROOT_PASSWORD` (or `MYSQL_ROOT_PASSWORD`). Results land in `backend/scripts/simulation/output/campaign-<timestamp>/` (`run-XX.log` per run plus `summary.log`); the exit code is non-zero if any run reports a verification failure.
 
 ---
 

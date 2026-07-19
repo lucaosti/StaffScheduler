@@ -1,17 +1,26 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
+/** Anything that can run a prepared statement — a pool or a transaction connection. */
+type SqlExecutor = Pick<Pool, 'execute'>;
+
 export class AssignmentValidator {
   constructor(private pool: Pool) {}
 
+  /**
+   * Returns the user's overlapping assignments on the given date.
+   * Pass the transaction `connection` as `executor` when the check must see
+   * (and be serialized with) uncommitted rows of the surrounding transaction.
+   */
   async checkConflicts(
     userId: number,
     date: string,
     startTime: string,
-    endTime: string
+    endTime: string,
+    executor: SqlExecutor = this.pool
   ): Promise<any[]> {
     try {
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
+      const [rows] = await executor.execute<RowDataPacket[]>(
         `SELECT
           sa.id, s.date as shift_date, s.start_time, s.end_time,
           d.name as department_name
@@ -42,14 +51,17 @@ export class AssignmentValidator {
     }
   }
 
+  /**
+   * Returns true when the user has no unavailability window covering `date`.
+   * Unavailability is tracked per calendar day, so no time-of-day arguments.
+   */
   async checkUserAvailability(
     userId: number,
     date: string,
-    _startTime: string,
-    _endTime: string
+    executor: SqlExecutor = this.pool
   ): Promise<boolean> {
     try {
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
+      const [rows] = await executor.execute<RowDataPacket[]>(
         `SELECT id FROM user_unavailability
          WHERE user_id = ?
            AND ? BETWEEN start_date AND end_date

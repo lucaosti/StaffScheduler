@@ -13,6 +13,12 @@ RUN npm ci
 # Copy source code
 COPY . .
 
+# Vite bakes env vars at build time, so the API base must arrive as a build
+# arg (a runtime env on the nginx container would be ignored). The relative
+# default works with the nginx /api proxy on any host.
+ARG REACT_APP_API_URL=/api
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+
 # Build the application for production
 RUN npm run build
 

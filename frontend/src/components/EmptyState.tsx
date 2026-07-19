@@ -24,7 +24,7 @@ const EmptyState: React.FC<Props> = ({ icon, title, message, action }) => (
   <div className="card">
     <div className="card-body text-center py-5">
       {icon && (
-        <i className={`bi ${icon} text-muted`} style={{ fontSize: '3rem' }}></i>
+        <i className={`bi ${icon} text-muted`} style={{ fontSize: '3rem' }} aria-hidden="true"></i>
       )}
       <h5 className={icon ? 'mt-3' : undefined}>{title}</h5>
       {message && <p className="text-muted mb-0">{message}</p>}

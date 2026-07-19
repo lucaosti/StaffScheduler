@@ -8,9 +8,12 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { config } from '../config';
 import { database } from '../config/database';
 import { logger } from '../config/logger';
+
+// Single source of truth for the service version. Works from both src/ (ts-node)
+// and dist/ (compiled) since the relative position to package.json is the same.
+const { version: SERVICE_VERSION } = require('../../package.json') as { version: string };
 
 const router = Router();
 
@@ -28,20 +31,15 @@ router.get('/', async (_req: Request, res: Response) => {
   try {
     const dbHealthy = await database.isHealthy();
 
+    // Unauthenticated endpoint: expose only what a load balancer needs.
+    // Environment name, uptime and process metrics are internal details
+    // that would otherwise leak to anyone who can reach the API.
     const healthCheck = {
       status: dbHealthy ? 'healthy' : 'degraded',
       timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-      version: '1.0.0',
-      environment: config.server.env,
+      version: SERVICE_VERSION,
       services: {
         database: dbHealthy ? 'connected' : 'disconnected',
-        memory: {
-          used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
-          total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
-          unit: 'MB'
-        },
-        cpu: process.cpuUsage()
       }
     };
 

@@ -27,12 +27,11 @@ export class AssignmentService {
     try {
       await connection.beginTransaction();
 
+      // Lock the shift row for the duration of the transaction so two
+      // concurrent assignment requests for the same shift serialize on the
+      // capacity check instead of both reading the same pre-insert count.
       const [shiftRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT s.*, COUNT(DISTINCT sa.id) as current_assignments
-        FROM shifts s
-        LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
-        WHERE s.id = ?
-        GROUP BY s.id`,
+        'SELECT * FROM shifts WHERE id = ? FOR UPDATE',
         [assignmentData.shiftId]
       );
 
@@ -40,10 +39,18 @@ export class AssignmentService {
 
       const shift = shiftRows[0];
 
-      if (shift.current_assignments >= shift.max_staff) throw new Error('Shift is already at maximum capacity');
+      const [countRows] = await connection.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS current_assignments
+           FROM shift_assignments
+          WHERE shift_id = ? AND status IN ('pending', 'confirmed')`,
+        [assignmentData.shiftId]
+      );
+      const currentAssignments = Number((countRows[0] as any).current_assignments);
+
+      if (currentAssignments >= shift.max_staff) throw new Error('Shift is already at maximum capacity');
 
       const [userRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id, role FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+        'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
         [assignmentData.userId]
       );
 
@@ -53,7 +60,8 @@ export class AssignmentService {
         assignmentData.userId,
         shift.date,
         shift.start_time,
-        shift.end_time
+        shift.end_time,
+        connection
       );
 
       if (conflicts.length > 0) {
@@ -63,8 +71,7 @@ export class AssignmentService {
       const isAvailable = await this.validator.checkUserAvailability(
         assignmentData.userId,
         shift.date,
-        shift.start_time,
-        shift.end_time
+        connection
       );
 
       if (!isAvailable) throw new Error('User is not available during this time');
@@ -372,8 +379,8 @@ export class AssignmentService {
     return this.validator.checkConflicts(userId, date, startTime, endTime);
   }
 
-  async checkUserAvailability(userId: number, date: string, startTime: string, endTime: string): Promise<boolean> {
-    return this.validator.checkUserAvailability(userId, date, startTime, endTime);
+  async checkUserAvailability(userId: number, date: string): Promise<boolean> {
+    return this.validator.checkUserAvailability(userId, date);
   }
 
   // ── Delegated to AssignmentOrchestrator ───────────────────────────────────

@@ -226,7 +226,8 @@ export interface DashboardStats {
   todayShifts: number;
   pendingApprovals: number;
   monthlyHours: number;
-  monthlyCost: number;
+  /** Labor cost for the month; null when the caller lacks `report.read`. */
+  monthlyCost: number | null;
   coverageRate: number;
   employeeSatisfaction: number;
 }

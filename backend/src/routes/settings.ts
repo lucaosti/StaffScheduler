@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
-import { authenticate, userHasPermission } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody, validateParams } from '../middleware/validation';
 import { updateCurrencyBody, updateTimePeriodBody, updateSettingValueBody, categoryParam, categoryKeyParam } from '../schemas';
 import { logger } from '../config/logger';
@@ -25,8 +25,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   const router = Router();
   const settingsService = new SystemSettingsService(pool);
 
-  // Get all system settings
-  router.get('/', authenticate, async (_req, res) => {
+  // Get all system settings. Full-catalog reads are for the admin settings
+  // screen; regular users only need the dedicated /currency and /time-period
+  // reads below, which stay open to any authenticated user.
+  router.get('/', authenticate, requirePermission('settings.manage'), async (_req, res) => {
     try {
       const settings = await settingsService.getAllSettings();
 
@@ -44,7 +46,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get settings by category
-  router.get('/category/:category', authenticate, validateParams(categoryParam), async (_req, res) => {
+  router.get('/category/:category', authenticate, requirePermission('settings.manage'), validateParams(categoryParam), async (_req, res) => {
     try {
       const { category } = res.locals.params;
       const settings = await settingsService.getSettingsByCategory(category);
@@ -157,7 +159,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   });
 
   // Get specific setting value
-  router.get('/:category/:key', authenticate, validateParams(categoryKeyParam), async (_req, res) => {
+  router.get('/:category/:key', authenticate, requirePermission('settings.manage'), validateParams(categoryKeyParam), async (_req, res) => {
     try {
       const { category, key } = res.locals.params;
       const value = await settingsService.getSetting(category, key);

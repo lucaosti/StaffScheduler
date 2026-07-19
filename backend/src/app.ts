@@ -20,10 +20,11 @@ import { config } from './config';
 import { logger } from './config/logger';
 import { requestId } from './middleware/requestContext';
 import { requestLogger } from './middleware/requestLogger';
+import { resolveTenant } from './middleware/tenant';
 
 import { createAuthRouter } from './routes/auth';
 import { createUsersRouter } from './routes/users';
-import dashboardRoutes from './routes/dashboard';
+import { createDashboardRouter } from './routes/dashboard';
 import { createEmployeesRouter } from './routes/employees';
 import { createShiftsRouter } from './routes/shifts';
 import { createSchedulesRouter } from './routes/schedules';
@@ -108,8 +109,17 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
         // (curl, container healthchecks, server-to-server). CORS only guards
         // browser cross-origin access, so these are always allowed.
         if (!origin) return callback(null, true);
-        if (config.server.env === 'development' && (origin.includes('localhost') || origin.includes('127.0.0.1'))) {
-          return callback(null, true);
+        if (config.server.env === 'development') {
+          // Match on the parsed hostname, not a substring: "localhost.evil.com"
+          // must not pass. Unparseable origins fall through to the exact match.
+          try {
+            const { hostname } = new URL(origin);
+            if (hostname === 'localhost' || hostname === '127.0.0.1') {
+              return callback(null, true);
+            }
+          } catch {
+            /* fall through to the exact-origin check */
+          }
         }
         if (origin === config.cors.origin) return callback(null, true);
         return callback(new Error('Not allowed by CORS'));
@@ -152,6 +162,12 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+  // Resolve the tenant for every API request (F13). Requests without an
+  // X-Tenant-Id header fall back to the default tenant, so single-tenant
+  // deployments are unaffected; an explicit unknown/inactive tenant is
+  // rejected up front instead of leaking into per-service filtering later.
+  app.use('/api', resolveTenant(pool));
+
   // Mount all routers under both the legacy /api prefix and the canonical /api/v1 prefix.
   // During the transition period both prefixes are active. A future PR will drop /api/* and
   // install 308 redirects once all clients have migrated to /api/v1/*.
@@ -162,7 +178,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/auth/2fa`, createTwoFactorRouter(pool));
     app.use(`${prefix}/auth`, createAuthRouter(pool));
     app.use(`${prefix}/users`, createUsersRouter(pool));
-    app.use(`${prefix}/dashboard`, dashboardRoutes);
+    app.use(`${prefix}/dashboard`, createDashboardRouter(pool));
     app.use(`${prefix}/employees`, createEmployeesRouter(pool));
     app.use(`${prefix}/departments`, createDepartmentsRouter(pool));
     app.use(`${prefix}/shifts`, createShiftsRouter(pool));

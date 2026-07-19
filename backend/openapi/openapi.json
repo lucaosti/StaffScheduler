@@ -20,7 +20,7 @@
     },
     {
       "url": "http://localhost:3001/api",
-      "description": "Local development (legacy \u2014 will be removed)"
+      "description": "Local development (legacy — will be removed)"
     }
   ],
   "components": {
@@ -1797,7 +1797,7 @@
           "Auth"
         ],
         "summary": "Confirm and enable 2FA",
-        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes \u2014 store them safely.",
+        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.",
         "requestBody": {
           "required": true,
           "content": {
@@ -1981,7 +1981,7 @@
             "description": "Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TOTP_REQUIRED`), or wrong 2FA code (`TOTP_INVALID`)."
           },
           "429": {
-            "description": "Login throttled \u2014 too many failed attempts."
+            "description": "Login throttled — too many failed attempts."
           }
         }
       }
@@ -2171,7 +2171,7 @@
           "Calendar"
         ],
         "summary": "Personal iCalendar feed",
-        "description": "Returns an iCal feed for the user identified by `token`. No JWT required \u2014 pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
+        "description": "Returns an iCal feed for the user identified by `token`. No JWT required — pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
         "security": [],
         "parameters": [
           {
@@ -2630,8 +2630,15 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Audit module disabled."
           }
-        }
+        },
+        "description": "Last audit-log entries. Guarded exactly like /audit-logs: requires the `audit` module enabled for the caller's organization and the `audit.read` permission."
       }
     },
     "/dashboard/departments": {
@@ -2658,12 +2665,13 @@
         "summary": "Aggregated dashboard statistics",
         "responses": {
           "200": {
-            "description": "Stats (total staff, shifts today, coverage, etc.)."
+            "description": "Stats (total staff, shifts today, coverage, monthly hours/cost, etc.). `monthlyCost` is null without `report.read`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
-        }
+        },
+        "description": "Aggregate counters for the landing dashboard. `monthlyCost` (labor cost derived from hourly rates) is only computed for callers holding `report.read`; for other users it is `null`."
       }
     },
     "/dashboard/upcoming-shifts": {
@@ -3675,7 +3683,7 @@
           "System"
         ],
         "summary": "Health check",
-        "description": "Returns database connectivity status. No authentication required.",
+        "description": "Returns database connectivity status, service version and timestamp. No authentication required; process metrics are intentionally not exposed.",
         "security": [],
         "responses": {
           "200": {
@@ -3693,6 +3701,9 @@
                       "type": "string"
                     },
                     "timestamp": {
+                      "type": "string"
+                    },
+                    "version": {
                       "type": "string"
                     }
                   }
@@ -3729,7 +3740,7 @@
           "Import"
         ],
         "summary": "Bulk import employees from CSV/JSON",
-        "description": "Admin only. Idempotent by email \u2014 existing employees are updated.",
+        "description": "Admin only. Idempotent by email — existing employees are updated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -4821,7 +4832,7 @@
           "Org Units"
         ],
         "summary": "List members of an org unit with display details",
-        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position \u2014 used by the org-chart view and the structure-decision delegate picker.",
+        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position — used by the org-chart view and the structure-decision delegate picker.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -6759,8 +6770,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "description": "Full settings catalog. Requires the `settings.manage` permission; regular users read /settings/currency and /settings/time-period instead."
       }
     },
     "/settings/category/{category}": {
@@ -8153,7 +8168,7 @@
           "Users"
         ],
         "summary": "List users",
-        "description": "Returns all users. Requires authentication; filter by role or active status.",
+        "description": "Returns the user directory. Callers holding `user.read_all` get the complete, unscoped list; everyone else receives only users in departments they manage.",
         "parameters": [
           {
             "name": "role",
@@ -8879,7 +8894,7 @@
           "Pending Approvals"
         ],
         "summary": "Structure head keeps a decision for themselves",
-        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent \u2014 a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
+        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent — a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
         "security": [
           {
             "bearerAuth": []
@@ -9015,7 +9030,7 @@
           "Pending Approvals"
         ],
         "summary": "Chain of command for a decision",
-        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure \u2014 not just whoever is authorized to decide it.",
+        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure — not just whoever is authorized to decide it.",
         "security": [
           {
             "bearerAuth": []

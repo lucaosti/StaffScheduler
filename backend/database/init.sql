@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS users (
     totp_secret VARCHAR(64) NULL,
     totp_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     totp_recovery_codes TEXT NULL,
+    -- Last accepted TOTP time-step counter. Rejecting counters <= this value
+    -- prevents replay of an intercepted code within its validity window.
+    totp_last_counter BIGINT NULL,
     -- Organization name for per-org module override resolution.
     -- Matches organization_name in organization_module_overrides.
     -- NULL = no org-specific module overrides apply (global defaults used).
@@ -939,6 +942,7 @@ INSERT IGNORE INTO permissions (code, resource, action, description) VALUES
 ('report.read',       'report',    'read',    'View reports and analytics'),
 ('audit.read',        'audit',     'read',    'View audit logs'),
 ('user.read',         'user',      'read',    'View user accounts and the directory'),
+('user.read_all',     'user',      'read_all','List and search the complete, unscoped user directory'),
 ('user.manage',       'user',      'manage',  'Create, update and delete user accounts and assign roles'),
 ('settings.manage',   'settings',  'manage',  'Edit system settings'),
 ('role.manage',           'role',            'manage',  'Create roles and assign permissions to them'),
