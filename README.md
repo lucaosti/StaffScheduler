@@ -385,7 +385,11 @@ service. The Python entry point is
 ## Project layout
 
 ```
-StaffScheduler/
+StaffScheduler/                    # npm workspaces monorepo (single root lockfile)
+├── packages/
+│   └── shared/                    # @staff-scheduler/shared — Zod schemas & domain
+│                                  # types: the single source of truth for the API
+│                                  # contract, imported by backend and frontend
 ├── backend/                       # Express + TypeScript REST API
 │   ├── src/
 │   │   ├── config/                # database / logger

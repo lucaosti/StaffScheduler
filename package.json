@@ -3,10 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "npm run build --workspace @staff-scheduler/shared"
   },
   "devDependencies": {
     "husky": "^9.1.7",
     "lint-staged": "^17.0.7"
-  }
+  },
+  "workspaces": [
+    "backend",
+    "frontend",
+    "packages/*"
+  ]
 }

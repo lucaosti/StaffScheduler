@@ -1,4 +1,11 @@
 {
-  "backend/src/**/*.ts": ["backend/node_modules/.bin/eslint --config backend/eslint.config.js --fix"],
-  "frontend/src/**/*.{ts,tsx}": ["frontend/node_modules/.bin/eslint --config frontend/eslint.config.js --fix"]
+  "backend/src/**/*.ts": [
+    "node_modules/.bin/eslint --config backend/eslint.config.js --fix"
+  ],
+  "frontend/src/**/*.{ts,tsx}": [
+    "node_modules/.bin/eslint --config frontend/eslint.config.js --fix"
+  ],
+  "packages/shared/src/**/*.ts": [
+    "node_modules/.bin/eslint --config backend/eslint.config.js --fix"
+  ]
 }

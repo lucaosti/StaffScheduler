@@ -53,8 +53,10 @@ services:
   # Backend API Service
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      # Root context: the workspaces lockfile and packages/shared live at the
+      # repo root (see backend/Dockerfile for the full rationale).
+      context: .
+      dockerfile: backend/Dockerfile
       target: production
     container_name: staff_scheduler_backend
     restart: unless-stopped
@@ -96,8 +98,8 @@ services:
   # Frontend Service
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/Dockerfile
       target: production
       args:
         # Vite bakes this at build time. Relative default: the frontend nginx
