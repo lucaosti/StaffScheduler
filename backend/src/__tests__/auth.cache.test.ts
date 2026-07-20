@@ -81,3 +81,59 @@ describe('authenticate — auth-context cache', () => {
     expect(UserService.prototype.getUserById).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('authenticate — cache expiry and eviction', () => {
+  it('re-resolves after the TTL elapses (bounded staleness window)', async () => {
+    const app = mountApp();
+    const token = signToken({ userId: 42 });
+
+    await request(app).get('/protected').set('Authorization', `Bearer ${token}`);
+
+    // Jump past the 60s TTL: the cached entry must be treated as dead, not
+    // served stale forever.
+    const realNow = Date.now;
+    const base = realNow();
+    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => base + 61_000);
+    try {
+      await request(app).get('/protected').set('Authorization', `Bearer ${token}`);
+    } finally {
+      nowSpy.mockRestore();
+    }
+
+    expect(UserService.prototype.getUserById).toHaveBeenCalledTimes(2);
+  });
+
+  it('evicts the oldest entry once the cache reaches capacity', async () => {
+    // Drive `authenticate` directly (no HTTP) so filling the 10 000-entry
+    // cache stays fast; each call is just jwt.verify + mocked resolvers.
+    const callAuthenticate = async (userId: number) => {
+      const req = {
+        cookies: { token: signToken({ userId }) },
+        headers: {},
+      } as never;
+      const res = {
+        status: jest.fn().mockReturnThis(),
+        json: jest.fn(),
+      } as never;
+      await new Promise<void>((resolve) => {
+        void authenticate(req, res, () => resolve());
+      });
+    };
+
+    (UserService.prototype.getUserById as jest.Mock).mockImplementation(async (id: number) => ({
+      id,
+      email: `u${id}@x`,
+      isActive: true,
+    }));
+
+    await callAuthenticate(1);
+    // 10 000 more distinct users push user 1 out (FIFO approximation).
+    for (let id = 2; id <= 10_001; id++) {
+      await callAuthenticate(id);
+    }
+
+    (UserService.prototype.getUserById as jest.Mock).mockClear();
+    await callAuthenticate(1);
+    expect(UserService.prototype.getUserById).toHaveBeenCalledTimes(1);
+  }, 120_000);
+});
