@@ -901,3 +901,54 @@ describe('RbacService.getEffectiveDelegationScopes', () => {
     expect(sql).toContain('scope_org_unit_id IS NOT NULL');
   });
 });
+
+describe('RbacService.bulkAssignRole', () => {
+  const makeTxPool = () => {
+    const execute = jest.fn().mockResolvedValue([[], null]);
+    const conn = {
+      execute: jest.fn().mockResolvedValue([{ affectedRows: 1 }, null]),
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    return { pool: { execute, getConnection: jest.fn().mockResolvedValue(conn) } as never, execute, conn };
+  };
+
+  it('short-circuits an empty user list without opening a transaction', async () => {
+    const { pool, conn } = makeTxPool();
+    const result = await new RbacService(pool).bulkAssignRole([], 2, null, null, 1, null);
+    expect(result).toEqual({ assigned: 0 });
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('grants the role to every user in one transaction, then audits after commit', async () => {
+    const { pool, execute, conn } = makeTxPool();
+
+    const result = await new RbacService(pool).bulkAssignRole([5, 6], 2, 3, '2026-12-31', 1, 'seasonal staff');
+
+    expect(result).toEqual({ assigned: 2 });
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.execute.mock.calls[0][1]).toEqual([5, 2, 3, '2026-12-31']);
+    expect(conn.commit).toHaveBeenCalled();
+    // Audit rows are written on the pool AFTER the commit: an audit failure
+    // must never roll back an already-granted role.
+    const auditCalls = execute.mock.calls.filter((c) => String(c[0]).includes('audit_logs'));
+    expect(auditCalls).toHaveLength(2);
+  });
+
+  it('rolls back and rethrows when a grant fails mid-batch', async () => {
+    const { pool, execute, conn } = makeTxPool();
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockRejectedValueOnce(new Error('deadlock'));
+
+    await expect(
+      new RbacService(pool).bulkAssignRole([5, 6], 2, null, null, 1, null)
+    ).rejects.toThrow('deadlock');
+
+    expect(conn.rollback).toHaveBeenCalled();
+    // No audit rows for a failed batch.
+    expect(execute.mock.calls.filter((c) => String(c[0]).includes('audit_logs'))).toHaveLength(0);
+  });
+});
