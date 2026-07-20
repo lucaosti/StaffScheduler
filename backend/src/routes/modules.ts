@@ -9,28 +9,16 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { z } from 'zod';
 import { authenticate, requirePermission, getModuleService } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
-import { moduleEnabledBody, codeParam } from '../schemas';
-
-const codeOrgParams = z.object({
-  code: z.string().min(1).max(60),
-  org: z.string().min(1).max(120),
-});
-
-// Same length bound as codeOrgParams.org: org names are identifiers coming
-// from the URL, so they are validated declaratively like every other param
-// (hand-rolled length checks drifted from the schema once already).
-const orgParam = z.object({
-  org: z.string().min(1).max(120),
-});
-
-const orgOverrideBody = z.object({
-  isEnabled: z.boolean(),
-  justification: z.string().max(1000).nullable().optional(),
-});
+import {
+  moduleEnabledBody,
+  codeParam,
+  codeOrgParams,
+  orgParam,
+  moduleOrgOverrideBody as orgOverrideBody,
+} from '../schemas';
 
 export const createModulesRouter = (_pool: Pool): Router => {
   const router = Router();

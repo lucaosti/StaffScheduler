@@ -16,43 +16,17 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { z } from 'zod';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import {
+  idParam,
+  responsibilityRuleCreateBody as createRuleBody,
+  responsibilityRuleUpdateBody as updateRuleBody,
+  responsibilityRuleBulkBody as bulkBody,
+} from '../schemas';
 import { ResponsibilityRuleService } from '../services/ResponsibilityRuleService';
 import { User } from '../types';
-
-const SUBJECT_TYPES = ['org_unit', 'department', 'role', 'all'] as const;
-
-const createRuleBody = z.object({
-  subjectType: z.enum(SUBJECT_TYPES),
-  subjectId: z.number().int().positive().nullable().optional(),
-  permissionCode: z.string().min(1).max(80),
-  responsibleOrgUnitId: z.number().int().positive(),
-  delegatedToRoleId: z.number().int().positive().nullable().optional(),
-  description: z.string().max(1000).nullable().optional(),
-});
-
-const updateRuleBody = z.object({
-  subjectType: z.enum(SUBJECT_TYPES).optional(),
-  subjectId: z.number().int().positive().nullable().optional(),
-  permissionCode: z.string().min(1).max(80).optional(),
-  responsibleOrgUnitId: z.number().int().positive().optional(),
-  delegatedToRoleId: z.number().int().positive().nullable().optional(),
-  description: z.string().max(1000).nullable().optional(),
-  isActive: z.boolean().optional(),
-});
-
-const bulkBody = z.object({
-  subjectType: z.enum(SUBJECT_TYPES),
-  subjectIds: z.array(z.number().int().positive()).max(200).optional(),
-  permissionCodes: z.array(z.string().min(1).max(80)).min(1).max(50),
-  responsibleOrgUnitId: z.number().int().positive(),
-  delegatedToRoleId: z.number().int().positive().nullable().optional(),
-  description: z.string().max(1000).nullable().optional(),
-});
 
 export const createResponsibilityRulesRouter = (pool: Pool): Router => {
   const router = Router();
