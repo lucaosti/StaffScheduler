@@ -22,11 +22,8 @@ This document is the single reference for architecture, domain model, database s
 14. [Contribution and review process](#14-contribution-and-review-process)
 15. [Security policy](#15-security-policy)
 16. [End-to-end tests](#16-end-to-end-tests)
-17. [Future roadmap](#17-future-roadmap)
-18. [Scalability analysis](#18-scalability-analysis)
-19. [Market benchmark](#19-market-benchmark)
-20. [Feature gap analysis](#20-feature-gap-analysis)
-21. [Recommended architecture evolution](#21-recommended-architecture-evolution)
+17. [Scalability analysis](#17-scalability-analysis)
+18. [Market benchmark](#18-market-benchmark)
 
 ---
 
@@ -752,6 +749,10 @@ Feature requests are welcome — describe the use case, not just the solution.
 
 ---
 
+### Dependency major-version policy
+
+The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and ESLint 8 (the flat-config migration required by ESLint 9+ is pending). Security patches within these majors are applied as they appear.
+
 ## 13. Architectural decisions
 
 | Decision | Rationale |
@@ -870,40 +871,7 @@ npm run sim:campaign   # many simulations, each on a freshly created database
 
 ---
 
-## 17. Future roadmap
-
-The following capabilities are planned but not yet implemented. Pull requests for any of these are welcome — open an issue first to coordinate.
-
-| Capability | Notes |
-|---|---|
-| Mobile app | Native or PWA for employees to view shifts and request swaps on mobile |
-| Real-time shift swap marketplace | Employees can post and claim swaps without manager intervention |
-| Geofencing | GPS/location verification on top of the existing plain clock-in/out (see [7a](#7a-attendance-tracking)) |
-| Predictive demand forecasting | Historical data model to auto-suggest minimum staffing targets |
-| Compliance reporting | Jurisdiction-specific labor rule checks (rest periods, overtime, etc.) |
-| Payroll integration | Export to payroll providers (Gusto, ADP, Workday) |
-| Multi-language / RTL support | i18n for the frontend SPA |
-| SSO / SAML / OAuth2 | Enterprise identity provider federation |
-| Bulk API | Batch endpoints for high-volume integrations |
-| Kiosk / QR clocking | Tablet kiosk mode and QR-code-based clock-in against the existing `POST /api/attendance/clock-in` endpoint |
-
-### Future Work
-
-#### Dependency major-version policy
-
-The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and ESLint 8 (the flat-config migration required by ESLint 9+ is pending). Security patches within these majors are applied as they appear.
-
-#### Express 4 → Express 5
-
-The backend runs Express 4.18.x. Express 5.0 was released in October 2024. Key improvements: native async error propagation (no more wrapping async handlers), updated `path-to-regexp`, and removal of deprecated 4.x APIs. Migration effort is low-to-medium. Recommended trigger: when Express 4 enters security-only maintenance.
-
-#### Dual API prefix cleanup
-
-All routes are mounted under both `/api/*` (legacy) and `/api/v1/*` (canonical) in `src/app.ts`. Once all clients have migrated to `/api/v1/*`, add HTTP 308 redirects from `/api/*` to `/api/v1/*` and drop the legacy prefix.
-
----
-
-## 18. Scalability analysis
+## 17. Scalability analysis
 
 This section evaluates how the current architecture behaves at four scale tiers and identifies the first bottlenecks at each level.
 
@@ -1008,7 +976,7 @@ At this scale the system is no longer a single-server application. The following
 
 ---
 
-## 19. Market benchmark
+## 18. Market benchmark
 
 This section compares Staff Scheduler against the four most comparable market products: **Deputy**, **When I Work**, **Shiftboard**, and **UKG Ready** (the mid-market tier of UKG/Kronos). The comparison covers features relevant to the target segment (shift-based, multi-department SME to lower enterprise).
 
@@ -1045,83 +1013,6 @@ Legend: ✅ Fully supported / ⚠️ Partial or limited / ❌ Not present
 
 ---
 
-## 20. Feature gap analysis
-
-Features are grouped by category:
-
-- **Standard**: present in every commercial workforce scheduling product; buyers expect them by default.
-- **Enterprise**: required by enterprise procurement; absence blocks deals above ~200 seats.
-- **Innovative**: differentiators that drive switching decisions and premium positioning.
-
-| Feature | Category | Business Value | Complexity | Notes |
-|---|---|---|---|---|
-| Mobile app (iOS/Android or PWA) | Standard | High | High | The single highest-impact gap. Employees on shift floors do not have desktop access. A React PWA reuses the existing SPA; a native shell (React Native + Expo) gives push notifications but doubles the surface area. |
-| Self-service shift swap marketplace | Standard | High | Medium | Backend `ShiftSwapService` already handles managed swaps; the gap is employee-facing discovery (open shift board) and peer-to-peer offer/accept flow with compliance guardrails. |
-| Push notifications | Standard | High | Medium | Requires a mobile app or browser push (Web Push API). The current SSE stream is server-initiated but cannot wake a closed browser or mobile app. |
-| Geofencing / GPS clock-in | Standard | Medium | Medium | Plain clock-in/out already exists (`AttendanceService`, see [7a](#7a-attendance-tracking)). This adds a `latitude`/`longitude` field to the existing clock-in payload, validated against a configured geofence polygon — no new endpoints needed. |
-| Time-clock / kiosk mode | Standard | Medium | Medium | A separate restricted-permission view on a shared tablet, reusing the existing `POST /api/attendance/clock-in`/`clock-out` endpoints. Backend already supports role-scoped access. |
-| Reporting dashboard UI | Standard | Medium | Low | The `ReportsService` and `/api/reports` endpoints are complete. The frontend dashboard is a stub. Building charts (e.g., Recharts) on top of existing API responses is straightforward. |
-| SSO / SAML / OAuth2 | Enterprise | High | Medium | Blocks enterprise deals. Passport.js has SAML and OAuth2 strategies. `UserService` would need a federated-identity lookup path alongside local password auth. |
-| Payroll export (ADP, Gusto, Workday) | Enterprise | High | High | Requires per-provider data mapping, OAuth credentials management, and scheduled sync jobs. The `integrations` module is defined but empty. |
-| Webhooks (outbound event push) | Enterprise | High | Medium | Enterprise integrations poll or require push. The `EventBus.ts` service exists as an internal bus; exposing it as tenant-configured HTTP webhooks with retry and signature verification is the gap. |
-| Labor law compliance rules | Enterprise | High | Medium | The `ComplianceEngine.ts` service and `compliance` module exist; jurisdiction-specific rule sets (FLSA, Fair Workweek, EU Working Time Directive) need to be authored and wired. |
-| Per-org-unit rate limiting | Enterprise | Medium | Low | Current rate limiting applies only to the login endpoint. A per-tenant API quota is required for multi-tenant SaaS hardening. |
-| Multi-language / i18n | Enterprise | Medium | High | All UI strings are currently hardcoded in English in React components. Retrofitting i18n (react-i18next) requires extracting every string. |
-| Bulk API (batch endpoints) | Enterprise | Medium | Medium | High-volume integrations (HRIS sync, bulk assignment) require atomic batch operations. The `/api/import` CSV bulk import exists; REST batch endpoints for other resources do not. |
-| Two-factor authentication | Enterprise | Medium | Low | Backend enforcement at login and the frontend challenge step are implemented. The gap is the frontend enrollment flow (QR/secret display, recovery code presentation) and enforcement policy per org unit. |
-| Predictive demand forecasting | Innovative | High | High | The `forecasting` module is registered; `ScheduleOptimizationOrchestrator` handles optimization. Demand forecasting requires a separate ML pipeline ingesting historical assignment data and external signals (sales, footfall). |
-| AI auto-schedule generation (production-ready) | Innovative | High | Medium | OR-Tools CP-SAT optimizer exists; gap is coverage rules refinement, forecast-input integration, and a manager review/override UX. |
-| Shift bidding / preference-based assignment | Innovative | Medium | Medium | Employees rank desired shifts; optimizer uses preferences as soft constraints. Preference weights exist in the CP-SAT model; the employee-facing bidding UI and ranking endpoint are missing. |
-| Fatigue / rest-period analytics | Innovative | Medium | Medium | Track consecutive shifts, rest gaps, and rolling hour windows per employee. Data is in `shift_assignments`; analytics surface and alerting are not built. |
-| Workforce cost simulation | Innovative | Medium | High | What-if cost modeling for different staffing scenarios. Requires a cost model (pay rates per role per time-of-day) and a simulation endpoint separate from the live optimizer. |
-
 ---
 
-## 21. Recommended architecture evolution
-
-The roadmap below is organized in three phases. Each phase is independently deployable and leaves the system in a stable state.
-
-### Phase 1 — Quick wins (0–3 months)
-
-Target: eliminate the most impactful bottlenecks without infrastructure changes; deliver the highest-value missing product surface.
-
-| Item | What to do | Rationale |
-|---|---|---|
-| Permission cache (Redis or in-process LRU) | Add a 5-minute TTL cache in `RbacService.getEffectivePermissions()`. Invalidate on role grant/revoke and delegation events. | Eliminates 2–3 DB queries on every authenticated request. Required before Tier 2 load. |
-| Connection pool tuning | Set `DB_POOL_LIMIT` (controls `connectionLimit`, default 30) and `DB_QUEUE_LIMIT` (controls `queueLimit`, default 100) in `backend/.env`. Raise `DB_POOL_LIMIT` to 30–50 for Tier 2; set `DB_QUEUE_LIMIT` to reject rather than queue indefinitely. | Prevents pool exhaustion under moderate burst. Low-risk change. |
-| Fix N+1 in list endpoints | Audit `GET /employees`, `GET /shifts`, `GET /schedules` for per-row sub-queries. Replace with `JOIN` or a single `IN (...)` query. | Latency on list endpoints grows linearly with result set size without this fix. |
-| Add missing API filters | `GET /assignments`, `GET /audit-logs`, `GET /notifications` lack date-range and status filters that clients need for pagination. | Reduces over-fetching and improves frontend perceived performance. |
-| Two-factor authentication UI | Build the frontend enrollment flow (QR/secret display, recovery code presentation) on top of the existing `/api/auth/2fa` endpoints. | Backend enforcement and the login challenge step exist; enrollment still requires calling the API manually. |
-| Reporting dashboard UI | Build chart components (Recharts) on top of the existing `/api/reports` responses. | High visible value; backend is already complete. |
-| Outbound webhooks (basic) | Add a `webhook_subscriptions` table and a delivery worker that POSTs to registered URLs on key events (schedule published, assignment confirmed). Use `EventBus.ts` as the event source. | Required by integrations; unblocks enterprise evaluation. |
-
-### Phase 2 — Infrastructure and enterprise hardening (3–12 months)
-
-Target: make the system production-ready for 10,000+ users and pass enterprise procurement requirements.
-
-| Item | What to do | Rationale |
-|---|---|---|
-| Redis for permission and module cache | Replace in-process LRU with Redis. Required when running multiple backend instances. | Tier 3 prerequisite; enables horizontal scaling. |
-| Async notification dispatch | Replace synchronous `NotificationService` calls in route handlers with a BullMQ job. The queue worker handles insert, SSE push, and future mobile push. | Removes notification latency from request path; required at Tier 3 notification volumes. |
-| MySQL read replica | Route `ReportsService`, `CalendarService`, and `AuditLogService` SELECTs to a replica pool. | Decouples heavy analytical reads from transactional writes; required at Tier 3 for report query performance. |
-| Horizontal backend scaling | Deploy 2–4 backend instances behind an nginx/ALB load balancer. Stateless by design; only the module cache must be Redis-backed first. | Required at Tier 3 request rates. |
-| OR-Tools optimization queue | Move optimization requests to a BullMQ job; respond immediately with a job ID; poll via `GET /api/schedules/:id/optimization-status`. | Prevents long-running child processes from blocking Express worker threads under concurrent load. |
-| SSO / SAML integration | Implement Passport.js SAML strategy in `createAuthRouter`; add `sso_providers` table for per-org config. | Enterprise deal blocker. |
-| Labor law compliance rules | Author FLSA, Fair Workweek, and EU Working Time Directive rule sets in `ComplianceEngine.ts`. Wire to the existing `compliance` module and approval workflow trigger. | Enterprise deal blocker in regulated industries. |
-| Per-org-unit rate limiting | Extend `express-rate-limit` with a custom store keyed by `req.user.allowedOrgUnitIds[0]` (or org identifier from JWT). | Required for multi-tenant hardening and fair-use enforcement. |
-| Self-service shift swap marketplace | Add an open-shift board endpoint (`GET /api/shift-swap/open`) and an employee claim endpoint. Wire compliance checks in `ShiftSwapService`. | Standard feature; high employee-satisfaction impact. |
-| Mobile PWA | Add `manifest.json`, service worker (Workbox), and offline-capable schedule view to the existing React SPA. Wire Web Push for notifications. | Highest-impact product gap; PWA path avoids native app complexity. |
-
-### Phase 3 — Full enterprise and innovation (12+ months)
-
-Target: position the product as a competitive enterprise platform with AI-driven differentiation.
-
-| Item | What to do | Rationale |
-|---|---|---|
-| Native mobile app (React Native / Expo) | Build a mobile shell using the existing REST API. Add push notifications, geofencing clock-in, biometric auth. | Full native experience; required for field-workforce segments. |
-| Payroll integrations | Build connectors for ADP Workforce Now, Gusto, and Workday. Use the existing `integrations` module toggle. Each connector is a scheduled BullMQ job that maps `shift_assignments` to payroll provider format. | Enterprise deal requirement; significant revenue enabler. |
-| Predictive demand forecasting | Build an ML pipeline (Python, scikit-learn or Prophet) that ingests historical `shift_assignments` and external signals. Expose results as forecast targets that feed into the OR-Tools optimizer as soft-constraint inputs. | Differentiator; reduces overstaffing cost and understaffing risk. |
-| OLAP reporting layer | Set up ClickHouse (or Redshift) fed by MySQL binlog CDC (Debezium). Move `ReportsService` complex aggregations to OLAP queries. | Required at Tier 4; allows ad-hoc analytics without impacting transactional DB. |
-| Workforce cost simulation | Add a cost model (pay rates, overtime multipliers per role) and a simulation endpoint that runs the optimizer against a hypothetical demand scenario without committing assignments. | Premium feature for budget planning and scenario modeling. |
-| Multi-language / i18n | Introduce react-i18next; extract all frontend UI strings; ship English and at least one additional locale. | Required for non-English-speaking markets and enterprise RFPs in the EU. |
-| Fatigue and rest-period analytics | Add a rolling-window analysis job that computes per-employee consecutive-shift counts, rest gaps, and weekly hours. Surface as alerts in the manager dashboard and as a compliance rule in `ComplianceEngine`. | Increasingly required by labor law; differentiator in healthcare and logistics. |
+Planned work is tracked exclusively in [GitHub Issues](https://github.com/lucaosti/StaffScheduler/issues): every capability, refactoring or idea gets a small, atomic issue. This document describes the system as it exists; anything aspirational belongs in an issue, not here.

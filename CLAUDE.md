@@ -154,6 +154,24 @@ The `code` field is required in all error responses.
 - **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`). Do not create additional root-level `.md` files.
 - **Sync docs on every code change**: When adding or modifying an endpoint, update `backend/openapi/openapi.json` and the relevant sections of `DOCUMENTATION.md` in the same PR.
 
+## Workflow (issue-first)
+
+- **No significant change without a GitHub Issue.** Before implementing
+  anything, check whether an adequate issue exists; if not, create one first.
+  Every implementation, refactoring, bugfix or improvement starts from an
+  issue, gets its own branch from main, and lands via a PR that references it
+  (`Closes #n`). The development history must be reconstructable from
+  issues and PRs alone.
+- Issues are small, atomic, well described, and cross-linked when related.
+  New ideas discovered mid-work become new issues, not scope creep.
+- **GitHub Issues only** — do not use GitHub Projects, and remove any
+  reference to them found in docs.
+- Planned/aspirational work never lives in Markdown files: documentation
+  describes the system as it exists; roadmap material belongs in issues.
+- A change is complete only when implementation, tests, documentation and
+  rationale comments (why this design, which alternatives were rejected and
+  why) are all updated together in the same PR.
+
 ## Authoring Rules
 
 - **Single author**: All commits must be authored by `Luca Ostinelli <ostinelliluca2@gmail.com>`. No co-authors, no automated bot signatures.
