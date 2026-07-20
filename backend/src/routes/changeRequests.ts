@@ -20,34 +20,19 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { z } from 'zod';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import {
+  idParam,
+  changeRequestCreateBody as createBody,
+  changeRequestApproveBody as approveBody,
+  changeRequestRejectBody as rejectBody,
+  changeRequestApplyBody as applyBody,
+} from '../schemas';
 import { ChangeRequestService } from '../services/ChangeRequestService';
 import { ConflictError } from '../errors';
 import { User } from '../types';
-
-const createBody = z.object({
-  changeType: z.string().min(1).max(80),
-  targetEntityType: z.string().min(1).max(60),
-  targetEntityId: z.number().int().positive().nullable().optional(),
-  proposedPayload: z.record(z.string(), z.unknown()),
-  justification: z.string().max(2000).nullable().optional(),
-});
-
-const approveBody = z.object({
-  justification: z.string().max(2000).nullable().optional(),
-});
-
-const rejectBody = z.object({
-  rejectionReason: z.string().min(1).max(2000),
-});
-
-const applyBody = z.object({
-  justification: z.string().max(2000).nullable().optional(),
-});
 
 export const createChangeRequestsRouter = (pool: Pool): Router => {
   const router = Router();
