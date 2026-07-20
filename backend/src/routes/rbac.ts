@@ -21,28 +21,20 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { z } from 'zod';
 import { authenticate, requirePermission, invalidateAuthContext } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
-import { idParam, userIdParam, userIdAndRoleIdParam, createRoleBody, updateRoleBody } from '../schemas';
+import {
+  idParam,
+  userIdParam,
+  userIdAndRoleIdParam,
+  createRoleBody,
+  updateRoleBody,
+  assignRoleBody,
+  bulkAssignRoleBody,
+} from '../schemas';
 import { NotFoundError } from '../errors';
-
-const assignRoleBody = z.object({
-  roleId: z.number().int().positive(),
-  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
-  expiresAt: z.string().nullable().optional(),
-  justification: z.string().max(1000).nullable().optional(),
-});
-
-const bulkAssignRoleBody = z.object({
-  roleId: z.number().int().positive(),
-  userIds: z.array(z.number().int().positive()).min(1).max(500),
-  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
-  expiresAt: z.string().nullable().optional(),
-  justification: z.string().max(1000).nullable().optional(),
-});
 
 export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Router } => {
   const rbac = new RbacService(pool);
