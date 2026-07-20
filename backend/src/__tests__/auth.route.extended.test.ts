@@ -172,3 +172,29 @@ describe('POST /api/auth/login — rate limiting', () => {
   });
 });
 
+
+describe('POST /api/auth/logout — server-side revocation', () => {
+  beforeEach(() => {
+    (UserService as jest.MockedClass<typeof UserService>).mockClear();
+    (database.getPool as jest.Mock).mockReturnValue({});
+    (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (RbacService.prototype.computeAllowedOrgUnitIds as jest.Mock) = jest.fn().mockResolvedValue(null);
+    (RbacService.prototype.getEffectiveDelegationScopes as jest.Mock) = jest.fn().mockResolvedValue([]);
+  });
+
+  it('blacklists the token JTI so the same token stops working immediately', async () => {
+    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
+    // A logout only revokes server-side when the token carries a jti — the
+    // login flow always mints one; this pins the revocation wiring itself.
+    const token = signToken({ userId: 7, jti: `logout-test-${Date.now()}` });
+
+    const app = buildApp();
+    const logout = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+    expect(logout.status).toBe(200);
+
+    const replay = await request(app).get('/api/auth/verify').set('Authorization', `Bearer ${token}`);
+    expect(replay.status).toBe(401);
+    expect(replay.body.error.code).toBe('TOKEN_REVOKED');
+  });
+});
