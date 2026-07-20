@@ -26,7 +26,8 @@
     "db:migrate": "npx ts-node scripts/db-migrate.ts up",
     "db:migrate:status": "npx ts-node scripts/db-migrate.ts status",
     "db:migrate:rollback": "npx ts-node scripts/db-migrate.ts rollback",
-    "db:migrate:new": "npx ts-node scripts/db-migrate.ts new"
+    "db:migrate:new": "npx ts-node scripts/db-migrate.ts new",
+    "openapi:generate": "npx ts-node scripts/generate-openapi.ts"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",

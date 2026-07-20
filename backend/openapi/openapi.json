@@ -812,36 +812,89 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "changeType",
-                  "steps"
-                ],
                 "properties": {
-                  "name": {
-                    "type": "string"
-                  },
                   "changeType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "requireAll": {
+                    "type": "boolean"
+                  },
+                  "description": {
                     "type": "string"
                   },
                   "steps": {
+                    "minItems": 1,
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
-                        "order": {
-                          "type": "integer"
+                        "stepOrder": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         },
-                        "approverRole": {
-                          "type": "string"
+                        "approverScope": {
+                          "type": "string",
+                          "enum": [
+                            "policy_owner",
+                            "unit_manager",
+                            "unit_manager_chain",
+                            "company_role",
+                            "company_user"
+                          ]
                         },
-                        "timeoutHours": {
-                          "type": "integer"
+                        "approverRoleId": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "approverUserId": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "autoApproveForOwner": {
+                          "type": "boolean"
+                        },
+                        "escalateAfterHours": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         }
-                      }
+                      },
+                      "required": [
+                        "stepOrder",
+                        "approverScope"
+                      ]
                     }
                   }
-                }
+                },
+                "required": [
+                  "changeType",
+                  "steps"
+                ]
               }
             }
           }
@@ -895,7 +948,81 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "requireAll": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "stepOrder": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "approverScope": {
+                          "type": "string",
+                          "enum": [
+                            "policy_owner",
+                            "unit_manager",
+                            "unit_manager_chain",
+                            "company_role",
+                            "company_user"
+                          ]
+                        },
+                        "approverRoleId": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "approverUserId": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "autoApproveForOwner": {
+                          "type": "boolean"
+                        },
+                        "escalateAfterHours": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "stepOrder",
+                        "approverScope"
+                      ]
+                    }
+                  }
+                }
               }
             }
           }
@@ -1080,21 +1207,29 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "shiftId",
-                  "userId"
-                ],
                 "properties": {
                   "shiftId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "userId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "notes": {
                     "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
                   }
-                }
+                },
+                "required": [
+                  "shiftId",
+                  "userId"
+                ]
               }
             }
           }
@@ -1146,21 +1281,37 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "shiftId",
-                  "userIds"
-                ],
                 "properties": {
-                  "shiftId": {
-                    "type": "integer"
-                  },
-                  "userIds": {
+                  "assignments": {
+                    "minItems": 1,
                     "type": "array",
                     "items": {
-                      "type": "integer"
+                      "type": "object",
+                      "properties": {
+                        "shiftId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "userId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "notes": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "shiftId",
+                        "userId"
+                      ]
                     }
                   }
-                }
+                },
+                "required": [
+                  "assignments"
+                ]
               }
             }
           }
@@ -1334,6 +1485,10 @@
                   },
                   "notes": {
                     "type": "string"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
                   }
                 }
               }
@@ -1765,15 +1920,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "code"
-                ],
                 "properties": {
                   "code": {
                     "type": "string",
-                    "description": "TOTP or recovery code."
+                    "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "code"
+                ]
               }
             }
           }
@@ -1804,15 +1959,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "code"
-                ],
                 "properties": {
                   "code": {
                     "type": "string",
-                    "pattern": "^[0-9]{6}$"
+                    "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "code"
+                ]
               }
             }
           }
@@ -1877,15 +2032,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "code"
-                ],
                 "properties": {
                   "code": {
                     "type": "string",
-                    "description": "TOTP or recovery code."
+                    "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "code"
+                ]
               }
             }
           }
@@ -1917,27 +2072,24 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "email",
-                  "password"
-                ],
                 "properties": {
                   "email": {
                     "type": "string",
-                    "format": "email"
+                    "minLength": 1
                   },
                   "password": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "totpCode": {
                     "type": "string",
-                    "description": "TOTP or recovery code; required only when 2FA is enabled."
+                    "minLength": 1
                   }
-                }
-              },
-              "example": {
-                "email": "admin@example.com",
-                "password": "secret"
+                },
+                "required": [
+                  "email",
+                  "password"
+                ]
               }
             }
           }
@@ -2335,34 +2487,53 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "changeType",
-                  "targetEntityType",
-                  "proposedPayload"
-                ],
                 "properties": {
                   "changeType": {
                     "type": "string",
+                    "minLength": 1,
                     "maxLength": 80
                   },
                   "targetEntityType": {
                     "type": "string",
+                    "minLength": 1,
                     "maxLength": 60
                   },
                   "targetEntityId": {
-                    "type": "integer",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "proposedPayload": {
                     "type": "object",
-                    "additionalProperties": true
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
                   },
                   "justification": {
-                    "type": "string",
-                    "maxLength": 2000,
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "changeType",
+                  "targetEntityType",
+                  "proposedPayload"
+                ]
               }
             }
           }
@@ -2434,14 +2605,22 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "justification": {
-                    "type": "string",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -2485,14 +2664,22 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "justification": {
-                    "type": "string",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -2577,16 +2764,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "rejectionReason"
-                ],
                 "properties": {
                   "rejectionReason": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 2000
                   }
-                }
+                },
+                "required": [
+                  "rejectionReason"
+                ]
               }
             }
           }
@@ -2718,34 +2905,52 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "delegateUserId",
-                  "permissionKeys",
-                  "startDate",
-                  "endDate"
-                ],
                 "properties": {
-                  "delegateUserId": {
-                    "type": "integer"
+                  "delegateeId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
-                  "permissionKeys": {
+                  "permissionCodes": {
+                    "minItems": 1,
                     "type": "array",
                     "items": {
                       "type": "string"
                     }
                   },
-                  "startDate": {
+                  "expiresAt": {
                     "type": "string",
-                    "format": "date-time"
+                    "minLength": 1
                   },
-                  "endDate": {
-                    "type": "string",
-                    "format": "date-time"
+                  "scopeOrgUnitId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
-                  "reason": {
-                    "type": "string"
+                  "justification": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "delegateeId",
+                  "permissionCodes",
+                  "expiresAt"
+                ]
               }
             }
           }
@@ -2848,20 +3053,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name"
-                ],
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "managerId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "description": {
                     "type": "string"
                   },
                   "orgUnitId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
-                }
+                },
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -2923,16 +3136,24 @@
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "description": {
                     "type": "string"
                   },
-                  "isActive": {
-                    "type": "boolean"
+                  "managerId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "orgUnitId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "isActive": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -3021,17 +3242,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "userId"
-                ],
                 "properties": {
                   "userId": {
-                    "type": "integer"
-                  },
-                  "role": {
-                    "type": "string"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
-                }
+                },
+                "required": [
+                  "userId"
+                ]
               }
             }
           }
@@ -3097,12 +3317,17 @@
                 "properties": {
                   "vcf": {
                     "type": "string",
-                    "description": "Raw .vcf text."
+                    "minLength": 1
                   },
                   "defaultPassword": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 8
                   }
-                }
+                },
+                "required": [
+                  "vcf",
+                  "defaultPassword"
+                ]
               }
             }
           }
@@ -3182,33 +3407,28 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "fields"
-                ],
                 "properties": {
                   "fields": {
                     "type": "array",
                     "items": {
                       "type": "object",
-                      "required": [
-                        "key",
-                        "value"
-                      ],
                       "properties": {
                         "key": {
                           "type": "string",
-                          "pattern": "^[A-Za-z0-9_-]{1,64}$"
+                          "minLength": 1
                         },
-                        "value": {
-                          "type": "string"
-                        },
-                        "isPublic": {
-                          "type": "boolean"
-                        }
-                      }
+                        "value": {}
+                      },
+                      "required": [
+                        "key",
+                        "value"
+                      ]
                     }
                   }
-                }
+                },
+                "required": [
+                  "fields"
+                ]
               }
             }
           }
@@ -3397,27 +3617,68 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "userId"
-                ],
                 "properties": {
-                  "userId": {
-                    "type": "integer"
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
-                  "employeeNumber": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "firstName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "roleIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "employeeId": {
+                    "type": "string"
+                  },
+                  "phone": {
                     "type": "string"
                   },
                   "position": {
                     "type": "string"
                   },
-                  "departmentId": {
-                    "type": "integer"
-                  },
                   "hourlyRate": {
                     "type": "number",
                     "minimum": 0
+                  },
+                  "departmentIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "skillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
                   }
-                }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "firstName",
+                  "lastName"
+                ]
               }
             }
           }
@@ -3505,14 +3766,57 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email",
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
+                  },
+                  "firstName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "lastName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "roleIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "employeeId": {
+                    "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
                   "position": {
                     "type": "string"
                   },
                   "hourlyRate": {
-                    "type": "number"
+                    "type": "number",
+                    "minimum": 0
                   },
                   "isActive": {
                     "type": "boolean"
+                  },
+                  "organizationName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -3599,14 +3903,22 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "skillId"
-                ],
                 "properties": {
                   "skillId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "proficiencyLevel": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
                   }
-                }
+                },
+                "required": [
+                  "skillId",
+                  "proficiencyLevel"
+                ]
               }
             }
           }
@@ -3747,17 +4059,20 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "employees"
-                ],
                 "properties": {
-                  "employees": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    }
+                  "csv": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "defaultPassword": {
+                    "type": "string",
+                    "minLength": 8
                   }
-                }
+                },
+                "required": [
+                  "csv",
+                  "defaultPassword"
+                ]
               }
             }
           }
@@ -3788,17 +4103,15 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "shifts"
-                ],
                 "properties": {
-                  "shifts": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    }
+                  "csv": {
+                    "type": "string",
+                    "minLength": 1
                   }
-                }
+                },
+                "required": [
+                  "csv"
+                ]
               }
             }
           }
@@ -3855,14 +4168,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "isEnabled"
-                ],
                 "properties": {
                   "isEnabled": {
                     "type": "boolean"
+                  },
+                  "justification": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "isEnabled"
+                ]
               }
             }
           }
@@ -3950,17 +4274,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "isEnabled"
-                ],
                 "properties": {
                   "isEnabled": {
                     "type": "boolean"
                   },
                   "justification": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "isEnabled"
+                ]
               }
             }
           }
@@ -4196,41 +4528,56 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "departmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "scheduleId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minStaff": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxStaff": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                },
                 "required": [
                   "departmentId",
                   "date",
                   "startTime",
                   "endTime"
-                ],
-                "properties": {
-                  "departmentId": {
-                    "type": "integer"
-                  },
-                  "scheduleId": {
-                    "type": "integer"
-                  },
-                  "date": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "startTime": {
-                    "type": "string"
-                  },
-                  "endTime": {
-                    "type": "string"
-                  },
-                  "minStaff": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "maxStaff": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "notes": {
-                    "type": "string"
-                  }
-                }
+                ]
               }
             }
           }
@@ -4286,7 +4633,49 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "minStaff": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxStaff": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "assigned",
+                      "cancelled"
+                    ]
+                  }
+                }
               }
             }
           }
@@ -4352,17 +4741,26 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "userId"
-                ],
                 "properties": {
                   "userId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "notes": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "userId"
+                ]
               }
             }
           }
@@ -4468,31 +4866,41 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "userId",
-                  "targetOrgUnitId",
-                  "startDate",
-                  "endDate"
-                ],
                 "properties": {
                   "userId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
-                  "targetOrgUnitId": {
-                    "type": "integer"
+                  "fromOrgUnitId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "toOrgUnitId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "reason": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "userId",
+                  "fromOrgUnitId",
+                  "toOrgUnitId",
+                  "startDate",
+                  "endDate"
+                ]
               }
             }
           }
@@ -4536,6 +4944,29 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4594,6 +5025,29 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -4624,18 +5078,42 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name"
-                ],
                 "properties": {
                   "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
                     "type": "string"
                   },
                   "parentId": {
-                    "type": "integer",
-                    "description": "Null for root units."
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "managerUserId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -4718,10 +5196,45 @@
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "parentId": {
-                    "type": "integer"
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "managerUserId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "isActive": {
+                    "type": "boolean"
                   }
                 }
               }
@@ -4802,7 +5315,20 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "isPrimary": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "userId"
+                ]
               }
             }
           }
@@ -5054,36 +5580,49 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "key",
-                  "label",
-                  "value",
-                  "valueType"
-                ],
                 "properties": {
-                  "key": {
-                    "type": "string"
-                  },
-                  "label": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "value": {},
-                  "valueType": {
+                  "scopeType": {
                     "type": "string",
                     "enum": [
-                      "integer",
-                      "float",
-                      "boolean",
-                      "string"
+                      "global",
+                      "org_unit",
+                      "schedule",
+                      "shift_template"
                     ]
                   },
-                  "category": {
-                    "type": "string"
+                  "scopeId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "policyKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "policyValue": {},
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "scopeType",
+                  "policyKey",
+                  "policyValue"
+                ]
               }
             }
           }
@@ -5138,7 +5677,56 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "approverScope": {
+                    "type": "string",
+                    "enum": [
+                      "policy_owner",
+                      "unit_manager",
+                      "unit_manager_chain",
+                      "company_role",
+                      "company_user"
+                    ]
+                  },
+                  "approverRoleId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "approverUserId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "autoApproveForOwner": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
               }
             }
           }
@@ -5188,18 +5776,37 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "policyId",
-                  "reason"
-                ],
                 "properties": {
                   "policyId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "targetType": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "targetId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "reason": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "policyId",
+                  "targetType",
+                  "targetId"
+                ]
               }
             }
           }
@@ -5240,6 +5847,29 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -5298,6 +5928,29 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -5314,18 +5967,22 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "shiftId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
                 "required": [
                   "userId",
                   "shiftId"
-                ],
-                "properties": {
-                  "userId": {
-                    "type": "integer"
-                  },
-                  "shiftId": {
-                    "type": "integer"
-                  }
-                }
+                ]
               }
             }
           }
@@ -5377,10 +6034,42 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "label": {
-                    "type": "string"
+                  "scopeType": {
+                    "type": "string",
+                    "enum": [
+                      "global",
+                      "org_unit",
+                      "schedule",
+                      "shift_template"
+                    ]
                   },
-                  "value": {},
+                  "scopeId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "policyKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "policyValue": {},
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "isActive": {
                     "type": "boolean"
                   }
@@ -5452,15 +6141,43 @@
                 "type": "object",
                 "properties": {
                   "maxHoursPerWeek": {
-                    "type": "integer"
+                    "type": "number",
+                    "exclusiveMinimum": 0
                   },
                   "minHoursPerWeek": {
-                    "type": "integer"
+                    "type": "number",
+                    "minimum": 0
                   },
                   "maxConsecutiveDays": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": 14
+                  },
+                  "preferredShifts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "avoidShifts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -5530,7 +6247,48 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "maxHoursPerWeek": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "minHoursPerWeek": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "maxConsecutiveDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14
+                  },
+                  "preferredShifts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "avoidShifts": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
               }
             }
           }
@@ -5723,11 +6481,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "subjectType",
-                  "permissionCode",
-                  "responsibleOrgUnitId"
-                ],
                 "properties": {
                   "subjectType": {
                     "type": "string",
@@ -5739,26 +6492,56 @@
                     ]
                   },
                   "subjectId": {
-                    "type": "integer",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "permissionCode": {
                     "type": "string",
+                    "minLength": 1,
                     "maxLength": 80
                   },
                   "responsibleOrgUnitId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "delegatedToRoleId": {
-                    "type": "integer",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "description": {
-                    "type": "string",
-                    "maxLength": 1000,
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "subjectType",
+                  "permissionCode",
+                  "responsibleOrgUnitId"
+                ]
               }
             }
           }
@@ -5883,6 +6666,7 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
@@ -5898,24 +6682,49 @@
                     ]
                   },
                   "subjectId": {
-                    "type": "integer",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "permissionCode": {
                     "type": "string",
+                    "minLength": 1,
                     "maxLength": 80
                   },
                   "responsibleOrgUnitId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "delegatedToRoleId": {
-                    "type": "integer",
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "description": {
-                    "type": "string",
-                    "maxLength": 1000,
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "isActive": {
                     "type": "boolean"
@@ -6020,23 +6829,24 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name"
-                ],
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "description": {
                     "type": "string"
                   },
-                  "permissionKeys": {
+                  "permissionCodes": {
                     "type": "array",
                     "items": {
                       "type": "string"
                     }
                   }
-                }
+                },
+                "required": [
+                  "name"
+                ]
               }
             }
           }
@@ -6109,7 +6919,50 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "roleId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "scopeOrgUnitId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "expiresAt": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "justification": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "roleId"
+                ]
               }
             }
           }
@@ -6214,12 +7067,13 @@
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "description": {
                     "type": "string"
                   },
-                  "permissionKeys": {
+                  "permissionCodes": {
                     "type": "array",
                     "items": {
                       "type": "string"
@@ -6357,31 +7211,42 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "departmentId",
-                  "startDate",
-                  "endDate"
-                ],
                 "properties": {
                   "name": {
-                    "type": "string"
-                  },
-                  "departmentId": {
-                    "type": "integer"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "departmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "templateIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
                   },
                   "notes": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "name",
+                  "startDate",
+                  "endDate",
+                  "departmentId"
+                ]
               }
             }
           }
@@ -6501,20 +7366,31 @@
                 "type": "object",
                 "properties": {
                   "name": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
-                  },
-                  "notes": {
-                    "type": "string"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "status": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "published",
+                      "archived"
+                    ]
+                  },
+                  "departmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "notes": {
                     "type": "string"
                   }
                 }
@@ -6616,24 +7492,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  }
+                },
                 "required": [
                   "name",
                   "startDate",
                   "endDate"
-                ],
-                "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "startDate": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "endDate": {
-                    "type": "string",
-                    "format": "date"
-                  }
-                }
+                ]
               }
             }
           }
@@ -6830,15 +7707,18 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "currency"
-                ],
                 "properties": {
                   "currency": {
                     "type": "string",
-                    "pattern": "^[A-Z]{3}$"
+                    "enum": [
+                      "EUR",
+                      "USD"
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "currency"
+                ]
               }
             }
           }
@@ -6883,9 +7763,6 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "timePeriod"
-                ],
                 "properties": {
                   "timePeriod": {
                     "type": "string",
@@ -6896,7 +7773,10 @@
                       "yearly"
                     ]
                   }
-                }
+                },
+                "required": [
+                  "timePeriod"
+                ]
               }
             }
           }
@@ -6983,14 +7863,14 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "value"
-                ],
                 "properties": {
                   "value": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "value"
+                ]
               }
             }
           }
@@ -7081,21 +7961,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "requesterAssignmentId",
-                  "targetAssignmentId"
-                ],
                 "properties": {
                   "requesterAssignmentId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "targetAssignmentId": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "notes": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "requesterAssignmentId",
+                  "targetAssignmentId"
+                ]
               }
             }
           }
@@ -7164,6 +8048,29 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -7220,6 +8127,29 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -7299,42 +8229,65 @@
             "application/json": {
               "schema": {
                 "type": "object",
+                "properties": {
+                  "scheduleId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "departmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "minStaff": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxStaff": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "templateId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "requiredSkillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "notes": {
+                    "type": "string"
+                  }
+                },
                 "required": [
                   "scheduleId",
                   "departmentId",
                   "date",
                   "startTime",
-                  "endTime"
-                ],
-                "properties": {
-                  "scheduleId": {
-                    "type": "integer"
-                  },
-                  "departmentId": {
-                    "type": "integer"
-                  },
-                  "date": {
-                    "type": "string",
-                    "format": "date"
-                  },
-                  "startTime": {
-                    "type": "string"
-                  },
-                  "endTime": {
-                    "type": "string"
-                  },
-                  "minStaff": {
-                    "type": "integer",
-                    "default": 1
-                  },
-                  "maxStaff": {
-                    "type": "integer",
-                    "default": 1
-                  },
-                  "notes": {
-                    "type": "string"
-                  }
-                }
+                  "endTime",
+                  "minStaff",
+                  "maxStaff"
+                ]
               }
             }
           }
@@ -7436,28 +8389,46 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "startTime",
-                  "endTime"
-                ],
                 "properties": {
                   "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
                     "type": "string"
+                  },
+                  "departmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "startTime": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
                   },
                   "endTime": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
                   },
                   "minStaff": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "maxStaff": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
-                }
+                },
+                "required": [
+                  "name",
+                  "departmentId",
+                  "startTime",
+                  "endTime",
+                  "minStaff",
+                  "maxStaff"
+                ]
               }
             }
           }
@@ -7513,7 +8484,34 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "startTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "endTime": {
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
+                  },
+                  "minStaff": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "maxStaff": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                }
               }
             }
           }
@@ -7604,22 +8602,52 @@
                 "properties": {
                   "date": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "startTime": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
                   },
                   "endTime": {
-                    "type": "string"
+                    "type": "string",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d(:[0-5]\\d)?$"
                   },
                   "minStaff": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "maxStaff": {
-                    "type": "integer"
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "open",
+                      "assigned",
+                      "confirmed",
+                      "cancelled"
+                    ]
+                  },
+                  "requiredSkillIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
                   },
                   "notes": {
-                    "type": "string"
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -7786,18 +8814,14 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "startDate",
-                  "endDate"
-                ],
                 "properties": {
                   "startDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "endDate": {
                     "type": "string",
-                    "format": "date"
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
                   },
                   "type": {
                     "type": "string",
@@ -7806,13 +8830,16 @@
                       "sick",
                       "personal",
                       "other"
-                    ],
-                    "default": "other"
+                    ]
                   },
                   "reason": {
                     "type": "string"
                   }
-                }
+                },
+                "required": [
+                  "startDate",
+                  "endDate"
+                ]
               }
             }
           }
@@ -7879,6 +8906,29 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -7928,6 +8978,22 @@
           "409": {
             "description": "An open attendance record already exists for this user."
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -7957,6 +9023,29 @@
           },
           "409": {
             "description": "Record is already clocked out or not owned by the caller."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -8089,6 +9178,29 @@
           "409": {
             "description": "Record is not pending or still clocked in."
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -8120,6 +9232,29 @@
           "409": {
             "description": "Record is not pending."
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -8135,14 +9270,22 @@
           }
         ],
         "requestBody": {
-          "required": false,
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "reason": {
-                    "type": "string"
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -8233,31 +9376,30 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "email",
-                  "password",
-                  "firstName",
-                  "lastName"
-                ],
                 "properties": {
                   "email": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
                   },
                   "password": {
                     "type": "string",
-                    "minLength": 1
+                    "minLength": 8
                   },
                   "firstName": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "lastName": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "roleIds": {
                     "type": "array",
                     "items": {
-                      "type": "integer"
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "employeeId": {
@@ -8276,16 +9418,26 @@
                   "departmentIds": {
                     "type": "array",
                     "items": {
-                      "type": "integer"
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "skillIds": {
                     "type": "array",
                     "items": {
-                      "type": "integer"
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     }
                   }
-                }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "firstName",
+                  "lastName"
+                ]
               }
             }
           }
@@ -8349,16 +9501,55 @@
                 "properties": {
                   "email": {
                     "type": "string",
-                    "format": "email"
+                    "format": "email",
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 8
                   },
                   "firstName": {
-                    "type": "string"
+                    "type": "string",
+                    "minLength": 1
                   },
                   "lastName": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "roleIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "employeeId": {
                     "type": "string"
+                  },
+                  "phone": {
+                    "type": "string"
+                  },
+                  "position": {
+                    "type": "string"
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "minimum": 0
                   },
                   "isActive": {
                     "type": "boolean"
+                  },
+                  "organizationName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 120
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -8428,41 +9619,60 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "roleId",
-                  "userIds"
-                ],
                 "properties": {
                   "roleId": {
                     "type": "integer",
-                    "description": "ID of the role to assign."
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   },
                   "userIds": {
-                    "type": "array",
-                    "items": {
-                      "type": "integer"
-                    },
                     "minItems": 1,
                     "maxItems": 500,
-                    "description": "List of user IDs to assign the role to."
+                    "type": "array",
+                    "items": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
                   },
                   "scopeOrgUnitId": {
-                    "type": "integer",
-                    "nullable": true,
-                    "description": "Optional org-unit scope."
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "expiresAt": {
-                    "type": "string",
-                    "format": "date-time",
-                    "nullable": true,
-                    "description": "Optional expiry."
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "justification": {
-                    "type": "string",
-                    "maxLength": 1000,
-                    "nullable": true
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "roleId",
+                  "userIds"
+                ]
               }
             }
           }
@@ -8608,17 +9818,69 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "rules"
-                ],
                 "properties": {
-                  "rules": {
+                  "subjectType": {
+                    "type": "string",
+                    "enum": [
+                      "org_unit",
+                      "department",
+                      "role",
+                      "all"
+                    ]
+                  },
+                  "subjectIds": {
+                    "maxItems": 200,
                     "type": "array",
                     "items": {
-                      "type": "object"
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
                     }
+                  },
+                  "permissionCodes": {
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 80
+                    }
+                  },
+                  "responsibleOrgUnitId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "delegatedToRoleId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 1000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
-                }
+                },
+                "required": [
+                  "subjectType",
+                  "permissionCodes",
+                  "responsibleOrgUnitId"
+                ]
               }
             }
           }
@@ -8805,15 +10067,22 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "note": {
-                    "type": "string",
-                    "nullable": true,
-                    "description": "Optional decision note recorded in audit log."
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -8857,15 +10126,22 @@
           }
         ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
                   "note": {
-                    "type": "string",
-                    "nullable": true,
-                    "description": "Optional rejection note."
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -8953,15 +10229,16 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "targetUserId"
-                ],
                 "properties": {
                   "targetUserId": {
                     "type": "integer",
-                    "description": "Must be a member of the structure the decision is assigned to."
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
                   }
-                }
+                },
+                "required": [
+                  "targetUserId"
+                ]
               }
             }
           }

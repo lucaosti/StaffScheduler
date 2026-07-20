@@ -417,3 +417,101 @@ export const importVcardBody = z.object({
   vcf: z.string().min(1, 'vcf is required'),
   defaultPassword: z.string().min(8, 'defaultPassword must be at least 8 characters'),
 });
+
+// ─── Schemas promoted from route files (single-source contract) ──────────────
+// These lived next to their routers until the OpenAPI spec became generated
+// from this package: every request shape the API accepts must be defined
+// here so the generator (backend/scripts/generate-openapi.ts) and both apps
+// read one truth. Route files import them, optionally under local aliases.
+
+export const codeOrgParams = z.object({
+  code: z.string().min(1).max(60),
+  org: z.string().min(1).max(120),
+});
+
+// Same length bound as codeOrgParams.org: org names are URL identifiers,
+// validated declaratively like every other param (a hand-rolled length check
+// drifted from the schema once already).
+export const orgParam = z.object({
+  org: z.string().min(1).max(120),
+});
+
+export const moduleOrgOverrideBody = z.object({
+  isEnabled: z.boolean(),
+  justification: z.string().max(1000).nullable().optional(),
+});
+
+export const changeRequestCreateBody = z.object({
+  changeType: z.string().min(1).max(80),
+  targetEntityType: z.string().min(1).max(60),
+  targetEntityId: z.number().int().positive().nullable().optional(),
+  proposedPayload: z.record(z.string(), z.unknown()),
+  justification: z.string().max(2000).nullable().optional(),
+});
+
+export const changeRequestApproveBody = z.object({
+  justification: z.string().max(2000).nullable().optional(),
+});
+
+export const changeRequestRejectBody = z.object({
+  rejectionReason: z.string().min(1).max(2000),
+});
+
+export const changeRequestApplyBody = z.object({
+  justification: z.string().max(2000).nullable().optional(),
+});
+
+export const assignRoleBody = z.object({
+  roleId: z.number().int().positive(),
+  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  justification: z.string().max(1000).nullable().optional(),
+});
+
+export const bulkAssignRoleBody = z.object({
+  roleId: z.number().int().positive(),
+  userIds: z.array(z.number().int().positive()).min(1).max(500),
+  scopeOrgUnitId: z.number().int().positive().nullable().optional(),
+  expiresAt: z.string().nullable().optional(),
+  justification: z.string().max(1000).nullable().optional(),
+});
+
+export const RESPONSIBILITY_SUBJECT_TYPES = ['org_unit', 'department', 'role', 'all'] as const;
+
+export const responsibilityRuleCreateBody = z.object({
+  subjectType: z.enum(RESPONSIBILITY_SUBJECT_TYPES),
+  subjectId: z.number().int().positive().nullable().optional(),
+  permissionCode: z.string().min(1).max(80),
+  responsibleOrgUnitId: z.number().int().positive(),
+  delegatedToRoleId: z.number().int().positive().nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+export const responsibilityRuleUpdateBody = z.object({
+  subjectType: z.enum(RESPONSIBILITY_SUBJECT_TYPES).optional(),
+  subjectId: z.number().int().positive().nullable().optional(),
+  permissionCode: z.string().min(1).max(80).optional(),
+  responsibleOrgUnitId: z.number().int().positive().optional(),
+  delegatedToRoleId: z.number().int().positive().nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const responsibilityRuleBulkBody = z.object({
+  subjectType: z.enum(RESPONSIBILITY_SUBJECT_TYPES),
+  subjectIds: z.array(z.number().int().positive()).max(200).optional(),
+  permissionCodes: z.array(z.string().min(1).max(80)).min(1).max(50),
+  responsibleOrgUnitId: z.number().int().positive(),
+  delegatedToRoleId: z.number().int().positive().nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+});
+
+export const pendingApprovalDelegateBody = z.object({
+  targetUserId: z.coerce.number().int().positive(),
+});
+
+// approve/reject accept an optional free-text note; validated so the
+// generated OpenAPI documents exactly what the API enforces.
+export const pendingApprovalDecisionBody = z.object({
+  note: z.string().max(2000).nullable().optional(),
+});
