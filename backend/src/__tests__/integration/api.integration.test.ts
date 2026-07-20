@@ -28,6 +28,7 @@ import bcrypt from 'bcrypt';
 import request from 'supertest';
 import type { Express } from 'express';
 import { migrationUpSql } from '../helpers/schema';
+import { expectErrorEnvelope, expectSuccessEnvelope } from '../helpers/openapiEnvelope';
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -131,6 +132,8 @@ describe('auth (real DB)', () => {
       .send({ email: ADMIN_EMAIL, password: 'wrong-password' });
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('LOGIN_FAILED');
+    // Contract: a real error response must match the documented ApiError shape.
+    expectErrorEnvelope(res.body);
   });
 
   it('logs in, serves an authenticated request, and revokes on logout', async () => {
@@ -138,6 +141,8 @@ describe('auth (real DB)', () => {
 
     const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
     expect(me.status).toBe(200);
+    // Contract: a real success response must carry the { success, data } envelope.
+    expectSuccessEnvelope(me.body);
     expect(me.body.data.email).toBe(ADMIN_EMAIL);
     expect(me.body.data.permissions).toContain('assignment.manage');
 
