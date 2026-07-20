@@ -1,5 +1,6 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment } from '../types';
+import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 
 export class AssignmentOrchestrator {
@@ -50,7 +51,7 @@ export class AssignmentOrchestrator {
         WHERE id = ? AND status = 'pending'`,
         [id]
       );
-      if (result.affectedRows === 0) throw new Error('Assignment not found or already confirmed');
+      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already confirmed');
       await connection.commit();
       logger.info(`Assignment confirmed successfully: ${id}`);
       const confirmed = await this.fetchById(id);
@@ -75,7 +76,7 @@ export class AssignmentOrchestrator {
         WHERE id = ? AND status IN ('pending', 'confirmed')`,
         [id]
       );
-      if (result.affectedRows === 0) throw new Error('Assignment not found or already cancelled');
+      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already cancelled');
       await connection.commit();
       logger.info(`Assignment cancelled successfully: ${id}`);
       const cancelled = await this.fetchById(id);
@@ -98,9 +99,9 @@ export class AssignmentOrchestrator {
     const connection = await this.pool.getConnection();
     try {
       const existing = await this.fetchById(id);
-      if (!existing) throw new Error('Assignment not found');
+      if (!existing) throw new NotFoundError('Assignment not found');
       if (existing.status === 'completed') return existing;
-      if (existing.status !== 'confirmed') throw new Error('Only confirmed assignments can be marked as completed');
+      if (existing.status !== 'confirmed') throw new ConflictError('Only confirmed assignments can be marked as completed');
       await connection.execute(
         'UPDATE shift_assignments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         ['completed', id]
@@ -187,7 +188,7 @@ export class AssignmentOrchestrator {
         'SELECT id, date, start_time, end_time, department_id FROM shifts WHERE id = ?',
         [shiftId]
       );
-      if (shiftRows.length === 0) throw new Error('Shift not found');
+      if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
       const shift = shiftRows[0];
       const [userRows] = await connection.execute<RowDataPacket[]>(
         `SELECT DISTINCT u.id AS userId, u.first_name AS firstName, u.last_name AS lastName, u.email

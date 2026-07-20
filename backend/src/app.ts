@@ -18,6 +18,7 @@ import rateLimit from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
 import { config } from './config';
 import { logger } from './config/logger';
+import { errorHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestContext';
 import { requestLogger } from './middleware/requestLogger';
 import { resolveTenant } from './middleware/tenant';
@@ -227,19 +228,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     });
   });
 
-  app.use(
-    (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-      logger.error('Unhandled error:', err);
-      res.status(err.status || 500).json({
-        success: false,
-        error: {
-          code: err.code || 'INTERNAL_ERROR',
-          message:
-            config.server.env === 'production' ? 'An internal error occurred' : err.message,
-        },
-      });
-    }
-  );
+  app.use(errorHandler);
 
   return app;
 }
