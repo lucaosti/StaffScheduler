@@ -14,10 +14,16 @@ import { authenticate, requirePermission, getModuleService } from '../middleware
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
 import { moduleEnabledBody, codeParam } from '../schemas';
-import { logger } from '../config/logger';
 
 const codeOrgParams = z.object({
   code: z.string().min(1).max(60),
+  org: z.string().min(1).max(120),
+});
+
+// Same length bound as codeOrgParams.org: org names are identifiers coming
+// from the URL, so they are validated declaratively like every other param
+// (hand-rolled length checks drifted from the schema once already).
+const orgParam = z.object({
   org: z.string().min(1).max(120),
 });
 
@@ -38,30 +44,22 @@ export const createModulesRouter = (_pool: Pool): Router => {
   router.put('/:code', authenticate, requirePermission('settings.manage'), validateParams(codeParam), validateBody(moduleEnabledBody), asyncHandler(async (req: Request, res: Response) => {
     const { code } = res.locals.params;
     const { isEnabled, justification } = res.locals.body;
-    const updated = await moduleService.setEnabled(code, isEnabled, req.user?.id ?? null, justification ?? null);
+    const updated = await moduleService.setEnabled(code, isEnabled, req.user!.id, justification ?? null);
     res.json({ success: true, data: updated, message: `Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}` });
   }));
 
   // GET /org/:org — list all modules with org-specific overrides applied
-  router.get('/org/:org', authenticate, requirePermission('settings.manage'), asyncHandler(async (req: Request, res: Response) => {
-    const org = req.params.org;
-    if (!org || org.length > 120) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'Invalid org name' } });
-    }
-    try {
-      const modules = await moduleService.listWithOrgOverrides(org);
-      res.json({ success: true, data: modules });
-    } catch (error) {
-      logger.error('Error listing org modules:', error);
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to list org modules' } });
-    }
+  router.get('/org/:org', authenticate, requirePermission('settings.manage'), validateParams(orgParam), asyncHandler(async (_req: Request, res: Response) => {
+    const { org } = res.locals.params;
+    const modules = await moduleService.listWithOrgOverrides(org);
+    res.json({ success: true, data: modules });
   }));
 
   // PUT /:code/org/:org — create or update a per-org module override
   router.put('/:code/org/:org', authenticate, requirePermission('settings.manage'), validateParams(codeOrgParams), validateBody(orgOverrideBody), asyncHandler(async (req: Request, res: Response) => {
     const { code, org } = res.locals.params;
     const { isEnabled, justification } = res.locals.body;
-    const updated = await moduleService.setOrgOverride(code, org, isEnabled, req.user?.id ?? null, justification ?? null);
+    const updated = await moduleService.setOrgOverride(code, org, isEnabled, req.user!.id, justification ?? null);
     res.json({
       success: true,
       data: updated,

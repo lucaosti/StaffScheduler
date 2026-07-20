@@ -6,6 +6,13 @@
  * without standing up the real RBAC tables.
  */
 
+// These lists must mirror the role_permissions seeds in the baseline
+// migration (db/migrations/*_initial_schema.sql) exactly: route tests use
+// them to decide what a given role may do, so a code missing here silently
+// weakens every authorization test for that area (this happened with the
+// attendance.*, responsibility.* and change_request.* codes). When a
+// migration adds a permission or changes a role's grants, update these lists
+// in the same PR.
 export const ALL_PERMISSIONS: string[] = [
   'employee.read', 'employee.manage',
   'schedule.read', 'schedule.manage', 'schedule.publish', 'schedule.optimize',
@@ -21,6 +28,9 @@ export const ALL_PERMISSIONS: string[] = [
   'report.read', 'audit.read',
   'user.read', 'user.read_all', 'user.manage',
   'settings.manage', 'role.manage',
+  'responsibility.read', 'responsibility.manage',
+  'change_request.create', 'change_request.review',
+  'attendance.read', 'attendance.approve',
 ];
 
 export const MANAGER_PERMISSIONS: string[] = [
@@ -37,6 +47,9 @@ export const MANAGER_PERMISSIONS: string[] = [
   'preferences.manage',
   'report.read', 'audit.read',
   'user.read', 'user.manage',
+  'responsibility.read', 'responsibility.manage',
+  'change_request.create', 'change_request.review',
+  'attendance.read', 'attendance.approve',
 ];
 
 export const EMPLOYEE_PERMISSIONS: string[] = [
