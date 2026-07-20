@@ -1,0 +1,18 @@
+{
+  "name": "@staff-scheduler/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Domain types and Zod schemas shared between backend and frontend — the single source of truth for the API contract.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

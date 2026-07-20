@@ -1,44 +1,58 @@
-# Multi-stage build for production optimization
+# Backend image — multi-stage, built from the REPO ROOT context.
+#
+# Why the root context: npm workspaces resolve @staff-scheduler/shared and the
+# single lockfile from the repository root, so a backend-only context can no
+# longer produce a correct node_modules tree. docker-compose passes
+# `context: .` with this file as `dockerfile`.
+#
+# Why --ignore-scripts: the root prepare hook (husky) is dev-only and absent
+# here, and npm runs even linked-workspace prepare hooks during ci — with no
+# devDependencies installed that would fail. Nothing in this tree needs
+# install scripts (bcrypt 6 ships prebuilt bindings, loaded at require time
+# and smoke-tested after the build); @staff-scheduler/shared is compiled by
+# an explicit build step instead.
+
 FROM node:22-alpine AS base
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+# Manifests only: keeps the dependency layer cacheable independent of source.
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/
+COPY packages/shared/package.json packages/shared/
 
-# Build stage
+# Build stage: full dev install for tsc.
 FROM base AS build
-# Install all dependencies (including dev dependencies for build)
-RUN npm ci
+RUN npm ci --workspace staff-scheduler-backend --include-workspace-root=false --ignore-scripts
 
-# Copy source code
-COPY . .
+COPY packages/shared packages/shared
+COPY backend backend
 
-# Build the application
-RUN npm run build
+RUN npm run build --workspace @staff-scheduler/shared \
+    && npm run build --workspace staff-scheduler-backend
 
-# Production stage
+# Production stage: runtime dependencies + compiled output only.
 FROM node:22-alpine AS production
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
+COPY backend/package.json backend/
+COPY packages/shared/package.json packages/shared/
 
-# Install only production dependencies
-RUN npm ci --omit=dev && npm cache clean --force
+RUN npm ci --omit=dev --workspace staff-scheduler-backend --include-workspace-root=false --ignore-scripts \
+    && npm cache clean --force
 
-# Copy built application from build stage
-COPY --from=build /app/dist ./dist
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/backend/dist backend/dist
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    mkdir -p backend/logs backend/reports backend/uploads && \
+    chown -R nodejs:nodejs /app
 
-# Create necessary directories with proper permissions
-RUN mkdir -p logs reports uploads && \
-    chown -R nodejs:nodejs /app logs reports uploads
-
-# Switch to non-root user
 USER nodejs
+
+WORKDIR /app/backend
 
 # Health check. The health route is only mounted under /api (see src/app.ts),
 # never at the bare path — this must stay in sync with docker-compose.yml's

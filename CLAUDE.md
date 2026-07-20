@@ -13,6 +13,11 @@ Staff Scheduler is an enterprise workforce management system.
 
 ## Commands
 
+The repository is an **npm workspaces monorepo**: run `npm install` once at the
+repo root (single root `package-lock.json`; also compiles
+`packages/shared`, the shared Zod-schema/type package both apps import).
+Never run `npm install` inside `backend/` or `frontend/`.
+
 ### Backend (`cd backend`)
 
 ```bash
