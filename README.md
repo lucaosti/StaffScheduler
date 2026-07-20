@@ -229,35 +229,12 @@ Preferences are stored in `user_preferences` and surfaced under
 
 ## Roadmap
 
-Planned work and explicitly out-of-scope items are tracked on the
-GitHub Project board (the feature overview above covers what is
-implemented today):
+Planned work is tracked exclusively in
+[GitHub Issues](https://github.com/lucaosti/StaffScheduler/issues):
+every capability, improvement or refactoring has a small, dedicated
+issue, and the development history is reconstructable from issues and
+pull requests alone. This README describes what is implemented today.
 
-- **Roadmap board (Projects v2)**:
-  [github.com/users/lucaosti/projects/2](https://github.com/users/lucaosti/projects/2)
-
-Each capability is tracked as a GitHub Issue tagged with
-`type:capability`, plus an `area:*` label (`area:backend`,
-`area:frontend`, `area:database`, `area:optimizer`, `area:docs`) and a
-`capability:*` label (`capability:core`, `capability:out-of-scope`).
-Useful filters:
-
-- All capabilities:
-  [`label:type:capability`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Atype%3Acapability)
-- Implemented core capabilities (closed as completed):
-  [`label:capability:core is:closed reason:completed`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Acapability%3Acore+is%3Aclosed+reason%3Acompleted)
-- Explicitly out-of-scope items:
-  [`label:capability:out-of-scope`](https://github.com/lucaosti/StaffScheduler/issues?q=label%3Acapability%3Aout-of-scope)
-
-The Project exposes three custom fields used by the views:
-
-- `Lifecycle` — `Backlog`, `In progress`, `Blocked`, `Done`, `Out of scope`.
-- `Area` — `Backend`, `Frontend`, `Database`, `Optimizer`, `Docs`.
-- `Capability` — `Core`, `Nice-to-have`, `Out-of-scope`.
-
-The "Out of scope" items are intentional design choices (this is an
-open-source self-hosted core, not a SaaS product). Pull requests
-addressing them are welcome — see [§12 Development guidelines](./DOCUMENTATION.md#12-development-guidelines).
 
 ## Documentation
 
