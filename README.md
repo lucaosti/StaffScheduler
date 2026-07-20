@@ -250,13 +250,23 @@ pull requests alone. This README describes what is implemented today.
 - MySQL >= 8 (or Docker for the demo profile below)
 - npm >= 9
 
+### Install (once, from the repo root)
+
+The project is an npm-workspaces monorepo with a single root lockfile, so one
+install covers backend, frontend and `packages/shared` (and compiles the
+shared contract package). Never run `npm install` inside `backend/` or
+`frontend/`.
+
+```bash
+npm install                # at the repository root
+```
+
 ### Backend
 
 ```bash
 cd backend
-npm install
 cp .env.example .env       # then edit DB_*, JWT_SECRET, etc.
-npm run db:init            # creates the schema; no users, no demo data
+npm run db:init            # applies schema migrations; no users, no demo data
 npm run dev                # http://localhost:3001
 ```
 
@@ -264,7 +274,6 @@ npm run dev                # http://localhost:3001
 
 ```bash
 cd frontend
-npm install
 npm start                  # http://localhost:3000
 ```
 
