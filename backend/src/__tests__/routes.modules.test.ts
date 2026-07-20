@@ -244,3 +244,102 @@ describe('modules router PUT /:code', () => {
     expect(setFn).toHaveBeenCalledWith('approvals', false, 1, null);
   });
 });
+
+// Org-override endpoints: per-org module state layered on the global flag.
+// These pin the Zod param validation (org identifiers are length-bounded like
+// every other URL param) and the exact argument wiring into ModuleService.
+
+describe('modules router GET /org/:org', () => {
+  it('returns the org-adjusted module list', async () => {
+    (ModuleService.prototype.listWithOrgOverrides as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ code: 'attendance', isEnabled: false }]);
+
+    const res = await request(mountApp()).get('/api/modules/org/acme');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ code: 'attendance', isEnabled: false }]);
+    expect(ModuleService.prototype.listWithOrgOverrides).toHaveBeenCalledWith('acme');
+  });
+
+  it('rejects an org name longer than 120 characters', async () => {
+    const res = await request(mountApp()).get('/api/modules/org/' + 'x'.repeat(121));
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('is forbidden without settings.manage', async () => {
+    currentUser = { id: 2, role: 'employee', email: 'e@example.com' };
+    const res = await request(mountApp()).get('/api/modules/org/acme');
+    expect(res.status).toBe(403);
+  });
+
+  it('returns 500 when the service fails', async () => {
+    (ModuleService.prototype.listWithOrgOverrides as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new Error('db down'));
+
+    const res = await request(mountApp()).get('/api/modules/org/acme');
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('modules router PUT /:code/org/:org', () => {
+  it('creates the override with actor id and justification', async () => {
+    const setFn = jest.fn().mockResolvedValue({ code: 'attendance', org: 'acme', isEnabled: false });
+    (ModuleService.prototype.setOrgOverride as jest.Mock) = setFn;
+
+    const res = await request(mountApp())
+      .put('/api/modules/attendance/org/acme')
+      .send({ isEnabled: false, justification: 'pilot rollout' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.message).toContain("disabled for org 'acme'");
+    expect(setFn).toHaveBeenCalledWith('attendance', 'acme', false, 1, 'pilot rollout');
+  });
+
+  it('defaults justification to null', async () => {
+    const setFn = jest.fn().mockResolvedValue({});
+    (ModuleService.prototype.setOrgOverride as jest.Mock) = setFn;
+
+    await request(mountApp()).put('/api/modules/attendance/org/acme').send({ isEnabled: true });
+
+    expect(setFn).toHaveBeenCalledWith('attendance', 'acme', true, 1, null);
+  });
+
+  it('rejects a non-boolean isEnabled', async () => {
+    const res = await request(mountApp())
+      .put('/api/modules/attendance/org/acme')
+      .send({ isEnabled: 'yes' });
+    expect(res.status).toBe(400);
+  });
+
+  it('renders a typed 404 when the module does not exist', async () => {
+    (ModuleService.prototype.setOrgOverride as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new NotFoundError('Module not found: nope'));
+
+    const res = await request(mountApp()).put('/api/modules/nope/org/acme').send({ isEnabled: true });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('modules router DELETE /:code/org/:org', () => {
+  it('removes the override', async () => {
+    (ModuleService.prototype.removeOrgOverride as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+
+    const res = await request(mountApp()).delete('/api/modules/attendance/org/acme');
+
+    expect(res.status).toBe(200);
+    expect(ModuleService.prototype.removeOrgOverride).toHaveBeenCalledWith('attendance', 'acme');
+  });
+
+  it('renders a typed 404 when there is no override', async () => {
+    (ModuleService.prototype.removeOrgOverride as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new NotFoundError('Override not found'));
+
+    const res = await request(mountApp()).delete('/api/modules/attendance/org/acme');
+    expect(res.status).toBe(404);
+  });
+});
