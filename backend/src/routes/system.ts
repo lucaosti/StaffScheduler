@@ -13,6 +13,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router } from 'express';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { logger } from '../config/logger';
 
 type RuntimeMode = 'production' | 'demo' | 'development';
@@ -20,26 +21,23 @@ type RuntimeMode = 'production' | 'demo' | 'development';
 export const createSystemRouter = (pool: Pool): Router => {
   const router = Router();
 
-  router.get('/info', async (_req, res) => {
+  router.get('/info', asyncHandler(async (_req, res) => {
+    let mode: RuntimeMode = 'production';
     try {
       const [rows] = await pool.execute<RowDataPacket[]>(
         `SELECT value FROM system_settings WHERE category = 'runtime' AND \`key\` = 'mode' LIMIT 1`
       );
-      const mode: RuntimeMode = (rows[0]?.value as RuntimeMode) || 'production';
-
-      res.json({
-        success: true,
-        data: { mode },
-      });
+      mode = (rows[0]?.value as RuntimeMode) || 'production';
     } catch (error) {
-      logger.error('Failed to read system info', error);
       // Never let this endpoint take the app down — fall back to production mode.
-      res.json({
-        success: true,
-        data: { mode: 'production' as RuntimeMode },
-      });
+      logger.error('Failed to read system info', error);
     }
-  });
+
+    res.json({
+      success: true,
+      data: { mode },
+    });
+  }));
 
   return router;
 };

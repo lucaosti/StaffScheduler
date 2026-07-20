@@ -14,6 +14,7 @@
  */
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { ApprovalEngineService } from './ApprovalEngineService';
@@ -88,7 +89,7 @@ export class ShiftSwapService {
       const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
       workflowCtx = { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined };
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
-        throw new Error(
+        throw new ConflictError(
           'No approver could be resolved for this shift swap request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
         );
       }
@@ -102,19 +103,19 @@ export class ShiftSwapService {
         `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
         [input.requesterAssignmentId]
       );
-      if (reqRows.length === 0) throw new Error('Requester assignment not found');
+      if (reqRows.length === 0) throw new NotFoundError('Requester assignment not found');
       if (reqRows[0].user_id !== input.requesterUserId) {
-        throw new Error('Requester does not own the requester assignment');
+        throw new ConflictError('Requester does not own the requester assignment');
       }
 
       const [tgtRows] = await conn.execute<RowDataPacket[]>(
         `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
         [input.targetAssignmentId]
       );
-      if (tgtRows.length === 0) throw new Error('Target assignment not found');
+      if (tgtRows.length === 0) throw new NotFoundError('Target assignment not found');
       const targetUserId = tgtRows[0].user_id as number;
       if (targetUserId === input.requesterUserId) {
-        throw new Error('Target assignment must belong to a different user');
+        throw new ConflictError('Target assignment must belong to a different user');
       }
 
       const [insert] = await conn.execute<ResultSetHeader>(
@@ -155,7 +156,7 @@ export class ShiftSwapService {
           // us (e.g. a concurrent membership removal). Never leave a
           // stranded, undecidable request behind.
           await this.pool.execute(`DELETE FROM shift_swap_requests WHERE id = ?`, [created.id]);
-          throw new Error('No approver could be resolved for this shift swap request — approver resolution changed during creation. Please retry.');
+          throw new ConflictError('No approver could be resolved for this shift swap request — approver resolution changed during creation. Please retry.');
         }
       }
 
@@ -219,11 +220,11 @@ export class ShiftSwapService {
         WHERE sa.id IN (?, ?)`,
       [swap.requesterAssignmentId, swap.targetAssignmentId]
     );
-    if (pairRows.length !== 2) throw new Error('One or both assignments are gone');
+    if (pairRows.length !== 2) throw new ConflictError('One or both assignments are gone');
 
     const reqRow = pairRows.find((r) => r.assignment_id === swap.requesterAssignmentId);
     const tgtRow = pairRows.find((r) => r.assignment_id === swap.targetAssignmentId);
-    if (!reqRow || !tgtRow) throw new Error('Assignment row mismatch');
+    if (!reqRow || !tgtRow) throw new ConflictError('Assignment row mismatch');
 
     // Re-verify current ownership. A different swap approved between this
     // request's creation and its decision can reassign one of these two
@@ -232,12 +233,12 @@ export class ShiftSwapService {
     // compliance. Ownership must still match what the request was created
     // against.
     if (reqRow.user_id !== swap.requesterUserId) {
-      throw new Error(
+      throw new ConflictError(
         `Requester's assignment (#${reqRow.assignment_id}) has been reassigned to another user since this request was created`
       );
     }
     if (tgtRow.user_id !== swap.targetUserId) {
-      throw new Error(
+      throw new ConflictError(
         `Target's assignment (#${tgtRow.assignment_id}) has been reassigned to another user since this request was created`
       );
     }
@@ -256,7 +257,7 @@ export class ShiftSwapService {
     if (dupRows.length > 0) {
       const dup = dupRows[0];
       const who = dup.user_id === swap.requesterUserId ? 'Requester' : 'Target';
-      throw new Error(`${who} is already assigned to the other party's shift (assignment #${dup.id})`);
+      throw new ConflictError(`${who} is already assigned to the other party's shift (assignment #${dup.id})`);
     }
 
     // Compliance: requester would be working the target shift, target the requester's.
@@ -271,7 +272,7 @@ export class ShiftSwapService {
       { excludeAssignmentId: swap.requesterAssignmentId }
     );
     if (!swappedRequester.ok) {
-      throw new Error(
+      throw new ConflictError(
         `Requester would violate compliance: ${swappedRequester.violations[0].code}`
       );
     }
@@ -286,7 +287,7 @@ export class ShiftSwapService {
       { excludeAssignmentId: swap.targetAssignmentId }
     );
     if (!swappedTarget.ok) {
-      throw new Error(
+      throw new ConflictError(
         `Target would violate compliance: ${swappedTarget.violations[0].code}`
       );
     }
@@ -303,12 +304,12 @@ export class ShiftSwapService {
     notes: string | null = null
   ): Promise<ShiftSwapRequest> {
     const existingForAuth = await this.getById(id);
-    if (!existingForAuth) throw new Error('Shift swap request not found');
+    if (!existingForAuth) throw new NotFoundError('Shift swap request not found');
     if (existingForAuth.status !== 'pending') {
-      throw new Error(`Cannot approve swap in status '${existingForAuth.status}'`);
+      throw new ConflictError(`Cannot approve swap in status '${existingForAuth.status}'`);
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
-    if (pendingApprovalId === null) throw new Error('No pending approval found for this shift swap');
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this shift swap');
 
     // A non-final step (an earlier approver in a multi-step workflow) has no
     // swap side effects to apply yet — just record the decision and let the
@@ -345,10 +346,10 @@ export class ShiftSwapService {
         `SELECT * FROM shift_swap_requests WHERE id = ? FOR UPDATE`,
         [id]
       );
-      if (rows.length === 0) throw new Error('Shift swap request not found');
+      if (rows.length === 0) throw new NotFoundError('Shift swap request not found');
       swap = mapRow(rows[0]);
       if (swap.status !== 'pending') {
-        throw new Error(`Cannot approve swap in status '${swap.status}'`);
+        throw new ConflictError(`Cannot approve swap in status '${swap.status}'`);
       }
 
       // Lock every assignment currently held by either party before
@@ -437,12 +438,12 @@ export class ShiftSwapService {
     notes: string | null = null
   ): Promise<ShiftSwapRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Shift swap request not found');
+    if (!existing) throw new NotFoundError('Shift swap request not found');
     if (existing.status !== 'pending') {
-      throw new Error(`Cannot decline swap in status '${existing.status}'`);
+      throw new ConflictError(`Cannot decline swap in status '${existing.status}'`);
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
-    if (pendingApprovalId === null) throw new Error('No pending approval found for this shift swap');
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this shift swap');
     await this.engine.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
@@ -462,8 +463,8 @@ export class ShiftSwapService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Shift swap request not found');
-      throw new Error(`Cannot decline swap in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Shift swap request not found');
+      throw new ConflictError(`Cannot decline swap in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve declined swap');
@@ -496,9 +497,9 @@ export class ShiftSwapService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Shift swap request not found');
-      if (existing.requesterUserId !== requesterUserId) throw new Error('Forbidden');
-      throw new Error(`Cannot cancel swap in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Shift swap request not found');
+      if (existing.requesterUserId !== requesterUserId) throw new ForbiddenError('Forbidden');
+      throw new ConflictError(`Cannot cancel swap in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve cancelled swap');

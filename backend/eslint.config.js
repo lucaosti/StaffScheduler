@@ -43,4 +43,26 @@ module.exports = [
       'no-var': 'error',
     },
   },
+  {
+    // Routes must dispatch on typed AppError subtypes, never on message
+    // substrings: the central error middleware owns status-code mapping.
+    files: ['src/routes/**/*.ts'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "CallExpression[callee.property.name='includes'][callee.object.callee.property.name='toLowerCase']",
+          message:
+            'Do not map errors by message substring; throw a typed error from src/errors and let the central error middleware set the status.',
+        },
+        {
+          selector:
+            "CallExpression[callee.property.name='includes'][callee.object.property.name='message']",
+          message:
+            'Do not map errors by message substring; throw a typed error from src/errors and let the central error middleware set the status.',
+        },
+      ],
+    },
+  },
 ];

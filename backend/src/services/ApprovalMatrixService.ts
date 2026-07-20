@@ -19,6 +19,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 
 type ApproverScope =
   | 'policy_owner'
@@ -91,7 +92,7 @@ export class ApprovalMatrixService {
     patch: Partial<Omit<ApprovalMatrixRow, 'id' | 'changeType'>>
   ): Promise<ApprovalMatrixRow> {
     const existing = await this.getByChangeType(changeType);
-    if (!existing) throw new Error(`Approval matrix entry not found: ${changeType}`);
+    if (!existing) throw new NotFoundError(`Approval matrix entry not found: ${changeType}`);
     const merged: ApprovalMatrixRow = { ...existing, ...patch };
     await this.pool.execute(
       `UPDATE approval_matrix
@@ -123,7 +124,7 @@ export class ApprovalMatrixService {
   async resolve(changeType: string, ctx: ResolveContext): Promise<ResolvedApprover> {
     const matrix = await this.getByChangeType(changeType);
     if (!matrix) {
-      throw new Error(`No approval matrix configured for change type '${changeType}'`);
+      throw new ConflictError(`No approval matrix configured for change type '${changeType}'`);
     }
 
     let approverUserId: number | null = null;

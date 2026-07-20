@@ -9,6 +9,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 
 interface UserPreferences {
@@ -57,23 +58,23 @@ const mapRow = (row: RowDataPacket): UserPreferences => ({
 
 const validate = (input: UpsertPreferencesInput): void => {
   if (input.maxHoursPerWeek !== undefined && input.maxHoursPerWeek <= 0) {
-    throw new Error('maxHoursPerWeek must be positive');
+    throw new ValidationError('maxHoursPerWeek must be positive');
   }
   if (input.minHoursPerWeek !== undefined && input.minHoursPerWeek < 0) {
-    throw new Error('minHoursPerWeek must be non-negative');
+    throw new ValidationError('minHoursPerWeek must be non-negative');
   }
   if (
     input.maxHoursPerWeek !== undefined &&
     input.minHoursPerWeek !== undefined &&
     input.minHoursPerWeek > input.maxHoursPerWeek
   ) {
-    throw new Error('minHoursPerWeek cannot exceed maxHoursPerWeek');
+    throw new ValidationError('minHoursPerWeek cannot exceed maxHoursPerWeek');
   }
   if (
     input.maxConsecutiveDays !== undefined &&
     (input.maxConsecutiveDays < 1 || input.maxConsecutiveDays > 14)
   ) {
-    throw new Error('maxConsecutiveDays must be between 1 and 14');
+    throw new ValidationError('maxConsecutiveDays must be between 1 and 14');
   }
 };
 

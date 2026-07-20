@@ -22,6 +22,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { PolicyService, Policy } from './PolicyService';
 import { PolicyExceptionService } from './PolicyExceptionService';
 
@@ -63,7 +64,7 @@ export class PolicyValidator {
         WHERE s.id = ? LIMIT 1`,
       [input.shiftId]
     );
-    if (shiftRows.length === 0) throw new Error('Shift not found');
+    if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
     const shift = shiftRows[0];
 
     // Map department -> primary org_unit (1:1 if seeded that way).

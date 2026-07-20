@@ -34,6 +34,8 @@ jest.mock('../services/RbacService');
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { createUsersRouter } from '../routes/users';
+import { ConflictError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -41,6 +43,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/users', createUsersRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -174,8 +177,7 @@ describe('users router POST /', () => {
   });
 
   it('returns 409 on duplicate', async () => {
-    const dup: any = new Error('dup');
-    dup.code = 'ER_DUP_ENTRY';
+    const dup = new ConflictError('Email or employee ID already exists');
     (UserService.prototype.createUser as jest.Mock) = jest.fn().mockRejectedValue(dup);
     const res = await request(mountApp())
       .post('/api/users')
@@ -323,8 +325,7 @@ describe('users router PUT /:id', () => {
   });
 
   it('returns 409 on duplicate', async () => {
-    const dup: any = new Error('dup');
-    dup.code = 'ER_DUP_ENTRY';
+    const dup = new ConflictError('Email or employee ID already exists');
     (UserService.prototype.updateUser as jest.Mock) = jest.fn().mockRejectedValue(dup);
     const res = await request(mountApp()).put('/api/users/9').send({ firstName: 'X' });
     expect(res.status).toBe(409);
@@ -361,7 +362,7 @@ describe('users router DELETE /:id', () => {
   });
 
   it('returns 404 when service throws "User not found"', async () => {
-    (UserService.prototype.deleteUser as jest.Mock) = jest.fn().mockRejectedValue(new Error('User not found'));
+    (UserService.prototype.deleteUser as jest.Mock) = jest.fn().mockRejectedValue(new NotFoundError('User not found'));
     const res = await request(mountApp()).delete('/api/users/9');
     expect(res.status).toBe(404);
   });

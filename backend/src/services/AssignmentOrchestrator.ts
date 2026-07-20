@@ -55,7 +55,7 @@ export class AssignmentOrchestrator {
       await connection.commit();
       logger.info(`Assignment confirmed successfully: ${id}`);
       const confirmed = await this.fetchById(id);
-      if (!confirmed) throw new Error('Assignment not found after confirmation');
+      if (!confirmed) throw new NotFoundError('Assignment not found after confirmation');
       return confirmed;
     } catch (error) {
       await connection.rollback();
@@ -80,7 +80,7 @@ export class AssignmentOrchestrator {
       await connection.commit();
       logger.info(`Assignment cancelled successfully: ${id}`);
       const cancelled = await this.fetchById(id);
-      if (!cancelled) throw new Error('Assignment not found after cancellation');
+      if (!cancelled) throw new NotFoundError('Assignment not found after cancellation');
       return cancelled;
     } catch (error) {
       await connection.rollback();

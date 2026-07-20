@@ -12,6 +12,7 @@
  */
 
 import { Pool } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import { ApprovalEngineService } from './ApprovalEngineService';
 import { ChangeRequestService } from './ChangeRequestService';
 import { TimeOffService } from './TimeOffService';
@@ -27,7 +28,7 @@ export async function dispatchPendingApprovalDecision(
 ): Promise<unknown> {
   const engine = new ApprovalEngineService(pool);
   const pa = await engine.getPendingApprovalById(id);
-  if (!pa) throw new Error('Pending approval not found');
+  if (!pa) throw new NotFoundError('Pending approval not found');
 
   if (pa.changeRequestId !== null) {
     const svc = new ChangeRequestService(pool);
@@ -51,5 +52,5 @@ export async function dispatchPendingApprovalDecision(
       ? svc.approve(pa.shiftSwapRequestId, userId, note)
       : svc.decline(pa.shiftSwapRequestId, userId, note);
   }
-  throw new Error('Pending approval has no linked entity');
+  throw new ConflictError('Pending approval has no linked entity');
 }

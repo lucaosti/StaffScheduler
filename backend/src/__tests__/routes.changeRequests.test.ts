@@ -45,6 +45,8 @@ jest.mock('../services/ChangeRequestService');
 
 import { ChangeRequestService } from '../services/ChangeRequestService';
 import { createChangeRequestsRouter } from '../routes/changeRequests';
+import { ConflictError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -52,6 +54,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/change-requests', createChangeRequestsRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -236,14 +239,14 @@ describe('POST /api/change-requests/:id/approve', () => {
   });
 
   it('returns 404 when service throws not found', async () => {
-    (ChangeRequestService.prototype.approve as jest.Mock).mockRejectedValue(new Error('Change request not found'));
+    (ChangeRequestService.prototype.approve as jest.Mock).mockRejectedValue(new NotFoundError('Change request not found'));
     const res = await request(mountApp()).post('/api/change-requests/1/approve').send({});
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('returns 409 on invalid status transition', async () => {
-    (ChangeRequestService.prototype.approve as jest.Mock).mockRejectedValue(new Error('Cannot approve a request in state rejected'));
+    (ChangeRequestService.prototype.approve as jest.Mock).mockRejectedValue(new ConflictError('Cannot approve a request in state rejected'));
     const res = await request(mountApp()).post('/api/change-requests/1/approve').send({});
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATUS');
@@ -267,13 +270,13 @@ describe('POST /api/change-requests/:id/reject', () => {
   });
 
   it('returns 404 when not found', async () => {
-    (ChangeRequestService.prototype.reject as jest.Mock).mockRejectedValue(new Error('Change request not found'));
+    (ChangeRequestService.prototype.reject as jest.Mock).mockRejectedValue(new NotFoundError('Change request not found'));
     const res = await request(mountApp()).post('/api/change-requests/1/reject').send({ rejectionReason: 'No budget' });
     expect(res.status).toBe(404);
   });
 
   it('returns 409 on invalid status', async () => {
-    (ChangeRequestService.prototype.reject as jest.Mock).mockRejectedValue(new Error('Cannot reject a request in state applied'));
+    (ChangeRequestService.prototype.reject as jest.Mock).mockRejectedValue(new ConflictError('Cannot reject a request in state applied'));
     const res = await request(mountApp()).post('/api/change-requests/1/reject').send({ rejectionReason: 'Denied' });
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATUS');
@@ -299,13 +302,13 @@ describe('POST /api/change-requests/:id/apply', () => {
   });
 
   it('returns 404 when not found', async () => {
-    (ChangeRequestService.prototype.apply as jest.Mock).mockRejectedValue(new Error('Change request not found'));
+    (ChangeRequestService.prototype.apply as jest.Mock).mockRejectedValue(new NotFoundError('Change request not found'));
     const res = await request(mountApp()).post('/api/change-requests/1/apply').send({});
     expect(res.status).toBe(404);
   });
 
   it('returns 409 when not in approved state', async () => {
-    (ChangeRequestService.prototype.apply as jest.Mock).mockRejectedValue(new Error('Cannot apply a request in state pending'));
+    (ChangeRequestService.prototype.apply as jest.Mock).mockRejectedValue(new ConflictError('Cannot apply a request in state pending'));
     const res = await request(mountApp()).post('/api/change-requests/1/apply').send({});
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATUS');
@@ -356,7 +359,7 @@ describe('POST /api/change-requests/:id/cancel', () => {
 
   it('returns 409 when already cancelled', async () => {
     (ChangeRequestService.prototype.getById as jest.Mock).mockResolvedValue({ ...fakeCr, proposerUserId: 1 });
-    (ChangeRequestService.prototype.cancel as jest.Mock).mockRejectedValue(new Error('Cannot cancel a request in state cancelled'));
+    (ChangeRequestService.prototype.cancel as jest.Mock).mockRejectedValue(new ConflictError('Cannot cancel a request in state cancelled'));
     const res = await request(mountApp()).post('/api/change-requests/1/cancel');
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('INVALID_STATUS');

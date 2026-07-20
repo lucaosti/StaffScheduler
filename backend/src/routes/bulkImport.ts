@@ -13,6 +13,7 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { bulkImportEmployeesBody, bulkImportShiftsBody } from '../schemas';
 import { BulkImportService } from '../services/BulkImportService';
@@ -27,7 +28,7 @@ export const createBulkImportRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requirePermission('employee.manage'));
 
-  router.post('/employees', validateBody(bulkImportEmployeesBody), async (_req: Request, res: Response) => {
+  router.post('/employees', validateBody(bulkImportEmployeesBody), asyncHandler(async (_req: Request, res: Response) => {
     const { csv, defaultPassword } = res.locals.body as { csv: string; defaultPassword: string };
     try {
       const result = await service.importEmployees(csv, defaultPassword);
@@ -36,9 +37,9 @@ export const createBulkImportRouter = (pool: Pool): Router => {
     } catch (err) {
       respondError(res, 500, 'IMPORT_FAILED', (err as Error).message);
     }
-  });
+  }));
 
-  router.post('/shifts', validateBody(bulkImportShiftsBody), async (_req: Request, res: Response) => {
+  router.post('/shifts', validateBody(bulkImportShiftsBody), asyncHandler(async (_req: Request, res: Response) => {
     const { csv } = res.locals.body as { csv: string };
     try {
       const result = await service.importShifts(csv);
@@ -47,7 +48,7 @@ export const createBulkImportRouter = (pool: Pool): Router => {
     } catch (err) {
       respondError(res, 500, 'IMPORT_FAILED', (err as Error).message);
     }
-  });
+  }));
 
   return router;
 };

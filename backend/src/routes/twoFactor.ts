@@ -12,10 +12,10 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { twoFactorCodeBody } from '../schemas';
 import { TwoFactorService } from '../services/TwoFactorService';
-import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -27,15 +27,10 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.post('/setup', async (req: Request, res: Response) => {
-    try {
-      const data = await service.beginSetup(req.user!.id, req.user!.email);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('2fa setup error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to start 2FA setup');
-    }
-  });
+  router.post('/setup', asyncHandler(async (req: Request, res: Response) => {
+    const data = await service.beginSetup(req.user!.id, req.user!.email);
+    res.json({ success: true, data });
+  }));
 
   router.post('/enable', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
     try {
@@ -47,36 +42,26 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/disable', validateBody(twoFactorCodeBody), async (req: Request, res: Response) => {
-    try {
-      const code = res.locals.body.code as string;
-      const userId = req.user!.id;
-      // Disabling 2FA weakens the account, so it demands the same proof of
-      // possession as login: a current TOTP code or an unused recovery code.
-      const valid =
-        (await service.verifyCode(userId, code)) ||
-        (await service.consumeRecoveryCode(userId, code));
-      if (!valid) {
-        return respondError(res, 401, 'TOTP_INVALID', 'Invalid two-factor authentication code');
-      }
-      await service.disable(userId);
-      res.json({ success: true });
-    } catch (err) {
-      logger.error('2fa disable error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to disable 2FA');
+  router.post('/disable', validateBody(twoFactorCodeBody), asyncHandler(async (req: Request, res: Response) => {
+    const code = res.locals.body.code as string;
+    const userId = req.user!.id;
+    // Disabling 2FA weakens the account, so it demands the same proof of
+    // possession as login: a current TOTP code or an unused recovery code.
+    const valid =
+      (await service.verifyCode(userId, code)) ||
+      (await service.consumeRecoveryCode(userId, code));
+    if (!valid) {
+      return respondError(res, 401, 'TOTP_INVALID', 'Invalid two-factor authentication code');
     }
-  });
+    await service.disable(userId);
+    res.json({ success: true });
+  }));
 
-  router.post('/verify', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
-    try {
-      const code = res.locals.body.code as string;
-      const ok = await service.verifyCode(_req.user!.id, code);
-      res.json({ success: true, data: { valid: ok } });
-    } catch (err) {
-      logger.error('2fa verify error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to verify 2FA code');
-    }
-  });
+  router.post('/verify', validateBody(twoFactorCodeBody), asyncHandler(async (_req: Request, res: Response) => {
+    const code = res.locals.body.code as string;
+    const ok = await service.verifyCode(_req.user!.id, code);
+    res.json({ success: true, data: { valid: ok } });
+  }));
 
   return router;
 };

@@ -16,6 +16,7 @@ import { Pool } from 'mysql2/promise';
 import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
 import { directoryFieldsBody, importVcardBody, idParam, idAndKeyParam } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
@@ -31,41 +32,37 @@ export const createDirectoryRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.get('/me', async (req: Request, res: Response) => {
+  router.get('/me', asyncHandler(async (req: Request, res: Response) => {
     const profile = await service.getProfile(req.user!.id);
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     res.json({ success: true, data: profile });
-  });
+  }));
 
-  router.get('/users/:id', requirePermission('user.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/users/:id', requirePermission('user.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
     const profile = await service.getProfile(res.locals.params.id);
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     res.json({ success: true, data: profile });
-  });
+  }));
 
-  router.put('/users/:id/fields', requirePermission('user.manage'), validateParams(idParam), validateBody(directoryFieldsBody), async (_req: Request, res: Response) => {
-    try {
-      const fields = res.locals.body.fields;
-      await service.setFields(res.locals.params.id, fields);
-      const profile = await service.getProfile(res.locals.params.id);
-      res.json({ success: true, data: profile });
-    } catch (err) {
-      error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.put('/users/:id/fields', requirePermission('user.manage'), validateParams(idParam), validateBody(directoryFieldsBody), asyncHandler(async (_req: Request, res: Response) => {
+    const fields = res.locals.body.fields;
+    await service.setFields(res.locals.params.id, fields);
+    const profile = await service.getProfile(res.locals.params.id);
+    res.json({ success: true, data: profile });
+  }));
 
   router.delete(
     '/users/:id/fields/:key',
     requirePermission('user.manage'),
     validateParams(idAndKeyParam),
-    async (_req: Request, res: Response) => {
+    asyncHandler(async (_req: Request, res: Response) => {
       const ok = await service.removeField(res.locals.params.id, res.locals.params.key);
       if (!ok) return error(res, 404, 'NOT_FOUND', 'Field not found');
       res.json({ success: true });
-    }
+    })
   );
 
-  router.get('/users/:id/vcard', requirePermission('user.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/users/:id/vcard', requirePermission('user.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
     const profile = await service.getProfile(res.locals.params.id);
     if (!profile) return error(res, 404, 'NOT_FOUND', 'Profile not found');
     const vcf = await service.exportVcf([profile.id]);
@@ -74,9 +71,9 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .type('text/vcard; charset=utf-8')
       .set('Content-Disposition', `attachment; filename="${profile.email}.vcf"`)
       .send(vcf);
-  });
+  }));
 
-  router.get('/vcard.vcf', requirePermission('user.read'), async (req: Request, res: Response) => {
+  router.get('/vcard.vcf', requirePermission('user.read'), asyncHandler(async (req: Request, res: Response) => {
     const idsParam = (req.query.ids as string | undefined) ?? '';
     const ids = idsParam
       .split(',')
@@ -89,25 +86,21 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .type('text/vcard; charset=utf-8')
       .set('Content-Disposition', 'attachment; filename="directory.vcf"')
       .send(vcf);
-  });
+  }));
 
   router.post(
     '/import-vcard',
     requirePermission('user.manage'),
     validateBody(importVcardBody),
-    async (req: Request, res: Response) => {
-      try {
-        const { vcf, defaultPassword } = res.locals.body as { vcf: string; defaultPassword: string };
-        const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
-        const out = await service.importVcf(vcf, {
-          defaultPasswordHash: passwordHash,
-          createdBy: req.user!.id,
-        });
-        res.json({ success: true, data: out });
-      } catch (err) {
-        error(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-      }
-    }
+    asyncHandler(async (req: Request, res: Response) => {
+      const { vcf, defaultPassword } = res.locals.body as { vcf: string; defaultPassword: string };
+      const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
+      const out = await service.importVcf(vcf, {
+        defaultPasswordHash: passwordHash,
+        createdBy: req.user!.id,
+      });
+      res.json({ success: true, data: out });
+  })
   );
 
   return router;

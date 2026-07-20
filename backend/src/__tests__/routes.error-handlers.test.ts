@@ -59,6 +59,7 @@ import { createReportsRouter } from '../routes/reports';
 import { createTwoFactorRouter } from '../routes/twoFactor';
 import { createPreferencesRouter } from '../routes/preferences';
 import { createEmployeesRouter } from '../routes/employees';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -66,6 +67,7 @@ const mount = (prefix: string, router: express.Router) => {
   const app = express();
   app.use(express.json());
   app.use(prefix, router);
+  app.use(errorHandler);
   return app;
 };
 
