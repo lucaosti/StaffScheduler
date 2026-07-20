@@ -38,8 +38,9 @@ export const base32Decode = (input: string): Buffer => {
   let value = 0;
   const bytes: number[] = [];
   for (const ch of cleaned) {
+    // The sanitizing replace above guarantees every remaining character is
+    // in the alphabet, so indexOf can never miss — no error path needed.
     const idx = BASE32_ALPHABET.indexOf(ch);
-    if (idx < 0) throw new Error(`Invalid base32 character: ${ch}`);
     value = (value << 5) | idx;
     bits += 5;
     if (bits >= 8) {

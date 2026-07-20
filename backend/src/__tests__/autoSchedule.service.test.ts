@@ -124,4 +124,41 @@ describe('AutoScheduleService.generate', () => {
     const problem = optimizerInstance.generateGreedySchedule.mock.calls[0][0];
     expect(problem.employees[0].unavailable_dates).toEqual(['2026-05-01', '2026-05-02', '2026-05-03']);
   });
+
+  it('feeds other-schedule assignments into the optimizer as busy time', async () => {
+    // The ±14-day window query exists so the greedy engine sees cross-schedule
+    // commitments; this pins the per-user grouping of those rows.
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null]) // schedule
+      .mockResolvedValueOnce([
+        [
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+        ],
+        null,
+      ]) // shifts
+      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([
+        [
+          { user_id: 1, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+          { user_id: 1, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+        ],
+        null,
+      ]); // external assignments: employee 1 already busy on the 1st
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const service = new AutoScheduleService(pool);
+    await service.generate(1, 7);
+
+    // The optimizer is mocked, so the assertion is on the problem plumbing:
+    // both external rows must arrive grouped under the employee's
+    // existing_assignments so the greedy engine treats them as busy time.
+    const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results[0].value;
+    const problem = optimizerInstance.generateGreedySchedule.mock.calls[0][0];
+    expect(problem.employees[0].existing_assignments).toEqual([
+      { date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+      { date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+    ]);
+  });
 });
