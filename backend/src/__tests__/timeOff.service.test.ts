@@ -245,3 +245,254 @@ describe('TimeOffService.cancel', () => {
     await expect(service.cancel(1, 999)).rejects.toThrow(/Forbidden/);
   });
 });
+
+// ── Workflow attachment, non-final steps and diagnosis arms ──────────────────
+// Mirrors the ShiftSwapService companion suite: engine interactions are spied
+// at the instance boundary so each test pins TimeOffService's orchestration
+// (the engine's own behaviour has a dedicated suite).
+
+const engineOf = (service: TimeOffService) =>
+  (service as unknown as { engine: Record<string, jest.Mock> }).engine as unknown as {
+    getWorkflowByChangeType: (t: string) => unknown;
+    resolvePrimaryOrgUnitForUser: (u: number) => unknown;
+    canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+    createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
+    wouldBeFinalStep: (id: number) => unknown;
+    decidePendingApproval: (...a: unknown[]) => unknown;
+  };
+
+const timeOffWorkflow = {
+  id: 10,
+  changeType: 'TimeOff.Request',
+  requireAll: false,
+  description: null,
+  steps: [{ id: 20, workflowId: 10, stepOrder: 1, approverScope: 'unit_structure' }],
+};
+
+const spyWorkflowCreation = (service: TimeOffService, paResult: unknown) => {
+  const engine = engineOf(service);
+  jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(timeOffWorkflow as never);
+  jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+  jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+  return jest.spyOn(engine, 'createPendingApprovalForStep').mockResolvedValue(paResult as never);
+};
+
+describe('TimeOffService.create — workflow attachment', () => {
+  it('attaches the first-step pending approval', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 42 }, null]) // INSERT
+      .mockResolvedValueOnce([[buildRow({ id: 42 })], null]) // getById
+      .mockResolvedValueOnce([{ insertId: 1 }, null]); // audit
+
+    const service = new TimeOffService(pool);
+    const createPa = spyWorkflowCreation(service, { id: 501 });
+
+    const created = await service.create({
+      userId: 7,
+      startDate: '2026-05-10',
+      endDate: '2026-05-15',
+      type: 'vacation',
+    });
+
+    expect(created.id).toBe(42);
+    expect(createPa).toHaveBeenCalledWith(
+      10,
+      timeOffWorkflow.steps[0],
+      { timeOffRequestId: 42 },
+      { actorUserId: 7, orgUnitId: 3 }
+    );
+  });
+
+  it('deletes the stranded request when approver resolution changes mid-flight', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 42 }, null]) // INSERT
+      .mockResolvedValueOnce([[buildRow({ id: 42 })], null]) // getById
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // cleanup DELETE
+
+    const service = new TimeOffService(pool);
+    spyWorkflowCreation(service, null);
+
+    await expect(
+      service.create({ userId: 7, startDate: '2026-05-10', endDate: '2026-05-15', type: 'vacation' })
+    ).rejects.toThrow(/approver resolution changed during creation/);
+
+    const deleteCall = execute.mock.calls[execute.mock.calls.length - 1];
+    expect(deleteCall[0]).toContain('DELETE FROM time_off_requests');
+    expect(deleteCall[1]).toEqual([42]);
+  });
+});
+
+describe('TimeOffService.approve — steps and diagnosis', () => {
+  it('refuses when no pending approval row exists', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById
+      .mockResolvedValueOnce([[], null]); // findPendingApprovalId -> none
+
+    await expect(new TimeOffService(pool).approve(1, 99)).rejects.toThrow(
+      'No pending approval found for this time-off request'
+    );
+  });
+
+  it('records a non-final decision without touching unavailability', async () => {
+    const { pool, execute, conn } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null]) // findPendingApprovalId
+      .mockResolvedValueOnce([[buildRow()], null]); // refreshed getById
+
+    const service = new TimeOffService(pool);
+    const engine = engineOf(service);
+    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    const decide = jest
+      .spyOn(engine, 'decidePendingApproval')
+      .mockImplementation(async (...args: unknown[]) => {
+        await (args[4] as () => Promise<unknown>)();
+        return undefined as never;
+      });
+
+    const result = await service.approve(1, 99, 'first sign-off');
+
+    expect(result.status).toBe('pending');
+    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'first sign-off', expect.any(Function));
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('non-final approve throws when the refreshed row cannot be re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[{ id: 501 }], null])
+      .mockResolvedValueOnce([[], null]); // refreshed getById: gone
+
+    const service = new TimeOffService(pool);
+    const engine = engineOf(service);
+    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    jest.spyOn(engine, 'decidePendingApproval').mockResolvedValue(undefined as never);
+
+    await expect(service.approve(1, 99)).rejects.toThrow('Failed to retrieve time-off request');
+  });
+
+  it('throws 404 when the locked re-read finds the row gone', async () => {
+    const { pool, execute, conn } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[{ id: 501 }], null]);
+    conn.execute.mockResolvedValueOnce([[], null]); // FOR UPDATE -> gone
+
+    const service = new TimeOffService(pool);
+    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+
+    await expect(service.approve(1, 99)).rejects.toThrow('Time-off request not found');
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('throws 409 when the row was decided between the auth check and the lock', async () => {
+    const { pool, execute, conn } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[{ id: 501 }], null]);
+    conn.execute.mockResolvedValueOnce([[buildRow({ status: 'approved' })], null]);
+
+    const service = new TimeOffService(pool);
+    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+
+    await expect(service.approve(1, 99)).rejects.toThrow(/Cannot approve request in status 'approved'/);
+  });
+
+  it('blocks approval when the user already has unavailability for the same dates', async () => {
+    const { pool, execute, conn } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([[{ id: 501 }], null]);
+    conn.execute
+      .mockResolvedValueOnce([[buildRow()], null]) // FOR UPDATE
+      .mockResolvedValueOnce([[{ id: 77 }], null]); // duplicate unavailability
+
+    const service = new TimeOffService(pool);
+    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+
+    await expect(service.approve(1, 99)).rejects.toThrow(/already has unavailability recorded/);
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+});
+
+describe('TimeOffService.reject — diagnosis arms', () => {
+  const rejectWith = (updateResult: unknown, refetchRows: unknown[]) => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById
+      .mockResolvedValueOnce([[{ id: 501 }], null]) // findPendingApprovalId
+      .mockResolvedValueOnce([updateResult, null]); // guarded UPDATE
+    for (const rows of refetchRows) execute.mockResolvedValueOnce([rows, null]);
+    const service = new TimeOffService(pool);
+    jest.spyOn(engineOf(service), 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
+      await (args[4] as () => Promise<unknown>)();
+      return undefined as never;
+    });
+    return service;
+  };
+
+  it('diagnoses a concurrent decision via the current row status', async () => {
+    const service = rejectWith({ affectedRows: 0 }, [[buildRow({ status: 'approved' })]]);
+    await expect(service.reject(1, 99)).rejects.toThrow(/Cannot reject request in status 'approved'/);
+  });
+
+  it('falls back to the pre-check status when the row vanished', async () => {
+    const service = rejectWith({ affectedRows: 0 }, [[]]);
+    await expect(service.reject(1, 99)).rejects.toThrow(/Cannot reject request in status 'pending'/);
+  });
+
+  it('throws an internal error when the rejected row cannot be re-read', async () => {
+    const service = rejectWith({ affectedRows: 1 }, [[]]);
+    await expect(service.reject(1, 99)).rejects.toThrow('Failed to retrieve rejected request');
+  });
+});
+
+describe('TimeOffService — residual arms', () => {
+  it('final approve materializes unavailability and scopes the decision to the reviewer', async () => {
+    const { pool, execute, conn } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById (auth check)
+      .mockResolvedValueOnce([[{ id: 501 }], null]); // findPendingApprovalId
+    conn.execute
+      .mockResolvedValueOnce([[buildRow()], null]) // FOR UPDATE
+      .mockResolvedValueOnce([[], null]) // duplicate unavailability -> none
+      .mockResolvedValueOnce([{ insertId: 88 }, null]) // INSERT user_unavailability
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE time_off_requests
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'approved', unavailability_id: 88 })], null]) // final getById
+      .mockResolvedValueOnce([{ insertId: 1 }, null]); // audit
+
+    const service = new TimeOffService(pool);
+    const engine = engineOf(service);
+    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(true as never);
+    const decide = jest
+      .spyOn(engine, 'decidePendingApproval')
+      .mockImplementation(async (...args: unknown[]) => {
+        const ctx = await (args[4] as () => Promise<{ actorUserId: number }>)();
+        expect(ctx).toEqual({ actorUserId: 99 });
+        return undefined as never;
+      });
+
+    const approved = await service.approve(1, 99, 'enjoy');
+
+    expect(approved.status).toBe('approved');
+    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'enjoy', expect.any(Function));
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('reject refuses when no pending approval row exists', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById
+      .mockResolvedValueOnce([[], null]); // findPendingApprovalId -> none
+
+    await expect(new TimeOffService(pool).reject(1, 99)).rejects.toThrow(
+      'No pending approval found for this time-off request'
+    );
+  });
+});
