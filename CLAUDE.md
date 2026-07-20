@@ -152,7 +152,7 @@ The `code` field is required in all error responses.
 - **Validation**: Use `validateBody(schema)` / `validateParams(schema)` from `src/middleware/validation.ts` with Zod schemas defined in `src/schemas/`. Do not use `express-validator`.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
 - **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`). Do not create additional root-level `.md` files.
-- **Sync docs on every code change**: When adding or modifying an endpoint, update `backend/openapi/openapi.json` and the relevant sections of `DOCUMENTATION.md` in the same PR.
+- **OpenAPI**: request bodies in `backend/openapi/openapi.json` are GENERATED from the shared Zod schemas — never edit them by hand; run `npm run openapi:generate` (backend) after changing a schema or a `validateBody` middleware (CI fails on drift). Curated prose (summaries, responses) is still edited in the file. Update `DOCUMENTATION.md` in the same PR when endpoints change.
 
 ## Authoring Rules
 

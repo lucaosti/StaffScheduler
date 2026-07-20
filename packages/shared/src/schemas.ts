@@ -509,3 +509,9 @@ export const responsibilityRuleBulkBody = z.object({
 export const pendingApprovalDelegateBody = z.object({
   targetUserId: z.coerce.number().int().positive(),
 });
+
+// approve/reject accept an optional free-text note; validated so the
+// generated OpenAPI documents exactly what the API enforces.
+export const pendingApprovalDecisionBody = z.object({
+  note: z.string().max(2000).nullable().optional(),
+});

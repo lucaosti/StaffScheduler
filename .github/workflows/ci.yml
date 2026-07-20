@@ -57,6 +57,11 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      - name: OpenAPI spec is generated and drift-free
+        run: |
+          npm run openapi:generate
+          git diff --exit-code ../backend/openapi/openapi.json
+
       - name: Unit tests with coverage gate
         run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
 

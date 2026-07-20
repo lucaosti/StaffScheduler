@@ -23,7 +23,7 @@ import { Pool } from 'mysql2/promise';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, pendingApprovalDelegateBody as delegateBody } from '../schemas';
+import { idParam, pendingApprovalDelegateBody as delegateBody, pendingApprovalDecisionBody as decisionBody } from '../schemas';
 import { PendingApprovalService } from '../services/PendingApprovalService';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
@@ -61,17 +61,17 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   ): Promise<unknown> => dispatchPendingApprovalDecision(pool, id, userId, decision, note);
 
   // POST /:id/approve — approve, whichever entity this decision belongs to
-  router.post('/:id/approve', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.post('/:id/approve', authenticate, validateParams(idParam), validateBody(decisionBody), asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
-    const note = typeof req.body?.note === 'string' ? req.body.note : null;
+    const note = res.locals.body.note ?? null;
     const result = await dispatchDecision(id, req.user!.id, 'approved', note);
     res.json({ success: true, data: result });
   }));
 
   // POST /:id/reject — reject, whichever entity this decision belongs to
-  router.post('/:id/reject', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.post('/:id/reject', authenticate, validateParams(idParam), validateBody(decisionBody), asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
-    const note = typeof req.body?.note === 'string' ? req.body.note : null;
+    const note = res.locals.body.note ?? null;
     const result = await dispatchDecision(id, req.user!.id, 'rejected', note);
     res.json({ success: true, data: result });
   }));
