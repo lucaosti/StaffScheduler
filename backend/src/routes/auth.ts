@@ -204,18 +204,9 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Reques
  * @returns    {Object} `{ success, data: <user> }`
  */
 router.get('/verify', authenticate, (req: Request, res: Response) => {
-  const user = req.user;
-  if (!user) {
-    res.status(401).json({
-      success: false,
-      error: {
-        code: 'UNAUTHORIZED',
-        message: 'User not found'
-      }
-    });
-    return;
-  }
-
+  // authenticate rejects unauthenticated requests before this handler runs,
+  // so req.user is guaranteed here — same invariant every protected route
+  // relies on.
   res.json({
     success: true,
     data: req.user!
@@ -233,16 +224,8 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
  */
 router.post('/refresh', authenticate, async (req: Request, res: Response) => {
   try {
-    const user = req.user;
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'User not found'
-        }
-      });
-    }
+    // Guaranteed by authenticate, as on every protected route.
+    const user = req.user!;
 
     const { password_hash: _password_hash, salt: _salt, ...userWithoutPassword } = user as any;
 
