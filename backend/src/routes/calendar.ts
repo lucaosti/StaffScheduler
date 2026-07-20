@@ -17,11 +17,11 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams } from '../middleware/validation';
 import { idParam } from '../schemas';
 import { CalendarService } from '../services/CalendarService';
 import { RbacService } from '../services/RbacService';
-import { logger } from '../config/logger';
 
 const writeIcsResponse = (
   res: Response,
@@ -46,48 +46,32 @@ export const createCalendarRouter = (pool: Pool): Router => {
   const service = new CalendarService(pool);
   const rbac = new RbacService(pool);
 
-  router.post('/token', authenticate, async (req: Request, res: Response) => {
-    try {
-      const token = await service.getOrCreateToken(req.user!.id);
-      res.json({ success: true, data: { token } });
-    } catch (err) {
-      logger.error('calendar token error:', err);
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to issue calendar token' } });
-    }
-  });
+  router.post('/token', authenticate, asyncHandler(async (req: Request, res: Response) => {
+    const token = await service.getOrCreateToken(req.user!.id);
+    res.json({ success: true, data: { token } });
+  }));
 
-  router.post('/token/rotate', authenticate, async (req: Request, res: Response) => {
-    try {
-      const token = await service.rotateToken(req.user!.id);
-      res.json({ success: true, data: { token } });
-    } catch (err) {
-      logger.error('calendar token rotate error:', err);
-      res.status(500).json({ success: false, error: { code: 'INTERNAL_ERROR', message: 'Failed to rotate calendar token' } });
-    }
-  });
+  router.post('/token/rotate', authenticate, asyncHandler(async (req: Request, res: Response) => {
+    const token = await service.rotateToken(req.user!.id);
+    res.json({ success: true, data: { token } });
+  }));
 
-  router.get('/feed.ics', async (req: Request, res: Response) => {
-    try {
-      const token = (req.query.token as string | undefined) || '';
-      if (!token) {
-        res.status(401).type('text/plain').send('token query parameter required');
-        return;
-      }
-      const userId = await service.resolveToken(token);
-      if (!userId) {
-        res.status(401).type('text/plain').send('invalid token');
-        return;
-      }
-      const { body, etag } = await service.buildUserFeed(userId);
-      writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
-    } catch (err) {
-      logger.error('calendar feed error:', err);
-      res.status(500).type('text/plain').send('internal error');
+  router.get('/feed.ics', asyncHandler(async (req: Request, res: Response) => {
+    const token = (req.query.token as string | undefined) || '';
+    if (!token) {
+      res.status(401).type('text/plain').send('token query parameter required');
+      return;
     }
-  });
+    const userId = await service.resolveToken(token);
+    if (!userId) {
+      res.status(401).type('text/plain').send('invalid token');
+      return;
+    }
+    const { body, etag } = await service.buildUserFeed(userId);
+    writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
+  }));
 
-  router.get('/department/:id.ics', validateParams(idParam), async (req: Request, res: Response) => {
-    try {
+  router.get('/department/:id.ics', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
       const token = (req.query.token as string | undefined) || '';
       if (!token) {
         res.status(401).type('text/plain').send('token query parameter required');
@@ -122,11 +106,7 @@ export const createCalendarRouter = (pool: Pool): Router => {
 
       const { body, etag } = await service.buildDepartmentFeed(departmentId);
       writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
-    } catch (err) {
-      logger.error('calendar department feed error:', err);
-      res.status(500).type('text/plain').send('internal error');
-    }
-  });
+  }));
 
   return router;
 };

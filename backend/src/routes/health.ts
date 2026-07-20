@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { database } from '../config/database';
 import { logger } from '../config/logger';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 // Single source of truth for the service version. Works from both src/ (ts-node)
 // and dist/ (compiled) since the relative position to package.json is the same.
@@ -79,7 +80,7 @@ router.get('/', async (_req: Request, res: Response) => {
  * @route GET /api/health/ready
  * @returns {Object} Readiness status
  */
-router.get('/ready', async (_req: Request, res: Response) => {
+router.get('/ready', asyncHandler(async (_req: Request, res: Response) => {
   const isReady = await database.isHealthy();
 
   if (isReady) {
@@ -96,6 +97,6 @@ router.get('/ready', async (_req: Request, res: Response) => {
       }
     });
   }
-});
+}));
 
 export default router;

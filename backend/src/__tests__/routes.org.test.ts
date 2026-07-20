@@ -30,6 +30,8 @@ jest.mock('../services/EmployeeLoanService');
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { createOrgRouter } from '../routes/org';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -37,6 +39,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/org', createOrgRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -111,15 +114,15 @@ describe('org router units', () => {
   it('PUT /units/:id 404 on not found', async () => {
     (OrgUnitService.prototype.update as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Org unit not found'));
+      .mockRejectedValue(new NotFoundError('Org unit not found'));
     const res = await request(mountApp()).put('/api/org/units/9').send({});
     expect(res.status).toBe(404);
   });
 
-  it('PUT /units/:id 400 on validation error', async () => {
+  it('PUT /units/:id 500 on unexpected service error', async () => {
     (OrgUnitService.prototype.update as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
     const res = await request(mountApp()).put('/api/org/units/9').send({});
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 
   it('DELETE /units/:id 200 on success', async () => {
@@ -131,15 +134,15 @@ describe('org router units', () => {
   it('DELETE /units/:id 404 on not found', async () => {
     (OrgUnitService.prototype.remove as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Org unit not found'));
+      .mockRejectedValue(new NotFoundError('Org unit not found'));
     const res = await request(mountApp()).delete('/api/org/units/9');
     expect(res.status).toBe(404);
   });
 
-  it('DELETE /units/:id 400 on validation', async () => {
+  it('DELETE /units/:id 500 on unexpected service error', async () => {
     (OrgUnitService.prototype.remove as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
     const res = await request(mountApp()).delete('/api/org/units/9');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 });
 
@@ -169,12 +172,12 @@ describe('org router members', () => {
     expect(res.status).toBe(201);
   });
 
-  it('POST /units/:id/members 400 on service error', async () => {
+  it('POST /units/:id/members 500 on unexpected service error', async () => {
     (OrgUnitService.prototype.addMember as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
     const res = await request(mountApp())
       .post('/api/org/units/1/members')
       .send({ userId: 5 });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 
   it('PATCH /units/:id/members/:userId/primary 200 on success', async () => {
@@ -186,15 +189,15 @@ describe('org router members', () => {
   it('PATCH /units/:id/members/:userId/primary 404 on not found', async () => {
     (OrgUnitService.prototype.setPrimary as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Membership not found'));
+      .mockRejectedValue(new NotFoundError('Membership not found'));
     const res = await request(mountApp()).patch('/api/org/units/1/members/5/primary');
     expect(res.status).toBe(404);
   });
 
-  it('PATCH /units/:id/members/:userId/primary 400 on validation', async () => {
+  it('PATCH /units/:id/members/:userId/primary 500 on unexpected service error', async () => {
     (OrgUnitService.prototype.setPrimary as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
     const res = await request(mountApp()).patch('/api/org/units/1/members/5/primary');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 
   it('DELETE /units/:id/members/:userId 200 on success', async () => {
@@ -203,12 +206,12 @@ describe('org router members', () => {
     expect(res.status).toBe(200);
   });
 
-  it('DELETE /units/:id/members/:userId 400 on error', async () => {
+  it('DELETE /units/:id/members/:userId 500 on unexpected service error', async () => {
     (OrgUnitService.prototype.removeMember as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('bad'));
     const res = await request(mountApp()).delete('/api/org/units/1/members/5');
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 });
 
@@ -270,7 +273,7 @@ describe('org router loans', () => {
       it('404 on not found', async () => {
         (EmployeeLoanService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('Loan not found'));
+          .mockRejectedValue(new NotFoundError('Loan not found'));
         const res = await request(mountApp()).post(`/api/org/loans/1/${action}`).send({});
         expect(res.status).toBe(404);
       });
@@ -278,7 +281,7 @@ describe('org router loans', () => {
       it('403 on Forbidden', async () => {
         (EmployeeLoanService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('Forbidden'));
+          .mockRejectedValue(new ForbiddenError('Forbidden'));
         const res = await request(mountApp()).post(`/api/org/loans/1/${action}`).send({});
         expect(res.status).toBe(403);
       });
@@ -286,7 +289,7 @@ describe('org router loans', () => {
       it('409 on conflict', async () => {
         (EmployeeLoanService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('already processed'));
+          .mockRejectedValue(new ConflictError('already processed'));
         const res = await request(mountApp()).post(`/api/org/loans/1/${action}`).send({});
         expect(res.status).toBe(409);
       });
@@ -303,21 +306,21 @@ describe('org router loans', () => {
     });
 
     it('404/403/409 paths', async () => {
-      const cancel = (msg: string) => {
+      const cancel = (error: Error) => {
         (EmployeeLoanService.prototype.cancel as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error(msg));
+          .mockRejectedValue(error);
       };
 
-      cancel('not found');
+      cancel(new NotFoundError('Loan not found'));
       let res = await request(mountApp()).post('/api/org/loans/1/cancel');
       expect(res.status).toBe(404);
 
-      cancel('Forbidden');
+      cancel(new ForbiddenError('Forbidden'));
       res = await request(mountApp()).post('/api/org/loans/1/cancel');
       expect(res.status).toBe(403);
 
-      cancel('already processed');
+      cancel(new ConflictError('Loan already processed'));
       res = await request(mountApp()).post('/api/org/loans/1/cancel');
       expect(res.status).toBe(409);
     });

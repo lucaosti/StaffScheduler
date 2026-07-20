@@ -12,6 +12,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 
 type PolicyScope = 'global' | 'org_unit' | 'schedule' | 'shift_template';
@@ -120,7 +121,7 @@ export class PolicyService {
   }
 
   async create(input: CreatePolicyInput): Promise<Policy> {
-    if (!input.policyKey?.trim()) throw new Error('policyKey is required');
+    if (!input.policyKey?.trim()) throw new ConflictError('policyKey is required');
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO policies
          (scope_type, scope_id, policy_key, policy_value, description, imposed_by_user_id)
@@ -142,7 +143,7 @@ export class PolicyService {
 
   async update(id: number, patch: UpdatePolicyInput): Promise<Policy> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Policy not found');
+    if (!existing) throw new NotFoundError('Policy not found');
     const merged: Policy = {
       ...existing,
       scopeType: patch.scopeType ?? existing.scopeType,
@@ -173,7 +174,7 @@ export class PolicyService {
 
   async remove(id: number): Promise<void> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Policy not found');
+    if (!existing) throw new NotFoundError('Policy not found');
     await this.pool.execute(`DELETE FROM policies WHERE id = ?`, [id]);
   }
 }

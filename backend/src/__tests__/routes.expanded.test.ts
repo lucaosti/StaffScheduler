@@ -82,7 +82,7 @@ import { createBulkImportRouter } from '../routes/bulkImport';
 import { createNotificationsRouter } from '../routes/notifications';
 import { createAuthRouter } from '../routes/auth';
 import { RbacService } from '../services/RbacService';
-import { ConflictError, NotFoundError } from '../errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
 
 const fakePool = {} as never;
@@ -452,7 +452,7 @@ describe('schedules router (extended)', () => {
 
     (ScheduleService.prototype.updateSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
     res = await request(app()).put('/api/schedules/1').send({});
     expect(res.status).toBe(404);
 
@@ -475,13 +475,13 @@ describe('schedules router (extended)', () => {
 
     (ScheduleService.prototype.deleteSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
     res = await request(app()).delete('/api/schedules/1');
     expect(res.status).toBe(404);
 
     (ScheduleService.prototype.deleteSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Only draft schedules can be deleted'));
+      .mockRejectedValue(new ConflictError('Only draft schedules can be deleted'));
     res = await request(app()).delete('/api/schedules/1');
     expect(res.status).toBe(409);
 
@@ -537,7 +537,7 @@ describe('schedules router (extended)', () => {
 
         (ScheduleService.prototype[method] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('Schedule not found'));
+          .mockRejectedValue(new NotFoundError('Schedule not found'));
         res = await request(app()).patch(`/api/schedules/1/${action}`);
         expect(res.status).toBe(404);
 
@@ -730,7 +730,7 @@ describe('shifts router (extended)', () => {
 
     (ShiftService.prototype.updateShift as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Shift not found'));
+      .mockRejectedValue(new NotFoundError('Shift not found'));
     res = await request(app()).put('/api/shifts/1').send({});
     expect(res.status).toBe(404);
 
@@ -751,7 +751,7 @@ describe('shifts router (extended)', () => {
 
     (ShiftService.prototype.deleteShift as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Shift not found'));
+      .mockRejectedValue(new NotFoundError('Shift not found'));
     res = await request(app()).delete('/api/shifts/1');
     expect(res.status).toBe(404);
 
@@ -828,7 +828,7 @@ describe('employees router (extended)', () => {
 
     (EmployeeService.prototype.updateEmployee as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Employee not found'));
+      .mockRejectedValue(new NotFoundError('Employee not found'));
     res = await request(app()).put('/api/employees/1').send({});
     expect(res.status).toBe(404);
 
@@ -851,7 +851,7 @@ describe('employees router (extended)', () => {
 
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Employee not found'));
+      .mockRejectedValue(new NotFoundError('Employee not found'));
     res = await request(app()).delete('/api/employees/1');
     expect(res.status).toBe(404);
 
@@ -1066,7 +1066,7 @@ describe('departments router (extended)', () => {
 
     (DepartmentService.prototype.deleteDepartment as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Cannot delete department with active users'));
+      .mockRejectedValue(new ConflictError('Cannot delete department with active users'));
     res = await request(app()).delete('/api/departments/1');
     expect(res.status).toBe(409);
 
@@ -1296,7 +1296,7 @@ describe('settings router (extended)', () => {
     res = await request(app()).put('/api/settings/cat/key').send({ value: 'v' });
     expect(res.status).toBe(200);
 
-    const protectedErr: any = new Error('System setting cannot be modified');
+    const protectedErr = new ForbiddenError('Setting cat.key is not editable');
     (SystemSettingsService.prototype.updateSetting as jest.Mock) = jest
       .fn()
       .mockRejectedValue(protectedErr);
@@ -1387,13 +1387,13 @@ describe('time-off router (extended)', () => {
 
       (TimeOffService.prototype[action] as jest.Mock) = jest
         .fn()
-        .mockRejectedValue(new Error('Time-off request not found'));
+        .mockRejectedValue(new NotFoundError('Time-off request not found'));
       res = await request(app()).post(`/api/time-off/1/${action}`).send({});
       expect(res.status).toBe(404);
 
       (TimeOffService.prototype[action] as jest.Mock) = jest
         .fn()
-        .mockRejectedValue(new Error('already done'));
+        .mockRejectedValue(new ConflictError('already done'));
       res = await request(app()).post(`/api/time-off/1/${action}`).send({});
       expect(res.status).toBe(409);
     });
@@ -1407,15 +1407,15 @@ describe('time-off router (extended)', () => {
     let res = await request(app()).post('/api/time-off/1/cancel');
     expect(res.status).toBe(200);
 
-    cancel(jest.fn().mockRejectedValue(new Error('Time-off request not found')));
+    cancel(jest.fn().mockRejectedValue(new NotFoundError('Time-off request not found')));
     res = await request(app()).post('/api/time-off/1/cancel');
     expect(res.status).toBe(404);
 
-    cancel(jest.fn().mockRejectedValue(new Error('Forbidden')));
+    cancel(jest.fn().mockRejectedValue(new ForbiddenError('Forbidden')));
     res = await request(app()).post('/api/time-off/1/cancel');
     expect(res.status).toBe(403);
 
-    cancel(jest.fn().mockRejectedValue(new Error('already')));
+    cancel(jest.fn().mockRejectedValue(new ConflictError('already')));
     res = await request(app()).post('/api/time-off/1/cancel');
     expect(res.status).toBe(409);
   });
@@ -1461,13 +1461,13 @@ describe('shift-swap router (extended)', () => {
   it('approve/decline/cancel error paths', async () => {
     (ShiftSwapService.prototype.approve as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Swap not found'));
+      .mockRejectedValue(new NotFoundError('Swap not found'));
     let res = await request(app()).post('/api/shift-swap/1/approve');
     expect(res.status).toBe(404);
 
     (ShiftSwapService.prototype.approve as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('already'));
+      .mockRejectedValue(new ConflictError('already'));
     res = await request(app()).post('/api/shift-swap/1/approve');
     expect(res.status).toBe(409);
 
@@ -1477,13 +1477,13 @@ describe('shift-swap router (extended)', () => {
 
     (ShiftSwapService.prototype.decline as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Swap not found'));
+      .mockRejectedValue(new NotFoundError('Swap not found'));
     res = await request(app()).post('/api/shift-swap/1/decline');
     expect(res.status).toBe(404);
 
     (ShiftSwapService.prototype.decline as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('already'));
+      .mockRejectedValue(new ConflictError('already'));
     res = await request(app()).post('/api/shift-swap/1/decline');
     expect(res.status).toBe(409);
 
@@ -1493,19 +1493,19 @@ describe('shift-swap router (extended)', () => {
 
     (ShiftSwapService.prototype.cancel as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('not found'));
+      .mockRejectedValue(new NotFoundError('not found'));
     res = await request(app()).post('/api/shift-swap/1/cancel');
     expect(res.status).toBe(404);
 
     (ShiftSwapService.prototype.cancel as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Forbidden'));
+      .mockRejectedValue(new ForbiddenError('Forbidden'));
     res = await request(app()).post('/api/shift-swap/1/cancel');
     expect(res.status).toBe(403);
 
     (ShiftSwapService.prototype.cancel as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('already'));
+      .mockRejectedValue(new ConflictError('already'));
     res = await request(app()).post('/api/shift-swap/1/cancel');
     expect(res.status).toBe(409);
   });
@@ -1515,7 +1515,7 @@ describe('preferences router (extended)', () => {
   const app = () => mountApp('/api/preferences', createPreferencesRouter(fakePool));
 
   it('PUT /me 400 on validation', async () => {
-    (PreferencesService.prototype.upsert as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
+    (PreferencesService.prototype.upsert as jest.Mock) = jest.fn().mockRejectedValue(new ValidationError('maxHoursPerWeek must be positive'));
     const res = await request(app()).put('/api/preferences/me').send({});
     expect(res.status).toBe(400);
   });
@@ -1531,7 +1531,7 @@ describe('preferences router (extended)', () => {
     let res = await request(app()).put('/api/preferences/2').send({});
     expect(res.status).toBe(200);
 
-    (PreferencesService.prototype.upsert as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
+    (PreferencesService.prototype.upsert as jest.Mock) = jest.fn().mockRejectedValue(new ValidationError('maxHoursPerWeek must be positive'));
     res = await request(app()).put('/api/preferences/2').send({});
     expect(res.status).toBe(400);
   });
@@ -1567,7 +1567,7 @@ describe('on-call router (extended)', () => {
 
     (OnCallService.prototype.updatePeriod as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Period not found'));
+      .mockRejectedValue(new NotFoundError('Period not found'));
     res = await request(app()).put('/api/on-call/periods/1').send({});
     expect(res.status).toBe(404);
 
@@ -1575,7 +1575,7 @@ describe('on-call router (extended)', () => {
       .fn()
       .mockRejectedValue(new Error('bad'));
     res = await request(app()).put('/api/on-call/periods/1').send({});
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 
   it('DELETE /periods/:id 200/404', async () => {
@@ -1585,7 +1585,7 @@ describe('on-call router (extended)', () => {
 
     (OnCallService.prototype.deletePeriod as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Period not found'));
+      .mockRejectedValue(new NotFoundError('Period not found'));
     res = await request(app()).delete('/api/on-call/periods/1');
     expect(res.status).toBe(404);
   });
@@ -1599,19 +1599,19 @@ describe('on-call router (extended)', () => {
   it('POST /periods/:id/assign error paths', async () => {
     (OnCallService.prototype.assign as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Period not found'));
+      .mockRejectedValue(new NotFoundError('Period not found'));
     let res = await request(app()).post('/api/on-call/periods/1/assign').send({ userId: 7 });
     expect(res.status).toBe(404);
 
     (OnCallService.prototype.assign as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('max capacity reached'));
+      .mockRejectedValue(new ConflictError('On-call period is already at max capacity'));
     res = await request(app()).post('/api/on-call/periods/1/assign').send({ userId: 7 });
     expect(res.status).toBe(409);
 
     (OnCallService.prototype.assign as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
     res = await request(app()).post('/api/on-call/periods/1/assign').send({ userId: 7 });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 
   it('DELETE /periods/:id/assign/:userId 404 when not removed', async () => {

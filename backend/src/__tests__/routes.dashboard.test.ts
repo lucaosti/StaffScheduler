@@ -36,6 +36,7 @@ jest.mock('../middleware/auth', () => ({
 }));
 
 import { createDashboardRouter } from '../routes/dashboard';
+import { errorHandler } from '../middleware/errorHandler';
 
 const execute = jest.fn();
 const fakePool = { execute } as any;
@@ -44,6 +45,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/dashboard', createDashboardRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 

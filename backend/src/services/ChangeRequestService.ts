@@ -14,6 +14,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import {
   ChangeRequest,
   ChangeRequestStatus,
@@ -204,7 +205,7 @@ export class ChangeRequestService {
 
   async approve(id: number, approverUserId: number, justification?: string | null): Promise<ChangeRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Change request not found');
+    if (!existing) throw new NotFoundError('Change request not found');
 
     // The status guard lives in the UPDATE's WHERE clause (not just the read
     // above) so two concurrent approve calls can't both succeed: only the
@@ -219,7 +220,7 @@ export class ChangeRequestService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getById(id);
-      throw new Error(`Cannot approve a change request in '${current?.status ?? existing.status}' status`);
+      throw new ConflictError(`Cannot approve a change request in '${current?.status ?? existing.status}' status`);
     }
 
     const updated = await this.getById(id);
@@ -241,7 +242,7 @@ export class ChangeRequestService {
 
   async reject(id: number, approverUserId: number, rejectionReason: string): Promise<ChangeRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Change request not found');
+    if (!existing) throw new NotFoundError('Change request not found');
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
@@ -252,7 +253,7 @@ export class ChangeRequestService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getById(id);
-      throw new Error(`Cannot reject a change request in '${current?.status ?? existing.status}' status`);
+      throw new ConflictError(`Cannot reject a change request in '${current?.status ?? existing.status}' status`);
     }
 
     const updated = await this.getById(id);
@@ -283,7 +284,7 @@ export class ChangeRequestService {
    */
   async apply(id: number, actorUserId: number, justification?: string | null): Promise<ChangeRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Change request not found');
+    if (!existing) throw new NotFoundError('Change request not found');
 
     const authorityHolder = existing.approverUserId ?? actorUserId;
 
@@ -296,7 +297,7 @@ export class ChangeRequestService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getById(id);
-      throw new Error(`Cannot apply a change request in '${current?.status ?? existing.status}' status — must be approved first`);
+      throw new ConflictError(`Cannot apply a change request in '${current?.status ?? existing.status}' status — must be approved first`);
     }
 
     const updated = await this.getById(id);
@@ -321,7 +322,7 @@ export class ChangeRequestService {
 
   async cancel(id: number, requestorUserId: number): Promise<ChangeRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Change request not found');
+    if (!existing) throw new NotFoundError('Change request not found');
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE change_requests
@@ -331,7 +332,7 @@ export class ChangeRequestService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getById(id);
-      throw new Error(`Cannot cancel a change request in '${current?.status ?? existing.status}' status`);
+      throw new ConflictError(`Cannot cancel a change request in '${current?.status ?? existing.status}' status`);
     }
 
     const updated = await this.getById(id);
@@ -368,10 +369,10 @@ export class ChangeRequestService {
     note?: string | null
   ): Promise<{ pendingApproval: PendingApproval; changeRequest: ChangeRequest }> {
     const pa = await this.engine.getPendingApprovalById(pendingApprovalId);
-    if (!pa || pa.changeRequestId === null) throw new Error('Pending approval not found');
+    if (!pa || pa.changeRequestId === null) throw new NotFoundError('Pending approval not found');
 
     const cr = await this.getById(pa.changeRequestId);
-    if (!cr) throw new Error('Change request not found');
+    if (!cr) throw new NotFoundError('Change request not found');
 
     const result = await this.engine.decidePendingApproval(
       pendingApprovalId,

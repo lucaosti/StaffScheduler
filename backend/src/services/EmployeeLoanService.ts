@@ -17,6 +17,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { ApprovalEngineService } from './ApprovalEngineService';
@@ -97,10 +98,10 @@ export class EmployeeLoanService {
    * matrix allows auto-approval, the loan is created already approved.
    */
   async create(input: CreateLoanInput): Promise<EmployeeLoan> {
-    if (!input.startDate || !input.endDate) throw new Error('startDate/endDate required');
-    if (input.endDate < input.startDate) throw new Error('endDate must be on or after startDate');
+    if (!input.startDate || !input.endDate) throw new ConflictError('startDate/endDate required');
+    if (input.endDate < input.startDate) throw new ConflictError('endDate must be on or after startDate');
     if (input.fromOrgUnitId === input.toOrgUnitId) {
-      throw new Error('source and target unit must differ');
+      throw new ConflictError('source and target unit must differ');
     }
 
     const resolved = await this.approvals.resolve('Loan.Request', {
@@ -121,7 +122,7 @@ export class EmployeeLoanService {
     const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
     if (workflow && workflow.steps.length > 0) {
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
-        throw new Error(
+        throw new ConflictError(
           'No approver could be resolved for this loan request — the target organizational unit has no manager who can decide it. Ask an administrator to fix the assignment.'
         );
       }
@@ -175,7 +176,7 @@ export class EmployeeLoanService {
         // (e.g. the target unit's manager was concurrently removed). Never
         // leave a stranded, undecidable request behind.
         await this.pool.execute(`DELETE FROM employee_loans WHERE id = ?`, [created.id]);
-        throw new Error('No approver could be resolved for this loan request — approver resolution changed during creation. Please retry.');
+        throw new ConflictError('No approver could be resolved for this loan request — approver resolution changed during creation. Please retry.');
       }
     }
 
@@ -242,12 +243,12 @@ export class EmployeeLoanService {
 
   async approve(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Loan not found');
+    if (!existing) throw new NotFoundError('Loan not found');
     if (existing.status !== 'pending') {
-      throw new Error(`Cannot approve loan in status '${existing.status}'`);
+      throw new ConflictError(`Cannot approve loan in status '${existing.status}'`);
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
-    if (pendingApprovalId === null) throw new Error('No pending approval found for this loan');
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this loan');
     const decision = await this.engine.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
@@ -270,7 +271,7 @@ export class EmployeeLoanService {
       [reviewerId, notes, id]
     );
     if (res.affectedRows === 0) {
-      throw new Error(`Cannot approve loan in status '${existing.status}'`);
+      throw new ConflictError(`Cannot approve loan in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
@@ -295,12 +296,12 @@ export class EmployeeLoanService {
 
   async reject(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Loan not found');
+    if (!existing) throw new NotFoundError('Loan not found');
     if (existing.status !== 'pending') {
-      throw new Error(`Cannot reject loan in status '${existing.status}'`);
+      throw new ConflictError(`Cannot reject loan in status '${existing.status}'`);
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
-    if (pendingApprovalId === null) throw new Error('No pending approval found for this loan');
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this loan');
     await this.engine.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
@@ -318,7 +319,7 @@ export class EmployeeLoanService {
       [reviewerId, notes, id]
     );
     if (res.affectedRows === 0) {
-      throw new Error(`Cannot reject loan in status '${existing.status}'`);
+      throw new ConflictError(`Cannot reject loan in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');
@@ -350,9 +351,9 @@ export class EmployeeLoanService {
     );
     if (res.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Loan not found');
-      if (existing.requestedBy !== requesterId) throw new Error('Forbidden');
-      throw new Error(`Cannot cancel loan in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Loan not found');
+      if (existing.requestedBy !== requesterId) throw new ForbiddenError('Forbidden');
+      throw new ConflictError(`Cannot cancel loan in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh loan');

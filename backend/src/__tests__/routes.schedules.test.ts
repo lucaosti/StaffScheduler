@@ -35,6 +35,8 @@ jest.mock('../services/ScheduleService');
 
 import { ScheduleService } from '../services/ScheduleService';
 import { createSchedulesRouter } from '../routes/schedules';
+import { ConflictError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -42,6 +44,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/schedules', createSchedulesRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -243,7 +246,7 @@ describe('schedules router PUT /:id', () => {
   it('returns 404 when service throws not found error', async () => {
     (ScheduleService.prototype.updateSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
 
     const res = await request(mountApp()).put('/api/schedules/99').send({ name: 'X' });
 
@@ -285,7 +288,7 @@ describe('schedules router DELETE /:id', () => {
   it('returns 404 when schedule not found', async () => {
     (ScheduleService.prototype.deleteSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
 
     const res = await request(mountApp()).delete('/api/schedules/99');
 
@@ -296,7 +299,7 @@ describe('schedules router DELETE /:id', () => {
   it('returns 409 when schedule is not in draft status', async () => {
     (ScheduleService.prototype.deleteSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Only draft schedules can be deleted'));
+      .mockRejectedValue(new ConflictError('Only draft schedules can be deleted'));
 
     const res = await request(mountApp()).delete('/api/schedules/5');
 
@@ -397,7 +400,7 @@ describe('schedules router PATCH /:id/publish', () => {
   it('returns 404 when schedule not found', async () => {
     (ScheduleService.prototype.publishSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
 
     const res = await request(mountApp()).patch('/api/schedules/99/publish');
 
@@ -434,7 +437,7 @@ describe('schedules router PATCH /:id/archive', () => {
   it('returns 404 when schedule not found', async () => {
     (ScheduleService.prototype.archiveSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Schedule not found'));
+      .mockRejectedValue(new NotFoundError('Schedule not found'));
 
     const res = await request(mountApp()).patch('/api/schedules/99/archive');
 
@@ -456,7 +459,7 @@ describe('schedules router PATCH /:id/archive', () => {
   it('returns 409 when the schedule has pending shift assignments', async () => {
     (ScheduleService.prototype.archiveSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Cannot archive schedule with 3 pending shift assignment(s); resolve or cancel them first'));
+      .mockRejectedValue(new ConflictError('Cannot archive schedule with 3 pending shift assignment(s); resolve or cancel them first'));
 
     const res = await request(mountApp()).patch('/api/schedules/5/archive');
 
@@ -467,7 +470,7 @@ describe('schedules router PATCH /:id/archive', () => {
   it('returns 409 when the schedule is already archived', async () => {
     (ScheduleService.prototype.archiveSchedule as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error("Cannot archive schedule in 'archived' status"));
+      .mockRejectedValue(new ConflictError("Cannot archive schedule in 'archived' status"));
 
     const res = await request(mountApp()).patch('/api/schedules/5/archive');
 

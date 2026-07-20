@@ -41,6 +41,8 @@ jest.mock('../services/DelegationService');
 
 import { DelegationService } from '../services/DelegationService';
 import { createDelegationsRouter } from '../routes/delegations';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -48,6 +50,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/delegations', createDelegationsRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -65,6 +68,7 @@ const mountUnauthApp = (): express.Express => {
   // Restore immediately after building (the router holds a closure reference
   // to the swapped function, so the 401 path remains active for this app).
   authModule.authenticate = saved;
+  app.use(errorHandler);
   return app;
 };
 
@@ -197,7 +201,7 @@ describe('delegations router POST /', () => {
 
   it('returns 422 when service throws escalation error', async () => {
     (DelegationService.prototype.createDelegation as jest.Mock) = jest.fn().mockRejectedValue(
-      new Error('Cannot delegate — privilege escalation detected')
+      new ConflictError('Cannot delegate — privilege escalation detected')
     );
 
     const res = await request(mountApp()).post('/api/delegations').send(validBody);
@@ -208,7 +212,7 @@ describe('delegations router POST /', () => {
 
   it('returns 422 when service throws yourself error', async () => {
     (DelegationService.prototype.createDelegation as jest.Mock) = jest.fn().mockRejectedValue(
-      new Error('Cannot delegate to yourself')
+      new ConflictError('Cannot delegate to yourself')
     );
 
     const res = await request(mountApp()).post('/api/delegations').send(validBody);
@@ -274,7 +278,7 @@ describe('delegations router DELETE /:id', () => {
 
   it('returns 404 when delegation is not found', async () => {
     (DelegationService.prototype.revokeDelegation as jest.Mock) = jest.fn().mockRejectedValue(
-      new Error('Delegation not found')
+      new NotFoundError('Delegation not found')
     );
 
     const res = await request(mountApp()).delete('/api/delegations/999');
@@ -286,7 +290,7 @@ describe('delegations router DELETE /:id', () => {
   it('returns 403 when the requester is not the delegator', async () => {
     currentUser = { id: 9, role: 'employee', email: 'emp@example.com' };
     (DelegationService.prototype.revokeDelegation as jest.Mock) = jest.fn().mockRejectedValue(
-      new Error('Only the delegator can revoke this delegation')
+      new ForbiddenError('Only the delegator can revoke this delegation')
     );
 
     const res = await request(mountApp()).delete('/api/delegations/5');

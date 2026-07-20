@@ -11,6 +11,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ForbiddenError, NotFoundError } from '../errors';
 import { SystemSetting } from '../types';
 import { logger } from '../config/logger';
 
@@ -109,7 +110,7 @@ export class SystemSettingsService {
       );
 
       if (rows.length === 0) {
-        throw new Error(`Setting not found: ${category}.${key}`);
+        throw new NotFoundError(`Setting not found: ${category}.${key}`);
       }
 
       return rows[0].value || rows[0].defaultValue;
@@ -140,11 +141,11 @@ export class SystemSettingsService {
       );
 
       if (existingRows.length === 0) {
-        throw new Error(`Setting not found: ${category}.${key}`);
+        throw new NotFoundError(`Setting not found: ${category}.${key}`);
       }
 
       if (!existingRows[0].isEditable) {
-        throw new Error(`Setting ${category}.${key} is not editable`);
+        throw new ForbiddenError(`Setting ${category}.${key} is not editable`);
       }
 
       await connection.execute(
@@ -203,7 +204,7 @@ export class SystemSettingsService {
       );
 
       if (rows.length === 0) {
-        throw new Error(`Setting not found: ${category}.${key}`);
+        throw new NotFoundError(`Setting not found: ${category}.${key}`);
       }
 
       const defaultValue = rows[0].defaultValue;

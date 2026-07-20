@@ -34,6 +34,8 @@ jest.mock('../services/ResponsibilityRuleService');
 
 import { ResponsibilityRuleService } from '../services/ResponsibilityRuleService';
 import { createResponsibilityRulesRouter } from '../routes/responsibilityRules';
+import { NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -41,6 +43,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/responsibility-rules', createResponsibilityRulesRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -231,7 +234,7 @@ describe('PUT /api/responsibility-rules/:id', () => {
   });
 
   it('returns 404 when service throws not found', async () => {
-    (ResponsibilityRuleService.prototype.update as jest.Mock).mockRejectedValue(new Error('Responsibility rule not found'));
+    (ResponsibilityRuleService.prototype.update as jest.Mock).mockRejectedValue(new NotFoundError('Responsibility rule not found'));
     const res = await request(mountApp()).put('/api/responsibility-rules/99').send({ isActive: false });
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
@@ -262,7 +265,7 @@ describe('DELETE /api/responsibility-rules/:id', () => {
   });
 
   it('returns 404 when service throws not found', async () => {
-    (ResponsibilityRuleService.prototype.delete as jest.Mock).mockRejectedValue(new Error('Responsibility rule not found'));
+    (ResponsibilityRuleService.prototype.delete as jest.Mock).mockRejectedValue(new NotFoundError('Responsibility rule not found'));
     const res = await request(mountApp()).delete('/api/responsibility-rules/99');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');

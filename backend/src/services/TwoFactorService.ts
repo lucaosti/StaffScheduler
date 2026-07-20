@@ -10,6 +10,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import bcrypt from 'bcrypt';
 import {
   buildOtpauthUri,
@@ -62,11 +63,11 @@ export class TwoFactorService {
       `SELECT totp_secret, totp_enabled FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
-    if (rows.length === 0) throw new Error('User not found');
+    if (rows.length === 0) throw new NotFoundError('User not found');
     const secret = rows[0].totp_secret as string | null;
-    if (!secret) throw new Error('2FA setup has not been started');
-    if (rows[0].totp_enabled) throw new Error('2FA is already enabled');
-    if (!verifyTotp(secret, code)) throw new Error('Invalid verification code');
+    if (!secret) throw new ConflictError('2FA setup has not been started');
+    if (rows[0].totp_enabled) throw new ConflictError('2FA is already enabled');
+    if (!verifyTotp(secret, code)) throw new ValidationError('Invalid verification code');
 
     const codes = generateRecoveryCodes(10);
     const hashed = await Promise.all(

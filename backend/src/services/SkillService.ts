@@ -9,6 +9,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import { 
   Skill,
   CreateSkillRequest,
@@ -52,7 +53,7 @@ export class SkillService {
       );
 
       if (existingRows.length > 0) {
-        throw new Error('Skill with this name already exists');
+        throw new ConflictError('Skill with this name already exists');
       }
 
       // Insert skill record
@@ -210,7 +211,7 @@ export class SkillService {
         );
 
         if (existingRows.length > 0) {
-          throw new Error('Skill with this name already exists');
+          throw new ConflictError('Skill with this name already exists');
         }
       }
 
@@ -246,7 +247,7 @@ export class SkillService {
 
       const updatedSkill = await this.getSkillById(id);
       if (!updatedSkill) {
-        throw new Error('Skill not found after update');
+        throw new NotFoundError('Skill not found after update');
       }
 
       return updatedSkill;
@@ -278,7 +279,7 @@ export class SkillService {
       );
 
       if (result.affectedRows === 0) {
-        throw new Error('Skill not found');
+        throw new NotFoundError('Skill not found');
       }
 
       await connection.commit();
@@ -316,7 +317,7 @@ export class SkillService {
       );
 
       if (userRows.length === 0) {
-        throw new Error('User not found');
+        throw new NotFoundError('User not found');
       }
 
       // Remove existing skill assignments
@@ -335,7 +336,7 @@ export class SkillService {
         const validIds = new Set((validRows as RowDataPacket[]).map((r) => r.id as number));
         const invalid = skillIds.find((id) => !validIds.has(id));
         if (invalid !== undefined) {
-          throw new Error(`Skill with ID ${invalid} not found or inactive`);
+          throw new NotFoundError(`Skill with ID ${invalid} not found or inactive`);
         }
 
         const insertValues = skillIds.map(() => '(?, ?)').join(', ');
@@ -474,7 +475,7 @@ export class SkillService {
       );
 
       if (shiftRows.length === 0) {
-        throw new Error('Shift not found');
+        throw new NotFoundError('Shift not found');
       }
 
       // Remove existing skill requirements
@@ -493,7 +494,7 @@ export class SkillService {
         const validIds = new Set((validRows as RowDataPacket[]).map((r) => r.id as number));
         const invalid = skillIds.find((id) => !validIds.has(id));
         if (invalid !== undefined) {
-          throw new Error(`Skill with ID ${invalid} not found or inactive`);
+          throw new NotFoundError(`Skill with ID ${invalid} not found or inactive`);
         }
 
         const insertValues = skillIds.map(() => '(?, ?)').join(', ');

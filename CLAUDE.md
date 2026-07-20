@@ -106,7 +106,7 @@ backend/src/
 
 **Password reset**: implemented in `UserService`; the relevant route is wired through `createAuthRouter`.
 
-**Error detection in routes**: Services throw `Error('X not found')` for 404 cases and `Error('X already confirmed')` for conflict cases. Routes check `error.message.toLowerCase().includes('not found')` in catch blocks to return 404 vs 500.
+**Error handling**: Services throw typed errors from `src/errors` (`NotFoundError` 404, `ConflictError` 409, `ForbiddenError` 403, `ValidationError` 400, `UnauthorizedError` 401); plain `Error` is reserved for internal faults (500). Route handlers are wrapped in `asyncHandler` (from `src/middleware/asyncHandler`) and do not catch errors — the central `errorHandler` middleware in `src/middleware/errorHandler.ts` renders the envelope. Never dispatch on `error.message` substrings (an ESLint rule enforces this in `src/routes`). Custom error codes (e.g. `TOTP_REQUIRED`, `INVALID_STATUS`, `DELEGATION_INVALID`) are preserved by catching the typed error in the route and re-rendering with the custom code.
 
 ### Frontend
 
