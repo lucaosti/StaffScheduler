@@ -574,3 +574,27 @@ describe('reassignment happy paths (first time)', () => {
     ).rejects.toThrow('Pending approval not found');
   });
 });
+
+describe('missing pending approval guards', () => {
+  it.each([
+    ['keepForSelf', (s: ApprovalEngineService) => s.keepForSelf(999, 9)],
+    ['delegateToPerson', (s: ApprovalEngineService) => s.delegateToPerson(999, 9, 5)],
+    ['openToStructure', (s: ApprovalEngineService) => s.openToStructure(999, 9)],
+    ['getDecisionChain', (s: ApprovalEngineService) => s.getDecisionChain(999, 9)],
+  ])('%s rejects an unknown pending approval', async (_name, call) => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(call(new ApprovalEngineService(pool))).rejects.toThrow('Pending approval not found');
+  });
+
+  it('getProposerUserId degrades to null for a row with no linked entity', async () => {
+    const svc = new ApprovalEngineService(makePool().pool) as unknown as {
+      getProposerUserId: (pa: Record<string, unknown>) => Promise<number | null>;
+    };
+    await expect(
+      svc.getProposerUserId({
+        changeRequestId: null, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+      })
+    ).resolves.toBeNull();
+  });
+});

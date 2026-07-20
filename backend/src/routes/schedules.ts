@@ -89,13 +89,8 @@ router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), vali
 
 // Create new schedule
 router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), asyncHandler(async (req: Request, res: Response) => {
-  const user = req.user;
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'User not authenticated' }
-    });
-  }
+  // Guaranteed by authenticate, as on every protected route.
+  const user = req.user!;
 
   const schedule = await scheduleService.createSchedule({ ...res.locals.body, createdBy: user.id });
 
@@ -181,17 +176,8 @@ router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'),
 }));
 
 // Duplicate schedule
-router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
-
-  const user = req.user;
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'User not authenticated' }
-    });
-  }
-
   const { name, startDate, endDate } = res.locals.body;
 
   const newSchedule = await scheduleService.duplicateSchedule(id, name, startDate, endDate);
@@ -207,13 +193,8 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
 router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  const user = req.user;
-  if (!user) {
-    return res.status(401).json({
-      success: false,
-      error: { code: 'UNAUTHORIZED', message: 'User not authenticated' }
-    });
-  }
+  // Guaranteed by authenticate, as on every protected route.
+  const user = req.user!;
 
   const schedule = await scheduleService.getScheduleById(id);
   if (!schedule) {
