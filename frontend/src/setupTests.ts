@@ -14,12 +14,17 @@ import { TextDecoder, TextEncoder } from 'util';
 // tests pin an absolute base that the MSW handlers register against.
 process.env.REACT_APP_API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
+// The assignment targets are typed `unknown` on purpose: Node's util
+// TextEncoder/TextDecoder signatures drift between @types/node versions
+// (label vs encoding parameter, AllowSharedBufferSource inputs), and under
+// the hoisted workspace install the exact version is resolved once for the
+// whole repo. Runtime-wise the polyfill is correct either way; pinning the
+// declared shape would just re-break on the next types bump.
 if (typeof (globalThis as { TextEncoder?: unknown }).TextEncoder === 'undefined') {
-  (globalThis as unknown as { TextEncoder: typeof TextEncoder }).TextEncoder = TextEncoder;
+  (globalThis as { TextEncoder?: unknown }).TextEncoder = TextEncoder;
 }
 if (typeof (globalThis as { TextDecoder?: unknown }).TextDecoder === 'undefined') {
-  (globalThis as unknown as { TextDecoder: typeof TextDecoder }).TextDecoder =
-    TextDecoder as unknown as typeof globalThis.TextDecoder;
+  (globalThis as { TextDecoder?: unknown }).TextDecoder = TextDecoder;
 }
 
 // MSW v2 requires real Web API globals (fetch, Request, Response, Headers,
