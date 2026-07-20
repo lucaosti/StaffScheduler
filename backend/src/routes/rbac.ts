@@ -23,10 +23,11 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { z } from 'zod';
 import { authenticate, requirePermission, invalidateAuthContext } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
 import { idParam, userIdParam, userIdAndRoleIdParam, createRoleBody, updateRoleBody } from '../schemas';
-import { logger } from '../config/logger';
+import { NotFoundError } from '../errors';
 
 const assignRoleBody = z.object({
   roleId: z.number().int().positive(),
@@ -43,156 +44,96 @@ const bulkAssignRoleBody = z.object({
   justification: z.string().max(1000).nullable().optional(),
 });
 
-const respondError = (res: Response, status: number, code: string, message: string): void => {
-  res.status(status).json({ success: false, error: { code, message } });
-};
-
-const statusFor = (message: string): number =>
-  message.toLowerCase().includes('not found')
-    ? 404
-    : message.toLowerCase().includes('already exists')
-      ? 409
-      : message.toLowerCase().includes('cannot be deleted')
-        ? 409
-        : 400;
-
 export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Router } => {
   const rbac = new RbacService(pool);
 
   const permissions = Router();
   permissions.use(authenticate, requirePermission('role.manage'));
-  permissions.get('/', async (_req: Request, res: Response) => {
-    try {
-      res.json({ success: true, data: await rbac.listPermissions() });
-    } catch (err) {
-      logger.error('list permissions failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list permissions');
-    }
-  });
+  permissions.get('/', asyncHandler(async (_req: Request, res: Response) => {
+    res.json({ success: true, data: await rbac.listPermissions() });
+  }));
 
   const roles = Router();
   roles.use(authenticate, requirePermission('role.manage'));
 
-  roles.get('/', async (_req: Request, res: Response) => {
-    try {
-      res.json({ success: true, data: await rbac.listRoles() });
-    } catch (err) {
-      logger.error('list roles failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list roles');
-    }
-  });
+  roles.get('/', asyncHandler(async (_req: Request, res: Response) => {
+    res.json({ success: true, data: await rbac.listRoles() });
+  }));
 
-  roles.post('/', validateBody(createRoleBody), async (_req: Request, res: Response) => {
-    try {
-      const created = await rbac.createRole({
-        name: res.locals.body.name,
-        description: res.locals.body.description,
-        permissionCodes: res.locals.body.permissionCodes,
-      });
-      res.status(201).json({ success: true, data: created });
-    } catch (err) {
-      const msg = (err as Error).message;
-      respondError(res, statusFor(msg), statusFor(msg) === 409 ? 'CONFLICT' : 'VALIDATION_ERROR', msg);
-    }
-  });
+  roles.post('/', validateBody(createRoleBody), asyncHandler(async (_req: Request, res: Response) => {
+    const created = await rbac.createRole({
+      name: res.locals.body.name,
+      description: res.locals.body.description,
+      permissionCodes: res.locals.body.permissionCodes,
+    });
+    res.status(201).json({ success: true, data: created });
+  }));
 
-  roles.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      const role = await rbac.getRoleById(res.locals.params.id);
-      if (!role) return respondError(res, 404, 'NOT_FOUND', 'Role not found');
-      res.json({ success: true, data: role });
-    } catch (err) {
-      logger.error('get role failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to read role');
-    }
-  });
+  roles.get('/:id', validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+    const role = await rbac.getRoleById(res.locals.params.id);
+    if (!role) throw new NotFoundError('Role not found');
+    res.json({ success: true, data: role });
+  }));
 
-  roles.put('/:id', validateParams(idParam), validateBody(updateRoleBody), async (_req: Request, res: Response) => {
-    try {
-      const updated = await rbac.updateRole(res.locals.params.id, {
-        name: res.locals.body.name,
-        description: res.locals.body.description,
-        permissionCodes: res.locals.body.permissionCodes,
-      });
-      res.json({ success: true, data: updated });
-    } catch (err) {
-      const msg = (err as Error).message;
-      respondError(res, statusFor(msg), statusFor(msg) === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR', msg);
-    }
-  });
+  roles.put('/:id', validateParams(idParam), validateBody(updateRoleBody), asyncHandler(async (_req: Request, res: Response) => {
+    const updated = await rbac.updateRole(res.locals.params.id, {
+      name: res.locals.body.name,
+      description: res.locals.body.description,
+      permissionCodes: res.locals.body.permissionCodes,
+    });
+    res.json({ success: true, data: updated });
+  }));
 
-  roles.delete('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      await rbac.deleteRole(res.locals.params.id);
-      res.json({ success: true });
-    } catch (err) {
-      const msg = (err as Error).message;
-      respondError(res, statusFor(msg), statusFor(msg) === 404 ? 'NOT_FOUND' : 'CONFLICT', msg);
-    }
-  });
+  roles.delete('/:id', validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+    await rbac.deleteRole(res.locals.params.id);
+    res.json({ success: true });
+  }));
 
-  roles.post('/bulk-assign', validateBody(bulkAssignRoleBody), async (req: Request, res: Response) => {
-    try {
-      const { roleId, userIds, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
-      const result = await rbac.bulkAssignRole(
-        userIds,
-        roleId,
-        scopeOrgUnitId ?? null,
-        expiresAt ?? null,
-        req.user?.id,
-        justification ?? null
-      );
-      res.status(201).json({ success: true, data: result });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  roles.post('/bulk-assign', validateBody(bulkAssignRoleBody), asyncHandler(async (req: Request, res: Response) => {
+    const { roleId, userIds, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
+    const result = await rbac.bulkAssignRole(
+      userIds,
+      roleId,
+      scopeOrgUnitId ?? null,
+      expiresAt ?? null,
+      req.user?.id,
+      justification ?? null
+    );
+    res.status(201).json({ success: true, data: result });
+  }));
 
-  roles.get('/users/:userId', validateParams(userIdParam), async (_req: Request, res: Response) => {
-    try {
-      const assignments = await rbac.getUserRoles(res.locals.params.userId);
-      res.json({ success: true, data: assignments });
-    } catch (err) {
-      logger.error('get user roles failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to get user roles');
-    }
-  });
+  roles.get('/users/:userId', validateParams(userIdParam), asyncHandler(async (_req: Request, res: Response) => {
+    const assignments = await rbac.getUserRoles(res.locals.params.userId);
+    res.json({ success: true, data: assignments });
+  }));
 
-  roles.post('/users/:userId', validateParams(userIdParam), validateBody(assignRoleBody), async (req: Request, res: Response) => {
-    try {
-      const { roleId, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
-      await rbac.assignRole(
-        res.locals.params.userId,
-        roleId,
-        scopeOrgUnitId ?? null,
-        expiresAt ?? null,
-        req.user?.id,
-        justification ?? null
-      );
-      // Drop any cached auth context so the new grant applies immediately
-      // on this instance even when the permission cache is enabled.
-      invalidateAuthContext(res.locals.params.userId);
-      res.status(201).json({ success: true });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  roles.post('/users/:userId', validateParams(userIdParam), validateBody(assignRoleBody), asyncHandler(async (req: Request, res: Response) => {
+    const { roleId, scopeOrgUnitId, expiresAt, justification } = res.locals.body;
+    await rbac.assignRole(
+      res.locals.params.userId,
+      roleId,
+      scopeOrgUnitId ?? null,
+      expiresAt ?? null,
+      req.user?.id,
+      justification ?? null
+    );
+    // Drop any cached auth context so the new grant applies immediately
+    // on this instance even when the permission cache is enabled.
+    invalidateAuthContext(res.locals.params.userId);
+    res.status(201).json({ success: true });
+  }));
 
-  roles.delete('/users/:userId/:roleId', validateParams(userIdAndRoleIdParam), async (req: Request, res: Response) => {
-    try {
-      const rawScope = req.query.scopeOrgUnitId;
-      const scope = rawScope ? (() => {
-        const n = parseInt(String(rawScope), 10);
-        return isNaN(n) || n <= 0 ? null : n;
-      })() : null;
-      const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
-      await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
-      invalidateAuthContext(res.locals.params.userId);
-      res.json({ success: true });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  roles.delete('/users/:userId/:roleId', validateParams(userIdAndRoleIdParam), asyncHandler(async (req: Request, res: Response) => {
+    const rawScope = req.query.scopeOrgUnitId;
+    const scope = rawScope ? (() => {
+      const n = parseInt(String(rawScope), 10);
+      return isNaN(n) || n <= 0 ? null : n;
+    })() : null;
+    const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
+    await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
+    invalidateAuthContext(res.locals.params.userId);
+    res.json({ success: true });
+  }));
 
   return { roles, permissions };
 };

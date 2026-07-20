@@ -9,6 +9,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 
 export interface Module {
@@ -61,7 +62,7 @@ export class ModuleService {
       'UPDATE modules SET is_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE code = ?',
       [isEnabled ? 1 : 0, code]
     );
-    if (result.affectedRows === 0) throw new Error(`Module not found: ${code}`);
+    if (result.affectedRows === 0) throw new NotFoundError(`Module not found: ${code}`);
     this.cache = null;
     logger.info(`Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}`);
     const mod = await this.getByCode(code);
@@ -120,7 +121,7 @@ export class ModuleService {
     justification?: string | null
   ): Promise<ModuleWithOrgOverride> {
     const mod = await this.getByCode(code);
-    if (!mod) throw new Error(`Module not found: ${code}`);
+    if (!mod) throw new NotFoundError(`Module not found: ${code}`);
 
     await this.pool.execute(
       `INSERT INTO organization_module_overrides (organization_name, module_code, is_enabled, updated_by)
@@ -154,14 +155,14 @@ export class ModuleService {
    */
   async removeOrgOverride(code: string, org: string): Promise<void> {
     const mod = await this.getByCode(code);
-    if (!mod) throw new Error(`Module not found: ${code}`);
+    if (!mod) throw new NotFoundError(`Module not found: ${code}`);
 
     const [result] = await this.pool.execute<import('mysql2/promise').ResultSetHeader>(
       `DELETE FROM organization_module_overrides WHERE organization_name = ? AND module_code = ?`,
       [org, code]
     );
     this.orgCache.delete(org);
-    if (result.affectedRows === 0) throw new Error('Override not found');
+    if (result.affectedRows === 0) throw new NotFoundError('Override not found');
     logger.info(`Module override removed: org='${org}' code='${code}'`);
   }
 

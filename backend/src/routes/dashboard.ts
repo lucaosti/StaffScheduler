@@ -22,7 +22,7 @@ import {
   requireModuleForUser,
   userHasPermission,
 } from '../middleware/auth';
-import { logger } from '../config/logger';
+import { asyncHandler } from '../middleware/asyncHandler';
 
 // Sargable month window: [first day of current month, first day of next month).
 // Keeps idx_date usable, unlike MONTH(...)/YEAR(...) predicates.
@@ -51,8 +51,7 @@ export const createDashboardRouter = (pool: Pool) => {
    * @route GET /api/dashboard/stats
    * @returns {Object} Dashboard statistics and KPIs
    */
-  router.get('/stats', authenticate, async (req: Request, res: Response) => {
-    try {
+  router.get('/stats', authenticate, asyncHandler(async (req: Request, res: Response) => {
       // Every active user is schedulable staff, so the headcount is the count
       // of active users.
       const totalEmployeesQuery =
@@ -174,14 +173,7 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: stats
       });
-    } catch (error) {
-      logger.error('Dashboard stats error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch dashboard statistics' },
-      });
-    }
-  });
+  }));
 
   // Get recent activities. Reads audit_logs, so it carries the same guards as
   // /api/audit-logs: audit module enabled for the caller's org + audit.read.
@@ -190,8 +182,7 @@ export const createDashboardRouter = (pool: Pool) => {
     authenticate,
     requireModuleForUser('audit'),
     requirePermission('audit.read'),
-    async (_req: Request, res: Response) => {
-    try {
+    asyncHandler(async (_req: Request, res: Response) => {
       // Fetch real activities from audit_logs table
       const activitiesQuery = `
         SELECT
@@ -227,18 +218,10 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: formattedActivities
       });
-    } catch (error) {
-      logger.error('Dashboard activities error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to load recent activities' },
-      });
-    }
-  });
+  }));
 
   // Get upcoming shifts
-  router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
-    try {
+  router.get('/upcoming-shifts', authenticate, asyncHandler(async (_req: Request, res: Response) => {
       // Query upcoming shifts with assignment information (using correct schema)
       const query = `
         SELECT
@@ -285,19 +268,10 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: upcomingShifts
       });
-    } catch (error) {
-      logger.error('Dashboard upcoming shifts error:', error);
-
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to load upcoming shifts' },
-      });
-    }
-  });
+  }));
 
   // Get department overview
-  router.get('/departments', authenticate, async (_req: Request, res: Response) => {
-    try {
+  router.get('/departments', authenticate, asyncHandler(async (_req: Request, res: Response) => {
       // Query department statistics using correct schema (departments + users + user_departments)
       const query = `
         SELECT
@@ -338,15 +312,7 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: departments
       });
-    } catch (error) {
-      logger.error('Dashboard departments error:', error);
-
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to load department overview' },
-      });
-    }
-  });
+  }));
 
   return router;
 };

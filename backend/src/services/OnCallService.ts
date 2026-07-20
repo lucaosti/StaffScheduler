@@ -12,6 +12,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 
@@ -105,11 +106,11 @@ export class OnCallService {
   async createPeriod(input: CreateOnCallPeriodInput): Promise<OnCallPeriod> {
     const minStaff = input.minStaff ?? 1;
     const maxStaff = input.maxStaff ?? Math.max(2, minStaff);
-    if (minStaff < 1) throw new Error('minStaff must be >= 1');
-    if (maxStaff < minStaff) throw new Error('maxStaff must be >= minStaff');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error('Invalid date');
-    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(input.startTime)) throw new Error('Invalid startTime');
-    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(input.endTime)) throw new Error('Invalid endTime');
+    if (minStaff < 1) throw new ConflictError('minStaff must be >= 1');
+    if (maxStaff < minStaff) throw new ConflictError('maxStaff must be >= minStaff');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new ValidationError('Invalid date');
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(input.startTime)) throw new ValidationError('Invalid startTime');
+    if (!/^\d{2}:\d{2}(:\d{2})?$/.test(input.endTime)) throw new ValidationError('Invalid endTime');
 
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO on_call_periods
@@ -202,7 +203,7 @@ export class OnCallService {
 
     if (updates.length === 0) {
       const existing = await this.getPeriodById(id);
-      if (!existing) throw new Error('On-call period not found');
+      if (!existing) throw new NotFoundError('On-call period not found');
       return existing;
     }
     values.push(id);
@@ -210,9 +211,9 @@ export class OnCallService {
       `UPDATE on_call_periods SET ${updates.join(', ')} WHERE id = ?`,
       values
     );
-    if (res.affectedRows === 0) throw new Error('On-call period not found');
+    if (res.affectedRows === 0) throw new NotFoundError('On-call period not found');
     const updated = await this.getPeriodById(id);
-    if (!updated) throw new Error('On-call period not found after update');
+    if (!updated) throw new NotFoundError('On-call period not found after update');
     return updated;
   }
 
@@ -221,7 +222,7 @@ export class OnCallService {
       `DELETE FROM on_call_periods WHERE id = ?`,
       [id]
     );
-    if (res.affectedRows === 0) throw new Error('On-call period not found');
+    if (res.affectedRows === 0) throw new NotFoundError('On-call period not found');
     return true;
   }
 
@@ -243,10 +244,10 @@ export class OnCallService {
            FROM on_call_periods WHERE id = ? FOR UPDATE`,
         [periodId]
       );
-      if (periodRows.length === 0) throw new Error('On-call period not found');
+      if (periodRows.length === 0) throw new NotFoundError('On-call period not found');
       const period = periodRows[0];
       if ((period.assigned_count as number) >= (period.max_staff as number)) {
-        throw new Error('On-call period is already at max capacity');
+        throw new ConflictError('On-call period is already at max capacity');
       }
 
       const [insRes] = await conn.execute<ResultSetHeader>(

@@ -11,6 +11,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { buildVcfFile, parseVcf, VCard } from '../utils/vcard';
 
@@ -88,7 +89,7 @@ export class UserDirectoryService {
       await conn.beginTransaction();
       for (const f of fields) {
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(f.key)) {
-          throw new Error(`Invalid field key '${f.key}'`);
+          throw new ValidationError(`Invalid field key '${f.key}'`);
         }
         await conn.execute<ResultSetHeader>(
           `INSERT INTO user_custom_fields (user_id, field_key, field_value, is_public)

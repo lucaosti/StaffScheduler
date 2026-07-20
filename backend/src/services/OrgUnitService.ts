@@ -9,6 +9,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 
@@ -136,10 +137,10 @@ export class OrgUnitService {
   }
 
   async create(input: CreateOrgUnitInput): Promise<OrgUnit> {
-    if (!input.name?.trim()) throw new Error('name is required');
+    if (!input.name?.trim()) throw new ConflictError('name is required');
     if (input.parentId !== undefined && input.parentId !== null) {
       const parent = await this.getById(input.parentId);
-      if (!parent) throw new Error('parent org unit not found');
+      if (!parent) throw new NotFoundError('parent org unit not found');
     }
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO org_units (name, description, parent_id, manager_user_id)
@@ -160,22 +161,22 @@ export class OrgUnitService {
 
   async update(id: number, patch: UpdateOrgUnitInput): Promise<OrgUnit> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Org unit not found');
+    if (!existing) throw new NotFoundError('Org unit not found');
     if (patch.parentId !== undefined && patch.parentId !== null) {
-      if (patch.parentId === id) throw new Error('parent_id cannot equal id');
+      if (patch.parentId === id) throw new ConflictError('parent_id cannot equal id');
       // Prevent simple cycles by walking up the proposed parent.
       let cur: number | null = patch.parentId;
       const seen = new Set<number>([id]);
       while (cur !== null) {
         const curId: number = cur;
-        if (seen.has(curId)) throw new Error('cycle detected in parent chain');
+        if (seen.has(curId)) throw new ConflictError('cycle detected in parent chain');
         seen.add(curId);
         const result = await this.pool.execute<RowDataPacket[]>(
           `SELECT parent_id FROM org_units WHERE id = ? LIMIT 1`,
           [curId]
         );
         const parentRows: RowDataPacket[] = result[0];
-        if (parentRows.length === 0) throw new Error('parent org unit not found');
+        if (parentRows.length === 0) throw new NotFoundError('parent org unit not found');
         cur = (parentRows[0].parent_id as number | null) ?? null;
       }
     }
@@ -209,7 +210,7 @@ export class OrgUnitService {
 
   async remove(id: number): Promise<void> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Org unit not found');
+    if (!existing) throw new NotFoundError('Org unit not found');
     await this.pool.execute(`DELETE FROM org_units WHERE id = ?`, [id]);
     _treeCache = null;
   }
@@ -335,7 +336,7 @@ export class OrgUnitService {
       `SELECT * FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
       [userId, orgUnitId]
     );
-    if (rows.length === 0) throw new Error('Membership not found after insert');
+    if (rows.length === 0) throw new NotFoundError('Membership not found after insert');
     const membership = mapMembership(rows[0]);
     await this.audit.write({
       actorId: actorId ?? null,
@@ -361,7 +362,7 @@ export class OrgUnitService {
           WHERE user_id = ? AND org_unit_id = ?`,
         [userId, orgUnitId]
       );
-      if (res.affectedRows === 0) throw new Error('Membership not found');
+      if (res.affectedRows === 0) throw new NotFoundError('Membership not found');
       await conn.commit();
     } catch (err) {
       await conn.rollback();

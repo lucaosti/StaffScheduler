@@ -22,6 +22,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import {
   ResponsibilityRule,
   ResponsibilitySubjectType,
@@ -142,10 +143,10 @@ export class ResponsibilityRuleService {
 
   async create(input: CreateResponsibilityRuleRequest, actorId: number | null): Promise<ResponsibilityRule> {
     if (input.subjectType !== 'all' && (input.subjectId === undefined || input.subjectId === null)) {
-      throw new Error('subject_id is required when subject_type is not "all"');
+      throw new ConflictError('subject_id is required when subject_type is not "all"');
     }
     if (input.subjectType === 'all' && input.subjectId != null) {
-      throw new Error('subject_id must be null when subject_type is "all"');
+      throw new ConflictError('subject_id must be null when subject_type is "all"');
     }
 
     const [res] = await this.pool.execute<ResultSetHeader>(
@@ -182,15 +183,15 @@ export class ResponsibilityRuleService {
 
   async update(id: number, patch: UpdateResponsibilityRuleRequest, actorId: number | null): Promise<ResponsibilityRule> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Responsibility rule not found');
+    if (!existing) throw new NotFoundError('Responsibility rule not found');
 
     const merged = { ...existing, ...patch };
 
     if (merged.subjectType !== 'all' && merged.subjectId == null) {
-      throw new Error('subject_id is required when subject_type is not "all"');
+      throw new ConflictError('subject_id is required when subject_type is not "all"');
     }
     if (merged.subjectType === 'all' && merged.subjectId != null) {
-      throw new Error('subject_id must be null when subject_type is "all"');
+      throw new ConflictError('subject_id must be null when subject_type is "all"');
     }
 
     await this.pool.execute(
@@ -229,7 +230,7 @@ export class ResponsibilityRuleService {
 
   async delete(id: number, actorId: number | null): Promise<void> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Responsibility rule not found');
+    if (!existing) throw new NotFoundError('Responsibility rule not found');
 
     await this.pool.execute('DELETE FROM responsibility_rules WHERE id = ?', [id]);
 
@@ -268,14 +269,14 @@ export class ResponsibilityRuleService {
       params.push(ctx.orgUnitId);
     }
     if (ctx.departmentIds && ctx.departmentIds.length > 0) {
-      if (ctx.departmentIds.length > 100) throw new Error('Max 100 department IDs allowed');
+      if (ctx.departmentIds.length > 100) throw new ConflictError('Max 100 department IDs allowed');
       subjectConditions.push(
         `(rr.subject_type = 'department' AND rr.subject_id IN (${ctx.departmentIds.map(() => '?').join(',')}))`
       );
       params.push(...ctx.departmentIds);
     }
     if (ctx.roleIds && ctx.roleIds.length > 0) {
-      if (ctx.roleIds.length > 100) throw new Error('Max 100 role IDs allowed');
+      if (ctx.roleIds.length > 100) throw new ConflictError('Max 100 role IDs allowed');
       subjectConditions.push(
         `(rr.subject_type = 'role' AND rr.subject_id IN (${ctx.roleIds.map(() => '?').join(',')}))`
       );
@@ -378,13 +379,13 @@ export class ResponsibilityRuleService {
       input.subjectType === 'all' ? [null] : input.subjectIds;
 
     if (effectiveSubjectIds.length === 0) {
-      throw new Error('subjectIds must not be empty');
+      throw new ConflictError('subjectIds must not be empty');
     }
     if (input.permissionCodes.length === 0) {
-      throw new Error('permissionCodes must not be empty');
+      throw new ConflictError('permissionCodes must not be empty');
     }
     if (effectiveSubjectIds.length * input.permissionCodes.length > 500) {
-      throw new Error('Bulk create limited to 500 rules per request');
+      throw new ConflictError('Bulk create limited to 500 rules per request');
     }
 
     const conn = await this.pool.getConnection();
@@ -436,7 +437,7 @@ export class ResponsibilityRuleService {
    */
   async getConflicts(id: number): Promise<ResponsibilityRule[]> {
     const rule = await this.getById(id);
-    if (!rule) throw new Error('Responsibility rule not found');
+    if (!rule) throw new NotFoundError('Responsibility rule not found');
 
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT r2.*

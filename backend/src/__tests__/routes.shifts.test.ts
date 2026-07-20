@@ -35,6 +35,8 @@ jest.mock('../services/ShiftService');
 
 import { ShiftService } from '../services/ShiftService';
 import { createShiftsRouter } from '../routes/shifts';
+import { NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -42,6 +44,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/shifts', createShiftsRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -415,7 +418,7 @@ describe('shifts router PUT /:id', () => {
   it('returns 404 when service throws not found error', async () => {
     (ShiftService.prototype.updateShift as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Shift not found'));
+      .mockRejectedValue(new NotFoundError('Shift not found'));
 
     const res = await request(mountApp())
       .put('/api/shifts/99')
@@ -459,7 +462,7 @@ describe('shifts router DELETE /:id', () => {
   it('returns 404 when shift not found', async () => {
     (ShiftService.prototype.deleteShift as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Shift not found'));
+      .mockRejectedValue(new NotFoundError('Shift not found'));
 
     const res = await request(mountApp()).delete('/api/shifts/99');
 

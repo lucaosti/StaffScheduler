@@ -8,6 +8,7 @@
 import express from 'express';
 import request from 'supertest';
 import { createSystemRouter } from '../routes/system';
+import { errorHandler } from '../middleware/errorHandler';
 
 type ExecuteResult = [unknown[], unknown];
 
@@ -15,6 +16,7 @@ const buildApp = (executeImpl: jest.Mock): express.Express => {
   const fakePool = { execute: executeImpl } as unknown as Parameters<typeof createSystemRouter>[0];
   const app = express();
   app.use('/api/system', createSystemRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 

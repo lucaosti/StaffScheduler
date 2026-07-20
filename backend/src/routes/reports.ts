@@ -7,10 +7,10 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModuleForUser } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams } from '../middleware/validation';
 import { scheduleIdParam } from '../schemas';
 import { ReportsService } from '../services/ReportsService';
-import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -25,52 +25,37 @@ export const createReportsRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requireModuleForUser('reporting'), requirePermission('report.read'));
 
-  router.get('/hours-worked', async (req: Request, res: Response) => {
-    try {
-      const start = req.query.start as string | undefined;
-      const end = req.query.end as string | undefined;
-      if (!start || !end) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
-      }
-      if (!isIsoDate(start) || !isIsoDate(end)) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
-      }
-      const departmentId = req.query.departmentId ? Number(req.query.departmentId) : undefined;
-      const data = await service.hoursWorkedByUser(start, end, departmentId);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('reports error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to generate report');
+  router.get('/hours-worked', asyncHandler(async (req: Request, res: Response) => {
+    const start = req.query.start as string | undefined;
+    const end = req.query.end as string | undefined;
+    if (!start || !end) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
     }
-  });
+    if (!isIsoDate(start) || !isIsoDate(end)) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
+    }
+    const departmentId = req.query.departmentId ? Number(req.query.departmentId) : undefined;
+    const data = await service.hoursWorkedByUser(start, end, departmentId);
+    res.json({ success: true, data });
+  }));
 
-  router.get('/cost-by-department', async (req: Request, res: Response) => {
-    try {
-      const start = req.query.start as string | undefined;
-      const end = req.query.end as string | undefined;
-      if (!start || !end) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
-      }
-      if (!isIsoDate(start) || !isIsoDate(end)) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
-      }
-      const data = await service.costByDepartment(start, end);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('reports error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to generate report');
+  router.get('/cost-by-department', asyncHandler(async (req: Request, res: Response) => {
+    const start = req.query.start as string | undefined;
+    const end = req.query.end as string | undefined;
+    if (!start || !end) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'start and end are required');
     }
-  });
+    if (!isIsoDate(start) || !isIsoDate(end)) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'start and end must be ISO dates (YYYY-MM-DD)');
+    }
+    const data = await service.costByDepartment(start, end);
+    res.json({ success: true, data });
+  }));
 
-  router.get('/fairness/:scheduleId', validateParams(scheduleIdParam), async (_req: Request, res: Response) => {
-    try {
-      const data = await service.fairnessForSchedule(res.locals.params.scheduleId);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('reports error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to generate report');
-    }
-  });
+  router.get('/fairness/:scheduleId', validateParams(scheduleIdParam), asyncHandler(async (_req: Request, res: Response) => {
+    const data = await service.fairnessForSchedule(res.locals.params.scheduleId);
+    res.json({ success: true, data });
+  }));
 
   return router;
 };

@@ -28,6 +28,7 @@ import { EmployeeService } from '../services/EmployeeService';
 import { createEmployeesRouter } from '../routes/employees';
 import { createBulkImportRouter } from '../routes/bulkImport';
 import { createRbacRouter } from '../routes/rbac';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -35,6 +36,7 @@ const mount = (prefix: string, router: express.Router) => {
   const app = express();
   app.use(express.json());
   app.use(prefix, router);
+  app.use(errorHandler);
   return app;
 };
 

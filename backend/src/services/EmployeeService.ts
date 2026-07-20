@@ -11,6 +11,7 @@
  */
 
 import { Pool } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { UserService } from './UserService';
 import { User, CreateUserRequest, UpdateUserRequest, EmployeeSkill } from '../types';
 import { logger } from '../config/logger';
@@ -153,7 +154,7 @@ export class EmployeeService {
     try {
       const employee = await this.getEmployeeById(id);
       if (!employee) {
-        throw new Error('Employee not found');
+        throw new NotFoundError('Employee not found');
       }
       return await this.userService.updateUser(id, userData);
     } catch (error) {
@@ -172,7 +173,7 @@ export class EmployeeService {
     try {
       const employee = await this.getEmployeeById(id);
       if (!employee) {
-        throw new Error('Employee not found');
+        throw new NotFoundError('Employee not found');
       }
       return await this.userService.deleteUser(id, actorId);
     } catch (error) {

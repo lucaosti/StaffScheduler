@@ -16,6 +16,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import {
   Permission,
   Role,
@@ -192,7 +193,7 @@ export class RbacService {
         'SELECT id FROM roles WHERE name = ? LIMIT 1',
         [input.name]
       );
-      if (existing.length > 0) throw new Error('Role name already exists');
+      if (existing.length > 0) throw new ConflictError('Role name already exists');
 
       const [res] = await connection.execute<ResultSetHeader>(
         'INSERT INTO roles (name, description, is_system) VALUES (?, ?, FALSE)',
@@ -240,7 +241,7 @@ export class RbacService {
       await connection.commit();
       logger.info(`Role updated: ${id}`);
       const role = await this.getRoleById(id);
-      if (!role) throw new Error('Role not found');
+      if (!role) throw new NotFoundError('Role not found');
       return role;
     } catch (error) {
       await connection.rollback();
@@ -252,8 +253,8 @@ export class RbacService {
 
   async deleteRole(id: number): Promise<void> {
     const role = await this.getRoleById(id);
-    if (!role) throw new Error('Role not found');
-    if (role.isSystem) throw new Error('System roles cannot be deleted');
+    if (!role) throw new NotFoundError('Role not found');
+    if (role.isSystem) throw new ConflictError('System roles cannot be deleted');
     await this.pool.execute('DELETE FROM roles WHERE id = ?', [id]);
     logger.info(`Role deleted: ${id}`);
   }

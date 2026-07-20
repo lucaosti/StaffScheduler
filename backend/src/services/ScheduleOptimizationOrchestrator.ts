@@ -1,4 +1,5 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { Schedule } from '../types';
 import { logger } from '../config/logger';
 
@@ -190,7 +191,7 @@ export class ScheduleOptimizationOrchestrator {
         'SELECT * FROM schedules WHERE id = ? LIMIT 1',
         [sourceScheduleId]
       );
-      if (sourceRows.length === 0) throw new Error('Source schedule not found');
+      if (sourceRows.length === 0) throw new NotFoundError('Source schedule not found');
 
       const source = sourceRows[0];
       const [scheduleResult] = await connection.execute<ResultSetHeader>(
