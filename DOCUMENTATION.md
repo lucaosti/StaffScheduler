@@ -635,19 +635,22 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 git clone https://github.com/lucaosti/StaffScheduler.git
 cd StaffScheduler
 
+# One install for the whole monorepo: the repository uses npm workspaces with
+# a single root lockfile, so backend, frontend and packages/shared are
+# installed (and the shared contract package compiled) in one step.
+npm install
+
 # Backend
 cp backend/.env.example backend/.env
 # Edit backend/.env — set DB_HOST, DB_USER, DB_PASSWORD, DB_NAME, JWT_SECRET
 
 cd backend
-npm install
-npm run db:init          # creates schema (no data)
+npm run db:init          # applies schema migrations (no data)
 npm run db:seed:demo     # optional: load realistic demo data
 npm run dev              # starts on http://localhost:3001
 
 # Frontend (new terminal)
 cd frontend
-npm install
 npm start                # starts on http://localhost:3000, proxies /api/* to 3001
 ```
 
