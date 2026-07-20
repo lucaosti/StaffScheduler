@@ -153,4 +153,31 @@ describe('ChangeRequestService.create — proposer context resolution', () => {
     expect(calls.some((sql) => sql.includes('user_departments'))).toBe(true);
     expect(calls.some((sql) => sql.includes('user_roles'))).toBe(true);
   });
+
+  it.each([
+    ['time_off_request_id', 'timeOffRequestId'],
+    ['employee_loan_id', 'employeeLoanId'],
+    ['shift_swap_request_id', 'shiftSwapRequestId'],
+  ])('classifies an overdue %s decision under the right entity ref', async (column, refKey) => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          overdueRow({
+            change_request_id: null,
+            time_off_request_id: null,
+            employee_loan_id: null,
+            shift_swap_request_id: null,
+            [column]: 33,
+          }),
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([{ insertId: 99 }, null]);
+
+    const result = await new ApprovalEngineService(pool).processEscalations();
+
+    expect(result.items[0].entityRef).toEqual({ [refKey]: 33 });
+  });
 });

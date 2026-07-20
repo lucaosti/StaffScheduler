@@ -362,3 +362,215 @@ describe('ApprovalEngineService.getDecisionChain', () => {
     expect(chain.assignedToOrgUnit?.id).toBe(3);
   });
 });
+
+// ── Structure-head guard arms and small read-side helpers ────────────────────
+
+describe('requireStructureHead guard arms (via keepForSelf)', () => {
+  it('rejects a decision that is not assigned to any structure', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[buildPaRow({ assigned_to_org_unit_id: null })], null]);
+
+    await expect(new ApprovalEngineService(pool).keepForSelf(501, 9)).rejects.toThrow(
+      'This decision is not assigned to a structure'
+    );
+  });
+
+  it('rejects reassignment of an already-decided approval', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [buildPaRow({ assigned_to_org_unit_id: 3, status: 'approved' })],
+      null,
+    ]);
+
+    await expect(new ApprovalEngineService(pool).keepForSelf(501, 9)).rejects.toThrow(
+      /Cannot reassign a decision in 'approved' status/
+    );
+  });
+
+  it('rejects a caller when the unit has no manager at all', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildPaRow({ assigned_to_org_unit_id: 3 })], null]) // getPendingApprovalById
+      .mockResolvedValueOnce([[{ manager_user_id: null }], null]); // org_units head lookup
+
+    await expect(new ApprovalEngineService(pool).keepForSelf(501, 9)).rejects.toThrow('Forbidden');
+  });
+});
+
+describe('reassignment concurrency conflicts', () => {
+  const paAssigned = () => [[buildPaRow({ assigned_to_org_unit_id: 3 })], null];
+  const headOk = () => [[{ manager_user_id: 9 }], null];
+
+  it('keepForSelf diagnoses a concurrent decision', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([[], null]) // no prior reassignment
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]); // guarded UPDATE misses
+
+    await expect(new ApprovalEngineService(pool).keepForSelf(501, 9)).rejects.toThrow(
+      'Cannot reassign a decision that was decided concurrently'
+    );
+  });
+
+  it('delegateToPerson diagnoses a concurrent decision', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([[{ 1: 1 }], null]) // membership ok
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+
+    await expect(new ApprovalEngineService(pool).delegateToPerson(501, 9, 5)).rejects.toThrow(
+      'Cannot reassign a decision that was decided concurrently'
+    );
+  });
+
+  it('openToStructure diagnoses a concurrent decision', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+
+    await expect(new ApprovalEngineService(pool).openToStructure(501, 9)).rejects.toThrow(
+      'Cannot reassign a decision that was decided concurrently'
+    );
+  });
+});
+
+describe('read-side helpers', () => {
+  it('wouldBeFinalStep: 404 for a missing approval, then true/false by next-step presence', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(new ApprovalEngineService(pool).wouldBeFinalStep(999)).rejects.toThrow(
+      'Pending approval not found'
+    );
+
+    const { pool: p2, execute: e2 } = makePool();
+    e2.mockResolvedValueOnce([[buildPaRow()], null]).mockResolvedValueOnce([[{ id: 21 }], null]);
+    await expect(new ApprovalEngineService(p2).wouldBeFinalStep(501)).resolves.toBe(false);
+
+    const { pool: p3, execute: e3 } = makePool();
+    e3.mockResolvedValueOnce([[buildPaRow()], null]).mockResolvedValueOnce([[], null]);
+    await expect(new ApprovalEngineService(p3).wouldBeFinalStep(501)).resolves.toBe(true);
+  });
+
+  it('resolveApproverForStep returns null for an unknown step and resolves a known one', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(
+      new ApprovalEngineService(pool).resolveApproverForStep(999, { actorUserId: 1 })
+    ).resolves.toBeNull();
+
+    const { pool: p2, execute: e2 } = makePool();
+    e2.mockResolvedValueOnce([
+      [
+        {
+          id: 20, workflow_id: 10, step_order: 1, approver_scope: 'company_user',
+          approver_role_id: null, approver_user_id: 42, approver_permission_code: null,
+          auto_approve_for_owner: 0, escalate_after_hours: null,
+        },
+      ],
+      null,
+    ]);
+    await expect(
+      new ApprovalEngineService(p2).resolveApproverForStep(20, { actorUserId: 1 })
+    ).resolves.toBe(42);
+  });
+
+  it('entityRefFromPendingApproval maps each entity kind and rejects an unlinked row', () => {
+    const svc = new ApprovalEngineService(makePool().pool) as unknown as {
+      entityRefFromPendingApproval: (pa: Record<string, unknown>) => unknown;
+    };
+    const base = {
+      changeRequestId: null, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+    };
+    expect(svc.entityRefFromPendingApproval({ ...base, changeRequestId: 1 })).toEqual({ changeRequestId: 1 });
+    expect(svc.entityRefFromPendingApproval({ ...base, timeOffRequestId: 2 })).toEqual({ timeOffRequestId: 2 });
+    expect(svc.entityRefFromPendingApproval({ ...base, employeeLoanId: 3 })).toEqual({ employeeLoanId: 3 });
+    expect(svc.entityRefFromPendingApproval({ ...base, shiftSwapRequestId: 4 })).toEqual({ shiftSwapRequestId: 4 });
+    expect(() => svc.entityRefFromPendingApproval(base)).toThrow('Pending approval has no linked entity');
+  });
+
+  it('createWorkflow translates a duplicate change type into a ConflictError', async () => {
+    const execute = jest.fn();
+    const conn = {
+      execute: jest.fn().mockRejectedValue(Object.assign(new Error('dup'), { code: 'ER_DUP_ENTRY' })),
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const pool = { execute, getConnection: jest.fn().mockResolvedValue(conn) } as never;
+
+    await expect(
+      new ApprovalEngineService(pool).createWorkflow({
+        changeType: 'TimeOff.Request',
+        steps: [{ stepOrder: 1, approverScope: 'company_user', approverUserId: 42 }],
+      } as never)
+    ).rejects.toThrow('Workflow for this change type already exists');
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+});
+
+describe('reassignment happy paths (first time)', () => {
+  const paAssigned = () => [[buildPaRow({ assigned_to_org_unit_id: 3 })], null];
+  const headOk = () => [[{ manager_user_id: 9 }], null];
+
+  it('keepForSelf assigns to the head and records the kept action once', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([[], null]) // no prior reassignment
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // INSERT decision_reassignments
+      .mockResolvedValueOnce(paAssigned() as never); // refetch
+
+    await new ApprovalEngineService(pool).keepForSelf(501, 9);
+
+    const insert = execute.mock.calls.find((c) => String(c[0]).includes('INSERT INTO decision_reassignments'))!;
+    expect(insert[1]).toEqual([501, 9]);
+  });
+
+  it('delegateToPerson reassigns to the member and records the delegation', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([[{ 1: 1 }], null]) // membership ok
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // INSERT
+      .mockResolvedValueOnce(paAssigned() as never); // refetch
+
+    await new ApprovalEngineService(pool).delegateToPerson(501, 9, 5);
+
+    const insert = execute.mock.calls.find((c) => String(c[0]).includes('INSERT INTO decision_reassignments'))!;
+    expect(insert[1]).toEqual([501, 9, 5]);
+  });
+
+  it('openToStructure clears the assignee and records the opening', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce(paAssigned() as never)
+      .mockResolvedValueOnce(headOk() as never)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // INSERT
+      .mockResolvedValueOnce(paAssigned() as never); // refetch
+
+    await new ApprovalEngineService(pool).openToStructure(501, 9);
+
+    const update = execute.mock.calls[2];
+    expect(String(update[0])).toContain('open_to_structure = TRUE');
+  });
+
+  it('decidePendingApproval rejects an unknown pending approval id', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(
+      new ApprovalEngineService(pool).decidePendingApproval(999, 1, 'approved', null, async () => ({ actorUserId: 1 }))
+    ).rejects.toThrow('Pending approval not found');
+  });
+});
