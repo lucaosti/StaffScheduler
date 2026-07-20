@@ -111,18 +111,19 @@ const scanRoutes = (): FoundOp[] => {
     const full = path.join(BACKEND, 'src', 'routes', file);
     const source = fs.readFileSync(full, 'utf8');
     const aliases = parseSchemaAliases(source);
-    // Handler registrations can span lines; [\s\S]*? inside the middleware
-    // list is bounded by the async handler that always follows.
+    // Handler registrations span lines; the middleware segment is tempered
+    // so it can never cross into the NEXT route registration — an untempered
+    // lazy [\s\S]*? would otherwise stretch a route that lacks the
+    // asyncHandler/async terminator over its successor and swallow that
+    // route's validateBody (exactly what happened with /auth/2fa/enable
+    // spanning into /disable before this guard existed).
     const re = new RegExp(
-      String.raw`${variable}\.(get|post|put|patch|delete)\(\s*'([^']*)'([\s\S]*?)asyncHandler|` +
-        String.raw`${variable}\.(get|post|put|patch|delete)\(\s*'([^']*)'([\s\S]*?)async \(`,
+      String.raw`${variable}\.(get|post|put|patch|delete)\(\s*'([^']*)'((?:(?!${variable}\.(?:get|post|put|patch|delete)\()[\s\S])*?)(?:asyncHandler|async \()`,
       'g'
     );
     let m: RegExpExecArray | null;
     while ((m = re.exec(source))) {
-      const method = (m[1] ?? m[4]) as string;
-      const routePath = (m[2] ?? m[5]) as string;
-      const middlewares = (m[3] ?? m[6]) as string;
+      const [, method, routePath, middlewares] = m;
       const body = middlewares.match(/validateBody\((\w+)\)/);
       if (!body) continue;
       const localName = body[1];
