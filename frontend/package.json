@@ -29,6 +29,7 @@
     "jest-environment-jsdom": "^30.4.1",
     "knip": "^6.7.0",
     "msw": "^2.7.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.8.4",
     "sass": "^1.64.1",
     "ts-jest": "^29.4.11",
@@ -48,7 +49,8 @@
     "lint:fix": "eslint src --fix",
     "deadcode": "knip",
     "format": "prettier --write src/**/*.{ts,tsx,css,scss}",
-    "analyze": "npm run build && npx source-map-explorer 'build/assets/*.js'"
+    "analyze": "npm run build && npx source-map-explorer 'build/assets/*.js'",
+    "api:generate": "openapi-typescript ../backend/openapi/openapi.json -o src/api/schema.ts"
   },
   "engines": {
     "node": ">=18.0.0",
