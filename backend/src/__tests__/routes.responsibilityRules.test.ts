@@ -285,3 +285,159 @@ describe('DELETE /api/responsibility-rules/:id', () => {
     expect(res.status).toBe(500);
   });
 });
+
+// ── Read-side endpoints not previously covered ───────────────────────────────
+
+describe('responsibility rules GET / — query-parameter parsing', () => {
+  it('parses isActive=true and a numeric org unit filter', async () => {
+    (ResponsibilityRuleService.prototype.list as jest.Mock).mockResolvedValue([]);
+
+    const res = await request(mountApp()).get(
+      '/api/responsibility-rules?isActive=true&responsibleOrgUnitId=7'
+    );
+
+    expect(res.status).toBe(200);
+    expect(ResponsibilityRuleService.prototype.list).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: true, responsibleOrgUnitId: 7 })
+    );
+  });
+
+  it('parses isActive=false', async () => {
+    (ResponsibilityRuleService.prototype.list as jest.Mock).mockResolvedValue([]);
+
+    await request(mountApp()).get('/api/responsibility-rules?isActive=false');
+
+    expect(ResponsibilityRuleService.prototype.list).toHaveBeenCalledWith(
+      expect.objectContaining({ isActive: false })
+    );
+  });
+});
+
+describe('responsibility rules GET /resolve', () => {
+  it('requires permissionCode', async () => {
+    const res = await request(mountApp()).get('/api/responsibility-rules/resolve');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('splits departmentIds/roleIds CSV lists into numbers, dropping junk', async () => {
+    (ResponsibilityRuleService.prototype.resolveResponsibleUsers as jest.Mock).mockResolvedValue([4, 5]);
+
+    const res = await request(mountApp()).get(
+      '/api/responsibility-rules/resolve?permissionCode=timeoff.approve&orgUnitId=3&departmentIds=1,2,x&roleIds=9'
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.userIds).toEqual([4, 5]);
+    expect(ResponsibilityRuleService.prototype.resolveResponsibleUsers).toHaveBeenCalledWith({
+      permissionCode: 'timeoff.approve',
+      orgUnitId: 3,
+      departmentIds: [1, 2],
+      roleIds: [9],
+    });
+  });
+
+  it('defaults org unit to null and id lists to empty', async () => {
+    (ResponsibilityRuleService.prototype.resolveResponsibleUsers as jest.Mock).mockResolvedValue([]);
+
+    await request(mountApp()).get('/api/responsibility-rules/resolve?permissionCode=timeoff.approve');
+
+    expect(ResponsibilityRuleService.prototype.resolveResponsibleUsers).toHaveBeenCalledWith({
+      permissionCode: 'timeoff.approve',
+      orgUnitId: null,
+      departmentIds: [],
+      roleIds: [],
+    });
+  });
+});
+
+describe('responsibility rules GET /matrix and /my-responsibilities', () => {
+  it('returns the pivot matrix', async () => {
+    (ResponsibilityRuleService.prototype.getMatrix as jest.Mock).mockResolvedValue([{ key: 'x' }]);
+
+    const res = await request(mountApp()).get('/api/responsibility-rules/matrix');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.matrix).toEqual([{ key: 'x' }]);
+  });
+
+  it("returns the caller's own responsibilities", async () => {
+    (ResponsibilityRuleService.prototype.getMyResponsibilities as jest.Mock).mockResolvedValue([]);
+
+    const res = await request(mountApp()).get('/api/responsibility-rules/my-responsibilities');
+
+    expect(res.status).toBe(200);
+    expect(ResponsibilityRuleService.prototype.getMyResponsibilities).toHaveBeenCalledWith(1);
+  });
+});
+
+describe('responsibility rules GET /:id/conflicts', () => {
+  it('reports overlaps with a hasConflicts flag', async () => {
+    (ResponsibilityRuleService.prototype.getConflicts as jest.Mock).mockResolvedValue([{ id: 2 }]);
+
+    const res = await request(mountApp()).get('/api/responsibility-rules/1/conflicts');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ conflicts: [{ id: 2 }], hasConflicts: true });
+  });
+
+  it('reports a clean rule with hasConflicts=false', async () => {
+    (ResponsibilityRuleService.prototype.getConflicts as jest.Mock).mockResolvedValue([]);
+
+    const res = await request(mountApp()).get('/api/responsibility-rules/1/conflicts');
+
+    expect(res.body.data.hasConflicts).toBe(false);
+  });
+});
+
+describe('responsibility rules POST /bulk', () => {
+  it('creates rules with explicit ids and forwards actor id', async () => {
+    (ResponsibilityRuleService.prototype.bulkCreate as jest.Mock).mockResolvedValue([{ id: 1 }, { id: 2 }]);
+
+    const res = await request(mountApp())
+      .post('/api/responsibility-rules/bulk')
+      .send({
+        subjectType: 'department',
+        subjectIds: [1, 2],
+        permissionCodes: ['timeoff.approve'],
+        responsibleOrgUnitId: 3,
+        delegatedToRoleId: 4,
+        description: 'coverage rules',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.message).toBe('2 responsibility rules created');
+    expect(ResponsibilityRuleService.prototype.bulkCreate).toHaveBeenCalledWith(
+      {
+        subjectType: 'department',
+        subjectIds: [1, 2],
+        permissionCodes: ['timeoff.approve'],
+        responsibleOrgUnitId: 3,
+        delegatedToRoleId: 4,
+        description: 'coverage rules',
+      },
+      1
+    );
+  });
+
+  it('defaults optional fields (subjectIds [], delegatedToRoleId/description null)', async () => {
+    (ResponsibilityRuleService.prototype.bulkCreate as jest.Mock).mockResolvedValue([]);
+
+    const res = await request(mountApp())
+      .post('/api/responsibility-rules/bulk')
+      .send({ subjectType: 'all', permissionCodes: ['timeoff.approve'], responsibleOrgUnitId: 3 });
+
+    expect(res.status).toBe(201);
+    expect(ResponsibilityRuleService.prototype.bulkCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ subjectIds: [], delegatedToRoleId: null, description: null }),
+      1
+    );
+  });
+
+  it('rejects a body without permissionCodes', async () => {
+    const res = await request(mountApp())
+      .post('/api/responsibility-rules/bulk')
+      .send({ subjectType: 'all', responsibleOrgUnitId: 3 });
+    expect(res.status).toBe(400);
+  });
+});
