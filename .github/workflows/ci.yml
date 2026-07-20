@@ -128,6 +128,11 @@ jobs:
       - name: Type-check (strict unused locals/parameters)
         run: npx tsc --noEmit
 
+      - name: Generated API client is drift-free
+        run: |
+          npm run api:generate
+          git diff --exit-code src/api/schema.ts
+
       - name: Unit tests with coverage
         run: npm test -- --watchAll=false --ci --coverage --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
 

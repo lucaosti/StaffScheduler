@@ -16,17 +16,11 @@
  */
 
 import { ApiResponse, DashboardStats, AuditLogEntry } from '../types';
-import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
+import { getAuthHeaders, API_BASE_URL } from './apiUtils';
+import { apiClient } from '../api/client';
 
-
-export const getDashboardStats = async (): Promise<ApiResponse<DashboardStats>> => {
-  const response = await fetch(`${API_BASE_URL}/dashboard/stats`, {
-    method: 'GET',
-    ...getAuthHeaders(),
-  });
-
-  return handleResponse<DashboardStats>(response);
-};
+export const getDashboardStats = (): Promise<ApiResponse<DashboardStats>> =>
+  apiClient.get<DashboardStats, '/dashboard/stats'>('/dashboard/stats');
 
 export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
   try {
