@@ -37,6 +37,8 @@ jest.mock('../services/UserService');
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { createDepartmentsRouter } from '../routes/departments';
+import { ConflictError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -44,6 +46,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/departments', createDepartmentsRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -300,7 +303,7 @@ describe('departments router DELETE /:id', () => {
   it('returns 409 when department has active users', async () => {
     (DepartmentService.prototype.deleteDepartment as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Cannot delete department with active users'));
+      .mockRejectedValue(new ConflictError('Cannot delete department with active users'));
 
     const res = await request(mountApp()).delete('/api/departments/3');
 

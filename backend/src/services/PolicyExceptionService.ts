@@ -13,6 +13,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { NotificationService } from './NotificationService';
@@ -82,7 +83,7 @@ export class PolicyExceptionService {
 
   async create(input: CreateExceptionInput): Promise<PolicyExceptionRequest> {
     const policy = await this.policies.getById(input.policyId);
-    if (!policy) throw new Error('Policy not found');
+    if (!policy) throw new NotFoundError('Policy not found');
 
     const resolved = await this.approvals.resolve('Policy.Exception', {
       policyOwnerId: policy.imposedByUserId,
@@ -188,15 +189,15 @@ export class PolicyExceptionService {
 
   async approve(id: number, reviewerId: number, notes: string | null = null): Promise<PolicyExceptionRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Exception request not found');
+    if (!existing) throw new NotFoundError('Exception request not found');
     const policy = await this.policies.getById(existing.policyId);
-    if (!policy) throw new Error('Policy not found');
+    if (!policy) throw new NotFoundError('Policy not found');
     const resolved = await this.approvals.resolve('Policy.Exception', {
       policyOwnerId: policy.imposedByUserId,
       actorUserId: reviewerId,
     });
     if (resolved.approverUserId !== reviewerId) {
-      throw new Error('Forbidden');
+      throw new ForbiddenError('Forbidden');
     }
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE policy_exception_requests
@@ -205,7 +206,7 @@ export class PolicyExceptionService {
       [reviewerId, notes, id]
     );
     if (res.affectedRows === 0) {
-      throw new Error(`Cannot approve exception in status '${existing.status}'`);
+      throw new ConflictError(`Cannot approve exception in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
@@ -229,15 +230,15 @@ export class PolicyExceptionService {
 
   async reject(id: number, reviewerId: number, notes: string | null = null): Promise<PolicyExceptionRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Exception request not found');
+    if (!existing) throw new NotFoundError('Exception request not found');
     const policy = await this.policies.getById(existing.policyId);
-    if (!policy) throw new Error('Policy not found');
+    if (!policy) throw new NotFoundError('Policy not found');
     const resolved = await this.approvals.resolve('Policy.Exception', {
       policyOwnerId: policy.imposedByUserId,
       actorUserId: reviewerId,
     });
     if (resolved.approverUserId !== reviewerId) {
-      throw new Error('Forbidden');
+      throw new ForbiddenError('Forbidden');
     }
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE policy_exception_requests
@@ -246,7 +247,7 @@ export class PolicyExceptionService {
       [reviewerId, notes, id]
     );
     if (res.affectedRows === 0) {
-      throw new Error(`Cannot reject exception in status '${existing.status}'`);
+      throw new ConflictError(`Cannot reject exception in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');
@@ -277,9 +278,9 @@ export class PolicyExceptionService {
     );
     if (res.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Exception request not found');
-      if (existing.requestedByUserId !== requesterId) throw new Error('Forbidden');
-      throw new Error(`Cannot cancel exception in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Exception request not found');
+      if (existing.requestedByUserId !== requesterId) throw new ForbiddenError('Forbidden');
+      throw new ConflictError(`Cannot cancel exception in status '${existing.status}'`);
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh exception');

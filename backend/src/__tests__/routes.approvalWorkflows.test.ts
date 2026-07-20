@@ -38,6 +38,8 @@ jest.mock('../services/ApprovalEngineService');
 
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { createApprovalWorkflowsRouter } from '../routes/approvalWorkflows';
+import { ConflictError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -45,6 +47,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/approval-workflows', createApprovalWorkflowsRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -192,7 +195,7 @@ describe('approval workflows POST /', () => {
   it('returns 409 on duplicate change type', async () => {
     (ApprovalEngineService.prototype.createWorkflow as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Duplicate entry for change type'));
+      .mockRejectedValue(new ConflictError('Workflow for this change type already exists'));
 
     const res = await request(mountApp())
       .post('/api/approval-workflows')
@@ -253,7 +256,7 @@ describe('approval workflows PUT /:id', () => {
   it('returns 404 when workflow not found', async () => {
     (ApprovalEngineService.prototype.updateWorkflow as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Workflow not found'));
+      .mockRejectedValue(new NotFoundError('Workflow not found'));
 
     const res = await request(mountApp())
       .put('/api/approval-workflows/99')
@@ -301,7 +304,7 @@ describe('approval workflows DELETE /:id', () => {
   it('returns 404 when workflow not found', async () => {
     (ApprovalEngineService.prototype.deleteWorkflow as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Workflow not found'));
+      .mockRejectedValue(new NotFoundError('Workflow not found'));
 
     const res = await request(mountApp()).delete('/api/approval-workflows/99');
     expect(res.status).toBe(404);
@@ -361,7 +364,7 @@ describe('approval workflows POST /escalate', () => {
   it('returns 500 on service error', async () => {
     (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('escalation failed'));
+      .mockRejectedValue(new Error('db error during escalation sweep'));
 
     const res = await request(mountApp())
       .post('/api/approval-workflows/escalate')

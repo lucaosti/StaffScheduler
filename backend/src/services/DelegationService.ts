@@ -13,6 +13,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { Delegation, CreateDelegationRequest } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
@@ -35,12 +36,12 @@ export class DelegationService {
     justification?: string | null
   ): Promise<Delegation> {
     if (input.delegateeId === delegatorId) {
-      throw new Error('Cannot delegate to yourself');
+      throw new ConflictError('Cannot delegate to yourself');
     }
 
     const invalid = input.permissionCodes.filter((c) => !delegatorPermissions.includes(c));
     if (invalid.length > 0) {
-      throw new Error(`Delegation escalation: codes not held by delegator: ${invalid.join(', ')}`);
+      throw new ConflictError(`Delegation escalation: codes not held by delegator: ${invalid.join(', ')}`);
     }
 
     const [result] = await this.pool.execute<ResultSetHeader>(
@@ -83,10 +84,10 @@ export class DelegationService {
       'SELECT id, delegator_id FROM delegations WHERE id = ? LIMIT 1',
       [id]
     );
-    if (rows.length === 0) throw new Error('Delegation not found');
+    if (rows.length === 0) throw new NotFoundError('Delegation not found');
     const row = rows[0] as any;
     if (row.delegator_id !== requestorId) {
-      throw new Error('Only the delegator may revoke a delegation');
+      throw new ForbiddenError('Only the delegator may revoke a delegation');
     }
 
     await this.pool.execute(

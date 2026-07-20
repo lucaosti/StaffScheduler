@@ -9,6 +9,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { 
   Department, 
   CreateDepartmentRequest, 
@@ -53,7 +54,7 @@ export class DepartmentService {
       );
 
       if (existing.length > 0) {
-        throw new Error('Department name already exists');
+        throw new ConflictError('Department name already exists');
       }
 
       // Validate manager if provided
@@ -64,7 +65,7 @@ export class DepartmentService {
         );
 
         if (managerRows.length === 0) {
-          throw new Error('Invalid manager ID');
+          throw new ValidationError('Invalid manager ID');
         }
       }
 
@@ -253,7 +254,7 @@ export class DepartmentService {
           [deptData.name, id]
         );
         if (existing.length > 0) {
-          throw new Error('Department name already in use');
+          throw new ConflictError('Department name already in use');
         }
         updates.push('name = ?');
         values.push(deptData.name);
@@ -272,7 +273,7 @@ export class DepartmentService {
             [deptData.managerId]
           );
           if (managerRows.length === 0) {
-            throw new Error('Invalid manager ID');
+            throw new ValidationError('Invalid manager ID');
           }
         }
         updates.push('manager_id = ?');
@@ -305,7 +306,7 @@ export class DepartmentService {
       // Retrieve and return updated department
       const updatedDepartment = await this.getDepartmentById(id);
       if (!updatedDepartment) {
-        throw new Error('Department not found after update');
+        throw new NotFoundError('Department not found after update');
       }
 
       return updatedDepartment;
@@ -338,7 +339,7 @@ export class DepartmentService {
       );
 
       if (employeeRows[0].count > 0) {
-        throw new Error('Cannot delete department with assigned employees');
+        throw new ConflictError('Cannot delete department with assigned employees');
       }
 
       // Soft delete the department
@@ -348,7 +349,7 @@ export class DepartmentService {
       );
 
       if (result.affectedRows === 0) {
-        throw new Error('Department not found');
+        throw new NotFoundError('Department not found');
       }
 
       await connection.commit();
@@ -420,7 +421,7 @@ export class DepartmentService {
       );
 
       if (deptRows.length === 0) {
-        throw new Error('Department not found');
+        throw new NotFoundError('Department not found');
       }
 
       if (userIds.length === 0) {

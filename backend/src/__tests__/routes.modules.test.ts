@@ -57,6 +57,8 @@ jest.mock('../services/ModuleService');
 
 import { ModuleService } from '../services/ModuleService';
 import { createModulesRouter } from '../routes/modules';
+import { NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -64,6 +66,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/modules', createModulesRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -79,6 +82,7 @@ const mountUnauthApp = (): express.Express => {
   app.use('/api/modules', createModulesRouter(fakePool));
 
   authModule.authenticate = saved;
+  app.use(errorHandler);
   return app;
 };
 
@@ -211,7 +215,7 @@ describe('modules router PUT /:code', () => {
 
   it('returns 404 when module code does not exist', async () => {
     (ModuleService.prototype.setEnabled as jest.Mock) = jest.fn().mockRejectedValue(
-      new Error('Module not found: ghost')
+      new NotFoundError('Module not found: ghost')
     );
 
     const res = await request(mountApp()).put('/api/modules/ghost').send({ isEnabled: true });

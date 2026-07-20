@@ -34,6 +34,8 @@ import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
 import { PolicyValidator } from '../services/PolicyValidator';
 import { createPoliciesRouter } from '../routes/policies';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -41,6 +43,7 @@ const mountApp = (): express.Express => {
   const app = express();
   app.use(express.json());
   app.use('/api/policies', createPoliciesRouter(fakePool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -63,7 +66,7 @@ describe('validation endpoint', () => {
   it('404 when entity missing', async () => {
     (PolicyValidator.prototype.validateAssignment as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Shift not found'));
+      .mockRejectedValue(new NotFoundError('Shift not found'));
     const res = await request(mountApp())
       .post('/api/policies/validate/assignment')
       .send({ userId: 1, shiftId: 2 });
@@ -113,21 +116,21 @@ describe('approval matrix', () => {
   it('PUT 404 on not found', async () => {
     (ApprovalMatrixService.prototype.update as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Approval matrix entry not found'));
+      .mockRejectedValue(new NotFoundError('Approval matrix entry not found'));
     const res = await request(mountApp())
       .put('/api/policies/approval-matrix/policy_change')
       .send({});
     expect(res.status).toBe(404);
   });
 
-  it('PUT 400 on validation', async () => {
+  it('PUT 500 on unexpected service error', async () => {
     (ApprovalMatrixService.prototype.update as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('bad'));
     const res = await request(mountApp())
       .put('/api/policies/approval-matrix/policy_change')
       .send({});
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
   });
 });
 
@@ -182,7 +185,7 @@ describe('exceptions', () => {
       it('404 not found', async () => {
         (PolicyExceptionService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('Exception not found'));
+          .mockRejectedValue(new NotFoundError('Exception not found'));
         const res = await request(mountApp()).post(`/api/policies/exceptions/1/${action}`).send({});
         expect(res.status).toBe(404);
       });
@@ -190,7 +193,7 @@ describe('exceptions', () => {
       it('403 forbidden', async () => {
         (PolicyExceptionService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('Forbidden'));
+          .mockRejectedValue(new ForbiddenError('Forbidden'));
         const res = await request(mountApp()).post(`/api/policies/exceptions/1/${action}`).send({});
         expect(res.status).toBe(403);
       });
@@ -198,7 +201,7 @@ describe('exceptions', () => {
       it('409 conflict', async () => {
         (PolicyExceptionService.prototype[action] as jest.Mock) = jest
           .fn()
-          .mockRejectedValue(new Error('already done'));
+          .mockRejectedValue(new ConflictError('already done'));
         const res = await request(mountApp()).post(`/api/policies/exceptions/1/${action}`).send({});
         expect(res.status).toBe(409);
       });
@@ -214,15 +217,15 @@ describe('exceptions', () => {
       let res = await request(mountApp()).post('/api/policies/exceptions/1/cancel');
       expect(res.status).toBe(200);
 
-      cancel(jest.fn().mockRejectedValue(new Error('not found')));
+      cancel(jest.fn().mockRejectedValue(new NotFoundError('not found')));
       res = await request(mountApp()).post('/api/policies/exceptions/1/cancel');
       expect(res.status).toBe(404);
 
-      cancel(jest.fn().mockRejectedValue(new Error('Forbidden')));
+      cancel(jest.fn().mockRejectedValue(new ForbiddenError('Forbidden')));
       res = await request(mountApp()).post('/api/policies/exceptions/1/cancel');
       expect(res.status).toBe(403);
 
-      cancel(jest.fn().mockRejectedValue(new Error('already')));
+      cancel(jest.fn().mockRejectedValue(new ConflictError('already')));
       res = await request(mountApp()).post('/api/policies/exceptions/1/cancel');
       expect(res.status).toBe(409);
     });
@@ -299,13 +302,13 @@ describe('policies CRUD', () => {
       expect(res.status).toBe(200);
     });
 
-    it('400 on validation error', async () => {
+    it('500 on unexpected service error', async () => {
       (PolicyService.prototype.getById as jest.Mock) = jest
         .fn()
         .mockResolvedValue({ id: 9, imposedByUserId: 1 });
       (PolicyService.prototype.update as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
       const res = await request(mountApp()).put('/api/policies/9').send({});
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(500);
     });
 
     it('404 on service "not found"', async () => {
@@ -314,7 +317,7 @@ describe('policies CRUD', () => {
         .mockResolvedValue({ id: 9, imposedByUserId: 1 });
       (PolicyService.prototype.update as jest.Mock) = jest
         .fn()
-        .mockRejectedValue(new Error('Policy not found'));
+        .mockRejectedValue(new NotFoundError('Policy not found'));
       const res = await request(mountApp()).put('/api/policies/9').send({});
       expect(res.status).toBe(404);
     });
@@ -345,13 +348,13 @@ describe('policies CRUD', () => {
       expect(res.status).toBe(200);
     });
 
-    it('400 on service error', async () => {
+    it('500 on unexpected service error', async () => {
       (PolicyService.prototype.getById as jest.Mock) = jest
         .fn()
         .mockResolvedValue({ id: 9, imposedByUserId: 1 });
       (PolicyService.prototype.remove as jest.Mock) = jest.fn().mockRejectedValue(new Error('bad'));
       const res = await request(mountApp()).delete('/api/policies/9');
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(500);
     });
   });
 });

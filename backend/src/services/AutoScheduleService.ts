@@ -18,6 +18,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
@@ -43,7 +44,7 @@ export class AutoScheduleService {
       `SELECT id, department_id, start_date, end_date FROM schedules WHERE id = ? LIMIT 1`,
       [scheduleId]
     );
-    if (schedRows.length === 0) throw new Error('Schedule not found');
+    if (schedRows.length === 0) throw new NotFoundError('Schedule not found');
     const schedule = schedRows[0];
 
     const [shiftRows] = await this.pool.execute<RowDataPacket[]>(

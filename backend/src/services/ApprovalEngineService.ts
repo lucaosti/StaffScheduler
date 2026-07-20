@@ -14,6 +14,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import {
   ApprovalWorkflow,
   ApprovalStep,
@@ -173,6 +174,10 @@ export class ApprovalEngineService {
       return workflow;
     } catch (error) {
       await connection.rollback();
+      // change_type is unique: a duplicate INSERT surfaces as ER_DUP_ENTRY.
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+        throw new ConflictError('Workflow for this change type already exists');
+      }
       throw error;
     } finally {
       connection.release();
@@ -212,7 +217,7 @@ export class ApprovalEngineService {
       }
       await connection.commit();
       const workflow = await this.getWorkflowById(id);
-      if (!workflow) throw new Error('Workflow not found');
+      if (!workflow) throw new NotFoundError('Workflow not found');
       return workflow;
     } catch (error) {
       await connection.rollback();
@@ -227,7 +232,7 @@ export class ApprovalEngineService {
       'SELECT id FROM approval_workflows WHERE id = ? LIMIT 1',
       [id]
     );
-    if (rows.length === 0) throw new Error('Workflow not found');
+    if (rows.length === 0) throw new NotFoundError('Workflow not found');
     await this.pool.execute('DELETE FROM approval_workflows WHERE id = ?', [id]);
   }
 
@@ -297,7 +302,7 @@ export class ApprovalEngineService {
   async resolveApprover(changeType: string, ctx: ResolveContext): Promise<ResolvedStep | null> {
     const workflow = await this.getWorkflowByChangeType(changeType);
     if (!workflow) {
-      throw new Error(`No approval workflow configured for change type '${changeType}'`);
+      throw new ConflictError(`No approval workflow configured for change type '${changeType}'`);
     }
 
     for (const step of workflow.steps) {
@@ -362,7 +367,7 @@ export class ApprovalEngineService {
     let assignedToOrgUnitId: number | null = null;
 
     if (step.approverScope === 'unit_structure') {
-      if (!ctx.orgUnitId) throw new Error("A 'unit_structure' step requires an org unit context");
+      if (!ctx.orgUnitId) throw new ConflictError("A 'unit_structure' step requires an org unit context");
       assignedToOrgUnitId = ctx.orgUnitId;
       assignedToUserId = await this.findUnitManager(ctx.orgUnitId);
     } else {
@@ -454,7 +459,7 @@ export class ApprovalEngineService {
     if (pa.timeOffRequestId !== null) return { timeOffRequestId: pa.timeOffRequestId };
     if (pa.employeeLoanId !== null) return { employeeLoanId: pa.employeeLoanId };
     if (pa.shiftSwapRequestId !== null) return { shiftSwapRequestId: pa.shiftSwapRequestId };
-    throw new Error('Pending approval has no linked entity');
+    throw new ConflictError('Pending approval has no linked entity');
   }
 
   /**
@@ -465,7 +470,7 @@ export class ApprovalEngineService {
    */
   async wouldBeFinalStep(pendingApprovalId: number): Promise<boolean> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
     const [nextRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id FROM approval_steps WHERE workflow_id = ? AND step_order > ? ORDER BY step_order ASC LIMIT 1`,
       [pa.workflowId, pa.stepOrder]
@@ -494,10 +499,10 @@ export class ApprovalEngineService {
     resolveNextStepCtx: (pa: PendingApproval) => Promise<ResolveContext>
   ): Promise<DecidePendingApprovalResult> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
 
     const authorized = await this.isAuthorizedToDecide(pa, userId);
-    if (!authorized) throw new Error('Not authorized to act on this pending approval');
+    if (!authorized) throw new ForbiddenError('Not authorized to act on this pending approval');
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE pending_approvals
@@ -508,7 +513,7 @@ export class ApprovalEngineService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getPendingApprovalById(pendingApprovalId);
-      throw new Error(`Pending approval is already ${current?.status ?? pa.status}`);
+      throw new ConflictError(`Pending approval is already ${current?.status ?? pa.status}`);
     }
 
     if (decision === 'rejected') {
@@ -547,20 +552,20 @@ export class ApprovalEngineService {
 
   /** Verifies `headUserId` really is the head of the structure this decision is assigned to. */
   private async requireStructureHead(pa: PendingApproval, headUserId: number): Promise<void> {
-    if (pa.assignedToOrgUnitId === null) throw new Error('This decision is not assigned to a structure');
-    if (pa.status !== 'pending') throw new Error(`Cannot reassign a decision in '${pa.status}' status`);
+    if (pa.assignedToOrgUnitId === null) throw new ValidationError('This decision is not assigned to a structure');
+    if (pa.status !== 'pending') throw new ConflictError(`Cannot reassign a decision in '${pa.status}' status`);
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT manager_user_id FROM org_units WHERE id = ? LIMIT 1`,
       [pa.assignedToOrgUnitId]
     );
     const headId = rows.length > 0 ? ((rows[0] as any).manager_user_id as number | null) : null;
-    if (headId === null || headId !== headUserId) throw new Error('Forbidden');
+    if (headId === null || headId !== headUserId) throw new ForbiddenError('Forbidden');
   }
 
   /** The structure head explicitly decides to keep the decision themselves. Idempotent. */
   async keepForSelf(pendingApprovalId: number, headUserId: number): Promise<PendingApproval> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
     await this.requireStructureHead(pa, headUserId);
 
     const [existing] = await this.pool.execute<RowDataPacket[]>(
@@ -572,7 +577,7 @@ export class ApprovalEngineService {
         `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ? AND status = 'pending'`,
         [headUserId, pendingApprovalId]
       );
-      if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
+      if (result.affectedRows === 0) throw new ConflictError('Cannot reassign a decision that was decided concurrently');
       await this.pool.execute(
         `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'kept', ?)`,
         [pendingApprovalId, headUserId]
@@ -584,20 +589,20 @@ export class ApprovalEngineService {
   /** The structure head delegates the decision to one specific member of their team. */
   async delegateToPerson(pendingApprovalId: number, headUserId: number, targetUserId: number): Promise<PendingApproval> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
     await this.requireStructureHead(pa, headUserId);
 
     const [memberRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT 1 FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
       [targetUserId, pa.assignedToOrgUnitId]
     );
-    if (memberRows.length === 0) throw new Error('targetUserId must be a member of the structure');
+    if (memberRows.length === 0) throw new ValidationError('targetUserId must be a member of the structure');
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE pending_approvals SET assigned_to_user_id = ?, open_to_structure = FALSE WHERE id = ? AND status = 'pending'`,
       [targetUserId, pendingApprovalId]
     );
-    if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
+    if (result.affectedRows === 0) throw new ConflictError('Cannot reassign a decision that was decided concurrently');
     await this.pool.execute(
       `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id, target_user_id)
        VALUES (?, 'delegated_to_person', ?, ?)`,
@@ -609,14 +614,14 @@ export class ApprovalEngineService {
   /** The structure head opens the decision to anyone in their team. */
   async openToStructure(pendingApprovalId: number, headUserId: number): Promise<PendingApproval> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
     await this.requireStructureHead(pa, headUserId);
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE pending_approvals SET assigned_to_user_id = NULL, open_to_structure = TRUE WHERE id = ? AND status = 'pending'`,
       [pendingApprovalId]
     );
-    if (result.affectedRows === 0) throw new Error('Cannot reassign a decision that was decided concurrently');
+    if (result.affectedRows === 0) throw new ConflictError('Cannot reassign a decision that was decided concurrently');
     await this.pool.execute(
       `INSERT INTO decision_reassignments (pending_approval_id, action, actor_user_id) VALUES (?, 'opened_to_structure', ?)`,
       [pendingApprovalId, headUserId]
@@ -627,9 +632,9 @@ export class ApprovalEngineService {
   /** The full chain of command for a decision: structure → head's choice(s) → who decided. */
   async getDecisionChain(pendingApprovalId: number, userId: number): Promise<DecisionChain> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
-    if (!pa) throw new Error('Pending approval not found');
+    if (!pa) throw new NotFoundError('Pending approval not found');
     if (!(await this.isAuthorizedToViewChain(pa, userId))) {
-      throw new Error('Forbidden: not authorized to view this decision chain');
+      throw new ForbiddenError('Forbidden: not authorized to view this decision chain');
     }
 
     let assignedToOrgUnit: DecisionChain['assignedToOrgUnit'] = null;

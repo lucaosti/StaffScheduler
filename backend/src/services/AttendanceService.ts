@@ -19,6 +19,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 
@@ -117,7 +118,7 @@ export class AttendanceService {
       [userId]
     );
     if (open.length > 0) {
-      throw new Error('An open attendance record already exists for this user');
+      throw new ConflictError('An open attendance record already exists for this user');
     }
 
     const shiftAssignmentId = await this.findTodaysAssignment(userId);
@@ -150,9 +151,9 @@ export class AttendanceService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Attendance record not found');
-      if (existing.userId !== userId) throw new Error('Forbidden');
-      throw new Error('Attendance record is already clocked out');
+      if (!existing) throw new NotFoundError('Attendance record not found');
+      if (existing.userId !== userId) throw new ForbiddenError('Forbidden');
+      throw new ConflictError('Attendance record is already clocked out');
     }
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve clocked-out record');
@@ -207,10 +208,10 @@ export class AttendanceService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Attendance record not found');
-      if (existing.userId === reviewerId) throw new Error('Forbidden: cannot approve your own attendance record');
-      if (existing.clockOut === null) throw new Error('Cannot approve a record that is still clocked in');
-      throw new Error(`Cannot approve record in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Attendance record not found');
+      if (existing.userId === reviewerId) throw new ForbiddenError('Forbidden: cannot approve your own attendance record');
+      if (existing.clockOut === null) throw new ConflictError('Cannot approve a record that is still clocked in');
+      throw new ConflictError(`Cannot approve record in status '${existing.status}'`);
     }
     logger.info(`Attendance record approved: id=${id} reviewer=${reviewerId}`);
     const refreshed = await this.getById(id);
@@ -240,9 +241,9 @@ export class AttendanceService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Attendance record not found');
-      if (existing.userId === reviewerId) throw new Error('Forbidden: cannot reject your own attendance record');
-      throw new Error(`Cannot reject record in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Attendance record not found');
+      if (existing.userId === reviewerId) throw new ForbiddenError('Forbidden: cannot reject your own attendance record');
+      throw new ConflictError(`Cannot reject record in status '${existing.status}'`);
     }
     logger.info(`Attendance record rejected: id=${id} reviewer=${reviewerId}`);
     const refreshed = await this.getById(id);

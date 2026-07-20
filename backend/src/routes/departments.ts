@@ -3,6 +3,7 @@ import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { authenticate, userHasPermission } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import {
   idParam,
@@ -12,7 +13,6 @@ import {
   addUserToDepartmentBody,
 } from '../schemas';
 import { UpdateDepartmentRequest } from '../types';
-import { logger } from '../config/logger';
 
 export const createDepartmentsRouter = (pool: Pool) => {
   const router = Router();
@@ -20,301 +20,229 @@ export const createDepartmentsRouter = (pool: Pool) => {
   const userService = new UserService(pool);
 
   // Get all departments
-  router.get('/', authenticate, async (req, res) => {
-    try {
-      const user = req.user!;
+  router.get('/', authenticate, asyncHandler(async (req, res) => {
+    const user = req.user!;
 
-      let departments;
-      if (userHasPermission(user, 'settings.manage')) {
-        departments = await departmentService.getAllDepartments();
-      } else {
-        departments = await departmentService.getDepartmentsForUser(user.id);
-      }
-
-      res.json({ success: true, data: departments });
-    } catch (error) {
-      logger.error('Get departments error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve departments' }
-      });
+    let departments;
+    if (userHasPermission(user, 'settings.manage')) {
+      departments = await departmentService.getAllDepartments();
+    } else {
+      departments = await departmentService.getDepartmentsForUser(user.id);
     }
-  });
+
+    res.json({ success: true, data: departments });
+  }));
 
   // Get single department
-  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
+  router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
 
-      if (!userHasPermission(user, 'settings.manage')) {
-        const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d) => d.id === departmentId);
+    if (!userHasPermission(user, 'settings.manage')) {
+      const userDepartments = await departmentService.getDepartmentsForUser(user.id);
+      const hasAccess = userDepartments.some((d) => d.id === departmentId);
 
-        if (!hasAccess) {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-          });
-        }
-      }
-
-      const department = await departmentService.getDepartmentById(departmentId);
-      if (!department) {
-        return res.status(404).json({
+      if (!hasAccess) {
+        return res.status(403).json({
           success: false,
-          error: { code: 'NOT_FOUND', message: 'Department not found' }
+          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
         });
       }
+    }
 
-      res.json({ success: true, data: department });
-    } catch (error) {
-      logger.error('Get department error:', error);
-      res.status(500).json({
+    const department = await departmentService.getDepartmentById(departmentId);
+    if (!department) {
+      return res.status(404).json({
         success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve department' }
+        error: { code: 'NOT_FOUND', message: 'Department not found' }
       });
     }
-  });
+
+    res.json({ success: true, data: department });
+  }));
 
   // Create new department
-  router.post('/', authenticate, validateBody(createDepartmentBody), async (req, res) => {
-    try {
-      const user = req.user!;
+  router.post('/', authenticate, validateBody(createDepartmentBody), asyncHandler(async (req, res) => {
+    const user = req.user!;
 
-      if (!userHasPermission(user, 'department.manage')) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-        });
-      }
-
-      const departmentData = res.locals.body;
-
-      if (departmentData.managerId) {
-        const manager = await userService.getUserById(departmentData.managerId);
-        if (!manager) {
-          return res.status(400).json({
-            success: false,
-            error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
-          });
-        }
-      }
-
-      const createdDepartment = await departmentService.createDepartment(departmentData);
-
-      res.status(201).json({ success: true, data: createdDepartment });
-    } catch (error) {
-      logger.error('Create department error:', error);
-      res.status(500).json({
+    if (!userHasPermission(user, 'department.manage')) {
+      return res.status(403).json({
         success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to create department' }
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
       });
     }
-  });
 
-  // Update department
-  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
-      const departmentData: UpdateDepartmentRequest = res.locals.body;
+    const departmentData = res.locals.body;
 
-      if (userHasPermission(user, 'settings.manage')) {
-        // Full administrators can update any department
-      } else if (userHasPermission(user, 'department.manage')) {
-        const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
-
-        if (!canManage) {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-          });
-        }
-      } else {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-        });
-      }
-
-      if (departmentData.managerId) {
-        const manager = await userService.getUserById(departmentData.managerId);
-        if (!manager) {
-          return res.status(400).json({
-            success: false,
-            error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
-          });
-        }
-      }
-
-      const updatedDepartment = await departmentService.updateDepartment(departmentId, departmentData);
-
-      res.json({ success: true, data: updatedDepartment });
-    } catch (error) {
-      logger.error('Update department error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to update department' }
-      });
-    }
-  });
-
-  // Delete department
-  router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
-
-      if (!userHasPermission(user, 'settings.manage')) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'Only administrators can delete departments' }
-        });
-      }
-
-      await departmentService.deleteDepartment(departmentId);
-
-      res.json({ success: true, data: { message: 'Department deleted successfully' } });
-    } catch (error) {
-      logger.error('Delete department error:', error);
-
-      if ((error as Error).message.includes('Cannot delete department with active users')) {
-        return res.status(409).json({
-          success: false,
-          error: { code: 'CONFLICT', message: (error as Error).message }
-        });
-      }
-
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to delete department' }
-      });
-    }
-  });
-
-  // Add user to department
-  router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
-      const { userId } = res.locals.body;
-
-      if (userHasPermission(user, 'settings.manage')) {
-        // Full administrators can add users to any department
-      } else if (userHasPermission(user, 'department.manage')) {
-        const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
-
-        if (!canManage) {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-          });
-        }
-      } else {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-        });
-      }
-
-      const targetUser = await userService.getUserById(userId);
-      if (!targetUser) {
+    if (departmentData.managerId) {
+      const manager = await userService.getUserById(departmentData.managerId);
+      if (!manager) {
         return res.status(400).json({
           success: false,
-          error: { code: 'INVALID_INPUT', message: 'User not found' }
+          error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
         });
       }
-
-      const department = await departmentService.getDepartmentById(departmentId);
-      if (!department) {
-        return res.status(404).json({
-          success: false,
-          error: { code: 'NOT_FOUND', message: 'Department not found' }
-        });
-      }
-
-      await departmentService.addUserToDepartment(departmentId, userId);
-
-      res.status(201).json({ success: true, data: { message: 'User added to department successfully' } });
-    } catch (error) {
-      logger.error('Add user to department error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to add user to department' }
-      });
     }
-  });
 
-  // Remove user from department
-  router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
-      const targetUserId = res.locals.params.userId;
+    const createdDepartment = await departmentService.createDepartment(departmentData);
 
-      if (userHasPermission(user, 'settings.manage')) {
-        // Full administrators can remove users from any department
-      } else if (userHasPermission(user, 'department.manage')) {
-        const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
+    res.status(201).json({ success: true, data: createdDepartment });
+  }));
 
-        if (!canManage) {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-          });
-        }
-      } else {
+  // Update department
+  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
+    const departmentData: UpdateDepartmentRequest = res.locals.body;
+
+    if (userHasPermission(user, 'settings.manage')) {
+      // Full administrators can update any department
+    } else if (userHasPermission(user, 'department.manage')) {
+      const userDepartments = await departmentService.getDepartmentsForUser(user.id);
+      const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
+
+      if (!canManage) {
         return res.status(403).json({
           success: false,
           error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
         });
       }
-
-      await departmentService.removeUserFromDepartment(targetUserId, departmentId);
-
-      res.json({ success: true, data: { message: 'User removed from department successfully' } });
-    } catch (error) {
-      logger.error('Remove user from department error:', error);
-      res.status(500).json({
+    } else {
+      return res.status(403).json({
         success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to remove user from department' }
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
       });
     }
-  });
+
+    if (departmentData.managerId) {
+      const manager = await userService.getUserById(departmentData.managerId);
+      if (!manager) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_INPUT', message: 'Specified manager not found' }
+        });
+      }
+    }
+
+    const updatedDepartment = await departmentService.updateDepartment(departmentId, departmentData);
+
+    res.json({ success: true, data: updatedDepartment });
+  }));
+
+  // Delete department
+  router.delete('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
+
+    if (!userHasPermission(user, 'settings.manage')) {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only administrators can delete departments' }
+      });
+    }
+
+    await departmentService.deleteDepartment(departmentId);
+
+    res.json({ success: true, data: { message: 'Department deleted successfully' } });
+  }));
+
+  // Add user to department
+  router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
+    const { userId } = res.locals.body;
+
+    if (userHasPermission(user, 'settings.manage')) {
+      // Full administrators can add users to any department
+    } else if (userHasPermission(user, 'department.manage')) {
+      const userDepartments = await departmentService.getDepartmentsForUser(user.id);
+      const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
+
+      if (!canManage) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
+        });
+      }
+    } else {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
+      });
+    }
+
+    const targetUser = await userService.getUserById(userId);
+    if (!targetUser) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'INVALID_INPUT', message: 'User not found' }
+      });
+    }
+
+    const department = await departmentService.getDepartmentById(departmentId);
+    if (!department) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Department not found' }
+      });
+    }
+
+    await departmentService.addUserToDepartment(departmentId, userId);
+
+    res.status(201).json({ success: true, data: { message: 'User added to department successfully' } });
+  }));
+
+  // Remove user from department
+  router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
+    const targetUserId = res.locals.params.userId;
+
+    if (userHasPermission(user, 'settings.manage')) {
+      // Full administrators can remove users from any department
+    } else if (userHasPermission(user, 'department.manage')) {
+      const userDepartments = await departmentService.getDepartmentsForUser(user.id);
+      const canManage = userDepartments.some((d) => d.id === departmentId && d.managerId === user.id);
+
+      if (!canManage) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
+        });
+      }
+    } else {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
+      });
+    }
+
+    await departmentService.removeUserFromDepartment(targetUserId, departmentId);
+
+    res.json({ success: true, data: { message: 'User removed from department successfully' } });
+  }));
 
   // Get department statistics
-  router.get('/:id/stats', authenticate, validateParams(idParam), async (req, res) => {
-    try {
-      const user = req.user!;
-      const departmentId = res.locals.params.id;
+  router.get('/:id/stats', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+    const user = req.user!;
+    const departmentId = res.locals.params.id;
 
-      if (!userHasPermission(user, 'settings.manage')) {
-        const userDepartments = await departmentService.getDepartmentsForUser(user.id);
-        const hasAccess = userDepartments.some((d) => d.id === departmentId);
+    if (!userHasPermission(user, 'settings.manage')) {
+      const userDepartments = await departmentService.getDepartmentsForUser(user.id);
+      const hasAccess = userDepartments.some((d) => d.id === departmentId);
 
-        if (!hasAccess) {
-          return res.status(403).json({
-            success: false,
-            error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-          });
-        }
+      if (!hasAccess) {
+        return res.status(403).json({
+          success: false,
+          error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
+        });
       }
-
-      const stats = await departmentService.getDepartmentStatsByDepartment(departmentId);
-
-      res.json({ success: true, data: stats });
-    } catch (error) {
-      logger.error('Get department stats error:', error);
-      res.status(500).json({
-        success: false,
-        error: { code: 'INTERNAL_ERROR', message: 'Failed to retrieve department statistics' }
-      });
     }
-  });
+
+    const stats = await departmentService.getDepartmentStatsByDepartment(departmentId);
+
+    res.json({ success: true, data: stats });
+  }));
 
   return router;
 };

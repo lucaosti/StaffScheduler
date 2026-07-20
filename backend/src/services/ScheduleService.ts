@@ -1,4 +1,5 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import {
   Schedule,
   CreateScheduleRequest,
@@ -25,17 +26,17 @@ export class ScheduleService {
     try {
       await connection.beginTransaction();
 
-      if (!scheduleData.createdBy) throw new Error('createdBy is required');
+      if (!scheduleData.createdBy) throw new ConflictError('createdBy is required');
 
       const startDate = new Date(scheduleData.startDate);
       const endDate = new Date(scheduleData.endDate);
-      if (startDate >= endDate) throw new Error('End date must be after start date');
+      if (startDate >= endDate) throw new ConflictError('End date must be after start date');
 
       const [deptRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
         [scheduleData.departmentId]
       );
-      if (deptRows.length === 0) throw new Error('Department not found');
+      if (deptRows.length === 0) throw new NotFoundError('Department not found');
 
       // FOR UPDATE acquires gap locks under InnoDB REPEATABLE READ, preventing
       // concurrent INSERTs in the same date window from racing past this check.
@@ -49,7 +50,7 @@ export class ScheduleService {
         [scheduleData.departmentId, scheduleData.endDate, scheduleData.startDate]
       );
       if (overlapRows.length > 0) {
-        throw new Error('A schedule already exists for this department in the specified date range');
+        throw new ConflictError('A schedule already exists for this department in the specified date range');
       }
 
       const [result] = await connection.execute<ResultSetHeader>(
@@ -235,11 +236,11 @@ export class ScheduleService {
         'SELECT status FROM schedules WHERE id = ? LIMIT 1',
         [id]
       );
-      if (existingRows.length === 0) throw new Error('Schedule not found');
+      if (existingRows.length === 0) throw new NotFoundError('Schedule not found');
 
       const currentStatus = existingRows[0].status;
       if (currentStatus === 'archived' && scheduleData.status !== 'archived') {
-        throw new Error('Cannot modify archived schedule');
+        throw new ConflictError('Cannot modify archived schedule');
       }
 
       const updates: string[] = [];
@@ -267,7 +268,7 @@ export class ScheduleService {
       logger.info(`Schedule updated successfully: ${id}`);
 
       const updatedSchedule = await this.getScheduleById(id);
-      if (!updatedSchedule) throw new Error('Schedule not found after update');
+      if (!updatedSchedule) throw new NotFoundError('Schedule not found after update');
       return updatedSchedule;
     } catch (error) {
       await connection.rollback();
@@ -287,11 +288,11 @@ export class ScheduleService {
         'SELECT status FROM schedules WHERE id = ? LIMIT 1',
         [id]
       );
-      if (scheduleRows.length === 0) throw new Error('Schedule not found');
+      if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
 
       const status = scheduleRows[0].status;
       if (status !== 'draft') {
-        throw new Error('Only draft schedules can be deleted. Archive published schedules instead.');
+        throw new ConflictError('Only draft schedules can be deleted. Archive published schedules instead.');
       }
 
       await connection.execute(
@@ -312,7 +313,7 @@ export class ScheduleService {
         'DELETE FROM schedules WHERE id = ?',
         [id]
       );
-      if (result.affectedRows === 0) throw new Error('Schedule not found');
+      if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
 
       await connection.commit();
       logger.info(`Schedule deleted successfully: ${id}`);
@@ -335,7 +336,7 @@ export class ScheduleService {
         'SELECT COUNT(*) as shift_count FROM shifts WHERE schedule_id = ?',
         [id]
       );
-      if (shiftRows[0].shift_count === 0) throw new Error('Cannot publish schedule with no shifts');
+      if (shiftRows[0].shift_count === 0) throw new ConflictError('Cannot publish schedule with no shifts');
 
       await connection.execute(
         `UPDATE schedules
@@ -348,7 +349,7 @@ export class ScheduleService {
       logger.info(`Schedule published successfully: ${id}`);
 
       const publishedSchedule = await this.getScheduleById(id);
-      if (!publishedSchedule) throw new Error('Schedule not found after publishing');
+      if (!publishedSchedule) throw new NotFoundError('Schedule not found after publishing');
 
       await this.audit.write({
         actorId: actorId ?? null,
@@ -399,10 +400,10 @@ export class ScheduleService {
         'SELECT status FROM schedules WHERE id = ? LIMIT 1 FOR UPDATE',
         [id]
       );
-      if (scheduleRows.length === 0) throw new Error('Schedule not found');
+      if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
       const previousStatus = scheduleRows[0].status as string;
       if (previousStatus !== 'draft' && previousStatus !== 'published') {
-        throw new Error(`Cannot archive schedule in '${previousStatus}' status`);
+        throw new ConflictError(`Cannot archive schedule in '${previousStatus}' status`);
       }
 
       // Archiving abandons any shift invite that hasn't been answered yet —
@@ -417,7 +418,7 @@ export class ScheduleService {
       );
       const pendingCount = pendingRows[0].pending_count as number;
       if (pendingCount > 0) {
-        throw new Error(
+        throw new ConflictError(
           `Cannot archive schedule with ${pendingCount} pending shift assignment(s); resolve or cancel them first`
         );
       }
@@ -428,13 +429,13 @@ export class ScheduleService {
         WHERE id = ? AND status = ?`,
         [id, previousStatus]
       );
-      if (result.affectedRows === 0) throw new Error('Schedule not found');
+      if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
 
       await connection.commit();
       logger.info(`Schedule archived successfully: ${id}`);
 
       const archivedSchedule = await this.getScheduleById(id);
-      if (!archivedSchedule) throw new Error('Schedule not found after archiving');
+      if (!archivedSchedule) throw new NotFoundError('Schedule not found after archiving');
 
       await this.audit.write({
         actorId: actorId ?? null,

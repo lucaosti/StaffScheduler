@@ -22,6 +22,7 @@
  */
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ApprovalEngineService } from './ApprovalEngineService';
@@ -94,10 +95,10 @@ export class TimeOffService {
   /** Creates a new pending request. Range is validated; reason is optional. */
   async create(input: CreateTimeOffInput): Promise<TimeOffRequest> {
     if (!input.startDate || !input.endDate) {
-      throw new Error('startDate and endDate are required');
+      throw new ConflictError('startDate and endDate are required');
     }
     if (input.endDate < input.startDate) {
-      throw new Error('endDate must be on or after startDate');
+      throw new ConflictError('endDate must be on or after startDate');
     }
 
     // Resolve the approval gate BEFORE inserting the request. A request
@@ -111,7 +112,7 @@ export class TimeOffService {
       const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.userId);
       workflowCtx = { actorUserId: input.userId, orgUnitId: orgUnitId ?? undefined };
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
-        throw new Error(
+        throw new ConflictError(
           'No approver could be resolved for this time-off request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
         );
       }
@@ -153,7 +154,7 @@ export class TimeOffService {
         // (e.g. a concurrent membership removal). Never leave a stranded,
         // undecidable request behind.
         await this.pool.execute(`DELETE FROM time_off_requests WHERE id = ?`, [created.id]);
-        throw new Error('No approver could be resolved for this time-off request — approver resolution changed during creation. Please retry.');
+        throw new ConflictError('No approver could be resolved for this time-off request — approver resolution changed during creation. Please retry.');
       }
     }
 
@@ -230,7 +231,7 @@ export class TimeOffService {
       [userId, startDate, endDate]
     );
     if (rows.length > 0) {
-      throw new Error(`User already has unavailability recorded for ${startDate}..${endDate}`);
+      throw new ConflictError(`User already has unavailability recorded for ${startDate}..${endDate}`);
     }
   }
 
@@ -240,14 +241,14 @@ export class TimeOffService {
     notes: string | null = null
   ): Promise<TimeOffRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Time-off request not found');
+    if (!existing) throw new NotFoundError('Time-off request not found');
     if (existing.status !== 'pending') {
-      throw new Error(`Cannot approve request in status '${existing.status}'`);
+      throw new ConflictError(`Cannot approve request in status '${existing.status}'`);
     }
 
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) {
-      throw new Error('No pending approval found for this time-off request');
+      throw new ConflictError('No pending approval found for this time-off request');
     }
 
     // A non-final step has no entity side effects to apply yet — just
@@ -279,10 +280,10 @@ export class TimeOffService {
         `SELECT * FROM time_off_requests WHERE id = ? FOR UPDATE`,
         [id]
       );
-      if (rows.length === 0) throw new Error('Time-off request not found');
+      if (rows.length === 0) throw new NotFoundError('Time-off request not found');
       const current = mapRow(rows[0]);
       if (current.status !== 'pending') {
-        throw new Error(`Cannot approve request in status '${current.status}'`);
+        throw new ConflictError(`Cannot approve request in status '${current.status}'`);
       }
       await this.checkNoDuplicateUnavailability(conn, current.userId, current.startDate, current.endDate);
 
@@ -350,14 +351,14 @@ export class TimeOffService {
     notes: string | null = null
   ): Promise<TimeOffRequest> {
     const existing = await this.getById(id);
-    if (!existing) throw new Error('Time-off request not found');
+    if (!existing) throw new NotFoundError('Time-off request not found');
     if (existing.status !== 'pending') {
-      throw new Error(`Cannot reject request in status '${existing.status}'`);
+      throw new ConflictError(`Cannot reject request in status '${existing.status}'`);
     }
 
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) {
-      throw new Error('No pending approval found for this time-off request');
+      throw new ConflictError('No pending approval found for this time-off request');
     }
 
     const decision = await this.engine.decidePendingApproval(
@@ -380,7 +381,7 @@ export class TimeOffService {
     );
     if (result.affectedRows === 0) {
       const current = await this.getById(id);
-      throw new Error(`Cannot reject request in status '${current?.status ?? existing.status}'`);
+      throw new ConflictError(`Cannot reject request in status '${current?.status ?? existing.status}'`);
     }
     logger.info(`Time-off request rejected: id=${id} reviewer=${reviewerId}`);
     const refreshed = await this.getById(id);
@@ -417,9 +418,9 @@ export class TimeOffService {
     );
     if (result.affectedRows === 0) {
       const existing = await this.getById(id);
-      if (!existing) throw new Error('Time-off request not found');
-      if (existing.userId !== requesterId) throw new Error('Forbidden');
-      throw new Error(`Cannot cancel request in status '${existing.status}'`);
+      if (!existing) throw new NotFoundError('Time-off request not found');
+      if (existing.userId !== requesterId) throw new ForbiddenError('Forbidden');
+      throw new ConflictError(`Cannot cancel request in status '${existing.status}'`);
     }
     logger.info(`Time-off request cancelled: id=${id} user=${requesterId}`);
     const refreshed = await this.getById(id);

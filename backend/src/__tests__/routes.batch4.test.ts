@@ -49,6 +49,8 @@ import { createShiftSwapRouter } from '../routes/shiftSwap';
 import { createSkillGapRouter } from '../routes/skillGap';
 import { createDirectoryRouter } from '../routes/directory';
 import { createDepartmentsRouter } from '../routes/departments';
+import { NotFoundError, ValidationError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -56,6 +58,7 @@ const mount = (prefix: string, router: express.Router) => {
   const app = express();
   app.use(express.json());
   app.use(prefix, router);
+  app.use(errorHandler);
   return app;
 };
 
@@ -74,16 +77,16 @@ describe('calendar route — resolveToken null', () => {
 // ─── routes/shiftSwap.ts ─────────────────────────────────────────────────────
 
 describe('shiftSwap route — create catch', () => {
-  it('POST / returns 400 VALIDATION_ERROR when service.create throws', async () => {
+  it('POST / returns 404 NOT_FOUND when service.create rejects with a missing entity', async () => {
     (ShiftSwapService.prototype.create as jest.Mock).mockRejectedValueOnce(
-      new Error('Assignment not found')
+      new NotFoundError('Assignment not found')
     );
     const app = mount('/api/shift-swaps', createShiftSwapRouter(fakePool));
     const res = await request(app)
       .post('/api/shift-swaps')
       .send({ requesterAssignmentId: 1, targetAssignmentId: 2 });
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
     expect(res.body.error.message).toMatch(/Assignment not found/);
   });
 });
@@ -117,7 +120,7 @@ describe('directory route — GET /users/:id null profile', () => {
 describe('directory route — PUT /users/:id/fields catch', () => {
   it('returns 400 VALIDATION_ERROR when setFields throws', async () => {
     (UserDirectoryService.prototype.setFields as jest.Mock).mockRejectedValueOnce(
-      new Error('invalid field key')
+      new ValidationError("Invalid field key 'bad key!'")
     );
     const app = mount('/api/directory', createDirectoryRouter(fakePool));
     const res = await request(app)

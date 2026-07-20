@@ -12,14 +12,10 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { userIdParam, upsertPreferencesBody } from '../schemas';
 import { PreferencesService } from '../services/PreferencesService';
-import { logger } from '../config/logger';
-
-const respondError = (res: Response, status: number, code: string, message: string): void => {
-  res.status(status).json({ success: false, error: { code, message } });
-};
 
 export const createPreferencesRouter = (pool: Pool): Router => {
   const router = Router();
@@ -27,45 +23,27 @@ export const createPreferencesRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.get('/me', async (req: Request, res: Response) => {
-    try {
-      const data = await service.getByUserId(req.user!.id);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('preferences get error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve preferences');
-    }
-  });
+  router.get('/me', asyncHandler(async (req: Request, res: Response) => {
+    const data = await service.getByUserId(req.user!.id);
+    res.json({ success: true, data });
+  }));
 
-  router.put('/me', validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
-    try {
-      const data = await service.upsert(_req.user!.id, res.locals.body);
-      res.json({ success: true, data });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.put('/me', validateBody(upsertPreferencesBody), asyncHandler(async (_req: Request, res: Response) => {
+    const data = await service.upsert(_req.user!.id, res.locals.body);
+    res.json({ success: true, data });
+  }));
 
-  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), async (_req: Request, res: Response) => {
-    try {
-      const userId = res.locals.params.userId;
-      const data = await service.getByUserId(userId);
-      res.json({ success: true, data });
-    } catch (err) {
-      logger.error('preferences get error:', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to retrieve preferences');
-    }
-  });
+  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), asyncHandler(async (_req: Request, res: Response) => {
+    const userId = res.locals.params.userId;
+    const data = await service.getByUserId(userId);
+    res.json({ success: true, data });
+  }));
 
-  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
-    try {
-      const userId = res.locals.params.userId;
-      const data = await service.upsert(userId, res.locals.body);
-      res.json({ success: true, data });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), asyncHandler(async (_req: Request, res: Response) => {
+    const userId = res.locals.params.userId;
+    const data = await service.upsert(userId, res.locals.body);
+    res.json({ success: true, data });
+  }));
 
   return router;
 };

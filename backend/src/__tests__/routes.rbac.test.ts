@@ -41,6 +41,8 @@ jest.mock('../services/RbacService');
 
 import { RbacService } from '../services/RbacService';
 import { createRbacRouter } from '../routes/rbac';
+import { ConflictError, NotFoundError } from '../errors';
+import { errorHandler } from '../middleware/errorHandler';
 
 const fakePool = {} as never;
 
@@ -50,6 +52,7 @@ const mountApp = (): express.Express => {
   const { roles, permissions } = createRbacRouter(fakePool);
   app.use('/api/permissions', permissions);
   app.use('/api/roles', roles);
+  app.use(errorHandler);
   return app;
 };
 
@@ -170,7 +173,7 @@ describe('rbac POST /roles', () => {
   it('returns 409 on duplicate role name', async () => {
     (RbacService.prototype.createRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Role already exists'));
+      .mockRejectedValue(new ConflictError('Role already exists'));
 
     const res = await request(mountApp())
       .post('/api/roles')
@@ -180,11 +183,7 @@ describe('rbac POST /roles', () => {
     expect(res.body.error.code).toBe('CONFLICT');
   });
 
-  it('returns 400 on validation error', async () => {
-    (RbacService.prototype.createRole as jest.Mock) = jest
-      .fn()
-      .mockRejectedValue(new Error('name is required'));
-
+  it('returns 400 when the body fails schema validation', async () => {
     const res = await request(mountApp())
       .post('/api/roles')
       .send({});
@@ -249,7 +248,7 @@ describe('rbac PUT /roles/:id', () => {
   it('returns 404 when role not found', async () => {
     (RbacService.prototype.updateRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Role not found'));
+      .mockRejectedValue(new NotFoundError('Role not found'));
 
     const res = await request(mountApp())
       .put('/api/roles/99')
@@ -259,7 +258,7 @@ describe('rbac PUT /roles/:id', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('returns 400 on validation error', async () => {
+  it('returns 500 on unexpected service error', async () => {
     (RbacService.prototype.updateRole as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('invalid permission code'));
@@ -268,8 +267,8 @@ describe('rbac PUT /roles/:id', () => {
       .put('/api/roles/2')
       .send({ permissionCodes: ['nonexistent'] });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
 });
 
@@ -289,7 +288,7 @@ describe('rbac DELETE /roles/:id', () => {
   it('returns 409 when trying to delete a system role', async () => {
     (RbacService.prototype.deleteRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Role cannot be deleted because it is a system role'));
+      .mockRejectedValue(new ConflictError('System roles cannot be deleted'));
 
     const res = await request(mountApp()).delete('/api/roles/1');
     expect(res.status).toBe(409);
@@ -299,7 +298,7 @@ describe('rbac DELETE /roles/:id', () => {
   it('returns 404 when role not found', async () => {
     (RbacService.prototype.deleteRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Role not found'));
+      .mockRejectedValue(new NotFoundError('Role not found'));
 
     const res = await request(mountApp()).delete('/api/roles/99');
     expect(res.status).toBe(404);
@@ -346,17 +345,17 @@ describe('rbac POST /roles/users/:userId', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('returns 400 on service error', async () => {
+  it('returns 404 when a referenced entity is missing', async () => {
     (RbacService.prototype.assignRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('User not found'));
+      .mockRejectedValue(new NotFoundError('User not found'));
 
     const res = await request(mountApp())
       .post('/api/roles/users/99')
       .send({ roleId: 2 });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 });
 
@@ -384,14 +383,14 @@ describe('rbac DELETE /roles/users/:userId/:roleId', () => {
     expect(RbacService.prototype.removeRole).toHaveBeenCalledWith(7, 2, 5, 1, null);
   });
 
-  it('returns 400 on service error', async () => {
+  it('returns 404 when a referenced entity is missing', async () => {
     (RbacService.prototype.removeRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Assignment not found'));
+      .mockRejectedValue(new NotFoundError('Assignment not found'));
 
     const res = await request(mountApp()).delete('/api/roles/users/7/99');
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 });
 
@@ -453,17 +452,17 @@ describe('rbac POST /roles/bulk-assign', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('returns 400 on service error', async () => {
+  it('returns 404 when a referenced entity is missing', async () => {
     (RbacService.prototype.bulkAssignRole as jest.Mock) = jest
       .fn()
-      .mockRejectedValue(new Error('Role not found'));
+      .mockRejectedValue(new NotFoundError('Role not found'));
 
     const res = await request(mountApp())
       .post('/api/roles/bulk-assign')
       .send({ roleId: 999, userIds: [1, 2] });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('returns 401 when unauthenticated', async () => {

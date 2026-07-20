@@ -9,6 +9,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import {
   Shift,
   CreateShiftRequest,
@@ -56,7 +57,7 @@ export class ShiftService {
       );
 
       if (scheduleRows.length === 0) {
-        throw new Error('Schedule not found');
+        throw new NotFoundError('Schedule not found');
       }
 
       // Validate department exists
@@ -66,7 +67,7 @@ export class ShiftService {
       );
 
       if (deptRows.length === 0) {
-        throw new Error('Department not found');
+        throw new NotFoundError('Department not found');
       }
 
       // Insert shift record
@@ -439,7 +440,7 @@ export class ShiftService {
 
       const updatedShift = await this.getShiftById(id);
       if (!updatedShift) {
-        throw new Error('Shift not found after update');
+        throw new NotFoundError('Shift not found after update');
       }
 
       return updatedShift;
@@ -477,7 +478,7 @@ export class ShiftService {
       );
 
       if (result.affectedRows === 0) {
-        throw new Error('Shift not found');
+        throw new NotFoundError('Shift not found');
       }
 
       await connection.commit();
@@ -522,7 +523,7 @@ export class ShiftService {
       );
 
       if (templateRows.length === 0) {
-        throw new Error('Shift template not found');
+        throw new NotFoundError('Shift template not found');
       }
 
       const template = templateRows[0];

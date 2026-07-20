@@ -23,13 +23,12 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
-import { mapServiceError } from '../utils/httpErrors';
-import { logger } from '../config/logger';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -45,233 +44,149 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Org units -------------
 
-  router.get('/units', requirePermission('org_unit.read'), async (_req, res: Response) => {
-    try {
-      res.json({ success: true, data: await units.list() });
-    } catch (err) {
-      logger.error('org units list failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list org units');
-    }
-  });
+  router.get('/units', requirePermission('org_unit.read'), asyncHandler(async (_req, res: Response) => {
+    res.json({ success: true, data: await units.list() });
+  }));
 
-  router.get('/units/tree', requirePermission('org_unit.read'), async (_req, res: Response) => {
-    try {
-      res.json({ success: true, data: await units.tree() });
-    } catch (err) {
-      logger.error('org tree failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to build org tree');
-    }
-  });
+  router.get('/units/tree', requirePermission('org_unit.read'), asyncHandler(async (_req, res: Response) => {
+    res.json({ success: true, data: await units.tree() });
+  }));
 
-  router.get('/units/:id', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      const u = await units.getById(res.locals.params.id);
-      if (!u) return respondError(res, 404, 'NOT_FOUND', 'Org unit not found');
-      res.json({ success: true, data: u });
-    } catch (err) {
-      logger.error('org unit get failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to read org unit');
-    }
-  });
+  router.get('/units/:id', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+    const u = await units.getById(res.locals.params.id);
+    if (!u) return respondError(res, 404, 'NOT_FOUND', 'Org unit not found');
+    res.json({ success: true, data: u });
+  }));
 
-  router.post('/units', requirePermission('org_unit.manage'), validateBody(createOrgUnitBody), async (req: Request, res: Response) => {
-    try {
-      const created = await units.create({
-        name: res.locals.body.name,
-        description: res.locals.body.description,
-        parentId: res.locals.body.parentId ?? null,
-        managerUserId: res.locals.body.managerUserId ?? null,
-      });
-      await audit.write({
-        actorId: req.user!.id, action: 'org_unit.create',
-        entityType: 'org_unit', entityId: created.id,
-        after: { name: created.name, parentId: created.parentId },
-      });
-      res.status(201).json({ success: true, data: created });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.post('/units', requirePermission('org_unit.manage'), validateBody(createOrgUnitBody), asyncHandler(async (req: Request, res: Response) => {
+    const created = await units.create({
+      name: res.locals.body.name,
+      description: res.locals.body.description,
+      parentId: res.locals.body.parentId ?? null,
+      managerUserId: res.locals.body.managerUserId ?? null,
+    });
+    await audit.write({
+      actorId: req.user!.id, action: 'org_unit.create',
+      entityType: 'org_unit', entityId: created.id,
+      after: { name: created.name, parentId: created.parentId },
+    });
+    res.status(201).json({ success: true, data: created });
+  }));
 
-  router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), async (req: Request, res: Response) => {
-    try {
-      const updated = await units.update(res.locals.params.id, res.locals.body);
-      await audit.write({
-        actorId: req.user!.id, action: 'org_unit.update',
-        entityType: 'org_unit', entityId: res.locals.params.id,
-        after: res.locals.body,
-      });
-      res.json({ success: true, data: updated });
-    } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg.includes('not found') ? 404 : 400;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR', msg);
-    }
-  });
+  router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), asyncHandler(async (req: Request, res: Response) => {
+    const updated = await units.update(res.locals.params.id, res.locals.body);
+    await audit.write({
+      actorId: req.user!.id, action: 'org_unit.update',
+      entityType: 'org_unit', entityId: res.locals.params.id,
+      after: res.locals.body,
+    });
+    res.json({ success: true, data: updated });
+  }));
 
-  router.delete('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), async (req: Request, res: Response) => {
-    try {
-      await units.remove(res.locals.params.id);
-      await audit.write({
-        actorId: req.user!.id, action: 'org_unit.delete',
-        entityType: 'org_unit', entityId: res.locals.params.id,
-      });
-      res.json({ success: true });
-    } catch (err) {
-      const msg = (err as Error).message;
-      const status = msg.includes('not found') ? 404 : 400;
-      respondError(res, status, status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR', msg);
-    }
-  });
+  router.delete('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+    await units.remove(res.locals.params.id);
+    await audit.write({
+      actorId: req.user!.id, action: 'org_unit.delete',
+      entityType: 'org_unit', entityId: res.locals.params.id,
+    });
+    res.json({ success: true });
+  }));
 
   // ------------- Memberships -------------
 
-  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
-    } catch (err) {
-      logger.error('members list failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list members');
-    }
-  });
+  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+    res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
+  }));
 
   // Display-ready member list (name/email/position) for the "browse offices" view.
-  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
-    try {
-      res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
-    } catch (err) {
-      logger.error('detailed members list failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list members');
-    }
-  });
+  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+    res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
+  }));
 
   // Chain of superiors for a user, from their own unit's manager up to the top
   // of the tree. Defaults to the caller; open to any authenticated user, same
   // visibility as the rest of the org tree (org_unit.read).
-  router.get('/manager-chain/:userId?', async (req: Request, res: Response) => {
-    try {
-      const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
-      if (!Number.isInteger(targetId) || targetId <= 0) {
-        return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
-      }
-      res.json({ success: true, data: await units.getManagerChain(targetId) });
-    } catch (err) {
-      logger.error('manager chain failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to resolve manager chain');
+  router.get('/manager-chain/:userId?', asyncHandler(async (req: Request, res: Response) => {
+    const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
     }
-  });
+    res.json({ success: true, data: await units.getManagerChain(targetId) });
+  }));
 
-  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
-    try {
-      const created = await units.addMember(
-        res.locals.body.userId,
-        res.locals.params.id,
-        Boolean(res.locals.body.isPrimary)
-      );
-      res.status(201).json({ success: true, data: created });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), asyncHandler(async (_req: Request, res: Response) => {
+    const created = await units.addMember(
+      res.locals.body.userId,
+      res.locals.params.id,
+      Boolean(res.locals.body.isPrimary)
+    );
+    res.status(201).json({ success: true, data: created });
+  }));
 
   router.patch(
     '/units/:id/members/:userId/primary',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
-    async (_req: Request, res: Response) => {
-      try {
-        const { id, userId } = res.locals.params;
-        await units.setPrimary(userId, id);
-        res.json({ success: true });
-      } catch (err) {
-        const msg = (err as Error).message;
-        const status = msg.includes('not found') ? 404 : 400;
-        respondError(res, status, status === 404 ? 'NOT_FOUND' : 'VALIDATION_ERROR', msg);
-      }
-    }
+    asyncHandler(async (_req: Request, res: Response) => {
+      const { id, userId } = res.locals.params;
+      await units.setPrimary(userId, id);
+      res.json({ success: true });
+  })
   );
 
   router.delete(
     '/units/:id/members/:userId',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
-    async (_req: Request, res: Response) => {
-      try {
-        const { id, userId } = res.locals.params;
-        await units.removeMember(userId, id);
-        res.json({ success: true });
-      } catch (err) {
-        respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-      }
-    }
+    asyncHandler(async (_req: Request, res: Response) => {
+      const { id, userId } = res.locals.params;
+      await units.removeMember(userId, id);
+      res.json({ success: true });
+  })
   );
 
   // ------------- Loans -------------
 
-  router.get('/loans', async (req: Request, res: Response) => {
-    try {
-      const isManager = userHasPermission(req.user, 'loan.approve');
-      const filters = isManager
-        ? {
-            userId: req.query.userId ? Number(req.query.userId) : undefined,
-            toOrgUnitId: req.query.toOrgUnitId ? Number(req.query.toOrgUnitId) : undefined,
-            fromOrgUnitId: req.query.fromOrgUnitId ? Number(req.query.fromOrgUnitId) : undefined,
-            status: (req.query.status as never) ?? undefined,
-          }
-        : { userId: req.user!.id, status: (req.query.status as never) ?? undefined };
-      res.json({ success: true, data: await loans.list(filters) });
-    } catch (err) {
-      logger.error('loan list failed', err);
-      respondError(res, 500, 'INTERNAL_ERROR', 'Failed to list loans');
-    }
-  });
+  router.get('/loans', asyncHandler(async (req: Request, res: Response) => {
+    const isManager = userHasPermission(req.user, 'loan.approve');
+    const filters = isManager
+      ? {
+          userId: req.query.userId ? Number(req.query.userId) : undefined,
+          toOrgUnitId: req.query.toOrgUnitId ? Number(req.query.toOrgUnitId) : undefined,
+          fromOrgUnitId: req.query.fromOrgUnitId ? Number(req.query.fromOrgUnitId) : undefined,
+          status: (req.query.status as never) ?? undefined,
+        }
+      : { userId: req.user!.id, status: (req.query.status as never) ?? undefined };
+    res.json({ success: true, data: await loans.list(filters) });
+  }));
 
-  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), async (req: Request, res: Response) => {
-    try {
-      const created = await loans.create({
-        userId: res.locals.body.userId,
-        fromOrgUnitId: res.locals.body.fromOrgUnitId,
-        toOrgUnitId: res.locals.body.toOrgUnitId,
-        startDate: res.locals.body.startDate,
-        endDate: res.locals.body.endDate,
-        reason: res.locals.body.reason,
-        requestedBy: req.user!.id,
-      });
-      res.status(201).json({ success: true, data: created });
-    } catch (err) {
-      respondError(res, 400, 'VALIDATION_ERROR', (err as Error).message);
-    }
-  });
+  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), asyncHandler(async (req: Request, res: Response) => {
+    const created = await loans.create({
+      userId: res.locals.body.userId,
+      fromOrgUnitId: res.locals.body.fromOrgUnitId,
+      toOrgUnitId: res.locals.body.toOrgUnitId,
+      startDate: res.locals.body.startDate,
+      endDate: res.locals.body.endDate,
+      reason: res.locals.body.reason,
+      requestedBy: req.user!.id,
+    });
+    res.status(201).json({ success: true, data: created });
+  }));
 
-  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
-    try {
-      const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
-      res.json({ success: true, data: updated });
-    } catch (err) {
-      const { status, code, message } = mapServiceError(err);
-      respondError(res, status, code, message);
-    }
-  });
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+    const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    res.json({ success: true, data: updated });
+  }));
 
-  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
-    try {
-      const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
-      res.json({ success: true, data: updated });
-    } catch (err) {
-      const { status, code, message } = mapServiceError(err);
-      respondError(res, status, code, message);
-    }
-  });
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+    const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    res.json({ success: true, data: updated });
+  }));
 
-  router.post('/loans/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
-    try {
-      const updated = await loans.cancel(res.locals.params.id, req.user!.id);
-      res.json({ success: true, data: updated });
-    } catch (err) {
-      const { status, code, message } = mapServiceError(err);
-      respondError(res, status, code, message);
-    }
-  });
+  router.post('/loans/:id/cancel', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+    const updated = await loans.cancel(res.locals.params.id, req.user!.id);
+    res.json({ success: true, data: updated });
+  }));
 
   return router;
 };

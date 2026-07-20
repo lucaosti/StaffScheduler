@@ -6,6 +6,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ConflictError, NotFoundError } from '../errors';
 import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest } from '../types';
 import { logger } from '../config/logger';
@@ -27,7 +28,7 @@ export class UserService {
         [userData.email]
       );
       if (existingUsers.length > 0) {
-        throw new Error('Email already exists');
+        throw new ConflictError('Email already exists');
       }
       const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
       const [result] = await connection.execute<ResultSetHeader>(
@@ -71,6 +72,11 @@ export class UserService {
       return newUser;
     } catch (error) {
       await connection.rollback();
+      // Unique-key races (email, employee_id) surface as ER_DUP_ENTRY from the
+      // driver; translate them into the domain conflict the caller expects.
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+        throw new ConflictError('Email or employee ID already exists');
+      }
       logger.error('Failed to create user:', error);
       throw error;
     } finally {
@@ -272,7 +278,7 @@ export class UserService {
       const values: any[] = [];
       if (userData.email !== undefined) {
         const [existing] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [userData.email, id]);
-        if (existing.length > 0) throw new Error('Email already exists');
+        if (existing.length > 0) throw new ConflictError('Email already exists');
         updates.push('email = ?');
         values.push(userData.email);
       }
@@ -334,7 +340,7 @@ export class UserService {
       await connection.commit();
       logger.info('User updated: ' + id);
       const updatedUser = await this.getUserById(id);
-      if (!updatedUser) throw new Error('User not found after update');
+      if (!updatedUser) throw new NotFoundError('User not found after update');
       await this.audit.write({
         actorId: actorId ?? null,
         action: 'user.update',
@@ -346,6 +352,9 @@ export class UserService {
       return updatedUser;
     } catch (error) {
       await connection.rollback();
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+        throw new ConflictError('Email or employee ID already exists');
+      }
       logger.error('Failed to update user:', error);
       throw error;
     } finally {
@@ -358,7 +367,7 @@ export class UserService {
     try {
       await connection.beginTransaction();
       const [exists] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
-      if ((exists as RowDataPacket[]).length === 0) throw new Error('User not found');
+      if ((exists as RowDataPacket[]).length === 0) throw new NotFoundError('User not found');
       await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
       await connection.commit();
       logger.info('User deleted: ' + id);
