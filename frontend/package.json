@@ -4,6 +4,7 @@
   "description": "Frontend React application for Staff Scheduler - Advanced Workforce Management System",
   "private": true,
   "dependencies": {
+    "@tanstack/react-query": "^5.101.4",
     "bootstrap": "^5.3.0",
     "bootstrap-icons": "^1.10.5",
     "react": "^18.2.0",
