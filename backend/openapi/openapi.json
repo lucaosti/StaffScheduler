@@ -7537,7 +7537,7 @@
           "Schedules"
         ],
         "summary": "Auto-generate assignments",
-        "description": "Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) and creates pending assignments for all open shifts. Requires `schedule.optimize`.",
+        "description": "Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) to create pending assignments. Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id — poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -7561,6 +7561,38 @@
                       "type": "number"
                     },
                     "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Optimization queued; poll the optimization endpoint for status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "jobId": {
+                          "type": "string"
+                        },
+                        "scheduleId": {
+                          "type": "integer"
+                        },
+                        "state": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "message": {
                       "type": "string"
                     }
                   }
@@ -10324,6 +10356,114 @@
         "responses": {
           "200": {
             "description": "Decision chain."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/schedules/{id}/optimization": {
+      "get": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Optimization job status",
+        "description": "Returns the state, progress and result of the schedule's optimization job. Requires schedule.optimize.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "jobId": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "waiting",
+                            "active",
+                            "completed",
+                            "failed",
+                            "unknown"
+                          ]
+                        },
+                        "progress": {
+                          "type": "number"
+                        },
+                        "result": {
+                          "type": "object"
+                        },
+                        "failedReason": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Schedules"
+        ],
+        "summary": "Cancel optimization job",
+        "description": "Cancels the schedule's in-flight or retained optimization job. Requires schedule.optimize.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
