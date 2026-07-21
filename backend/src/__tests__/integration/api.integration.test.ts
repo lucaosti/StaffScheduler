@@ -164,6 +164,40 @@ describe('auth (real DB)', () => {
     const afterLogout = await request(app).get('/api/auth/verify').set('Cookie', cookie);
     expect(afterLogout.status).toBe(401);
   });
+
+  // End-to-end refresh-token rotation and reuse detection against the real
+  // refresh_tokens table — the security-critical path #284 introduced.
+  const extractCookie = (res: request.Response, name: string): string | undefined => {
+    const setCookie = res.headers['set-cookie'];
+    const arr = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+    return arr.map((c: string) => c.split(';')[0]).find((c) => c.startsWith(`${name}=`));
+  };
+
+  it('rotates the refresh token and detects reuse of a spent one', async () => {
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+    expect(login.status).toBe(200);
+    const firstRefresh = extractCookie(login, 'refresh_token');
+    expect(firstRefresh).toBeDefined();
+
+    // A valid refresh rotates: it succeeds and returns a new refresh cookie.
+    const refresh1 = await request(app).post('/api/auth/refresh').set('Cookie', firstRefresh!);
+    expect(refresh1.status).toBe(200);
+    expect(refresh1.body.data.user.email).toBe(ADMIN_EMAIL);
+    const secondRefresh = extractCookie(refresh1, 'refresh_token');
+    expect(secondRefresh).toBeDefined();
+    expect(secondRefresh).not.toBe(firstRefresh);
+
+    // Replaying the now-spent first token is reuse: it is rejected AND revokes
+    // the whole family, so the legitimately-rotated second token stops working.
+    const reuse = await request(app).post('/api/auth/refresh').set('Cookie', firstRefresh!);
+    expect(reuse.status).toBe(401);
+    expect(reuse.body.error.code).toBe('REFRESH_INVALID');
+
+    const afterReuse = await request(app).post('/api/auth/refresh').set('Cookie', secondRefresh!);
+    expect(afterReuse.status).toBe(401);
+  });
 });
 
 describe('assignments (real DB) — regression for the users.role column drift', () => {

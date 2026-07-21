@@ -82,8 +82,18 @@ export const config = {
   },
   jwt: {
     secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),
-    expiresIn: process.env.JWT_EXPIRES_IN || '24h',
-    expiresInMs: parseDurationMs(process.env.JWT_EXPIRES_IN || '24h', 24 * 60 * 60 * 1000),
+    // Access token: short-lived by design. Longevity is now provided by the
+    // rotating refresh token, so a leaked access token is only usable for a
+    // few minutes. Default 15m; still overridable for special deployments.
+    expiresIn: process.env.JWT_EXPIRES_IN || '15m',
+    expiresInMs: parseDurationMs(process.env.JWT_EXPIRES_IN || '15m', 15 * 60 * 1000),
+    // Refresh token lifetime: the session's real length. 30 days by default;
+    // rotation on every use means a token is short-lived in practice even
+    // though the family can live this long.
+    refreshExpiresInMs: parseDurationMs(
+      process.env.JWT_REFRESH_EXPIRES_IN || '30d',
+      30 * 24 * 60 * 60 * 1000
+    ),
   },
   auth: {
     // TTL (ms) for the per-user auth context cache in the authenticate
