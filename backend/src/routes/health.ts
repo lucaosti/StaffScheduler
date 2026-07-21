@@ -10,6 +10,7 @@
 import { Router, Request, Response } from 'express';
 import { database } from '../config/database';
 import { logger } from '../config/logger';
+import { isRedisConfigured, isRedisHealthy } from '../config/redis';
 import { asyncHandler } from '../middleware/asyncHandler';
 
 // Single source of truth for the service version. Works from both src/ (ts-node)
@@ -31,6 +32,10 @@ const router = Router();
 router.get('/', async (_req: Request, res: Response) => {
   try {
     const dbHealthy = await database.isHealthy();
+    // Redis is optional: report its state only when configured, so a
+    // single-instance deployment without Redis is not flagged "degraded" for
+    // a dependency it deliberately does not use.
+    const redisReported = isRedisConfigured() ? await isRedisHealthy() : null;
 
     // Unauthenticated endpoint: expose only what a load balancer needs.
     // Environment name, uptime and process metrics are internal details
@@ -41,6 +46,9 @@ router.get('/', async (_req: Request, res: Response) => {
       version: SERVICE_VERSION,
       services: {
         database: dbHealthy ? 'connected' : 'disconnected',
+        ...(redisReported !== null
+          ? { redis: redisReported ? 'connected' : 'disconnected' }
+          : {}),
       }
     };
 
