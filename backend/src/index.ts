@@ -12,6 +12,7 @@ import { config } from './config';
 import { database } from './config/database';
 import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
+import { eventBus } from './services/EventBus';
 import { buildApp } from './app';
 
 export async function startServer(): Promise<void> {
@@ -31,6 +32,10 @@ export async function startServer(): Promise<void> {
 
     const app = buildApp(pool);
     const port = config.server.port;
+
+    // Wire the SSE bus onto Redis pub/sub so events fan out across instances.
+    // No-op without Redis; never throws (degrades to single-instance delivery).
+    await eventBus.init();
 
     const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
