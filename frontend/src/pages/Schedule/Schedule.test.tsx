@@ -1,4 +1,5 @@
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { screen, within, fireEvent } from '@testing-library/react';
+import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
 const mockGetSchedules = jest.fn();

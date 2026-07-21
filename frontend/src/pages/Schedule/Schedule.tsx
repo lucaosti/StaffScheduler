@@ -12,13 +12,11 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Schedule as ScheduleType, Assignment, Employee, Shift } from '../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Assignment, Shift } from '../../types';
 import * as scheduleService from '../../services/scheduleService';
-import * as employeeService from '../../services/employeeService';
 import * as shiftService from '../../services/shiftService';
-import * as departmentService from '../../services/departmentService';
-import type { Department } from '../../services/departmentService';
+import { useSchedulePageData } from '../../hooks/useSchedulePage';
 import { ApiError } from '../../services/apiUtils';
 import ScheduleList from '../Schedule/ScheduleList';
 import CreateScheduleModal from '../Schedule/CreateScheduleModal';
@@ -36,14 +34,29 @@ interface OptimizationOutcome {
 }
 
 const Schedule: React.FC = () => {
-  const [schedules, setSchedules] = useState<ScheduleType[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Server state (the four page lists + first-schedule assignments) is owned by
+  // one TanStack Query hook; `reload` invalidates it after a mutation. Only
+  // genuinely local UI state lives in this component.
+  const { query: pageQuery, reload: loadData } = useSchedulePageData();
+  const pageData = pageQuery.data;
+  // Memoized so the derived arrays keep a stable reference between renders while
+  // the query data is unchanged — otherwise the `?? []` fallbacks would be new
+  // arrays every render and churn the useMemo hooks that depend on them.
+  const schedules = useMemo(() => pageData?.schedules ?? [], [pageData]);
+  const employees = useMemo(() => pageData?.employees ?? [], [pageData]);
+  const shifts = useMemo(() => pageData?.shifts ?? [], [pageData]);
+  const departments = useMemo(() => pageData?.departments ?? [], [pageData]);
+  const assignments = useMemo(() => pageData?.assignments ?? [], [pageData]);
+  const loading = pageQuery.isLoading;
+
+  const [localError, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  // The page error is the query's load error, or a one-off action error.
+  const error = pageQuery.isError
+    ? pageQuery.error instanceof ApiError
+      ? pageQuery.error.message
+      : (pageQuery.error as Error)?.message ?? 'Failed to load schedule data'
+    : localError;
 
   const [monthShifts, setMonthShifts] = useState<Shift[]>([]);
   const [monthLoading, setMonthLoading] = useState(false);
@@ -59,82 +72,6 @@ const Schedule: React.FC = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | number | null>(null);
-
-  // Guards state updates from fetches that resolve after the component
-  // unmounted (route change while the initial load is in flight).
-  const mountedRef = React.useRef(true);
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const [schedulesResponse, employeesResponse, shiftsResponse, departmentsResponse] =
-        await Promise.all([
-          scheduleService.getSchedules(),
-          employeeService.getEmployees({}),
-          shiftService.getShifts({}),
-          departmentService.getDepartments(),
-        ]);
-      if (!mountedRef.current) return;
-
-      if (schedulesResponse.success && schedulesResponse.data) {
-        setSchedules(schedulesResponse.data);
-      } else {
-        setError('Failed to load schedules');
-      }
-
-      if (employeesResponse.success && employeesResponse.data) {
-        setEmployees(employeesResponse.data);
-      }
-
-      if (shiftsResponse.success && shiftsResponse.data) {
-        setShifts(shiftsResponse.data);
-      }
-
-      if (departmentsResponse.success && departmentsResponse.data) {
-        setDepartments(departmentsResponse.data);
-      }
-
-      if (
-        schedulesResponse.success &&
-        schedulesResponse.data &&
-        schedulesResponse.data.length > 0
-      ) {
-        const firstSchedule = schedulesResponse.data[0];
-        const scheduleDetails = await scheduleService.getScheduleWithShifts(firstSchedule.id);
-        if (!mountedRef.current) return;
-        if (scheduleDetails.success && scheduleDetails.data) {
-          const allAssignments: Assignment[] = [];
-          const detailShifts = scheduleDetails.data.shifts;
-          if (Array.isArray(detailShifts)) {
-            for (const shift of detailShifts) {
-              if (Array.isArray(shift.assignments)) {
-                allAssignments.push(...shift.assignments);
-              }
-            }
-          }
-          setAssignments(allAssignments);
-        }
-      }
-    } catch (err) {
-      if (!mountedRef.current) return;
-      const message = err instanceof ApiError ? err.message : 'Failed to load schedule data';
-      setError(message);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   const generateWeekDates = (startDate: Date) => {
     const dates: Date[] = [];
