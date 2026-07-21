@@ -10,17 +10,14 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { Shift, Schedule } from '../../types';
-import * as shiftService from '../../services/shiftService';
-import * as scheduleService from '../../services/scheduleService';
-import * as departmentService from '../../services/departmentService';
-import type { Department } from '../../services/departmentService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Shift } from '../../types';
 import { ApiError } from '../../services/apiUtils';
 import ShiftTable from '../Shifts/ShiftTable';
 import TemplateModal from '../Shifts/TemplateModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import { useShiftsPageData, useDeleteShift, useSaveShift } from '../../hooks/useShifts';
 
 interface ConfirmState {
   show: boolean;
@@ -30,10 +27,6 @@ interface ConfirmState {
 }
 
 const Shifts: React.FC = () => {
-  const [shifts, setShifts] = useState<Shift[]>([]);
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -41,7 +34,6 @@ const Shifts: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
@@ -58,45 +50,24 @@ const Shifts: React.FC = () => {
     onConfirm: () => undefined,
   });
 
-  const loadShifts = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
+  // Server state via TanStack Query; mutations invalidate the page data so the
+  // table refreshes itself after create/update/delete.
+  const shiftsQuery = useShiftsPageData();
+  const deleteShift = useDeleteShift();
+  const saveShift = useSaveShift();
 
-      const [shiftsResponse, schedulesResponse, departmentsResponse] = await Promise.all([
-        shiftService.getShifts({}),
-        scheduleService.getSchedules(),
-        departmentService.getDepartments(),
-      ]);
-
-      if (shiftsResponse.success && shiftsResponse.data) {
-        setShifts(shiftsResponse.data);
-      } else {
-        setError(
-          'Failed to load shifts. Please ensure the backend is running and database is populated.'
-        );
-        setShifts([]);
-      }
-
-      if (schedulesResponse.success && schedulesResponse.data) {
-        setSchedules(schedulesResponse.data);
-      }
-
-      if (departmentsResponse.success && departmentsResponse.data) {
-        setDepartments(departmentsResponse.data);
-      }
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to load shifts.';
-      setError(message);
-      setShifts([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadShifts();
-  }, [loadShifts]);
+  const shifts = useMemo(() => shiftsQuery.data?.shifts ?? [], [shiftsQuery.data]);
+  const schedules = shiftsQuery.data?.schedules ?? [];
+  const departments = useMemo(() => shiftsQuery.data?.departments ?? [], [shiftsQuery.data]);
+  const loading = shiftsQuery.isLoading;
+  const submitting = saveShift.isPending;
+  // A load error comes from the query; action errors are set locally below.
+  const loadError = shiftsQuery.isError
+    ? shiftsQuery.error instanceof ApiError
+      ? shiftsQuery.error.message
+      : 'Failed to load shifts.'
+    : null;
+  const displayError = error ?? loadError;
 
   const departmentNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -112,9 +83,8 @@ const Shifts: React.FC = () => {
       onConfirm: async () => {
         setConfirm((prev) => ({ ...prev, show: false }));
         try {
-          await shiftService.deleteShift(shiftId);
+          await deleteShift.mutateAsync(shiftId);
           setInfo('Shift deleted.');
-          await loadShifts();
         } catch (err) {
           const message = err instanceof ApiError ? err.message : 'Failed to delete shift.';
           setError(message);
@@ -173,28 +143,18 @@ const Shifts: React.FC = () => {
       notes,
     };
 
-    setSubmitting(true);
+    if (editingShift && !editingShift.id) {
+      setFormError('Cannot update shift: missing ID');
+      return;
+    }
     try {
-      if (editingShift) {
-        if (!editingShift.id) {
-          setFormError('Cannot update shift: missing ID');
-          setSubmitting(false);
-          return;
-        }
-        await shiftService.updateShift(editingShift.id, payload);
-        setInfo('Shift updated.');
-      } else {
-        await shiftService.createShift(payload);
-        setInfo('Shift created.');
-      }
+      await saveShift.mutateAsync({ id: editingShift ? editingShift.id : undefined, data: payload });
+      setInfo(editingShift ? 'Shift updated.' : 'Shift created.');
       setShowAddModal(false);
       setEditingShift(null);
-      await loadShifts();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to save shift.';
       setFormError(message);
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -271,10 +231,10 @@ const Shifts: React.FC = () => {
         </div>
       </div>
 
-      {error && (
+      {displayError && (
         <div className="alert alert-danger" role="alert">
           <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-          {error}
+          {displayError}
         </div>
       )}
       {info && (
