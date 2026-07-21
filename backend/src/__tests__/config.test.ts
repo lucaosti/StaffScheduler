@@ -83,7 +83,7 @@ describe('defaults (bare environment)', () => {
     expect(config.upload.allowedTypes).toEqual(['image/jpeg', 'image/png', 'application/pdf']);
     expect(config.reports).toEqual({ storagePath: './reports', cleanupDays: 30 });
     expect(config.optimization).toMatchObject({
-      engine: 'javascript', timeout: 300000, maxIterations: 10000,
+      engine: 'or-tools', timeout: 300000, maxIterations: 10000,
       populationSize: 100, mutationRate: 0.1, crossoverRate: 0.8,
     });
     expect(config.logging).toEqual({ level: 'info', file: './logs/app.log', maxSize: '10m', maxFiles: 5 });

@@ -9,10 +9,21 @@
  *   3. Build an OptimizationProblem, call ScheduleOptimizer.
  *   4. Persist resulting assignments inside a single transaction.
  *
- * Defaults to the pure-TypeScript greedy fallback (no Python required).
- * Set OPTIMIZATION_ENGINE=or-tools to route through the Python OR-Tools
- * CP-SAT solver instead — see ScheduleOptimizer.optimize(), which itself
- * falls back to greedy if Python is unavailable or times out.
+ * Engine selection (OPTIMIZATION_ENGINE):
+ *   - 'or-tools' (DEFAULT): route through the Python OR-Tools CP-SAT solver —
+ *     the most optimal engine. If Python is unavailable or times out it still
+ *     produces a schedule via the greedy solver, but that fallback is never
+ *     silent: the result reports engine='greedy' with degraded=true and a
+ *     reason, and a warning is logged. The optimum is always attempted first.
+ *   - 'greedy' (a.k.a. legacy 'javascript'): explicit DRAFT mode — the fast
+ *     best-effort greedy pass, chosen deliberately. Reports engine='greedy'
+ *     with degraded=false so callers can tell an intentional draft from a
+ *     degraded fallback.
+ *
+ * Because both engines are held to one shared constraint definition (see
+ * optimization/constraintValidator.ts and the optimizer.parity.test.ts suite),
+ * either engine's output respects the same hard rules; they differ only in how
+ * close to optimal the coverage/fairness is.
  *
  * @author Luca Ostinelli
  */
@@ -30,6 +41,17 @@ interface AutoScheduleResult {
   totalShifts: number;
   coveragePercentage: number;
   status: string;
+  /** The engine that actually produced this schedule. */
+  engine: 'or-tools' | 'greedy';
+  /**
+   * True when the optimal engine (or-tools) was requested but the run fell back
+   * to greedy (Python unavailable/timed out, or the solver errored). Always
+   * false for an intentionally-selected greedy draft. Lets the UI flag "this is
+   * a draft, not the optimum" clearly rather than silently.
+   */
+  degraded: boolean;
+  /** Why the run degraded, when it did (for logs and the UI banner). */
+  degradedReason?: string;
 }
 
 const formatDate = (raw: unknown): string =>
@@ -65,6 +87,8 @@ export class AutoScheduleService {
         totalShifts: 0,
         coveragePercentage: 0,
         status: 'EMPTY',
+        engine: config.optimization.engine === 'or-tools' ? 'or-tools' : 'greedy',
+        degraded: false,
       };
     }
 
@@ -159,14 +183,37 @@ export class AutoScheduleService {
       },
     };
 
-    // config.optimization.engine === 'or-tools' routes through the Python
-    // CP-SAT solver (optimize() falls back to the greedy path itself if
-    // Python is unavailable or times out); any other value goes straight to
-    // the greedy fallback, skipping the child-process round-trip entirely.
-    const assignments =
-      config.optimization.engine === 'or-tools'
-        ? (await optimizer.optimize(problem as never)).assignments
-        : await optimizer.generateGreedySchedule(problem as never);
+    // Engine selection. Default 'or-tools' attempts the optimum first; any
+    // fall back to greedy is surfaced (engine/degraded), never silent. An
+    // explicit 'greedy'/'javascript' selection is an intentional draft and
+    // skips the child-process round-trip entirely.
+    let engine: 'or-tools' | 'greedy';
+    let degraded = false;
+    let degradedReason: string | undefined;
+    let assignments;
+
+    if (config.optimization.engine === 'or-tools') {
+      const result = await optimizer.optimize(problem as never);
+      assignments = result.assignments;
+      if (result.status === 'GREEDY_FALLBACK' || result.status === 'ERROR') {
+        // optimize() already ran the greedy fallback internally; make that
+        // visible instead of pretending or-tools produced the schedule.
+        engine = 'greedy';
+        degraded = true;
+        degradedReason =
+          result.error ?? 'OR-Tools solver was unavailable; used the greedy fallback';
+        logger.warn(
+          `Optimization for schedule=${scheduleId} requested or-tools but degraded to greedy: ${degradedReason}`
+        );
+      } else {
+        engine = 'or-tools';
+      }
+    } else {
+      // Explicit draft mode — greedy chosen on purpose, not a degradation.
+      assignments = await optimizer.generateGreedySchedule(problem as never);
+      engine = 'greedy';
+      logger.info(`Optimization for schedule=${scheduleId} using greedy draft engine (explicit)`);
+    }
 
     // 4. Persist assignments.
     const conn = await this.pool.getConnection();
@@ -201,6 +248,9 @@ export class AutoScheduleService {
       totalShifts,
       coveragePercentage: coverage,
       status: 'OK',
+      engine,
+      degraded,
+      degradedReason,
     };
   }
 }

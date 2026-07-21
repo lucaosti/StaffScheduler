@@ -202,7 +202,18 @@ Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev prox
 
 ## Optimization Engine
 
-The Python OR-Tools optimizer is optional. To enable:
+Two engines produce schedules: the Python OR-Tools CP-SAT solver (optimal) and a
+TypeScript greedy engine (fast, best-effort). `OPTIMIZATION_ENGINE` selects which
+runs — **default `or-tools`**:
+
+- `or-tools`: attempt the optimum first. If Python/OR-Tools is unavailable the
+  run degrades to greedy, but never silently — the result carries
+  `engine: 'greedy'`, `degraded: true` and a reason, a warning is logged, and
+  the UI flags the schedule as a draft.
+- `greedy` (legacy alias `javascript`): use the greedy draft engine on purpose
+  (`engine: 'greedy'`, `degraded: false`).
+
+Install the Python solver:
 
 ```bash
 cd backend
@@ -210,4 +221,10 @@ pip3 install -r optimization-scripts/requirements.txt
 python3 optimization-scripts/schedule_optimizer.py --help
 ```
 
-Set `OPTIMIZATION_ENGINE=or-tools` in `backend/.env` to use it. Defaults to the TypeScript fallback.
+Both engines are held to one shared hard-constraint definition in
+`backend/src/optimization/constraintValidator.ts`. The parity suite
+(`backend/src/__tests__/optimizer.parity.test.ts`) runs both engines against it,
+so any constraint drift between them is a red test. In CI the CP-SAT half is
+mandatory (`REQUIRE_ORTOOLS=1`); locally it self-skips if OR-Tools is absent.
+Any change to the scheduling constraints must update the validator first, then
+both engines, keeping the parity suite green.
