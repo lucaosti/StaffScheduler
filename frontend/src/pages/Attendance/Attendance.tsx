@@ -6,18 +6,14 @@
  * @author Luca Ostinelli
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { AttendanceRecord, AttendanceCostEstimate } from '../../types';
 import {
-  clockIn,
-  clockOut,
-  getAttendanceRecords,
-  getPendingApprovals,
-  approveAttendance,
-  rejectAttendance,
-  getCostEstimate,
-} from '../../services/attendanceService';
+  useMyAttendanceQuery,
+  usePendingAttendanceQuery,
+  useAttendanceCostQuery,
+  useAttendanceMutations,
+} from '../../hooks/useAttendance';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -42,88 +38,57 @@ const Attendance: React.FC = () => {
   const canApprove = (user?.permissions ?? []).includes('attendance.approve');
   const canReadCost = (user?.permissions ?? []).includes('attendance.read');
 
-  const [myRecords, setMyRecords] = useState<AttendanceRecord[]>([]);
-  const [pending, setPending] = useState<AttendanceRecord[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [acting, setActing] = useState(false);
+  // One-off action error (a failed mutation), separate from a load error.
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const [cost, setCost] = useState<AttendanceCostEstimate | null>(null);
-  const [costError, setCostError] = useState<string | null>(null);
+  // Server state via TanStack Query; queries are gated by permission so a
+  // non-approver never fetches the queue and a non-cost-reader never fetches
+  // the estimate. Mutations invalidate the attendance keys, so an action
+  // refreshes exactly the affected lists.
+  const userId = user?.id ? Number(user.id) : undefined;
+  const recordsQuery = useMyAttendanceQuery(userId);
+  const pendingQuery = usePendingAttendanceQuery(canApprove);
+  const costQuery = useAttendanceCostQuery(canReadCost, daysAgoIso(30), todayIso());
+  const { clockInMutation, clockOutMutation, decisionMutation } = useAttendanceMutations();
+
+  const myRecords = recordsQuery.data ?? [];
+  const pending = pendingQuery.data ?? [];
+  const loading = recordsQuery.isLoading || (canApprove && pendingQuery.isLoading);
+  const cost = costQuery.data ?? null;
+  // 404 means the payroll module is disabled — a "panel not available" note, not a banner.
+  const costError = costQuery.isError ? (costQuery.error as Error).message : null;
+  const acting = clockInMutation.isPending || clockOutMutation.isPending || decisionMutation.isPending;
+  const error =
+    actionError ??
+    (recordsQuery.isError ? (recordsQuery.error as Error).message ?? 'Failed to load attendance records.' : null);
 
   const openRecord = myRecords.find((r) => !r.clockOut) ?? null;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const mine = await getAttendanceRecords({ userId: user?.id ? Number(user.id) : undefined });
-      setMyRecords(mine.data ?? []);
-      if (canApprove) {
-        const queue = await getPendingApprovals();
-        setPending(queue.data ?? []);
-      }
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load attendance records.');
-    } finally {
-      setLoading(false);
-    }
-  }, [user?.id, canApprove]);
-
-  const loadCost = useCallback(async () => {
-    if (!canReadCost) return;
-    setCostError(null);
-    try {
-      const res = await getCostEstimate({ startDate: daysAgoIso(30), endDate: todayIso() });
-      setCost(res.data ?? null);
-    } catch (e) {
-      // 404 means the payroll module is disabled — treat as "panel not available", not an error banner.
-      setCost(null);
-      setCostError((e as Error).message ?? null);
-    }
-  }, [canReadCost]);
-
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void loadCost(); }, [loadCost]);
-
   const handleClockIn = async () => {
-    setActing(true);
-    setError(null);
+    setActionError(null);
     try {
-      await clockIn();
-      await load();
+      await clockInMutation.mutateAsync();
     } catch (e) {
-      setError((e as Error).message ?? 'Clock-in failed.');
-    } finally {
-      setActing(false);
+      setActionError((e as Error).message ?? 'Clock-in failed.');
     }
   };
 
   const handleClockOut = async () => {
     if (!openRecord) return;
-    setActing(true);
-    setError(null);
+    setActionError(null);
     try {
-      await clockOut(openRecord.id);
-      await load();
+      await clockOutMutation.mutateAsync(openRecord.id);
     } catch (e) {
-      setError((e as Error).message ?? 'Clock-out failed.');
-    } finally {
-      setActing(false);
+      setActionError((e as Error).message ?? 'Clock-out failed.');
     }
   };
 
   const handleDecision = async (id: number | string, decision: 'approve' | 'reject') => {
-    setActing(true);
+    setActionError(null);
     try {
-      if (decision === 'approve') await approveAttendance(id);
-      else await rejectAttendance(id);
-      await load();
-      await loadCost();
+      await decisionMutation.mutateAsync({ id, decision });
     } catch (e) {
-      setError((e as Error).message ?? 'Action failed.');
-    } finally {
-      setActing(false);
+      setActionError((e as Error).message ?? 'Action failed.');
     }
   };
 
