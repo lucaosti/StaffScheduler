@@ -38,7 +38,7 @@ Three-tier separation of concerns:
 └─────────────────────┘    JSON     └─────────────────────┘          └──────────────────┘
 ```
 
-The frontend is a React SPA. The backend is a stateless Express REST API. State lives entirely in MySQL — no in-memory session, no Redis. JWTs are stored client-side; the backend validates them on every request.
+The frontend is a React SPA. The backend is an Express REST API. Durable state lives in MySQL; JWTs are stored client-side and validated on every request. Ephemeral shared state — the token-revocation blacklist, the auth-context cache and the module cache — uses **Redis when reachable** (on by default, `backend/src/config/redis.ts`), so several backend instances stay consistent and revocation survives a restart; without Redis those caches fall back transparently to process-local state, keeping single-instance and local runs zero-configuration. The API layer itself remains stateless, so it scales horizontally behind a load balancer once Redis holds the shared caches.
 
 ### Backend structure
 

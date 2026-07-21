@@ -10,6 +10,7 @@
 
 import { config } from './config';
 import { database } from './config/database';
+import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
 import { buildApp } from './app';
 
@@ -41,6 +42,7 @@ export async function startServer(): Promise<void> {
       logger.info(`${signal} received — shutting down gracefully`);
       server.close(async () => {
         try { await pool.end(); } catch { /* ignore */ }
+        try { await closeRedis(); } catch { /* ignore */ }
         logger.info('Connection pool closed, process exiting');
         process.exit(0);
       });
