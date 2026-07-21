@@ -32,6 +32,7 @@
   "dependencies": {
     "@staff-scheduler/shared": "1.0.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.80.10",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

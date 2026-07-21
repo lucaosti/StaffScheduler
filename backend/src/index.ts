@@ -13,6 +13,7 @@ import { database } from './config/database';
 import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
 import { eventBus } from './services/EventBus';
+import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
 import { buildApp } from './app';
 
 export async function startServer(): Promise<void> {
@@ -37,6 +38,10 @@ export async function startServer(): Promise<void> {
     // No-op without Redis; never throws (degrades to single-instance delivery).
     await eventBus.init();
 
+    // Start the in-process optimization worker (no-op without Redis; then
+    // /generate runs synchronously instead).
+    initOptimizationWorker(pool);
+
     const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
       logger.info(`Health check: http://localhost:${port}/api/health`);
@@ -46,6 +51,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async (signal: string): Promise<void> => {
       logger.info(`${signal} received — shutting down gracefully`);
       server.close(async () => {
+        try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
         try { await closeRedis(); } catch { /* ignore */ }
         logger.info('Connection pool closed, process exiting');

@@ -319,6 +319,26 @@ const Schedule: React.FC = () => {
     }
   };
 
+  // Polls the optimization job until it finishes. Bounded so a stuck job never
+  // hangs the UI forever; the 2s interval keeps status requests light while
+  // still feeling responsive. Throws on failure/timeout so the caller surfaces
+  // an error, and on the terminal 'completed' state it simply returns.
+  const waitForOptimization = async (scheduleId: number): Promise<void> => {
+    const POLL_MS = 2000;
+    const MAX_ATTEMPTS = 150; // ~5 minutes, matching the solver time limit
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      const status = await scheduleService.getOptimizationStatus(scheduleId);
+      const state = status.data?.state;
+      if (state === 'completed') return;
+      if (state === 'failed') {
+        throw new Error(status.data?.failedReason || 'Optimization failed.');
+      }
+      // 'waiting' / 'active' / 'unknown' → keep polling.
+    }
+    throw new Error('Optimization timed out.');
+  };
+
   const handleGenerateSchedule = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setGenerateError(null);
@@ -331,13 +351,23 @@ const Schedule: React.FC = () => {
     setIsGenerating(true);
     try {
       const response = await scheduleService.generateSchedule(selectedScheduleId);
-      if (response.success) {
-        setShowGenerateModal(false);
-        setInfo(response.data?.message || 'Schedule generation completed.');
-        await loadData();
-      } else {
+      if (!response.success) {
         setGenerateError(response.error?.message || 'Failed to generate schedule.');
+        return;
       }
+
+      // Async path: the backend queued the solve (202 { jobId }). Poll the job
+      // status until it finishes, so the UI reflects the real result rather
+      // than the "queued" acknowledgement. Sync path (no Redis): the result is
+      // already present, so we skip polling.
+      const data = response.data as { jobId?: string } | undefined;
+      if (data?.jobId) {
+        await waitForOptimization(Number(selectedScheduleId));
+      }
+
+      setShowGenerateModal(false);
+      setInfo('Schedule generation completed.');
+      await loadData();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to generate schedule.';
       setGenerateError(message);

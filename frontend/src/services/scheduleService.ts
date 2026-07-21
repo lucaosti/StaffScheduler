@@ -96,12 +96,43 @@ export const deleteSchedule = (id: string | number) =>
     params: { id: Number(id) },
   });
 
+/**
+ * Triggers optimization. When the backend job queue is enabled it returns
+ * `202` with `{ jobId }` (poll {@link getOptimizationStatus}); without Redis it
+ * runs synchronously and returns the result. The union return type reflects
+ * both shapes so callers can branch on the presence of `jobId`.
+ */
 export const generateSchedule = (id: string | number) =>
-  apiClient.post<GenerateScheduleResponse, '/schedules/{id}/generate'>(
+  apiClient.post<GenerateScheduleResponse | OptimizationEnqueued, '/schedules/{id}/generate'>(
     '/schedules/{id}/generate',
     undefined,
     { params: { id: Number(id) } }
   );
+
+interface OptimizationEnqueued {
+  jobId: string;
+  scheduleId: number;
+  state: string;
+}
+
+export interface OptimizationStatus {
+  jobId: string;
+  state: 'waiting' | 'active' | 'completed' | 'failed' | 'unknown';
+  progress: number;
+  result?: GenerateScheduleResponse;
+  failedReason?: string;
+}
+
+/** Reads the status/progress/result of a schedule's optimization job. */
+export const getOptimizationStatus = (id: string | number) =>
+  apiClient.get<OptimizationStatus, '/schedules/{id}/optimization'>('/schedules/{id}/optimization', {
+    params: { id: Number(id) },
+  });
+
+// Note: the backend also exposes DELETE /schedules/:id/optimization to cancel a
+// job. The frontend cancel control lands with the Schedule page's server-state
+// migration (Phase 5); the client method is added there so it is not dead code
+// in the meantime.
 
 export const publishSchedule = (id: string | number) =>
   apiClient.patch<Schedule, '/schedules/{id}/publish'>('/schedules/{id}/publish', undefined, {
