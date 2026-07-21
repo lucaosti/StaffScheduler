@@ -1,5 +1,8 @@
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { QueryClientProvider } from '@tanstack/react-query';
+
+import { queryClient } from './lib/queryClient';
 
 // Layout Components
 import Layout from './components/Layout/Layout';
@@ -59,6 +62,7 @@ const Attendance = lazy(() => import('./pages/Attendance/Attendance'));
  */
 const App: React.FC = () => {
   return (
+    <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <I18nProvider>
       <AuthProvider>
@@ -163,6 +167,7 @@ const App: React.FC = () => {
       </AuthProvider>
       </I18nProvider>
     </ThemeProvider>
+    </QueryClientProvider>
   );
 };
 

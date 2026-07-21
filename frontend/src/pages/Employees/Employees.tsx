@@ -16,80 +16,61 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
-import { getDepartments, Department } from '../../services/departmentService';
 import ConfirmModal from '../../components/ConfirmModal';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import {
+  useEmployeesQuery,
+  useDepartmentsQuery,
+  useDeleteEmployee,
+  useSaveEmployee,
+} from '../../hooks/useEmployees';
 
 
 /**
- * Employees page component providing complete employee management
+ * Employees page component providing complete employee management.
+ *
+ * Server state (the employee list, the department dropdown, and the
+ * create/update/delete mutations) is owned by TanStack Query hooks
+ * (`useEmployees`), so this component no longer hand-manages loading flags,
+ * a debounce timer, or manual list reloads — a mutation invalidates the
+ * employees cache and the list refreshes itself. Only genuinely local UI state
+ * (search text, open modals, the delete-confirm dialog, one-off action errors)
+ * lives here.
+ *
  * @returns JSX element containing the employee management interface
  */
 const Employees: React.FC = () => {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [allDepartments, setAllDepartments] = useState<Department[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ open: boolean; employeeId: number | string | null }>({ open: false, employeeId: null });
-  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isInitialMount = useRef(true);
+  // One-off error from a mutation (save/delete), separate from the query's own
+  // load error which comes straight from the hook.
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const loadEmployees = useCallback(async (search: string, department: string, showLoading = true) => {
-    try {
-      if (showLoading) setLoading(true);
-      setError(null);
+  // Debounce the server-side filters so typing doesn't fetch on every keystroke;
+  // the debounced values feed the query key, and TanStack Query does the rest.
+  const debouncedSearch = useDebouncedValue(searchTerm, 300);
+  const debouncedDepartment = useDebouncedValue(selectedDepartment, 300);
 
-      const response = await employeeService.getEmployees({
-        search: search || undefined,
-        department: department || undefined,
-        limit: 50
-      });
+  const employeesQuery = useEmployeesQuery(debouncedSearch, debouncedDepartment);
+  const departmentsQuery = useDepartmentsQuery();
+  const deleteEmployee = useDeleteEmployee();
+  const saveEmployee = useSaveEmployee();
 
-      if (response.success && response.data) {
-        setEmployees(response.data);
-      } else {
-        setError('Failed to load employees. Please ensure the backend is running and database is populated.');
-        setEmployees([]);
-      }
-    } catch (_err) {
-      setError('Failed to load employees. Please check your connection and try again.');
-      setEmployees([]);
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      loadEmployees(searchTerm, selectedDepartment, true);
-      return;
-    }
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(() => {
-      loadEmployees(searchTerm, selectedDepartment, false);
-    }, 300);
-    return () => {
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    };
-  }, [searchTerm, selectedDepartment, loadEmployees]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await getDepartments();
-        if (res?.success && res?.data) setAllDepartments(res.data);
-      } catch {
-        // non-fatal — form will show no department options
-      }
-    })();
-  }, []);
+  const employees = useMemo(() => employeesQuery.data ?? [], [employeesQuery.data]);
+  const allDepartments = departmentsQuery.data ?? [];
+  // Show the full-page loader only on the very first load (no cached data yet);
+  // filter changes keep the previous list visible via placeholderData.
+  const loading = employeesQuery.isLoading;
+  const error = employeesQuery.isError
+    ? 'Failed to load employees. Please ensure the backend is running and database is populated.'
+    : actionError;
+  const setError = setActionError;
 
   const handleDeleteEmployee = (id: number | string) => {
     setConfirmDelete({ open: true, employeeId: id });
@@ -100,10 +81,9 @@ const Employees: React.FC = () => {
     const id = confirmDelete.employeeId;
     setConfirmDelete({ open: false, employeeId: null });
     try {
-      await employeeService.deleteEmployee(id);
-      await loadEmployees(searchTerm, selectedDepartment); // Reload the list
+      await deleteEmployee.mutateAsync(id);
     } catch (_err) {
-      setError('Failed to delete employee');
+      setActionError('Failed to delete employee');
     }
   };
 
@@ -353,17 +333,15 @@ const Employees: React.FC = () => {
                   };
 
                   try {
-                    if (editingEmployee) {
-                      if (!editingEmployee.id) {
-                        // Guard: leave modal open so the user can see the error message.
-                        setError('Cannot update employee: missing ID');
-                        return;
-                      }
-                      await employeeService.updateEmployee(editingEmployee.id.toString(), employeeData);
-                    } else {
-                      await employeeService.createEmployee(employeeData);
+                    if (editingEmployee && !editingEmployee.id) {
+                      // Guard: leave modal open so the user can see the error message.
+                      setError('Cannot update employee: missing ID');
+                      return;
                     }
-                    await loadEmployees(searchTerm, selectedDepartment);
+                    await saveEmployee.mutateAsync({
+                      id: editingEmployee ? editingEmployee.id!.toString() : undefined,
+                      data: employeeData,
+                    });
                     setShowAddModal(false);
                     setEditingEmployee(null);
                   } catch (_err) {

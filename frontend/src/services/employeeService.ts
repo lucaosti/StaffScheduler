@@ -41,7 +41,7 @@ interface EmployeeFilters {
 /**
  * Interface for creating new employee records
  */
-interface CreateEmployeeData {
+export interface CreateEmployeeData {
   /** Unique employee identifier */
   employeeId: string;
   /** Employee's first name */
@@ -76,7 +76,7 @@ interface CreateEmployeeData {
   notes?: string;
 }
 
-type UpdateEmployeeData = Partial<CreateEmployeeData>;
+export type UpdateEmployeeData = Partial<CreateEmployeeData>;
 
 /**
  * Retrieves a list of employees with optional filtering and pagination
