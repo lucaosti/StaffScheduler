@@ -21,6 +21,7 @@ import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
+import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { loginBody } from '../schemas';
 import jwt, { SignOptions } from 'jsonwebtoken';
@@ -266,16 +267,19 @@ router.post('/refresh', authenticate, async (req: Request, res: Response) => {
  * @middleware authenticate
  * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, (req: Request, res: Response) => {
+router.post('/logout', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  // Await the revocation before confirming logout: the token must be blacklisted
+  // (in shared Redis) by the time the client is told it is logged out, so an
+  // immediate replay on any instance is already rejected.
   if (req.tokenJti) {
-    addToBlacklist(req.tokenJti, req.tokenExp);
+    await addToBlacklist(req.tokenJti, req.tokenExp);
   }
   res.clearCookie(JWT_COOKIE_NAME);
   res.json({
     success: true,
     message: 'Logged out successfully'
   });
-});
+}));
 
   return router;
 };

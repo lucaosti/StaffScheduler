@@ -178,7 +178,7 @@ export const createUsersRouter = (pool: Pool) => {
     const updatedUser = await userService.updateUser(userId, updateData, user.id);
 
     // Role changes must not linger in the auth-context cache.
-    if (updateData.roleIds !== undefined) invalidateAuthContext(userId);
+    if (updateData.roleIds !== undefined) await invalidateAuthContext(userId);
 
     if (!updatedUser) {
       return res.status(404).json({
