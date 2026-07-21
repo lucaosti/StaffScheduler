@@ -6324,7 +6324,7 @@ export interface paths {
         put?: never;
         /**
          * Auto-generate assignments
-         * @description Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) and creates pending assignments for all open shifts. Requires `schedule.optimize`.
+         * @description Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) to create pending assignments. Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id — poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.
          */
         post: {
             parameters: {
@@ -6348,6 +6348,23 @@ export interface paths {
                             totalShifts?: number;
                             coveragePercentage?: number;
                             status?: string;
+                        };
+                    };
+                };
+                /** @description Optimization queued; poll the optimization endpoint for status. */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            data?: {
+                                jobId?: string;
+                                scheduleId?: number;
+                                state?: string;
+                            };
+                            message?: string;
                         };
                     };
                 };
@@ -8880,6 +8897,91 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{id}/optimization": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Optimization job status
+         * @description Returns the state, progress and result of the schedule's optimization job. Requires schedule.optimize.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Job status. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            data?: {
+                                jobId?: string;
+                                /** @enum {string} */
+                                state?: "waiting" | "active" | "completed" | "failed" | "unknown";
+                                progress?: number;
+                                result?: Record<string, never>;
+                                failedReason?: string;
+                            };
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Cancel optimization job
+         * @description Cancels the schedule's in-flight or retained optimization job. Requires schedule.optimize.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Cancelled. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            message?: string;
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
         options?: never;
         head?: never;
         patch?: never;

@@ -1,6 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ScheduleService } from '../services/ScheduleService';
+import {
+  enqueueOptimization,
+  getOptimizationStatus,
+  cancelOptimization,
+} from '../services/OptimizationQueue';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
@@ -189,11 +194,16 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
   });
 }));
 
-// Generate optimized schedule
+// Generate an optimized schedule.
+//
+// Async by default: when the job queue is available (Redis configured), the
+// long-running solve is enqueued and the endpoint returns 202 with a job id
+// immediately, so the client polls status / receives SSE progress and can
+// cancel — instead of holding the request open for minutes. Without Redis it
+// falls back to running synchronously and returns 200 with the result, so a
+// zero-Redis deployment still works (at the cost of a long request).
 router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
-
-  // Guaranteed by authenticate, as on every protected route.
   const user = req.user!;
 
   const schedule = await scheduleService.getScheduleById(id);
@@ -204,13 +214,48 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
     });
   }
 
-  const result = await scheduleService.generateOptimizedSchedule(id, user.id);
+  const jobId = await enqueueOptimization({ scheduleId: id, createdBy: user.id });
+  if (jobId) {
+    return res.status(202).json({
+      success: true,
+      data: { jobId, scheduleId: id, state: 'queued' },
+      message: 'Optimization queued',
+    });
+  }
 
+  // Synchronous fallback (no queue): run inline and return the result.
+  const result = await scheduleService.generateOptimizedSchedule(id, user.id);
   res.json({
     success: true,
     data: result,
     message: 'Schedule generated successfully'
   });
+}));
+
+// Poll the status/progress/result of a schedule's optimization job.
+router.get('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  const { id } = res.locals.params;
+  const status = await getOptimizationStatus(id);
+  if (!status) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'No optimization job for this schedule' },
+    });
+  }
+  res.json({ success: true, data: status });
+}));
+
+// Cancel a schedule's in-flight (or retained) optimization job.
+router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  const { id } = res.locals.params;
+  const cancelled = await cancelOptimization(id);
+  if (!cancelled) {
+    return res.status(404).json({
+      success: false,
+      error: { code: 'NOT_FOUND', message: 'No optimization job to cancel' },
+    });
+  }
+  res.json({ success: true, message: 'Optimization cancelled' });
 }));
 
   return router;
