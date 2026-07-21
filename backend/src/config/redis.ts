@@ -32,6 +32,7 @@ import { config } from './index';
 import { logger } from './logger';
 
 let client: Redis | null = null;
+let subscriber: Redis | null = null;
 let errorLogged = false;
 
 /** True when Redis is enabled; callers use this to pick Redis vs. in-process state. */
@@ -80,6 +81,26 @@ export const getRedis = (): Redis | null => {
   return client;
 };
 
+/**
+ * Returns a DEDICATED client for pub/sub subscription, or null when Redis is
+ * off. A separate connection is mandatory: once an ioredis client enters
+ * subscriber mode it can no longer issue ordinary commands, so the shared
+ * `getRedis()` client (used for cache GET/SET/PUBLISH) must not be the one that
+ * SUBSCRIBEs. `duplicate()` clones the shared client's configuration, keeping
+ * the retry/timeout behaviour consistent. Created lazily and cached.
+ */
+export const getRedisSubscriber = (): Redis | null => {
+  if (!isRedisConfigured()) return null;
+  if (subscriber) return subscriber;
+  const base = getRedis();
+  if (!base) return null;
+  subscriber = base.duplicate();
+  subscriber.on('error', (err) => {
+    logger.warn('Redis subscriber connection error', { message: err.message });
+  });
+  return subscriber;
+};
+
 /** Liveness check for the health endpoint. False when unconfigured or unreachable. */
 export const isRedisHealthy = async (): Promise<boolean> => {
   const redis = getRedis();
@@ -92,14 +113,17 @@ export const isRedisHealthy = async (): Promise<boolean> => {
   }
 };
 
-/** Closes the client on graceful shutdown; no-op when never connected. */
+/** Closes both clients on graceful shutdown; no-op when never connected. */
 export const closeRedis = async (): Promise<void> => {
-  if (!client) return;
-  try {
-    await client.quit();
-  } catch {
-    /* already closed */
-  } finally {
-    client = null;
-  }
+  const closers = [subscriber, client].map(async (c) => {
+    if (!c) return;
+    try {
+      await c.quit();
+    } catch {
+      /* already closed */
+    }
+  });
+  await Promise.all(closers);
+  subscriber = null;
+  client = null;
 };
