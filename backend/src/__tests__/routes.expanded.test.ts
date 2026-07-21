@@ -33,6 +33,7 @@ jest.mock('../services/ShiftService');
 jest.mock('../services/EmployeeService');
 jest.mock('../services/DepartmentService');
 jest.mock('../services/UserService');
+jest.mock('../services/RefreshTokenService');
 jest.mock('../services/SystemSettingsService');
 jest.mock('../services/TimeOffService');
 jest.mock('../services/ShiftSwapService');
@@ -81,6 +82,7 @@ import { createDirectoryRouter } from '../routes/directory';
 import { createBulkImportRouter } from '../routes/bulkImport';
 import { createNotificationsRouter } from '../routes/notifications';
 import { createAuthRouter } from '../routes/auth';
+import { RefreshTokenService } from '../services/RefreshTokenService';
 import { RbacService } from '../services/RbacService';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
@@ -1886,6 +1888,9 @@ describe('auth router (extended)', () => {
       lastName: 'B',
       role: 'admin',
     });
+    (RefreshTokenService.prototype.issue as jest.Mock) = jest.fn().mockResolvedValue({
+      token: 'refresh', expiresAt: new Date(Date.now() + 1000),
+    });
     const res = await request(app()).post('/api/auth/login').send({
       email: 'a@x',
       password: 'pw',
@@ -1908,10 +1913,24 @@ describe('auth router (extended)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('POST /refresh 200', async () => {
-    const res = await request(app()).post('/api/auth/refresh');
+  it('POST /refresh 200 rotates the session', async () => {
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      userId: 1,
+      issued: { token: 'rotated', expiresAt: new Date(Date.now() + 1000) },
+    });
+    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 1, email: 'a@x', firstName: 'A', lastName: 'B', isActive: true,
+    });
+    const res = await request(app())
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refresh_token=current');
     expect(res.status).toBe(200);
     expect(res.headers['set-cookie']).toBeDefined();
+  });
+
+  it('POST /refresh 401 without a refresh cookie', async () => {
+    const res = await request(app()).post('/api/auth/refresh');
+    expect(res.status).toBe(401);
   });
 
   it('POST /logout 200', async () => {

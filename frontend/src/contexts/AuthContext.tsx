@@ -81,20 +81,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
   useEffect(() => {
+    // On mount, try the access token first. Because access tokens are now
+    // short-lived (~15m), a page reload after that window would otherwise log
+    // the user out despite a still-valid refresh token — so a failed verify
+    // falls back to a silent refresh (which rotates the refresh cookie and
+    // mints a new access token) before giving up.
     const initializeAuth = async () => {
       try {
         const response = await authService.verifyToken();
         if (response.success && response.data) {
-          dispatch({
-            type: 'LOGIN_SUCCESS',
-            payload: { user: response.data },
-          });
-        } else {
-          dispatch({ type: 'SET_LOADING', payload: false });
+          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: response.data } });
+          return;
         }
       } catch {
-        dispatch({ type: 'LOGOUT' });
+        // fall through to a refresh attempt
       }
+      try {
+        const refreshed = await authService.refreshToken();
+        if (refreshed.success && refreshed.data) {
+          dispatch({ type: 'LOGIN_SUCCESS', payload: refreshed.data });
+          return;
+        }
+      } catch {
+        // no valid session
+      }
+      dispatch({ type: 'SET_LOADING', payload: false });
     };
 
     initializeAuth();
@@ -141,6 +152,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       logout();
     }
   }, [logout]);
+
+  // Proactive refresh: rotate the session before the ~15m access token expires,
+  // so an active user is never interrupted by an expired token mid-session.
+  // Refreshing at 12m (80% of the lifetime) leaves margin for clock skew and
+  // request latency. Only runs while authenticated; the interval is torn down
+  // on logout or unmount.
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+    const ACCESS_REFRESH_INTERVAL_MS = 12 * 60 * 1000;
+    const id = window.setInterval(() => {
+      void refreshToken();
+    }, ACCESS_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [state.isAuthenticated, refreshToken]);
 
   const value: AuthContextType = useMemo(
     () => ({
