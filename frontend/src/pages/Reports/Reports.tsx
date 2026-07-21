@@ -12,19 +12,14 @@
  * @author Luca Ostinelli
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  hoursWorked,
-  costByDepartment,
-  fairnessReport,
-  HoursWorkedRow,
-  CostByDepartmentRow,
-  FairnessReport,
-} from '../../services/reportsService';
-import { getSchedules } from '../../services/scheduleService';
-import { Schedule } from '../../types';
+import React, { useMemo, useState } from 'react';
 import { formatCurrency } from '../../utils/format';
 import { errorMessage } from '../../utils/notify';
+import {
+  useRangeReportsQuery,
+  useReportSchedulesQuery,
+  useFairnessQuery,
+} from '../../hooks/useReports';
 
 const isoToday = (): string => new Date().toISOString().slice(0, 10);
 const isoFirstOfMonth = (): string => {
@@ -36,58 +31,29 @@ const isoFirstOfMonth = (): string => {
 const Reports: React.FC = () => {
   const [start, setStart] = useState(() => isoFirstOfMonth());
   const [end, setEnd] = useState(() => isoToday());
-  const [hours, setHours] = useState<HoursWorkedRow[]>([]);
-  const [cost, setCost] = useState<CostByDepartmentRow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
-  const [fairness, setFairness] = useState<FairnessReport | null>(null);
-  const [fairnessLoading, setFairnessLoading] = useState(false);
-  const [fairnessError, setFairnessError] = useState<string | null>(null);
 
-  useEffect(() => {
-    getSchedules().then((res) => {
-      if (res.success && res.data) setSchedules(res.data);
-    });
-  }, []);
+  // Server state via TanStack Query: the range pair refetches when start/end
+  // change; schedules load once; the fairness report is gated on a selection.
+  const rangeQuery = useRangeReportsQuery(start, end);
+  const schedulesQuery = useReportSchedulesQuery();
+  const fairnessQuery = useFairnessQuery(selectedScheduleId);
 
-  const reload = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [hoursRes, costRes] = await Promise.all([
-        hoursWorked(start, end),
-        costByDepartment(start, end),
-      ]);
-      if (hoursRes.success && hoursRes.data) setHours(hoursRes.data);
-      if (costRes.success && costRes.data) setCost(costRes.data);
-    } catch (err) {
-      setError(errorMessage(err, 'Failed to load reports'));
-    } finally {
-      setLoading(false);
-    }
-  }, [start, end]);
+  const hours = rangeQuery.data?.hours ?? [];
+  const cost = useMemo(() => rangeQuery.data?.cost ?? [], [rangeQuery.data]);
+  const loading = rangeQuery.isLoading || rangeQuery.isFetching;
+  const error = rangeQuery.isError ? errorMessage(rangeQuery.error, 'Failed to load reports') : null;
 
-  useEffect(() => {
-    reload();
-  }, [reload]);
+  const schedules = schedulesQuery.data ?? [];
+  const fairness = fairnessQuery.data ?? null;
+  const fairnessLoading = selectedScheduleId !== null && fairnessQuery.isLoading;
+  const fairnessError = fairnessQuery.isError
+    ? errorMessage(fairnessQuery.error, 'Failed to load fairness report')
+    : null;
 
-  useEffect(() => {
-    if (selectedScheduleId === null) {
-      setFairness(null);
-      return;
-    }
-    setFairnessLoading(true);
-    setFairnessError(null);
-    fairnessReport(selectedScheduleId)
-      .then((res) => {
-        if (res.success && res.data) setFairness(res.data);
-      })
-      .catch((err) => setFairnessError(errorMessage(err, 'Failed to load fairness report')))
-      .finally(() => setFairnessLoading(false));
-  }, [selectedScheduleId]);
+  // Explicit "reload" from the form submit; the range query already reacts to
+  // date changes, so this covers re-running with the same dates.
+  const reload = () => rangeQuery.refetch();
 
   const totalCost = useMemo(() => cost.reduce((acc, r) => acc + (r.cost || 0), 0), [cost]);
 

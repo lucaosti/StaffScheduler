@@ -22,12 +22,11 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { DashboardStats, AuditLogEntry } from '../../types';
-import { getDashboardStats, getRecentActivity } from '../../services/dashboardService';
 import { formatCurrency, formatPercentage as fmtPct } from '../../utils/format';
+import { useDashboardData } from '../../hooks/useDashboard';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -37,53 +36,16 @@ const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
   const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [recentActivity, setRecentActivity] = useState<AuditLogEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, []);
-
-  /**
-   * Loads dashboard statistics and metrics from backend services
-   * Integrates with multiple APIs to provide comprehensive dashboard data
-   */
-  const loadDashboardData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      const [dashboardResponse, activity] = await Promise.all([
-        getDashboardStats(),
-        getRecentActivity(5),
-      ]);
-
-      if (dashboardResponse.success && dashboardResponse.data) {
-        setStats(dashboardResponse.data);
-      } else {
-        throw new Error('Failed to load dashboard statistics');
-      }
-      setRecentActivity(activity);
-    } catch (_err) {
-      setError('Failed to load dashboard data. Please ensure the backend is running and database is populated.');
-      
-      // Set empty stats on error
-      setStats({
-        totalEmployees: 0,
-        activeSchedules: 0,
-        todayShifts: 0,
-        pendingApprovals: 0,
-        monthlyHours: 0,
-        monthlyCost: 0,
-        coverageRate: 0,
-        employeeSatisfaction: 0
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Server state (stats + recent activity) is owned by TanStack Query; the retry
+  // button calls refetch() directly instead of a hand-written reload.
+  const dashboardQuery = useDashboardData();
+  const stats = dashboardQuery.data?.stats ?? null;
+  const recentActivity = dashboardQuery.data?.recentActivity ?? [];
+  const loading = dashboardQuery.isLoading;
+  const error = dashboardQuery.isError
+    ? 'Failed to load dashboard data. Please ensure the backend is running and database is populated.'
+    : null;
 
   const formatPct = (value: number) => fmtPct(value / 100);
 
@@ -106,7 +68,7 @@ const Dashboard: React.FC = () => {
         <div className="alert alert-danger" role="alert">
           <h4 className="alert-heading">Error</h4>
           <p>{error}</p>
-          <button className="btn btn-outline-danger" onClick={loadDashboardData}>
+          <button className="btn btn-outline-danger" onClick={() => dashboardQuery.refetch()}>
             Try Again
           </button>
         </div>
