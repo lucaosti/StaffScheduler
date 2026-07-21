@@ -54,6 +54,13 @@ const JWT_COOKIE_OPTIONS = {
 // The refresh cookie is scoped to the refresh endpoint only: it is never sent
 // on ordinary API calls, shrinking its exposure. It lives for the full refresh
 // lifetime so the session survives many access-token expiries.
+//
+// Coupling to the API prefix: routes are mounted under both `/api` (legacy)
+// and `/api/v1` (canonical). This path matches the SPA's `/api/auth/refresh`,
+// which is what the frontend uses today. When the legacy `/api` prefix is
+// retired in favour of `/api/v1` (#319), this path MUST move to
+// `/api/v1/auth/refresh` in lockstep, or the browser will stop sending the
+// refresh cookie to the endpoint.
 const REFRESH_COOKIE_OPTIONS = {
   ...BASE_COOKIE_OPTIONS,
   path: '/api/auth/refresh',
