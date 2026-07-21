@@ -184,6 +184,17 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
+      # Redis is on by default; run it here so the started backend exercises
+      # the real shared-cache path rather than the in-process fallback.
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - uses: actions/checkout@v7
 
@@ -258,13 +269,16 @@ jobs:
           DB_PASSWORD: demo1234
           DB_NAME: staff_scheduler
           JWT_SECRET: ci-secret-please-change
+          REDIS_URL: redis://127.0.0.1:6379
           PORT: 3001
           NODE_ENV: development
         run: |
           nohup npm run dev > ../backend.log 2>&1 &
           for i in {1..60}; do
-            if curl -fsS http://127.0.0.1:3001/api/health >/dev/null; then
-              echo "backend up"; exit 0
+            # Require the health endpoint to report redis connected, proving the
+            # backend is exercising the real shared-cache path, not the fallback.
+            if curl -fsS http://127.0.0.1:3001/api/health | grep -q '"redis":"connected"'; then
+              echo "backend up with redis"; exit 0
             fi
             sleep 2
           done

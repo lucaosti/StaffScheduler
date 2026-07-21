@@ -136,6 +136,19 @@ export const config = {
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   },
+  redis: {
+    // On by default: the shared caches (JTI blacklist, auth-context, module
+    // state) use Redis whenever it is reachable, so a multi-instance
+    // deployment is consistent out of the box without extra configuration.
+    // `REDIS_URL` overrides the connection string (credentials/TLS/db-index
+    // travel together in one URL); the localhost default matches the compose
+    // service and a typical local Redis. Set REDIS_ENABLED=false to force the
+    // legacy in-process behaviour for a deployment that genuinely cannot run
+    // Redis — the caches fall back transparently either way, so this flag is
+    // only about suppressing connection attempts, not correctness.
+    enabled: process.env.REDIS_ENABLED !== 'false',
+    url: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+  },
   notifications: {
     enabled: process.env.NOTIFICATIONS_ENABLED === 'true',
     emailEnabled: process.env.EMAIL_NOTIFICATIONS_ENABLED !== 'false',

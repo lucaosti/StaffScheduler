@@ -29,6 +29,31 @@ services:
       retries: 10
       start_period: 40s
 
+  # Redis — shared-state backend for the JTI blacklist, auth-context cache and
+  # module cache (see backend/src/config/redis.ts). Present in the compose
+  # deployment because that is where horizontal scaling matters; the backend
+  # uses it only when REDIS_URL is set (below), so removing this service and
+  # the backend's REDIS_URL falls back cleanly to single-instance in-process
+  # state. Password-protected: set REDIS_PASSWORD in .env for any real
+  # deployment (an empty value runs Redis without auth for local use only).
+  redis:
+    image: redis:7.4-alpine
+    container_name: staff_scheduler_redis
+    restart: unless-stopped
+    command: redis-server --requirepass "${REDIS_PASSWORD:-}" --maxmemory 256mb --maxmemory-policy allkeys-lru
+    networks:
+      - staff_scheduler_network
+    mem_limit: 320m
+    cpus: 0.25
+    healthcheck:
+      # -a is only meaningful when a password is set; redis-cli tolerates an
+      # empty -a argument, so this works with or without REDIS_PASSWORD.
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   # One-shot schema migration runner: applies pending dbmate migrations and
   # exits. The backend only starts after this completes successfully, so the
   # schema is always up to date before the API accepts traffic.
@@ -63,6 +88,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     environment:
@@ -73,6 +100,9 @@ services:
       DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
       DB_USER: ${MYSQL_USER:-scheduler_user}
       DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
+      # Enables the shared Redis-backed caches. Drop this line (and the redis
+      # service) to run single-instance with in-process state.
+      REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
       JWT_SECRET: ${JWT_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
