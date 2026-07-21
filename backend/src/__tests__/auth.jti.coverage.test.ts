@@ -51,14 +51,14 @@ const makeApp = () => {
 // ─── JTI Blacklist — addToBlacklist ──────────────────────────────────────────
 
 describe('addToBlacklist', () => {
-  it('is exported and callable without throwing', () => {
-    expect(() => addToBlacklist('jti-abc', Date.now() + 60_000)).not.toThrow();
+  it('is exported and callable without throwing', async () => {
+    await expect(addToBlacklist('jti-abc', Date.now() + 60_000)).resolves.toBeUndefined();
   });
 
   it('causes authenticate to reject that jti with TOKEN_REVOKED', async () => {
     const jti = `test-jti-${Date.now()}`;
     // Put the jti in the blacklist BEFORE issuing the token
-    addToBlacklist(jti, Date.now() + 60_000);
+    await addToBlacklist(jti, Date.now() + 60_000);
 
     const token = jwt.sign({ userId: 1, email: 'a@x', jti }, config.jwt.secret, {
       expiresIn: '1h',
@@ -72,7 +72,7 @@ describe('addToBlacklist', () => {
     expect(res.body.error.message).toBe('Token has been revoked');
   });
 
-  it('allows authenticate to pass when jti has expired in the blacklist', async () => {
+  it('allows authenticate to pass once the blacklist entry has expired', async () => {
     const { UserService } = require('../services/UserService');
     const { RbacService } = require('../services/RbacService');
 
@@ -84,10 +84,15 @@ describe('addToBlacklist', () => {
     RbacService.prototype.getEffectivePermissions = jest.fn().mockResolvedValue([]);
     RbacService.prototype.getUserRoles = jest.fn().mockResolvedValue([]);
     RbacService.prototype.computeAllowedOrgUnitIds = jest.fn().mockResolvedValue(null);
+    RbacService.prototype.getEffectiveDelegationScopes = jest.fn().mockResolvedValue([]);
 
-    const jti = `expired-jti-${Date.now()}`;
-    // Set expiry in the past so the entry is considered expired
-    addToBlacklist(jti, Date.now() - 1);
+    const jti = `expiring-jti-${Date.now()}`;
+    // Revoke for a very short window (the store's minimum TTL), then let it
+    // lapse: an expired revocation must no longer reject the token. Awaited so
+    // the entry is committed before the request; the wait exceeds the TTL by a
+    // wide margin so this stays deterministic, not timing-flaky.
+    await addToBlacklist(jti, Date.now() + 10);
+    await new Promise((resolve) => setTimeout(resolve, 60));
 
     const token = jwt.sign({ userId: 1, email: 'user@x', jti }, config.jwt.secret, {
       expiresIn: '1h',
@@ -96,14 +101,13 @@ describe('addToBlacklist', () => {
     const app = makeApp();
     const res = await request(app).get('/protected').set('Authorization', `Bearer ${token}`);
 
-    // Should NOT be rejected — expired blacklist entries are pruned and treated as not blacklisted
     expect(res.status).toBe(200);
   });
 
-  it('uses a 24h default expiry when no expiresAt is provided', () => {
+  it('uses a 24h default expiry when no expiresAt is provided', async () => {
     const jti = `default-exp-jti-${Date.now()}`;
     // This should not throw even without an explicit expiresAt
-    expect(() => addToBlacklist(jti)).not.toThrow();
+    await expect(addToBlacklist(jti)).resolves.toBeUndefined();
   });
 });
 
