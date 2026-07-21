@@ -339,25 +339,48 @@ Users cannot assign roles that contain permissions they do not themselves hold (
 
 ## 6. Scheduling engine
 
-Two engines are available: a TypeScript greedy solver (always active) and a
-Python OR-Tools CP-SAT solver (opt-in). The system degrades gracefully —
-when Python is unavailable, the greedy solver runs automatically.
+Two engines produce schedules: a Python OR-Tools CP-SAT solver (optimal) and a
+TypeScript greedy solver (fast, best-effort). The optimum is attempted by
+default; when Python is unavailable the greedy solver runs automatically, but
+that fallback is **always signalled, never silent** (see below).
 
 ### Engine selection
 
 | `OPTIMIZATION_ENGINE` env value | Effect |
 |---|---|
-| `typescript` (default) | Greedy TypeScript solver only |
-| `or-tools` | CP-SAT Python solver; greedy fallback on any failure |
+| `or-tools` (default) | Optimal CP-SAT Python solver; a **signalled** greedy fallback on any failure (`engine: "greedy"`, `degraded: true`, reason) |
+| `greedy` (alias `javascript`) | Greedy draft solver on purpose (`engine: "greedy"`, `degraded: false`) |
 
-To enable OR-Tools:
+Every generation result — the synchronous `200` body and the job `result` —
+reports `engine` (`"or-tools"` or `"greedy"`) and `degraded`. `degraded: true`
+means the optimum was requested but the run fell back to greedy, so the output
+is a draft; the UI surfaces this prominently and a warning is logged. This makes
+it unambiguous whenever a schedule is a draft rather than the optimum.
+
+Install the Python solver:
 
 ```bash
 cd backend
 pip3 install -r optimization-scripts/requirements.txt
 python3 optimization-scripts/schedule_optimizer.py --help
-# Then set OPTIMIZATION_ENGINE=or-tools in backend/.env
+# 'or-tools' is already the default; set OPTIMIZATION_ENGINE=greedy to force draft mode
 ```
+
+### Constraint parity between the engines
+
+The hard scheduling constraints (staff cap, no double-booking, minimum rest,
+declared unavailability, required skills, daily-hours cap, rolling weekly-hours
+cap, and maximum consecutive days — all accounting for shifts held on other
+schedules) are defined **once**, declaratively, in
+`backend/src/optimization/constraintValidator.ts`. That validator is the single
+source of truth for what a legal schedule is. The parity suite
+(`backend/src/__tests__/optimizer.parity.test.ts`) runs **both** engines against
+the same fixtures and asserts each output satisfies that one definition, so any
+divergence between the two engines becomes a failing test instead of a silent
+production difference. In CI the CP-SAT half is mandatory (`REQUIRE_ORTOOLS=1`);
+locally it self-skips when OR-Tools is not installed. Coverage is deliberately
+not treated as a hard violation (the greedy is best-effort and may leave a shift
+short where CP-SAT would prove infeasibility); it is reported separately.
 
 ### Running optimization as a background job
 
@@ -390,22 +413,30 @@ Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.
 | # | Constraint | Source of truth |
 |---|---|---|
 | 1 | Staff cap | `shift.max_staff` — never exceeded |
-| 2 | No double-booking | Time-overlap check within the calendar day |
+| 2 | No double-booking | Absolute-time overlap (overnight-aware, across day boundaries) |
+| 2b | Minimum rest between shifts | `min_hours_between_shifts` (default 8h), across day boundaries |
 | 3 | Declared unavailability | `user_unavailability` rows, expanded to per-day dates |
 | 4 | Skill requirements | `shift_skills` join; employee must hold every required skill |
 | 5 | Daily hours cap | `max(8, emp.max_hours_per_week / 5)` hours per employee per day |
+| 6 | Weekly hours cap | Rolling 7-day window ≤ `emp.max_hours_per_week` |
+| 7 | Max consecutive days | Longest run of worked days ≤ `emp.max_consecutive_days` |
+
+Constraints 2, 2b, 5, 6 and 7 also account for shifts the employee already holds
+on **other** schedules (`existing_assignments`), so back-to-back schedule periods
+cannot jointly bust a limit each satisfies alone. This exact set is the canonical
+definition in `constraintValidator.ts`, and the Python CP-SAT engine enforces the
+same set as hard constraints — the parity suite keeps the two aligned.
 
 **How to add a new constraint**:
 
-1. Add any needed state tracking in `generateGreedySchedule` (e.g. a new `Map`).
-2. Add the check to `evaluateCandidate(emp, ctx)` — the method is pure; no DB calls allowed there.
-3. Update the state map after each successful assignment in `generateGreedySchedule`.
-4. Write a unit test in `backend/src/__tests__/scheduleOptimizer.test.ts` against `evaluateCandidate` directly (no DB needed).
+1. Add the rule to `constraintValidator.ts` first — it is the single source of truth.
+2. Add any needed state tracking in `generateGreedySchedule` (e.g. a new `Map`) and the check to `evaluateCandidate(emp, ctx)` — the method is pure; no DB calls allowed there.
+3. Add the matching hard constraint to `schedule_optimizer.py`.
+4. Extend the fixtures/assertions in `backend/src/__tests__/optimizer.parity.test.ts` so both engines are verified against the new rule.
 
 **Known limitations**:
-- No backtracking: a locally greedy choice can block a later shift from being staffed. The CP-SAT path solves this globally.
-- Weekly hours are not tracked across the full schedule period; only the per-day budget is enforced.
-- Employee ordering within the candidate list is deterministic (input order) but not optimized for fairness — workload balancing is a soft constraint in CP-SAT only.
+- No backtracking: a locally greedy choice can block a later shift from being staffed. The CP-SAT path solves this globally, which is why `or-tools` is the default and greedy is a signalled draft/fallback.
+- Employee ordering within the candidate list is deterministic (input order) but not optimized for fairness — workload balancing is a soft objective in CP-SAT only.
 
 ### Python CP-SAT solver (`schedule_optimizer.py`)
 
@@ -421,14 +452,16 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
 
-The `optimize()` return status is `GREEDY_FALLBACK` when the Python solver was unavailable.
+The `optimize()` return status is `GREEDY_FALLBACK` when the Python solver was
+unavailable; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
+`degraded: true` result rather than a silent substitution.
 
 **CP-SAT formulation**:
 
 - **Variables** — one boolean per `(employee, shift)` candidate assignment.
-- **Hard constraints** — coverage windows, no double-booking, declared availability, weekly hour caps, skill requirements.
-- **Soft constraints** — preferences, workload fairness, minimum rest, consecutive-day caps. Each has a configurable weight (see `_getDefaultWeights()` in `ScheduleOptimizerORTools.ts`).
-- **Objective** — weighted sum to minimize.
+- **Hard constraints** — the full canonical set (see `constraintValidator.ts`): coverage windows, no double-booking (absolute time), minimum rest, declared availability, required skills, daily-hours cap, rolling 7-day weekly-hours cap, and maximum consecutive days — each also charging the employee's `existing_assignments` on other schedules. These match the greedy engine exactly (enforced by the parity suite); minimum rest and consecutive-days used to be soft objective penalties and are now hard.
+- **Objective** — a weighted sum to **maximize**: coverage (fill every seat) first, then employee preferences.
+- **stdout contract** — a single pure-JSON document; CP-SAT search logging is disabled (`log_search_progress = False`) so diagnostics never interleave with the result. Diagnostic prints go to stderr.
 
 **Performance characteristics**: CP-SAT is branch-and-bound with propagation. Small problems (< 50 shifts, < 30 employees) typically solve in under 1 s. Large problems run until `timeLimitSeconds` (default 300 s for the Python call) then return the best feasible solution found.
 
