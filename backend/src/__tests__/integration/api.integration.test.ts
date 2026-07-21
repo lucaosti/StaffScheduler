@@ -22,6 +22,13 @@
 const ITEST_DB = process.env.ITEST_DB_NAME || 'staff_scheduler_itest';
 process.env.DB_NAME = ITEST_DB;
 process.env.NODE_ENV = 'test';
+// This suite verifies DB integration; Redis is not its subject and the shared
+// caches fall back to in-process state transparently. Disabling it here means
+// the real app under test never opens an ioredis socket, so Jest exits cleanly
+// instead of hanging on the client's reconnection timer. The Redis path is
+// covered by cacheStore.test.ts, and the e2e job asserts the started backend
+// reports redis connected against a real Redis service.
+process.env.REDIS_ENABLED = 'false';
 
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcrypt';
@@ -119,6 +126,11 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (closeAppPool) await closeAppPool();
+  // Close any Redis client the app created, so no reconnection timer keeps
+  // the process alive after the suite (belt-and-suspenders with REDIS_ENABLED
+  // above). Loaded lazily to respect the env-before-config ordering.
+  const { closeRedis } = require('../../config/redis') as typeof import('../../config/redis');
+  await closeRedis();
   if (admin) {
     await admin.query(`DROP DATABASE IF EXISTS \`${ITEST_DB}\``);
     await admin.end();

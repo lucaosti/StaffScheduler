@@ -1,4 +1,11 @@
 // Test setup for Staff Scheduler
+//
+// Safety net: default Redis to disabled in tests unless a suite opts in, so no
+// test can leave a live ioredis client whose reconnection timer keeps Jest
+// from exiting. Suites that exercise Redis mock config/redis or set the flag
+// themselves (redis.config.test.ts), so this default never masks real coverage.
+if (process.env.REDIS_ENABLED === undefined) process.env.REDIS_ENABLED = 'false';
+
 
 export const mockDatabase = {
   query: jest.fn(),
