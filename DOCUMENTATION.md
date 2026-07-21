@@ -359,6 +359,25 @@ python3 optimization-scripts/schedule_optimizer.py --help
 # Then set OPTIMIZATION_ENGINE=or-tools in backend/.env
 ```
 
+### Running optimization as a background job
+
+Optimization can run for minutes, so it executes as a **background job** when
+Redis is available (`backend/src/services/OptimizationQueue.ts`, BullMQ):
+
+- `POST /api/schedules/:id/generate` enqueues the solve and returns
+  `202 { jobId }` immediately instead of holding the request open.
+- `GET /api/schedules/:id/optimization` reports the job `state`, `progress`
+  and `result`.
+- `DELETE /api/schedules/:id/optimization` cancels an in-flight job.
+- Progress is also pushed over the SSE stream as `optimization.progress`,
+  `optimization.completed` and `optimization.failed` events.
+
+The job id is deterministic per schedule (`schedule:{id}`), so a second
+generate while one is in flight returns the same job rather than starting a
+competing solve, and the worker runs one solve at a time. Without Redis the
+endpoint falls back to running the optimizer synchronously and returns `200`
+with the result.
+
 ### Greedy TypeScript solver (`ScheduleOptimizer.generateGreedySchedule`)
 
 Entry point: `backend/src/optimization/ScheduleOptimizerORTools.ts`  
