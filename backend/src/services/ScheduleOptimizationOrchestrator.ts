@@ -267,6 +267,12 @@ export class ScheduleOptimizationOrchestrator {
     totalShifts: number;
     coveragePercentage: number;
     status: string;
+    /** Engine that produced the schedule ('or-tools' = optimal, 'greedy' = draft/fallback). */
+    engine: 'or-tools' | 'greedy';
+    /** True when the optimum was requested but the run degraded to greedy. */
+    degraded: boolean;
+    /** Reason for degradation, when applicable. */
+    degradedReason?: string;
   }> {
     // Lazy require to avoid a circular dependency at module load.
     const { AutoScheduleService } = require('./AutoScheduleService');

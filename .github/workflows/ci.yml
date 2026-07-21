@@ -40,6 +40,20 @@ jobs:
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
+      # Python + OR-Tools are needed so the optimizer parity suite runs the real
+      # CP-SAT engine, not just the greedy path. REQUIRE_ORTOOLS=1 (on the test
+      # step) then makes the CP-SAT parity block mandatory rather than skipped,
+      # so cross-engine constraint drift actually fails CI.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/optimization-scripts/requirements.txt
+
+      - name: Install optimizer Python dependencies
+        run: pip install -r optimization-scripts/requirements.txt
+
       - name: Install dependencies (workspace root)
         working-directory: .
         run: npm ci --prefer-offline --no-audit --no-fund
@@ -63,6 +77,10 @@ jobs:
           git diff --exit-code ../backend/openapi/openapi.json
 
       - name: Unit tests with coverage gate
+        env:
+          # Make the CP-SAT parity block mandatory (not skipped) now that
+          # OR-Tools is installed above.
+          REQUIRE_ORTOOLS: '1'
         run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
 
       - name: Publish coverage summary to job summary

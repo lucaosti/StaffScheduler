@@ -67,23 +67,58 @@ class ScheduleOptimizerORTools:
         }
     
     def build_model(self):
-        """Build the CP-SAT model with all constraints."""
+        """Build the CP-SAT model with all constraints.
+
+        The hard-constraint set below is kept in lock-step with the canonical
+        definition in backend/src/optimization/constraintValidator.ts and with
+        the TypeScript greedy engine (ScheduleOptimizer.evaluateCandidate). The
+        optimizer.parity.test.ts suite runs both engines against that one
+        validator, so any rule added here without a matching rule there (or
+        vice-versa) turns the parity suite red. Rest, daily-cap,
+        consecutive-days and cross-schedule ("external") load used to be missing
+        from this model — they are now enforced as hard constraints so a CP-SAT
+        solution can never be one the greedy path would have rejected.
+        """
         print("Building CP-SAT model...", file=sys.stderr)
-        
+
+        # External assignments = shifts the employee already holds on *other*
+        # schedules. They are fixed facts (never decision variables) but must
+        # count toward this employee's rest, daily, weekly and consecutive-day
+        # limits, otherwise back-to-back schedule periods are optimized in
+        # isolation and can jointly bust a limit each satisfies alone.
+        self.external_by_employee = {
+            emp_id: emp.get('existing_assignments', []) or []
+            for emp_id, emp in self.employees.items()
+        }
+
         # 1. Create assignment variables
         self._create_assignment_variables()
-        
-        # 2. Add hard constraints
+
+        # 2. Add hard constraints (order mirrors evaluateCandidate)
         self._add_shift_coverage_constraints()
         self._add_no_double_booking_constraints()
+        self._add_min_rest_constraints()
         self._add_skill_requirements_constraints()
         self._add_availability_constraints()
+        self._add_daily_hours_constraints()
         self._add_max_hours_constraints()
-        
+        self._add_max_consecutive_days_constraints()
+
         # 3. Build objective function
         self._build_objective_function()
-        
+
         print(f"Model built: {len(self.assignments)} assignment variables", file=sys.stderr)
+
+    def _abs_bounds(self, shift: Dict) -> Tuple[int, int]:
+        """Absolute [start, end] minutes for a shift on the global calendar,
+        rolling an overnight shift's end into the next day. Mirrors
+        ScheduleOptimizer._shiftBoundsMs so cross-day overlap and rest match."""
+        day = datetime.strptime(shift['date'], '%Y-%m-%d').toordinal() * 1440
+        start = day + self._parse_time(shift['start_time'])
+        end = day + self._parse_time(shift['end_time'])
+        if end <= start:
+            end += 1440
+        return start, end
     
     def _create_assignment_variables(self):
         """Create boolean variables for each (employee, shift) pair."""
@@ -113,60 +148,65 @@ class ScheduleOptimizerORTools:
     
     def _add_no_double_booking_constraints(self):
         """
-        HARD: Employee cannot be assigned to overlapping shifts.
-        Similar to PoliTO's no teaching overlaps constraint.
+        HARD: an employee cannot hold two time-overlapping shifts. Uses absolute
+        (date + time) bounds so an overnight shift is compared against the next
+        day's shifts too, not just same-date ones — matching the validator and
+        the greedy's _shiftBoundsMs. External assignments force the conflicting
+        decision shift off entirely.
         """
+        shift_items = list(self.shifts.items())
         for employee_id in self.employees.keys():
-            # Group shifts by date
-            shifts_by_date = {}
-            for shift_id, shift in self.shifts.items():
-                date = shift['date']
-                if date not in shifts_by_date:
-                    shifts_by_date[date] = []
-                shifts_by_date[date].append(shift_id)
-            
-            # For each date, check for overlapping shifts
-            for date, shift_ids in shifts_by_date.items():
-                overlapping_groups = self._find_overlapping_shifts(shift_ids)
-                
-                for overlapping_shifts in overlapping_groups:
-                    # Employee can be assigned to at most 1 overlapping shift
-                    assignments = [
-                        self.assignments[(employee_id, shift_id)]
-                        for shift_id in overlapping_shifts
-                    ]
-                    self.model.Add(sum(assignments) <= 1)
-    
-    def _find_overlapping_shifts(self, shift_ids: List[str]) -> List[List[str]]:
-        """Find groups of overlapping shifts."""
-        overlapping = []
-        
-        for i, shift_id_1 in enumerate(shift_ids):
-            shift_1 = self.shifts[shift_id_1]
-            overlap_group = [shift_id_1]
-            
-            for shift_id_2 in shift_ids[i+1:]:
-                shift_2 = self.shifts[shift_id_2]
-                
-                # Check if shifts overlap
-                if self._shifts_overlap(shift_1, shift_2):
-                    overlap_group.append(shift_id_2)
-            
-            if len(overlap_group) > 1:
-                overlapping.append(overlap_group)
-        
-        return overlapping
-    
-    def _shifts_overlap(self, shift1: Dict, shift2: Dict) -> bool:
-        """Check if two shifts overlap in time."""
-        # Simple time comparison (assumes same date)
-        start1 = self._parse_time(shift1['start_time'])
-        end1 = self._parse_time(shift1['end_time'])
-        start2 = self._parse_time(shift2['start_time'])
-        end2 = self._parse_time(shift2['end_time'])
-        
-        return not (end1 <= start2 or end2 <= start1)
-    
+            externals = self.external_by_employee[employee_id]
+            for i, (sid1, s1) in enumerate(shift_items):
+                # Decision shift vs the employee's fixed external shifts.
+                for ext in externals:
+                    if self._shifts_overlap_abs(s1, ext):
+                        self.model.Add(self.assignments[(employee_id, sid1)] == 0)
+                # Decision shift vs decision shift.
+                for sid2, s2 in shift_items[i + 1:]:
+                    if self._shifts_overlap_abs(s1, s2):
+                        self.model.Add(
+                            self.assignments[(employee_id, sid1)]
+                            + self.assignments[(employee_id, sid2)] <= 1
+                        )
+
+    def _add_min_rest_constraints(self):
+        """
+        HARD: consecutive (non-overlapping) shifts for one employee must leave at
+        least `min_hours_between_shifts` of rest, across day boundaries. Same
+        rule as ComplianceEngine.checkMinRest and the validator's min-rest check.
+        External assignments are included as fixed neighbours.
+        """
+        min_rest_minutes = int(self.constraints_config.get('min_hours_between_shifts', 8)) * 60
+        shift_items = list(self.shifts.items())
+        for employee_id in self.employees.keys():
+            externals = self.external_by_employee[employee_id]
+            for i, (sid1, s1) in enumerate(shift_items):
+                for ext in externals:
+                    if not self._shifts_overlap_abs(s1, ext) and \
+                            self._rest_conflict(s1, ext, min_rest_minutes):
+                        self.model.Add(self.assignments[(employee_id, sid1)] == 0)
+                for sid2, s2 in shift_items[i + 1:]:
+                    if not self._shifts_overlap_abs(s1, s2) and \
+                            self._rest_conflict(s1, s2, min_rest_minutes):
+                        self.model.Add(
+                            self.assignments[(employee_id, sid1)]
+                            + self.assignments[(employee_id, sid2)] <= 1
+                        )
+
+    def _shifts_overlap_abs(self, shift1: Dict, shift2: Dict) -> bool:
+        """Absolute-time overlap check (date + time, overnight-aware)."""
+        a_start, a_end = self._abs_bounds(shift1)
+        b_start, b_end = self._abs_bounds(shift2)
+        return a_start < b_end and b_start < a_end
+
+    def _rest_conflict(self, a: Dict, b: Dict, min_rest_minutes: int) -> bool:
+        """True if the rest gap between two non-overlapping shifts is too short."""
+        a_start, a_end = self._abs_bounds(a)
+        b_start, b_end = self._abs_bounds(b)
+        gap = (b_start - a_end) if a_end <= b_start else (a_start - b_end)
+        return gap < min_rest_minutes
+
     def _parse_time(self, time_str: str) -> int:
         """Parse time string to minutes since midnight."""
         parts = time_str.split(':')
@@ -205,47 +245,120 @@ class ScheduleOptimizerORTools:
                 if shift_date in unavailable_dates:
                     self.model.Add(self.assignments[(employee_id, shift_id)] == 0)
     
+    def _add_daily_hours_constraints(self):
+        """
+        HARD: an employee's assigned hours on any single date must stay within a
+        one-day budget of max(8, max_hours_per_week / 5). Mirrors the validator's
+        daily-hours rule and evaluateCandidate step 5. External hours on the date
+        are pre-charged against the budget.
+        """
+        for employee_id, employee in self.employees.items():
+            daily_budget = max(8, employee.get('max_hours_per_week', 40) // 5)
+
+            # Pre-existing external hours per date.
+            external_hours_by_date: Dict[str, int] = {}
+            for ext in self.external_by_employee[employee_id]:
+                external_hours_by_date[ext['date']] = (
+                    external_hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                )
+
+            # Decision-shift hours per date.
+            shifts_by_date: Dict[str, List[str]] = {}
+            for shift_id, shift in self.shifts.items():
+                shifts_by_date.setdefault(shift['date'], []).append(shift_id)
+
+            dates = set(shifts_by_date) | set(external_hours_by_date)
+            for date in dates:
+                terms = [
+                    self.assignments[(employee_id, sid)] * self._calculate_shift_hours(self.shifts[sid])
+                    for sid in shifts_by_date.get(date, [])
+                ]
+                self.model.Add(
+                    sum(terms) + external_hours_by_date.get(date, 0) <= daily_budget
+                )
+
     def _add_max_hours_constraints(self):
         """
-        HARD: Employees cannot exceed max hours per week.
-        Similar to PoliTO's max teaching hours constraints.
+        HARD: rolling 7-day hours cap. For every worked date `d` (decision or
+        external), the hours assigned in the window [d, d+7) must not exceed
+        max_hours_per_week. This replaces the old ISO-calendar-week grouping,
+        which let an employee work e.g. Thu–Sun of one week and Mon–Wed of the
+        next (11 days) without either "week" tripping. The forward-window form
+        matches the validator exactly. External hours in the window count too.
         """
-        # Group shifts by week
-        shifts_by_week = {}
-        for shift_id, shift in self.shifts.items():
-            week_key = self._get_week_key(shift['date'])
-            if week_key not in shifts_by_week:
-                shifts_by_week[week_key] = []
-            shifts_by_week[week_key].append(shift_id)
-        
-        # For each employee, constrain weekly hours
         for employee_id, employee in self.employees.items():
-            max_hours = employee.get('max_hours_per_week', 40)
-            
-            for week_key, shift_ids in shifts_by_week.items():
-                # Calculate total hours if assigned to all shifts
-                weekly_assignments = []
-                shift_hours = []
-                
-                for shift_id in shift_ids:
-                    shift = self.shifts[shift_id]
-                    hours = self._calculate_shift_hours(shift)
-                    
-                    weekly_assignments.append(self.assignments[(employee_id, shift_id)])
-                    shift_hours.append(hours)
-                
-                # Constraint: sum(assignment * hours) <= max_hours
-                total_hours = sum(
-                    a * h for a, h in zip(weekly_assignments, shift_hours)
-                )
-                self.model.Add(total_hours <= max_hours)
-    
-    def _get_week_key(self, date_str: str) -> str:
-        """Get week identifier from date string."""
-        # Parse date and return ISO week number
-        date = datetime.strptime(date_str, '%Y-%m-%d')
-        return f"{date.year}-W{date.isocalendar()[1]}"
-    
+            max_hours = employee.get('max_hours_per_week')
+            if not max_hours:
+                continue
+
+            externals = self.external_by_employee[employee_id]
+            external_ord = [
+                (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
+                 self._calculate_shift_hours(ext))
+                for ext in externals
+            ]
+            decision_ord = [
+                (datetime.strptime(shift['date'], '%Y-%m-%d').toordinal(), shift_id)
+                for shift_id, shift in self.shifts.items()
+            ]
+
+            anchor_days = {o for o, _ in external_ord} | {o for o, _ in decision_ord}
+            for anchor in anchor_days:
+                window = range(anchor, anchor + 7)
+                terms = [
+                    self.assignments[(employee_id, sid)] * self._calculate_shift_hours(self.shifts[sid])
+                    for o, sid in decision_ord if o in window
+                ]
+                fixed = sum(h for o, h in external_ord if o in window)
+                self.model.Add(sum(terms) + fixed <= max_hours)
+
+    def _add_max_consecutive_days_constraints(self):
+        """
+        HARD: cap the longest run of consecutive worked calendar days at
+        max_consecutive_days. A day counts as worked if the employee is assigned
+        any decision shift that day or already holds an external shift that day.
+        Mirrors the validator's consecutive-days rule (evaluateCandidate step 7),
+        which the old model only expressed as a soft objective penalty.
+        """
+        for employee_id, employee in self.employees.items():
+            max_consec = employee.get('max_consecutive_days')
+            if not max_consec:
+                continue
+
+            shifts_by_ord: Dict[int, List[str]] = {}
+            for shift_id, shift in self.shifts.items():
+                o = datetime.strptime(shift['date'], '%Y-%m-%d').toordinal()
+                shifts_by_ord.setdefault(o, []).append(shift_id)
+
+            external_ords = {
+                datetime.strptime(ext['date'], '%Y-%m-%d').toordinal()
+                for ext in self.external_by_employee[employee_id]
+            }
+
+            all_ords = set(shifts_by_ord) | external_ords
+            if not all_ords:
+                continue
+
+            # Per-day "worked" indicator over the full span so windows can span
+            # dates that have no shifts (a gap day breaks the run → worked=0).
+            day_worked: Dict[int, object] = {}
+            for o in range(min(all_ords), max(all_ords) + 1):
+                if o in external_ords:
+                    day_worked[o] = 1  # fixed external work
+                elif o in shifts_by_ord:
+                    var = self.model.NewBoolVar(f'worked_e{employee_id}_o{o}')
+                    self.model.AddMaxEquality(
+                        var, [self.assignments[(employee_id, sid)] for sid in shifts_by_ord[o]]
+                    )
+                    day_worked[o] = var
+                else:
+                    day_worked[o] = 0  # no shift, no external → not worked
+
+            span_start, span_end = min(all_ords), max(all_ords)
+            for start in range(span_start, span_end - max_consec + 1):
+                window = [day_worked[o] for o in range(start, start + max_consec + 1)]
+                self.model.Add(sum(window) <= max_consec)
+
     def _calculate_shift_hours(self, shift: Dict) -> int:
         """Calculate shift duration in hours."""
         start = self._parse_time(shift['start_time'])
@@ -263,28 +376,29 @@ class ScheduleOptimizerORTools:
         Inspired by PoliTO's correlation-based objective function.
         """
         objective_terms = []
-        
-        # 1. Employee preferences (correlations)
-        # Higher weight for preferred shifts, penalty for avoided shifts
+
+        # Coverage first: reward every filled seat so the solver prefers fully
+        # staffing shifts over leaving them empty. Weighted well above
+        # preferences so a covered shift is never sacrificed for a preference.
+        coverage_weight = int(self.weights.get('shift_coverage', 100.0))
+        for var in self.assignments.values():
+            objective_terms.append(var * coverage_weight)
+
+        # Employee preferences (correlations): nudge toward preferred shifts and
+        # away from avoided ones. +10 / 0 / -10 scaled by the preference weight.
         pref_weight = int(self.weights.get('employee_preferences', 55.0))
         for (emp_id, shift_id), var in self.assignments.items():
             preference = self._get_preference(emp_id, shift_id)
-            # preference: +10 (preferred), 0 (neutral), -10 (avoid)
             objective_terms.append(var * preference * pref_weight)
-        
-        # 2. Workload fairness
-        # Minimize variance in assigned hours
-        fairness_weight = int(self.weights.get('workload_fairness', 40.0))
-        # (This is complex in CP-SAT, simplified here)
-        
-        # 3. Consecutive days penalty
-        # Prefer giving employees days off between shifts
-        consec_weight = int(self.weights.get('consecutive_days', 30.0))
-        objective_terms.extend(self._add_consecutive_days_terms(consec_weight))
-        
+
+        # Note: consecutive-days is now a HARD constraint
+        # (_add_max_consecutive_days_constraints), so it is no longer expressed
+        # as a soft objective penalty here — that would be redundant and could
+        # only ever discourage solutions the hard constraint already forbids.
+
         # Maximize objective
         self.model.Maximize(sum(objective_terms))
-    
+
     def _get_preference(self, employee_id: str, shift_id: str) -> int:
         """
         Get preference score for employee-shift pair.
@@ -304,57 +418,7 @@ class ScheduleOptimizerORTools:
             return -10
         
         return 0  # Neutral
-    
-    def _add_consecutive_days_terms(self, weight: int) -> List:
-        """
-        Add terms to objective to discourage too many consecutive work days.
-        Similar to PoliTO's slot dispersion constraints.
-        """
-        terms = []
-        
-        # Group shifts by employee and date
-        for employee_id in self.employees.keys():
-            shifts_by_date = {}
-            for shift_id, shift in self.shifts.items():
-                date = shift['date']
-                if date not in shifts_by_date:
-                    shifts_by_date[date] = []
-                shifts_by_date[date].append(shift_id)
-            
-            # Sort dates
-            sorted_dates = sorted(shifts_by_date.keys())
-            
-            # Penalize consecutive work days beyond threshold
-            max_consec = self.employees[employee_id].get('max_consecutive_days', 5)
-            
-            for i in range(len(sorted_dates) - max_consec):
-                # Check if working all days in window
-                window_dates = sorted_dates[i:i+max_consec+1]
-                
-                # Create indicator variables for each day
-                day_worked = []
-                for date in window_dates:
-                    # Employee works if assigned to any shift on this day
-                    day_shifts = shifts_by_date[date]
-                    day_var = self.model.NewBoolVar(f'worked_e{employee_id}_d{date}')
-                    
-                    # day_var = 1 if any assignment on this date
-                    self.model.AddMaxEquality(
-                        day_var,
-                        [self.assignments[(employee_id, s_id)] for s_id in day_shifts]
-                    )
-                    day_worked.append(day_var)
-                
-                # Penalty if working all consecutive days
-                all_worked = self.model.NewBoolVar(f'consec_e{employee_id}_w{i}')
-                self.model.Add(sum(day_worked) == len(day_worked)).OnlyEnforceIf(all_worked)
-                self.model.Add(sum(day_worked) < len(day_worked)).OnlyEnforceIf(all_worked.Not())
-                
-                # Add negative term to objective (penalty)
-                terms.append(-all_worked * weight)
-        
-        return terms
-    
+
     def solve(self, time_limit_seconds: int = 300) -> Dict:
         """
         Solve the CP-SAT model and return solution.
@@ -369,7 +433,11 @@ class ScheduleOptimizerORTools:
         
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = time_limit_seconds
-        solver.parameters.log_search_progress = True
+        # Must stay False: the --stdout contract is a single pure-JSON document
+        # on stdout, and CP-SAT's search log would otherwise interleave with it
+        # and break the caller's JSON.parse (both the Node wrapper and the
+        # parity suite). Diagnostic prints in this script all target stderr.
+        solver.parameters.log_search_progress = False
         
         status = solver.Solve(self.model)
         

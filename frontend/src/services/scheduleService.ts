@@ -48,6 +48,12 @@ interface GenerateScheduleResponse {
   coverage: string;
   fairnessScore: string;
   message: string;
+  /** Engine that produced the schedule: 'or-tools' (optimal) or 'greedy' (draft/fallback). */
+  engine?: 'or-tools' | 'greedy';
+  /** True when the optimum was requested but the run fell back to greedy — the result is a draft. */
+  degraded?: boolean;
+  /** Why the run degraded, when it did (shown to the user). */
+  degradedReason?: string;
 }
 
 /**
