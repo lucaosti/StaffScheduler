@@ -185,13 +185,18 @@ Backend requires `backend/.env` (copy from `.env.example`):
 
 ```
 DB_HOST=localhost  DB_PORT=3306  DB_USER=...  DB_PASSWORD=...  DB_NAME=staff_scheduler
-JWT_SECRET=...  JWT_EXPIRES_IN=24h
+JWT_SECRET=...  JWT_EXPIRES_IN=15m  JWT_REFRESH_EXPIRES_IN=30d
 BCRYPT_ROUNDS=12
 CORS_ORIGIN=http://localhost:3000
 ```
 
-Note: `JWT_EXPIRES_IN` (default `24h`) controls the token lifetime — it is read into
-`config.jwt.expiresIn` and applied at sign time in `src/routes/auth.ts`.
+**Sessions**: short-lived access token (`JWT_EXPIRES_IN`, default `15m`) in the
+`token` cookie, plus a rotating refresh token (`JWT_REFRESH_EXPIRES_IN`, default
+`30d`) in the `refresh_token` cookie (scoped to `/api/auth/refresh`).
+`RefreshTokenService` stores only the token hash, rotates on every `/refresh`,
+and revokes the whole family on reuse of a spent token. `POST /api/auth/refresh`
+is NOT behind `authenticate` — it works precisely when the access token has
+expired. The frontend refreshes proactively (`AuthContext`) and on mount.
 
 Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev proxy handles it by default).
 

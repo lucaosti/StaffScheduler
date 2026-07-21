@@ -229,6 +229,29 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 
 ## 5. Security and RBAC
 
+### Sessions and tokens
+
+Authentication uses a short-lived access token plus a rotating refresh token,
+both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
+
+- **Access token** (`token` cookie): a JWT carrying only the user id and a JTI,
+  default 15-minute lifetime (`JWT_EXPIRES_IN`). Verified on every request;
+  permissions are resolved fresh from the database, so a short access token is
+  not a staleness problem. Revoked on logout via the shared JTI blacklist.
+- **Refresh token** (`refresh_token` cookie, scoped to `/api/auth/refresh`): an
+  opaque 256-bit token whose **hash** is stored in `refresh_tokens`, default
+  30-day lifetime (`JWT_REFRESH_EXPIRES_IN`). `POST /api/auth/refresh` rotates
+  it — revoking the presented token and issuing a successor in the same family —
+  and mints a new access token. It is deliberately **not** behind the auth
+  middleware, so it works exactly when the access token has expired.
+- **Reuse detection**: replaying an already-rotated refresh token revokes the
+  entire token family (`RefreshTokenService`), bounding a stolen token to one
+  rotation window. Logout revokes both the access JTI and the refresh token.
+
+The SPA refreshes proactively before expiry and falls back to a refresh on page
+load, so an active session is never interrupted. See `RefreshTokenService` and
+`backend/db/migrations/*_add_refresh_tokens.sql` for the schema rationale.
+
 ### Model
 
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
