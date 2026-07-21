@@ -25,6 +25,16 @@ import CreateScheduleModal from '../Schedule/CreateScheduleModal';
 import StatsBadge from '../Schedule/StatsBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
+/**
+ * The engine-provenance subset of an optimization result the UI cares about.
+ * Enough to tell the user whether they got the optimum or a signalled draft.
+ */
+interface OptimizationOutcome {
+  engine?: 'or-tools' | 'greedy';
+  degraded?: boolean;
+  degradedReason?: string;
+}
+
 const Schedule: React.FC = () => {
   const [schedules, setSchedules] = useState<ScheduleType[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
@@ -322,21 +332,41 @@ const Schedule: React.FC = () => {
   // Polls the optimization job until it finishes. Bounded so a stuck job never
   // hangs the UI forever; the 2s interval keeps status requests light while
   // still feeling responsive. Throws on failure/timeout so the caller surfaces
-  // an error, and on the terminal 'completed' state it simply returns.
-  const waitForOptimization = async (scheduleId: number): Promise<void> => {
+  // an error; on the terminal 'completed' state it returns the job result so
+  // the caller can tell the user which engine ran (optimal vs degraded draft).
+  const waitForOptimization = async (
+    scheduleId: number
+  ): Promise<OptimizationOutcome | undefined> => {
     const POLL_MS = 2000;
     const MAX_ATTEMPTS = 150; // ~5 minutes, matching the solver time limit
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
       const status = await scheduleService.getOptimizationStatus(scheduleId);
       const state = status.data?.state;
-      if (state === 'completed') return;
+      if (state === 'completed') return status.data?.result;
       if (state === 'failed') {
         throw new Error(status.data?.failedReason || 'Optimization failed.');
       }
       // 'waiting' / 'active' / 'unknown' → keep polling.
     }
     throw new Error('Optimization timed out.');
+  };
+
+  // A completion message that makes the engine unmistakable: the optimal run is
+  // reported plainly, a degraded run is flagged prominently as a draft so it is
+  // never mistaken for the optimum (the whole point of the degraded signal).
+  const describeOutcome = (outcome?: OptimizationOutcome): { message: string; degraded: boolean } => {
+    if (outcome?.degraded) {
+      const reason = outcome.degradedReason ? ` (${outcome.degradedReason})` : '';
+      return {
+        degraded: true,
+        message: `Schedule generated as a DRAFT using the greedy fallback — the optimal OR-Tools engine was unavailable${reason}. Re-run once it is available for an optimal schedule.`,
+      };
+    }
+    if (outcome?.engine === 'greedy') {
+      return { degraded: false, message: 'Schedule generated with the greedy draft engine.' };
+    }
+    return { degraded: false, message: 'Schedule generation completed with the optimal engine.' };
   };
 
   const handleGenerateSchedule = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -360,13 +390,21 @@ const Schedule: React.FC = () => {
       // status until it finishes, so the UI reflects the real result rather
       // than the "queued" acknowledgement. Sync path (no Redis): the result is
       // already present, so we skip polling.
-      const data = response.data as { jobId?: string } | undefined;
-      if (data?.jobId) {
-        await waitForOptimization(Number(selectedScheduleId));
-      }
+      const data = response.data as ({ jobId?: string } & OptimizationOutcome) | undefined;
+      const outcome = data?.jobId
+        ? await waitForOptimization(Number(selectedScheduleId))
+        : data;
 
       setShowGenerateModal(false);
-      setInfo('Schedule generation completed.');
+      const { message, degraded } = describeOutcome(outcome);
+      // Surface a degraded (draft) run in the prominent page-level alert so it
+      // stays visible after the modal closes and is impossible to miss; an
+      // optimal run uses the normal info banner.
+      if (degraded) {
+        setError(message);
+      } else {
+        setInfo(message);
+      }
       await loadData();
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Failed to generate schedule.';

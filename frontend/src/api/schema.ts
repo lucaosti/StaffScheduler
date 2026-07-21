@@ -6324,7 +6324,7 @@ export interface paths {
         put?: never;
         /**
          * Auto-generate assignments
-         * @description Runs the scheduling optimizer (OR-Tools if available, TypeScript fallback otherwise) to create pending assignments. Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id — poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.
+         * @description Runs the scheduling optimizer to create pending assignments. Uses the optimal OR-Tools CP-SAT engine by default; if it is unavailable the run degrades to the greedy draft engine and the result reports engine='greedy' with degraded=true (the fallback is always signalled, never silent). Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id — poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.
          */
         post: {
             parameters: {
@@ -6348,6 +6348,15 @@ export interface paths {
                             totalShifts?: number;
                             coveragePercentage?: number;
                             status?: string;
+                            /**
+                             * @description Engine that produced the schedule: 'or-tools' is the optimal CP-SAT solver, 'greedy' is the best-effort draft engine.
+                             * @enum {string}
+                             */
+                            engine?: "or-tools" | "greedy";
+                            /** @description True when the optimal engine was requested but the run fell back to greedy (e.g. OR-Tools unavailable). The result is a draft, not the optimum. */
+                            degraded?: boolean;
+                            /** @description Why the run degraded to greedy, when it did. */
+                            degradedReason?: string;
                         };
                     };
                 };
@@ -8937,7 +8946,20 @@ export interface paths {
                                 /** @enum {string} */
                                 state?: "waiting" | "active" | "completed" | "failed" | "unknown";
                                 progress?: number;
-                                result?: Record<string, never>;
+                                result?: {
+                                    assignmentsCreated?: number;
+                                    totalShifts?: number;
+                                    coveragePercentage?: number;
+                                    status?: string;
+                                    /**
+                                     * @description Engine that produced the schedule.
+                                     * @enum {string}
+                                     */
+                                    engine?: "or-tools" | "greedy";
+                                    /** @description True when the optimum was requested but the run fell back to greedy. */
+                                    degraded?: boolean;
+                                    degradedReason?: string;
+                                };
                                 failedReason?: string;
                             };
                         };

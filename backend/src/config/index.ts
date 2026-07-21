@@ -125,7 +125,11 @@ export const config = {
     cleanupDays: parseInt(process.env.REPORT_CLEANUP_DAYS || '30'),
   },
   optimization: {
-    engine: process.env.OPTIMIZATION_ENGINE || 'javascript', // 'javascript' (TS fallback) | 'or-tools' (Python CP-SAT)
+    // Default to the most optimal engine. 'or-tools' attempts the Python CP-SAT
+    // solver first and, if it is unavailable, degrades to greedy *visibly*
+    // (engine/degraded surfaced in the result). 'greedy' (or legacy
+    // 'javascript') selects the fast best-effort draft engine on purpose.
+    engine: process.env.OPTIMIZATION_ENGINE || 'or-tools',
     timeout: parseInt(process.env.OPTIMIZATION_TIMEOUT || '300000'), // 5 minutes
     maxIterations: parseInt(process.env.OPTIMIZATION_MAX_ITERATIONS || '10000'),
     populationSize: parseInt(process.env.OPTIMIZATION_POPULATION_SIZE || '100'),

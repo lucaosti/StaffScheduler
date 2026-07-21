@@ -53,6 +53,12 @@ export interface OptimizationResult {
   totalShifts: number;
   coveragePercentage: number;
   status: string;
+  /** Engine that produced the schedule: 'or-tools' (optimal) or 'greedy' (draft/fallback). */
+  engine: 'or-tools' | 'greedy';
+  /** True when the optimum was requested but the run degraded to greedy. */
+  degraded: boolean;
+  /** Human-readable reason for a degraded run, when applicable. */
+  degradedReason?: string;
 }
 
 export interface OptimizationJobStatus {
