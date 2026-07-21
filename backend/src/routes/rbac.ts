@@ -111,7 +111,7 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     );
     // Drop any cached auth context so the new grant applies immediately
     // on this instance even when the permission cache is enabled.
-    invalidateAuthContext(res.locals.params.userId);
+    await invalidateAuthContext(res.locals.params.userId);
     res.status(201).json({ success: true });
   }));
 
@@ -123,7 +123,7 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     })() : null;
     const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
     await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
-    invalidateAuthContext(res.locals.params.userId);
+    await invalidateAuthContext(res.locals.params.userId);
     res.json({ success: true });
   }));
 

@@ -20,6 +20,13 @@ import { ModuleService } from '../services/ModuleService';
 import { config } from '../config';
 import { logger } from '../config/logger';
 import { database } from '../config/database';
+import {
+  blacklistJti,
+  isJtiBlacklisted,
+  getAuthContext,
+  setAuthContext,
+  invalidateAuthContext as invalidateAuthContextStore,
+} from '../services/cacheStore';
 
 // Single ModuleService instance per process — shares the in-process cache.
 // Exported so routes that mutate module state (routes/modules.ts) invalidate
@@ -31,78 +38,47 @@ export const getModuleService = (): ModuleService => {
   return _moduleService;
 };
 
-// In-memory JTI blacklist for server-side token revocation on logout.
-// Each entry stores the expiry timestamp (ms). A background interval prunes
-// expired entries every hour so the map stays bounded even under sustained
-// logout traffic. MAX_JTI_BLACKLIST_SIZE caps absolute memory usage.
-const MAX_JTI_BLACKLIST_SIZE = 100_000;
-const _jtiBlacklist = new Map<string, number>();
+// Server-side JWT revocation and the per-user auth-context cache both live in
+// the shared cache store (Redis when reachable, in-process fallback otherwise)
+// — see services/cacheStore.ts for why. The blacklist is always active because
+// token revocation is security-critical and cheap; a token revoked on logout
+// must stay revoked across restarts and sibling instances.
+const DEFAULT_JTI_TTL_MS = 24 * 60 * 60 * 1000;
 
-const _pruneBlacklist = (): void => {
-  const now = Date.now();
-  for (const [jti, exp] of _jtiBlacklist) {
-    if (now > exp) _jtiBlacklist.delete(jti);
-  }
+export const addToBlacklist = async (jti: string, expiresAt?: number): Promise<void> => {
+  // expiresAt is the token's own expiry (ms): revoke exactly until then so the
+  // entry self-cleans and never outlives the token it blocks.
+  const ttlMs = expiresAt ? Math.max(1, expiresAt - Date.now()) : DEFAULT_JTI_TTL_MS;
+  await blacklistJti(jti, ttlMs);
 };
 
-// Prune every hour regardless of access patterns.
-const _pruneInterval = setInterval(_pruneBlacklist, 60 * 60 * 1000);
-_pruneInterval.unref(); // don't block process exit
-
-export const addToBlacklist = (jti: string, expiresAt?: number): void => {
-  // Drop oldest entry if at capacity (FIFO approximation).
-  if (_jtiBlacklist.size >= MAX_JTI_BLACKLIST_SIZE) {
-    const firstKey = _jtiBlacklist.keys().next().value;
-    if (firstKey !== undefined) _jtiBlacklist.delete(firstKey);
-  }
-  const exp = expiresAt ?? Date.now() + 24 * 60 * 60 * 1000; // default: 24 h
-  _jtiBlacklist.set(jti, exp);
-};
-
-const _isBlacklisted = (jti: string): boolean => {
-  const exp = _jtiBlacklist.get(jti);
-  if (exp === undefined) return false;
-  if (Date.now() > exp) {
-    _jtiBlacklist.delete(jti); // prune expired entry on access
-    return false;
-  }
-  return true;
-};
-
-// Optional per-user auth-context cache (permissions, roles, org scope).
-// Disabled by default (TTL = 0): every request resolves fresh from the DB so
-// role/permission changes take effect immediately. Deployments that accept a
-// bounded staleness window can set AUTH_PERMISSION_CACHE_TTL_MS to cut the
-// ~6 queries this middleware otherwise issues per authenticated request.
-const AUTH_CACHE_MAX_ENTRIES = 10_000;
-const _authContextCache = new Map<number, { user: User; expiresAt: number }>();
-
-const _getCachedAuthContext = (userId: number): User | null => {
-  const ttl = config.auth.permissionCacheTtlMs;
-  if (ttl <= 0) return null;
-  const entry = _authContextCache.get(userId);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    _authContextCache.delete(userId);
+// The auth-context cache stays OPT-IN via AUTH_PERMISSION_CACHE_TTL_MS (default
+// 0 = disabled), so permission/role changes apply immediately out of the box.
+// What changed with Redis: when enabled, the cache is now shared and its
+// invalidation is instantly visible to every instance (a DEL, not a local
+// map delete), so a short TTL no longer means per-instance staleness. Left
+// opt-in deliberately: delegations expire on a timestamp the cache cannot
+// observe until TTL, so enabling it is a conscious latency/staleness trade.
+const _getCachedAuthContext = async (userId: number): Promise<User | null> => {
+  if (config.auth.permissionCacheTtlMs <= 0) return null;
+  const json = await getAuthContext(userId);
+  if (!json) return null;
+  try {
+    return JSON.parse(json) as User;
+  } catch {
     return null;
   }
-  // Shallow copy so per-request mutations never leak into the cache.
-  return { ...entry.user };
 };
 
-const _setCachedAuthContext = (userId: number, user: User): void => {
+const _setCachedAuthContext = async (userId: number, user: User): Promise<void> => {
   const ttl = config.auth.permissionCacheTtlMs;
   if (ttl <= 0) return;
-  if (_authContextCache.size >= AUTH_CACHE_MAX_ENTRIES) {
-    const firstKey = _authContextCache.keys().next().value;
-    if (firstKey !== undefined) _authContextCache.delete(firstKey);
-  }
-  _authContextCache.set(userId, { user: { ...user }, expiresAt: Date.now() + ttl });
+  await setAuthContext(userId, JSON.stringify(user), ttl);
 };
 
 /** Drops a user's cached auth context (call after changing their grants). */
-export const invalidateAuthContext = (userId: number): void => {
-  _authContextCache.delete(userId);
+export const invalidateAuthContext = async (userId: number): Promise<void> => {
+  await invalidateAuthContextStore(userId);
 };
 
 // Extend Express Request to include user and token JTI
@@ -168,7 +144,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       });
     }
 
-    if (decodedToken.jti && _isBlacklisted(decodedToken.jti)) {
+    if (decodedToken.jti && (await isJtiBlacklisted(decodedToken.jti))) {
       return res.status(401).json({
         success: false,
         error: {
@@ -194,7 +170,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       return res.status(401).json({ success: false, error: { code: 'INVALID_TOKEN', message: 'Invalid token payload' } });
     }
 
-    const cachedUser = _getCachedAuthContext(userId);
+    const cachedUser = await _getCachedAuthContext(userId);
     if (cachedUser) {
       req.user = cachedUser;
       return next();
@@ -228,7 +204,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // Empty array is the common case — no extra work when no scoped delegations exist.
     user.delegationScopes = await rbac.getEffectiveDelegationScopes(userId);
 
-    _setCachedAuthContext(userId, user);
+    await _setCachedAuthContext(userId, user);
     req.user = user;
 
     logger.debug('User authenticated', { userId: user.id });
