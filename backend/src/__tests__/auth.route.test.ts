@@ -12,12 +12,22 @@ import jwt from 'jsonwebtoken';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { TwoFactorService } from '../services/TwoFactorService';
+import { RefreshTokenService } from '../services/RefreshTokenService';
 import { config } from '../config';
 import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
 jest.mock('../services/RbacService');
 jest.mock('../services/TwoFactorService');
+jest.mock('../services/RefreshTokenService');
+
+beforeEach(() => {
+  // Login always issues a refresh token; give the mock a valid return so the
+  // cookie is set without a real DB.
+  (RefreshTokenService.prototype.issue as jest.Mock) = jest
+    .fn()
+    .mockResolvedValue({ token: 'refresh-token', expiresAt: new Date(Date.now() + 1000) });
+});
 
 const buildApp = (): express.Express => {
   const app = express();
@@ -30,6 +40,11 @@ const buildApp = (): express.Express => {
 describe('POST /api/auth/login', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    // resetAllMocks wipes the top-level issue mock; re-establish it so a
+    // successful login can set the refresh cookie.
+    (RefreshTokenService.prototype.issue as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ token: 'refresh-token', expiresAt: new Date(Date.now() + 1000) });
   });
 
   it('returns 400 when credentials are missing', async () => {
@@ -80,6 +95,9 @@ describe('POST /api/auth/login', () => {
 describe('POST /api/auth/login — two-factor enforcement', () => {
   beforeEach(() => {
     jest.resetAllMocks();
+    (RefreshTokenService.prototype.issue as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ token: 'refresh-token', expiresAt: new Date(Date.now() + 1000) });
     (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
       id: 7,
       email: 'a@x.com',

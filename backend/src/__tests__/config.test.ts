@@ -71,8 +71,9 @@ describe('defaults (bare environment)', () => {
       password: 'scheduler_password', connectionLimit: 30, queueLimit: 100,
     });
     expect(config.jwt.secret).toBe('fallback-jwt_secret');
-    expect(config.jwt.expiresIn).toBe('24h');
-    expect(config.jwt.expiresInMs).toBe(24 * 60 * 60 * 1000);
+    expect(config.jwt.expiresIn).toBe('15m');
+    expect(config.jwt.expiresInMs).toBe(15 * 60 * 1000);
+    expect(config.jwt.refreshExpiresInMs).toBe(30 * 24 * 60 * 60 * 1000);
     expect(config.auth.permissionCacheTtlMs).toBe(0);
     expect(config.email.host).toBe('smtp.gmail.com');
     expect(config.email.port).toBe(587);
@@ -178,9 +179,9 @@ describe('parseDurationMs (via JWT_EXPIRES_IN)', () => {
     expect(config.jwt.expiresInMs).toBe(ms);
   });
 
-  it('falls back to 24h for an unrecognized format, keeping cookie and JWT lifetimes aligned', () => {
+  it('falls back to 15m for an unrecognized format, keeping cookie and JWT lifetimes aligned', () => {
     const config = loadConfig({ JWT_EXPIRES_IN: 'soon' });
     expect(config.jwt.expiresIn).toBe('soon'); // jsonwebtoken will reject it loudly
-    expect(config.jwt.expiresInMs).toBe(24 * 60 * 60 * 1000);
+    expect(config.jwt.expiresInMs).toBe(15 * 60 * 1000);
   });
 });

@@ -7,6 +7,7 @@
  */
 
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { UserService } from '../services/UserService';
@@ -16,15 +17,20 @@ import { createAuthRouter } from '../routes/auth';
 
 jest.mock('../services/UserService');
 jest.mock('../services/RbacService');
+jest.mock('../services/RefreshTokenService');
 jest.mock('../config/database', () => ({
   database: { getPool: jest.fn().mockReturnValue({}) },
 }));
 
 import { RbacService } from '../services/RbacService';
+import { RefreshTokenService } from '../services/RefreshTokenService';
 
+// The real app mounts cookie-parser; the refresh endpoint reads the refresh
+// cookie, so these bare test apps need it too.
 const buildApp = () => {
   const app = express();
   app.use(express.json());
+  app.use(cookieParser());
   app.use('/api/auth', createAuthRouter({} as never));
   return app;
 };
@@ -71,26 +77,65 @@ describe('POST /api/auth/refresh', () => {
     (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
   });
 
-  it('issues a new token for a valid user', async () => {
+  it('rotates the refresh token and issues a fresh access token', async () => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
-    const token = signToken({ userId: 7, email: 'a@x.com', role: 'manager' });
+    // A valid rotation returns the user id and a brand-new refresh token.
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      userId: 7,
+      issued: { token: 'new-refresh-token', expiresAt: new Date(Date.now() + 1000) },
+    });
 
-    const res = await request(buildApp()).post('/api/auth/refresh').set('Authorization', `Bearer ${token}`);
+    const res = await request(buildApp())
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refresh_token=old-refresh-token');
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.data.token).toBeUndefined();
+    expect(res.body.data.user.id).toBe(7);
+    expect(RefreshTokenService.prototype.rotate).toHaveBeenCalledWith('old-refresh-token');
+
     const cookies = res.headers['set-cookie'] as unknown as string[];
-    const tokenCookie = cookies?.find((c: string) => c.startsWith('token='));
-    expect(tokenCookie).toBeDefined();
-    const cookieToken = tokenCookie!.split(';')[0].split('=')[1];
-    const decoded = jwt.verify(cookieToken, config.jwt.secret) as { userId: number };
+    // A new short-lived access token and the rotated refresh token are both set.
+    const accessCookie = cookies.find((c) => c.startsWith('token='));
+    const refreshCookie = cookies.find((c) => c.startsWith('refresh_token='));
+    expect(accessCookie).toBeDefined();
+    expect(refreshCookie).toContain('refresh_token=new-refresh-token');
+    const decoded = jwt.verify(accessCookie!.split(';')[0].split('=')[1], config.jwt.secret) as {
+      userId: number;
+    };
     expect(decoded.userId).toBe(7);
   });
 
-  it('returns 401 without a token', async () => {
+  it('returns 401 and clears cookies when no refresh cookie is present', async () => {
     const res = await request(buildApp()).post('/api/auth/refresh');
     expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('REFRESH_INVALID');
+  });
+
+  it('returns 401 when the refresh token is invalid/reused (rotate returns null)', async () => {
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refresh_token=stolen');
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('REFRESH_INVALID');
+  });
+
+  it('revokes and rejects when the account is gone or inactive', async () => {
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      userId: 7,
+      issued: { token: 'new', expiresAt: new Date(Date.now() + 1000) },
+    });
+    (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(null);
+    const revoke = jest.fn().mockResolvedValue(undefined);
+    (RefreshTokenService.prototype.revoke as jest.Mock) = revoke;
+
+    const res = await request(buildApp())
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refresh_token=valid-but-orphaned');
+
+    expect(res.status).toBe(401);
+    expect(revoke).toHaveBeenCalledWith('new');
   });
 });
 
