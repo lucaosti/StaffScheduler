@@ -18,6 +18,7 @@ import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
 import { eventBus } from './services/EventBus';
 import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
+import { startOutboxWorker, stopOutboxWorker } from './services/OutboxWorker';
 import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
 
@@ -47,6 +48,9 @@ export async function startServer(): Promise<void> {
     // /generate runs synchronously instead).
     initOptimizationWorker(pool);
 
+    // Start the email outbox delivery worker (no-op unless email is configured).
+    startOutboxWorker(pool);
+
     const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
       logger.info(`Health check: http://localhost:${port}/api/health`);
@@ -56,6 +60,7 @@ export async function startServer(): Promise<void> {
     const shutdown = async (signal: string): Promise<void> => {
       logger.info(`${signal} received — shutting down gracefully`);
       server.close(async () => {
+        try { stopOutboxWorker(); } catch { /* ignore */ }
         try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
         try { await closeRedis(); } catch { /* ignore */ }

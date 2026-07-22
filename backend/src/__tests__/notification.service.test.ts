@@ -2,6 +2,9 @@
  * NotificationService tests (F03).
  */
 
+const isEmailConfigured = jest.fn().mockReturnValue(false);
+jest.mock('../services/MailerService', () => ({ isEmailConfigured: () => isEmailConfigured() }));
+
 import { NotificationService } from '../services/NotificationService';
 
 const buildRow = (overrides: Record<string, unknown> = {}) => ({
@@ -23,11 +26,19 @@ const makePool = () => {
 };
 
 describe('NotificationService.notify', () => {
-  it('inserts and returns the persisted row', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([{ insertId: 9 }, null])
-      .mockResolvedValueOnce([[buildRow({ id: 9 })], null]);
+  it('inserts inside a transaction and returns the persisted row', async () => {
+    // notify() now writes in a transaction (for the outbox pattern); email is
+    // not configured in tests, so no outbox row is written.
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockResolvedValueOnce([{ insertId: 9 }, null]),
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const execute = jest.fn().mockResolvedValueOnce([[buildRow({ id: 9 })], null]); // getById
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute } as never;
+
     const service = new NotificationService(pool);
     const out = await service.notify({
       userId: 7,
@@ -36,8 +47,50 @@ describe('NotificationService.notify', () => {
       body: 'You are on tomorrow',
       link: '/shifts/42',
     });
+
     expect(out.id).toBe(9);
-    expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO notifications/);
+    expect(conn.beginTransaction).toHaveBeenCalled();
+    expect(conn.execute.mock.calls[0][0]).toMatch(/INSERT INTO notifications/);
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('enqueues an email in the outbox when email is configured and the user has an address', async () => {
+    isEmailConfigured.mockReturnValueOnce(true);
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 9 }, null]) // INSERT notifications
+        .mockResolvedValueOnce([[{ email: 'user@example.com' }], null]) // SELECT email
+        .mockResolvedValueOnce([{ insertId: 1 }, null]), // INSERT email_outbox
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const execute = jest.fn().mockResolvedValueOnce([[buildRow({ id: 9 })], null]); // getById
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute } as never;
+
+    await new NotificationService(pool).notify({ userId: 7, type: 't', title: 'Subj', body: 'Msg' });
+
+    const outboxCall = conn.execute.mock.calls.find((c) => /INSERT INTO email_outbox/.test(c[0]));
+    expect(outboxCall).toBeDefined();
+    expect(outboxCall![1]).toEqual([9, 'user@example.com', 'Subj', 'Msg']);
+  });
+
+  it('rolls back and rethrows when the insert fails', async () => {
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockRejectedValueOnce(new Error('insert failed')),
+      commit: jest.fn(),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute: jest.fn() } as never;
+    const service = new NotificationService(pool);
+    await expect(service.notify({ userId: 7, type: 't', title: 'x' })).rejects.toThrow(/insert failed/);
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
   });
 });
 
