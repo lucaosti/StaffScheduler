@@ -167,13 +167,18 @@ export class AuditLogService {
     );
     const total = (countRows[0] as { c: number }).c;
 
+    // Inlined rather than bound: MySQL's binary prepared-statement protocol
+    // rejects placeholders for LIMIT/OFFSET, so `execute()` failed every call
+    // with ER_WRONG_ARGUMENTS — GET /api/audit-logs returned 500 unconditionally.
+    // Both values are clamped integers, never caller-supplied text, which is
+    // the same reasoning the export query and OutboxWorker already rely on.
     const limit = clampLimit(filters.limit);
     const offset = clampOffset(filters.offset);
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where}
         ORDER BY created_at DESC
-        LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+        LIMIT ${limit} OFFSET ${offset}`,
+      params
     );
 
     return { total, items: rows.map(mapRow) };
