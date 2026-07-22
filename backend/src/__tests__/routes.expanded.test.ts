@@ -123,6 +123,70 @@ beforeEach(() => {
 describe('assignments router (extended)', () => {
   const app = () => mountApp('/api/assignments', createAssignmentsRouter(fakePool));
 
+  // The defect this covers: the handler used to take `_req` and call
+  // getAllAssignments() with no arguments, so every documented filter was
+  // silently discarded and a caller asking for one user got everyone's rows.
+  it('GET / forwards every documented query filter to the service', async () => {
+    const spy = jest.fn().mockResolvedValue([]);
+    (AssignmentService.prototype.getAllAssignments as jest.Mock) = spy;
+
+    const res = await request(app()).get(
+      '/api/assignments?shiftId=3&userId=7&scheduleId=5&departmentId=2&status=confirmed&startDate=2026-05-01&endDate=2026-05-31'
+    );
+
+    expect(res.status).toBe(200);
+    expect(spy).toHaveBeenCalledWith(
+      {
+        shiftId: 3,
+        userId: 7,
+        scheduleId: 5,
+        departmentId: 2,
+        status: 'confirmed',
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+      }
+    );
+  });
+
+  it('GET / rejects a malformed filter instead of ignoring it', async () => {
+    const spy = jest.fn().mockResolvedValue([]);
+    (AssignmentService.prototype.getAllAssignments as jest.Mock) = spy;
+
+    const res = await request(app()).get('/api/assignments?userId=abc');
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('GET / rejects an inverted date range', async () => {
+    const res = await request(app()).get(
+      '/api/assignments?startDate=2026-05-31&endDate=2026-05-01'
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('GET / returns the paginated envelope when page/pageSize are supplied', async () => {
+    const list = jest.fn().mockResolvedValue([{ id: 1 }]);
+    (AssignmentService.prototype.getAllAssignments as jest.Mock) = list;
+    (AssignmentService.prototype.countAssignments as jest.Mock) = jest.fn().mockResolvedValue(101);
+
+    const res = await request(app()).get('/api/assignments?page=3&pageSize=10&userId=7');
+
+    expect(res.status).toBe(200);
+    expect(res.body.meta).toEqual({ total: 101, page: 3, pageSize: 10, pages: 11 });
+    expect(list).toHaveBeenCalledWith({ userId: 7 }, { limit: 10, offset: 20 });
+  });
+
+  it('GET / surfaces the service refusal as 400 rather than a partial list', async () => {
+    (AssignmentService.prototype.getAllAssignments as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new ValidationError('Too many assignments match this query'));
+
+    const res = await request(app()).get('/api/assignments');
+    expect(res.status).toBe(400);
+  });
+
   it('GET / 500 on error', async () => {
     (AssignmentService.prototype.getAllAssignments as jest.Mock) = jest
       .fn()

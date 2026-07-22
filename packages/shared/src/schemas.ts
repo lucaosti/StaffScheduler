@@ -162,6 +162,28 @@ export const updateAssignmentBody = z.object({
   reason: z.string().max(2000).optional(),
 });
 
+/**
+ * Query filters accepted by `GET /assignments`.
+ *
+ * These were already published in the OpenAPI spec but the route ignored them
+ * entirely, so callers narrowing by `userId` silently received every
+ * assignment in the system. Declaring them as a schema means the documented
+ * contract and the parsing code are the same artefact and cannot drift again.
+ *
+ * `page` / `pageSize` are handled separately by the pagination middleware and
+ * are therefore not listed here; unknown keys are stripped, not rejected, so
+ * adding them to the URL stays valid.
+ */
+export const assignmentListQuery = z.object({
+  shiftId: positiveInt.optional(),
+  userId: positiveInt.optional(),
+  scheduleId: positiveInt.optional(),
+  departmentId: positiveInt.optional(),
+  status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
+
 export const createShiftTemplateBody = z.object({
   name: z.string().min(1, 'Name is required'),
   description: z.string().optional(),
