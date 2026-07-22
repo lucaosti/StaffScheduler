@@ -32,6 +32,8 @@ import { createSchedulesRouter } from './routes/schedules';
 import { createAssignmentsRouter } from './routes/assignments';
 import { createSystemSettingsRouter } from './routes/settings';
 import healthRoutes from './routes/health';
+import { createMetricsRouter } from './routes/metrics';
+import { httpMetricsMiddleware, registerPoolMetrics } from './observability/metrics';
 import { createDepartmentsRouter } from './routes/departments';
 import { createSystemRouter } from './routes/system';
 import { createTimeOffRouter } from './routes/timeOff';
@@ -164,7 +166,16 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
 
   app.use(requestId);
   app.use(requestLogger);
+  // Time every request under its matched route pattern. Placed after requestId
+  // so a trace/log correlation id already exists, and before the routers so the
+  // whole handler chain is inside the timer.
+  app.use(httpMetricsMiddleware);
   app.use(compression());
+
+  // Sample the DB pool at scrape time, and expose the Prometheus endpoint
+  // outside the /api tree (a scraper is not an API user — see routes/metrics).
+  registerPoolMetrics(pool);
+  app.use('/metrics', createMetricsRouter());
   // Body parser: 10 MB ceiling is intentional — bulk import CSVs and schedule payloads
   // can be large, but we keep this well below the 50 MB nginx default to limit DoS surface.
   app.use(express.json({ limit: '10mb' }));
