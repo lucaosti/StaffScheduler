@@ -163,6 +163,200 @@ export const updateAssignmentBody = z.object({
 });
 
 /**
+ * Query contracts for list endpoints.
+ *
+ * WHY THESE EXIST: `parameters` in openapi.json used to be hand-curated prose
+ * that nothing compared against the code, so six endpoints documented filters
+ * their handlers never read — a caller narrowing by `userId` or `isActive`
+ * silently received everything. Declaring the accepted query as a schema, and
+ * generating the spec's `parameters` from it (see scripts/generate-openapi.ts),
+ * makes the published contract and the parsing code the same artefact.
+ *
+ * Each schema below is the *whole* query contract for its endpoint: anything
+ * not listed here is not accepted, and anything listed here is documented.
+ */
+
+/** Boolean flags arrive as the strings "true"/"false" in a query string. */
+const booleanFlag = z
+  .union([z.boolean(), z.enum(['true', 'false']).transform((v) => v === 'true')])
+  .optional();
+
+/**
+ * Shared page/pageSize contract. Endpoints compose this into their own query
+ * schema so the parameters are documented, rather than being invisible to the
+ * spec because the pagination middleware reads `req.query` directly.
+ */
+export const paginationQuery = {
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(200).optional(),
+};
+
+export const departmentListQuery = z.object({
+  search: shortString.optional(),
+  isActive: booleanFlag,
+  orgUnitId: positiveInt.optional(),
+});
+
+export const scheduleListQuery = z.object({
+  departmentId: positiveInt.optional(),
+  status: z.enum(['draft', 'published', 'archived']).optional(),
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
+  ...paginationQuery,
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
+
+export const employeeListQuery = z.object({
+  search: shortString.optional(),
+  /** Numeric id or department name — resolved by the route. */
+  department: shortString.optional(),
+  isActive: booleanFlag,
+  ...paginationQuery,
+});
+
+export const userListQuery = z.object({
+  search: shortString.optional(),
+  department: shortString.optional(),
+  roleId: positiveInt.optional(),
+  isActive: booleanFlag,
+  ...paginationQuery,
+});
+
+export const shiftListQuery = z.object({
+  scheduleId: positiveInt.optional(),
+  departmentId: positiveInt.optional(),
+  /** Convenience for a single day; equivalent to startDate = endDate = date. */
+  date: dateString.optional(),
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
+  status: z.enum(['open', 'assigned', 'confirmed', 'cancelled']).optional(),
+  ...paginationQuery,
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
+
+/**
+ * Reporting date range.
+ *
+ * The spec published `startDate`/`endDate` while the handlers read `start`/`end`,
+ * so a client following the documentation got a 400. The documented names win;
+ * the old ones stay accepted as aliases so no existing caller breaks.
+ */
+export const reportRangeQuery = z.object({
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
+  start: dateString.optional(),
+  end: dateString.optional(),
+  departmentId: positiveInt.optional(),
+});
+
+export const auditLogListQuery = z.object({
+  userId: positiveInt.optional(),
+  onBehalfOfUserId: positiveInt.optional(),
+  action: shortString.optional(),
+  entityType: shortString.optional(),
+  entityId: positiveInt.optional(),
+  fromDate: dateString.optional(),
+  toDate: dateString.optional(),
+  requestId: shortString.optional(),
+  /** Legacy pairing, kept alongside page/pageSize for existing callers. */
+  limit: z.coerce.number().int().positive().max(1000).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  ...paginationQuery,
+});
+
+export const auditLogExportQuery = z.object({
+  format: z.enum(['csv', 'json']).optional(),
+  userId: positiveInt.optional(),
+  onBehalfOfUserId: positiveInt.optional(),
+  action: shortString.optional(),
+  entityType: shortString.optional(),
+  entityId: positiveInt.optional(),
+  fromDate: dateString.optional(),
+  toDate: dateString.optional(),
+  requestId: shortString.optional(),
+});
+
+/**
+ * Calendar feeds authenticate by opaque token, not by session cookie.
+ *
+ * The token is optional *to the schema* on purpose: a missing one must produce
+ * the handler's `401 text/plain`, which is what an iCal client subscribing to
+ * the URL expects, not a JSON 400 from the validation middleware. The schema
+ * still bounds the value and documents the parameter.
+ */
+export const calendarFeedQuery = z.object({
+  token: z.string().min(1).max(255).optional(),
+});
+
+export const changeRequestListQuery = z.object({
+  proposerUserId: positiveInt.optional(),
+  approverUserId: positiveInt.optional(),
+  status: shortString.optional(),
+  changeType: shortString.optional(),
+  targetEntityType: shortString.optional(),
+  limit: z.coerce.number().int().positive().max(1000).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+});
+
+/** Comma-separated list of user ids to render as vCards. */
+export const vcardQuery = z.object({
+  ids: z.string().min(1).max(2000),
+});
+
+export const onCallMineQuery = z.object({
+  start: dateString.optional(),
+  end: dateString.optional(),
+});
+
+export const onCallPeriodListQuery = z.object({
+  departmentId: positiveInt.optional(),
+  status: shortString.optional(),
+  start: dateString.optional(),
+  end: dateString.optional(),
+});
+
+export const responsibilityRuleListQuery = z.object({
+  subjectType: shortString.optional(),
+  permissionCode: shortString.optional(),
+  responsibleOrgUnitId: positiveInt.optional(),
+  isActive: booleanFlag,
+});
+
+export const responsibilityRuleResolveQuery = z.object({
+  permissionCode: z.string().min(1).max(80),
+  orgUnitId: positiveInt.optional(),
+  /** Comma-separated numeric ids. */
+  departmentIds: z.string().max(2000).optional(),
+  roleIds: z.string().max(2000).optional(),
+});
+
+export const skillGapQuery = z.object({
+  departmentId: positiveInt,
+  start: dateString,
+  end: dateString,
+});
+
+export const timeOffListQuery = z.object({
+  status: shortString.optional(),
+  userId: positiveInt.optional(),
+});
+
+export const pendingApprovalListQuery = z.object({
+  status: shortString.optional(),
+});
+
+export const attendanceListQuery = z.object({
+  userId: positiveInt.optional(),
+  status: shortString.optional(),
+  startDate: dateString.optional(),
+  endDate: dateString.optional(),
+});
+
+export const costEstimateQuery = z.object({
+  startDate: dateString,
+  endDate: dateString,
+  departmentId: positiveInt.optional(),
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
+
+/**
  * Query filters accepted by `GET /assignments`.
  *
  * These were already published in the OpenAPI spec but the route ignored them
@@ -170,9 +364,8 @@ export const updateAssignmentBody = z.object({
  * assignment in the system. Declaring them as a schema means the documented
  * contract and the parsing code are the same artefact and cannot drift again.
  *
- * `page` / `pageSize` are handled separately by the pagination middleware and
- * are therefore not listed here; unknown keys are stripped, not rejected, so
- * adding them to the URL stays valid.
+ * `page` / `pageSize` are composed in so the spec documents them; the
+ * pagination middleware still reads them from `req.query` directly.
  */
 export const assignmentListQuery = z.object({
   shiftId: positiveInt.optional(),
@@ -182,6 +375,7 @@ export const assignmentListQuery = z.object({
   status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
   startDate: dateString.optional(),
   endDate: dateString.optional(),
+  ...paginationQuery,
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const createShiftTemplateBody = z.object({

@@ -201,12 +201,24 @@ either is present the response carries a `meta` block
 the plain `{ success, data }` shape is returned, for backward compatibility.
 
 Query filters are validated with `validateQuery(schema)` against a Zod schema
-in `@staff-scheduler/shared`, the same way bodies and path params are. This is
-deliberate: `GET /api/assignments` previously documented seven filters in the
-OpenAPI spec while its handler read none of them, so a caller narrowing by
-`userId` silently received every assignment in the system. Declaring the
-accepted query parameters as a schema keeps the published contract and the
-parsing code the same artefact.
+in `@staff-scheduler/shared`, the same way bodies and path params are, and the
+spec's `parameters` are **generated** from those schemas by
+`npm run openapi:generate`.
+
+This is deliberate. Request bodies were generated and drift-checked from the
+start, but `parameters` were hand-curated prose that nothing compared against
+the code — so they drifted: six endpoints published filters their handlers
+never read (`GET /api/assignments` ignored all seven of its documented filters;
+`/departments`, `/schedules`, `/employees`, `/users` and `/shifts` each ignored
+one or more), and the reporting endpoints published `startDate`/`endDate` while
+the code read `start`/`end`. A caller narrowing by `userId` or `isActive`
+silently received everything.
+
+The generator now refuses to run when an operation documents query parameters
+with no `validateQuery` behind it, and `openapi.contract.test.ts` asserts that
+every documented parameter originates from a shared query schema. Adding a
+parameter to the spec by hand is therefore a failing build, not stale
+documentation.
 
 `GET /api/assignments` additionally refuses — with `400`, rather than
 truncating — an unpaginated request matching more than 5000 rows.

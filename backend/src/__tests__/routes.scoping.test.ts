@@ -110,8 +110,12 @@ describe('GET /api/schedules — scope filtering', () => {
       .set('Authorization', `Bearer ${makeToken()}`);
 
     expect(res.status).toBe(200);
+    // The route now always passes a filters object (query filters merged with
+    // scope), so the assertion is on the absence of org-unit scoping rather
+    // than on the argument being undefined — the two are equivalent to the
+    // service, and only the former is what this test is about.
     const callArg = (ScheduleService.prototype.getAllSchedules as jest.Mock).mock.calls[0][0];
-    expect(callArg).toBeUndefined();
+    expect(callArg?.orgUnitIds).toBeUndefined();
   });
 
   it('scoped manager calls getAllSchedules with orgUnitIds filter', async () => {

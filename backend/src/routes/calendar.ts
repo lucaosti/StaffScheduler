@@ -18,8 +18,8 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import { validateParams, validateQuery } from '../middleware/validation';
+import { idParam, calendarFeedQuery } from '../schemas';
 import { CalendarService } from '../services/CalendarService';
 import { RbacService } from '../services/RbacService';
 
@@ -56,8 +56,8 @@ export const createCalendarRouter = (pool: Pool): Router => {
     res.json({ success: true, data: { token } });
   }));
 
-  router.get('/feed.ics', asyncHandler(async (req: Request, res: Response) => {
-    const token = (req.query.token as string | undefined) || '';
+  router.get('/feed.ics', validateQuery(calendarFeedQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { token } = res.locals.query;
     if (!token) {
       res.status(401).type('text/plain').send('token query parameter required');
       return;
@@ -71,8 +71,8 @@ export const createCalendarRouter = (pool: Pool): Router => {
     writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
   }));
 
-  router.get('/department/:id.ics', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
-      const token = (req.query.token as string | undefined) || '';
+  router.get('/department/:id.ics', validateParams(idParam), validateQuery(calendarFeedQuery), asyncHandler(async (req: Request, res: Response) => {
+      const { token } = res.locals.query;
       if (!token) {
         res.status(401).type('text/plain').send('token query parameter required');
         return;

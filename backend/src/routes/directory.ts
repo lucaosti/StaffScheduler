@@ -17,8 +17,8 @@ import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
-import { directoryFieldsBody, importVcardBody, idParam, idAndKeyParam } from '../schemas';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
+import { directoryFieldsBody, importVcardBody, idParam, idAndKeyParam, vcardQuery } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -73,9 +73,8 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .send(vcf);
   }));
 
-  router.get('/vcard.vcf', requirePermission('user.read'), asyncHandler(async (req: Request, res: Response) => {
-    const idsParam = (req.query.ids as string | undefined) ?? '';
-    const ids = idsParam
+  router.get('/vcard.vcf', requirePermission('user.read'), validateQuery(vcardQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const ids = (res.locals.query.ids as string)
       .split(',')
       .map((s) => Number(s.trim()))
       .filter((n) => Number.isFinite(n) && n > 0);

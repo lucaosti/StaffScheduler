@@ -22,13 +22,14 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   idParam,
   changeRequestCreateBody as createBody,
   changeRequestApproveBody as approveBody,
   changeRequestRejectBody as rejectBody,
   changeRequestApplyBody as applyBody,
+  changeRequestListQuery,
 } from '../schemas';
 import { ChangeRequestService } from '../services/ChangeRequestService';
 import { ConflictError } from '../errors';
@@ -41,17 +42,9 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   // List (reviewers only)
-  router.get('/', requirePermission('change_request.review'), asyncHandler(async (req: Request, res: Response) => {
-    const { proposerUserId, approverUserId, status, changeType, targetEntityType, limit, offset } = req.query;
-    const page = await svc.list({
-      proposerUserId: proposerUserId ? Number(proposerUserId) : undefined,
-      approverUserId: approverUserId ? Number(approverUserId) : undefined,
-      status: status as string | undefined as never,
-      changeType: changeType as string | undefined,
-      targetEntityType: targetEntityType as string | undefined,
-      limit: limit ? Number(limit) : undefined,
-      offset: offset ? Number(offset) : undefined,
-    });
+  router.get('/', requirePermission('change_request.review'), validateQuery(changeRequestListQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const { status, ...rest } = res.locals.query;
+    const page = await svc.list({ ...rest, status: status as never });
     res.json({ success: true, data: page });
   }));
 

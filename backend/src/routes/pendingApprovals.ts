@@ -22,8 +22,8 @@ import express from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, pendingApprovalDelegateBody as delegateBody, pendingApprovalDecisionBody as decisionBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, pendingApprovalDelegateBody as delegateBody, pendingApprovalDecisionBody as decisionBody, pendingApprovalListQuery } from '../schemas';
 import { PendingApprovalService } from '../services/PendingApprovalService';
 import { ApprovalEngineService } from '../services/ApprovalEngineService';
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
@@ -33,9 +33,9 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   const router = express.Router();
 
   // GET / — list pending approvals assigned to the current user
-  router.get('/', authenticate, asyncHandler(async (req, res) => {
+  router.get('/', authenticate, validateQuery(pendingApprovalListQuery), asyncHandler(async (req, res) => {
     const svc = new PendingApprovalService(pool);
-    const status = typeof req.query.status === 'string' ? req.query.status : 'pending';
+    const status = res.locals.query.status ?? 'pending';
     const items = await svc.listForUser(req.user!.id, status);
     res.json({ success: true, data: { items, total: items.length } });
   }));
