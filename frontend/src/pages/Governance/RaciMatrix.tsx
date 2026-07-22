@@ -12,12 +12,10 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
-import {
-  getResponsibilityMatrix,
-  MatrixEntry,
-  ResponsibilitySubjectType,
-} from '../../services/responsibilityService';
+import React, { useState } from 'react';
+import type { MatrixEntry } from '../../services/responsibilityService';
+import { ResponsibilitySubjectType } from '../../services/responsibilityService';
+import { useResponsibilityMatrixQuery } from '../../hooks/useGovernance';
 
 interface MatrixCol {
   key: string;
@@ -33,25 +31,14 @@ const subjectLabel = (type: ResponsibilitySubjectType, id: number | null): strin
 };
 
 const RaciMatrix: React.FC = () => {
-  const [entries, setEntries] = useState<MatrixEntry[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getResponsibilityMatrix();
-      setEntries(res.data?.matrix ?? []);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load responsibility matrix.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
+  const matrixQuery = useResponsibilityMatrixQuery();
+  const entries = matrixQuery.data ?? [];
+  const loading = matrixQuery.isLoading;
+  const error = matrixQuery.isError
+    ? (matrixQuery.error as Error).message ?? 'Failed to load responsibility matrix.'
+    : null;
 
   // Derive unique permission codes (rows) and subject columns
   const filteredEntries = search.trim()
@@ -94,7 +81,7 @@ const RaciMatrix: React.FC = () => {
             <h1 className="h3 mb-0">Responsibility Matrix</h1>
             <p className="text-muted mb-0 small">Pivot view of responsibility rules by permission and subject</p>
           </div>
-          <button className="btn btn-sm btn-outline-primary" onClick={load} aria-label="Refresh matrix">
+          <button className="btn btn-sm btn-outline-primary" onClick={() => matrixQuery.refetch()} aria-label="Refresh matrix">
             <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
           </button>
         </div>

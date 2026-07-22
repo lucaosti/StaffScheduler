@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
+import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
 const mockListPolicies = jest.fn();

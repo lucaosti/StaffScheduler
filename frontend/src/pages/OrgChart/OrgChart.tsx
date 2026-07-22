@@ -8,16 +8,14 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { OrgUnitNode } from '../../services/orgService';
 import {
-  getTree,
-  getManagerChain,
-  listMembersDetailed,
-  OrgUnitNode,
-  ManagerChainLink,
-  OrgUnitMemberDetail,
-} from '../../services/orgService';
+  useOrgTreeQuery,
+  useManagerChainQuery,
+  useUnitMembersQuery,
+} from '../../hooks/useOrg';
 
 const NODE_W = 180;
 const NODE_H = 60;
@@ -181,42 +179,25 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlig
 
 const OrgChart: React.FC = () => {
   const { user } = useAuth();
-  const [roots, setRoots] = useState<OrgUnitNode[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
-
-  const [myChain, setMyChain] = useState<ManagerChainLink[]>([]);
-
   const [selectedNode, setSelectedNode] = useState<OrgUnitNode | null>(null);
-  const [members, setMembers] = useState<OrgUnitMemberDetail[]>([]);
-  const [membersLoading, setMembersLoading] = useState(false);
-  const [membersError, setMembersError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getTree();
-      setRoots(res.data ?? []);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load org chart.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Server state via TanStack Query: the tree and the current user's manager
+  // chain are cached; a selected node's members are fetched on demand and
+  // cached, so re-selecting a node doesn't re-fetch.
+  const treeQuery = useOrgTreeQuery();
+  const chainQuery = useManagerChainQuery();
+  const membersQuery = useUnitMembersQuery(selectedNode?.id ?? null);
 
-  const loadMyChain = useCallback(async () => {
-    try {
-      const res = await getManagerChain();
-      setMyChain(res.data ?? []);
-    } catch {
-      setMyChain([]);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { void loadMyChain(); }, [loadMyChain]);
+  const roots = treeQuery.data ?? [];
+  const loading = treeQuery.isLoading;
+  const error = treeQuery.isError ? (treeQuery.error as Error).message ?? 'Failed to load org chart.' : null;
+  const myChain = useMemo(() => chainQuery.data ?? [], [chainQuery.data]);
+  const members = membersQuery.data ?? [];
+  const membersLoading = selectedNode !== null && membersQuery.isLoading;
+  const membersError = membersQuery.isError
+    ? (membersQuery.error as Error).message ?? 'Failed to load members.'
+    : null;
 
   // Units the current user belongs to or reports up through — used to
   // highlight "your" branch of the tree.
@@ -231,19 +212,8 @@ const OrgChart: React.FC = () => {
     });
   };
 
-  const selectNode = async (node: OrgUnitNode) => {
-    setSelectedNode(node);
-    setMembersLoading(true);
-    setMembersError(null);
-    try {
-      const res = await listMembersDetailed(node.id);
-      setMembers(res.data ?? []);
-    } catch (e) {
-      setMembersError((e as Error).message ?? 'Failed to load members.');
-    } finally {
-      setMembersLoading(false);
-    }
-  };
+  // Selecting a node drives useUnitMembersQuery via selectedNode.id.
+  const selectNode = (node: OrgUnitNode) => setSelectedNode(node);
 
   const expandAll = () => setCollapsed(new Set());
   const collapseAll = () => {
@@ -274,7 +244,7 @@ const OrgChart: React.FC = () => {
             <button className="btn btn-sm btn-outline-secondary" onClick={collapseAll} aria-label="Collapse all nodes">
               <i className="bi bi-arrows-collapse me-1" aria-hidden="true"></i>Collapse all
             </button>
-            <button className="btn btn-sm btn-outline-primary" onClick={load} aria-label="Refresh org chart">
+            <button className="btn btn-sm btn-outline-primary" onClick={() => treeQuery.refetch()} aria-label="Refresh org chart">
               <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
             </button>
           </div>
