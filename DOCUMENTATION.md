@@ -193,6 +193,27 @@ JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from
 
 **Two-factor authentication**: when an account has TOTP enabled (`POST /api/auth/2fa/setup` + `/enable`), login additionally requires `totpCode` — a current TOTP code or an unused recovery code. A password-valid login without the code answers 401 `TOTP_REQUIRED`; a wrong code answers 401 `TOTP_INVALID`. Disabling 2FA (`POST /api/auth/2fa/disable`) likewise requires a valid code. Accepted TOTP codes are single-use: the matched time-step counter is stored in `users.totp_last_counter` with a compare-and-set update, so an intercepted code cannot be replayed within its validity window; recovery-code consumption uses the same compare-and-set pattern.
 
+### List endpoints: filtering and pagination
+
+List endpoints accept `?page` and `?pageSize` (max 200, default 25). When
+either is present the response carries a `meta` block
+(`{ total, page, pageSize, pages }`) alongside `data`; when neither is present
+the plain `{ success, data }` shape is returned, for backward compatibility.
+
+Query filters are validated with `validateQuery(schema)` against a Zod schema
+in `@staff-scheduler/shared`, the same way bodies and path params are. This is
+deliberate: `GET /api/assignments` previously documented seven filters in the
+OpenAPI spec while its handler read none of them, so a caller narrowing by
+`userId` silently received every assignment in the system. Declaring the
+accepted query parameters as a schema keeps the published contract and the
+parsing code the same artefact.
+
+`GET /api/assignments` additionally refuses — with `400`, rather than
+truncating — an unpaginated request matching more than 5000 rows.
+`shift_assignments` grows by one row per person per shift indefinitely, and a
+short list that looks complete hides missing assignments; narrow the filters
+or request a page.
+
 ### Core endpoints (summary)
 
 | Prefix | Description | Permission guard |

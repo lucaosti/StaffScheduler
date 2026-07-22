@@ -3,26 +3,45 @@ import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
   userIdParam,
   shiftIdParam,
   departmentIdParam,
+  assignmentListQuery,
   createAssignmentBody,
   bulkCreateAssignmentsBody,
   updateAssignmentBody,
 } from '../schemas';
 import { User } from '../types';
 import { ForbiddenError, NotFoundError, ValidationError } from '../errors';
+import { parsePagination, sendPaginated } from '../middleware/pagination';
 
 export const createAssignmentsRouter = (pool: Pool) => {
   const router = Router();
   const assignmentService = new AssignmentService(pool);
 
-// Get all assignments
-router.get('/', authenticate, requirePermission('assignment.manage'), asyncHandler(async (_req: Request, res: Response) => {
-  const assignments = await assignmentService.getAllAssignments();
+// Get all assignments.
+//
+// The filters below were documented in the OpenAPI spec long before the
+// handler read them: it called getAllAssignments() with no arguments, so a
+// request for one user's assignments returned everyone's. They are now parsed
+// from a schema, and the listing is bounded — see AssignmentService for why an
+// oversized unpaginated request is refused rather than truncated.
+router.get('/', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), asyncHandler(async (req: Request, res: Response) => {
+  const filters = res.locals.query;
+  const pagination = parsePagination(req);
+
+  if (pagination) {
+    const [total, assignments] = await Promise.all([
+      assignmentService.countAssignments(filters),
+      assignmentService.getAllAssignments(filters, { limit: pagination.pageSize, offset: pagination.offset }),
+    ]);
+    return sendPaginated(res, assignments, total, pagination);
+  }
+
+  const assignments = await assignmentService.getAllAssignments(filters);
   res.json({ success: true, data: assignments });
 }));
 

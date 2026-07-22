@@ -243,7 +243,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List assignments */
+        /**
+         * List assignments
+         * @description Filters are applied server-side. An unpaginated request that matches more than 5000 assignments is refused with 400 rather than silently truncated; narrow the filters or use page/pageSize.
+         */
         get: {
             parameters: {
                 query?: {
@@ -254,6 +257,10 @@ export interface paths {
                     status?: "pending" | "confirmed" | "cancelled" | "completed";
                     startDate?: string;
                     endDate?: string;
+                    /** @description Page number (1-based). Supplying page or pageSize returns the paginated envelope with a meta block. */
+                    page?: number;
+                    /** @description Rows per page (max 200, default 25). */
+                    pageSize?: number;
                 };
                 header?: never;
                 path?: never;
@@ -272,6 +279,13 @@ export interface paths {
                             data?: components["schemas"]["Assignment"][];
                         };
                     };
+                };
+                /** @description Invalid query parameters, or too many rows for an unpaginated request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
             };
