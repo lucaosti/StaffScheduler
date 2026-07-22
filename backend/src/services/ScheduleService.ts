@@ -3,8 +3,7 @@ import { ConflictError, NotFoundError } from '../errors';
 import {
   Schedule,
   CreateScheduleRequest,
-  UpdateScheduleRequest
-} from '../types';
+  UpdateScheduleRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
@@ -151,7 +150,7 @@ export class ScheduleService {
       `;
 
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
       if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
@@ -205,7 +204,7 @@ export class ScheduleService {
     try {
       let query = `SELECT COUNT(DISTINCT s.id) AS total FROM schedules s LEFT JOIN departments d ON s.department_id = d.id`;
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
       if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
@@ -244,7 +243,7 @@ export class ScheduleService {
       }
 
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
 
       if (scheduleData.name !== undefined) { updates.push('name = ?'); values.push(scheduleData.name); }
       if (scheduleData.startDate !== undefined) { updates.push('start_date = ?'); values.push(scheduleData.startDate); }
