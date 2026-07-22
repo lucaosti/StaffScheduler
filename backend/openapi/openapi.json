@@ -103,18 +103,33 @@
         "type": "object",
         "properties": {
           "total": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "page": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
-          "limit": {
-            "type": "integer"
+          "pageSize": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
-          "totalPages": {
-            "type": "integer"
+          "pages": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           }
-        }
+        },
+        "required": [
+          "total",
+          "page",
+          "pageSize",
+          "pages"
+        ],
+        "additionalProperties": false
       },
       "User": {
         "type": "object",
