@@ -12,11 +12,11 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Assignment, Shift } from '../../types';
 import * as scheduleService from '../../services/scheduleService';
-import * as shiftService from '../../services/shiftService';
 import { useSchedulePageData } from '../../hooks/useSchedulePage';
+import { useShiftsInRange } from '../../hooks/useShifts';
 import { ApiError } from '../../services/apiUtils';
 import ScheduleList from '../Schedule/ScheduleList';
 import CreateScheduleModal, { type CreateScheduleValues } from '../Schedule/CreateScheduleModal';
@@ -58,8 +58,6 @@ const Schedule: React.FC = () => {
       : (pageQuery.error as Error)?.message ?? 'Failed to load schedule data'
     : localError;
 
-  const [monthShifts, setMonthShifts] = useState<Shift[]>([]);
-  const [monthLoading, setMonthLoading] = useState(false);
 
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
@@ -152,6 +150,15 @@ const Schedule: React.FC = () => {
     setSelectedWeek(newDate);
   };
 
+  // Local calendar-date key (not toISOString, which shifts to UTC and can
+  // land a shift on the wrong day for any timezone ahead/behind UTC).
+  const toDateKey = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
   // 6-week (42-cell) grid covering the selected month, padded with the tail
   // of the previous month and the head of the next so every row is full.
   const monthGridDates = useMemo(() => {
@@ -167,66 +174,33 @@ const Schedule: React.FC = () => {
     return dates;
   }, [selectedWeek]);
 
-  const monthShiftsFiltered = useMemo(
-    () =>
-      monthShifts.filter(
-        (shift) =>
-          !selectedDepartment ||
-          String(shift.departmentId) === selectedDepartment
-      ),
-    [monthShifts, selectedDepartment]
+  // The month grid exercises the endpoint's real date-range and department
+  // filters rather than fetching every shift and discarding most of them, so
+  // it scales independently of how many shifts exist overall.
+  const monthQuery = useShiftsInRange(
+    {
+      startDate: toDateKey(monthGridDates[0]),
+      endDate: toDateKey(monthGridDates[monthGridDates.length - 1]),
+      departmentId: selectedDepartment ? Number(selectedDepartment) : undefined,
+    },
+    { enabled: viewMode === 'month' }
   );
+  const monthShifts = useMemo(() => monthQuery.data ?? [], [monthQuery.data]);
+  const monthLoading = monthQuery.isFetching;
 
   const shiftsByDate = useMemo(() => {
     const index = new Map<string, Shift[]>();
-    for (const shift of monthShiftsFiltered) {
+    for (const shift of monthShifts) {
       const dateStr = typeof shift.date === 'string' ? shift.date.slice(0, 10) : new Date(shift.date as unknown as string).toISOString().slice(0, 10);
       const bucket = index.get(dateStr);
       if (bucket) bucket.push(shift);
       else index.set(dateStr, [shift]);
     }
     return index;
-  }, [monthShiftsFiltered]);
+  }, [monthShifts]);
 
-  // Local calendar-date key (not toISOString, which shifts to UTC and can
-  // land a shift on the wrong day for any timezone ahead/behind UTC).
-  const toDateKey = (date: Date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
-  };
   const todayKey = toDateKey(new Date());
 
-  // The month grid exercises the real date-range filter on GET /shifts
-  // (rather than client-side-filtering the whole unbounded shift list),
-  // so it scales independently of how many shifts exist overall.
-  useEffect(() => {
-    if (viewMode !== 'month') return;
-    let cancelled = false;
-    setMonthLoading(true);
-    shiftService
-      .getShifts({
-        startDate: toDateKey(monthGridDates[0]),
-        endDate: toDateKey(monthGridDates[monthGridDates.length - 1]),
-      })
-      .then((res) => {
-        // Department filtering stays client-side here, same as the week view's
-        // `filteredShifts` above — the frontend ShiftFilters type doesn't carry
-        // a departmentId param matching the backend's query field.
-        if (!cancelled && res.success && res.data) setMonthShifts(res.data);
-      })
-      .catch(() => {
-        if (!cancelled) setError('Failed to load shifts for the selected month');
-      })
-      .finally(() => {
-        if (!cancelled) setMonthLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode, selectedWeek]);
 
   // Values arrive already validated against the shared createScheduleBody schema
   // (the modal uses it via zodResolver), so this handler only performs the API
