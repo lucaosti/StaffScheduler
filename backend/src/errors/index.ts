@@ -33,7 +33,17 @@ export class ValidationError extends AppError {
   }
 }
 
-/** 401 — missing or invalid authentication. */
+/**
+ * 401 — missing or invalid authentication.
+ *
+ * No service throws this today, and that is deliberate rather than an
+ * oversight: authentication is decided in `authenticate`, which is middleware
+ * and not a route handler, so it is not wrapped in `asyncHandler` and a throw
+ * would escape Express 4's synchronous error path. It also needs codes this
+ * class cannot express — `MISSING_TOKEN`, `INVALID_TOKEN`, `TOKEN_REVOKED` —
+ * which the frontend's refresh logic distinguishes, so it returns its envelope
+ * directly. The class stays for any service that genuinely needs a 401.
+ */
 export class UnauthorizedError extends AppError {
   constructor(message = 'Authentication required') {
     super(message, 401, 'UNAUTHORIZED');
