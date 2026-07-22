@@ -9120,14 +9120,25 @@ export interface components {
             totalPages?: number;
         };
         User: {
-            id?: number;
-            /** Format: email */
-            email?: string;
-            firstName?: string;
-            lastName?: string;
-            /** @description Legacy role field. Use RBAC permissions for fine-grained access control. */
-            role?: string;
-            isActive?: boolean;
+            id: number;
+            email: string;
+            firstName: string;
+            lastName: string;
+            employeeId?: string;
+            phone?: string;
+            position?: string;
+            hourlyRate?: number;
+            isActive: boolean;
+            /** Format: date-time */
+            lastLogin?: string;
+            roles?: {
+                roleId: number;
+                roleName: string;
+                scopeOrgUnitId?: number | null;
+                expiresAt?: string | null;
+            }[];
+            permissions?: string[];
+            organizationName?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
@@ -9145,43 +9156,50 @@ export interface components {
             createdAt?: string;
         };
         Schedule: {
-            id?: number;
-            name?: string;
+            id: number;
+            name: string;
+            /** Format: date-time */
+            startDate: string;
+            /** Format: date-time */
+            endDate: string;
+            /** @enum {string} */
+            status: "draft" | "published" | "archived";
             departmentId?: number;
             departmentName?: string;
-            /** Format: date */
-            startDate?: string;
-            /** Format: date */
-            endDate?: string;
-            /** @enum {string} */
-            status?: "draft" | "published" | "archived";
+            createdBy?: number;
+            createdByName?: string;
+            publishedBy?: number;
             /** Format: date-time */
             publishedAt?: string;
             totalShifts?: number;
             totalAssignments?: number;
-            notes?: string;
+            notes?: string | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
             updatedAt?: string;
         };
         Shift: {
-            id?: number;
-            scheduleId?: number;
-            departmentId?: number;
+            id: number;
+            scheduleId: number;
+            scheduleName?: string;
+            departmentId: number;
             departmentName?: string;
-            /** Format: date */
-            date?: string;
-            /** @description HH:MM */
-            startTime?: string;
-            /** @description HH:MM */
-            endTime?: string;
-            minStaff?: number;
-            maxStaff?: number;
-            assignedStaff?: number;
+            templateId?: number;
+            /** Format: date-time */
+            date: string;
+            startTime: string;
+            endTime: string;
+            minStaff: number;
+            maxStaff: number;
+            assignedStaff: number;
             /** @enum {string} */
-            status?: "open" | "filled" | "overstaffed";
-            notes?: string;
+            status: "open" | "assigned" | "confirmed" | "cancelled";
+            notes?: string | null;
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
         };
         Assignment: {
             id?: number;
@@ -9256,18 +9274,22 @@ export interface components {
             path?: string;
         };
         Role: {
-            id?: number;
-            name?: string;
+            id: number;
+            name: string;
             description?: string;
-            isBuiltin?: boolean;
-            /** @description Permission keys assigned to this role, e.g. 'schedule.manage'. */
+            isSystem: boolean;
             permissions?: string[];
+            /** Format: date-time */
+            createdAt?: string;
+            /** Format: date-time */
+            updatedAt?: string;
         };
         Permission: {
-            /** @description Dot-notation key, e.g. 'schedule.manage'. */
-            key?: string;
+            id: number;
+            code: string;
+            resource: string;
+            action: string;
             description?: string;
-            category?: string;
         };
         Policy: {
             id?: number;

@@ -21,42 +21,77 @@
  * Both `types/index.ts` barrels re-export these, so no call site had to change
  * when they moved here.
  *
+ * WHY ZOD SCHEMAS RATHER THAN PLAIN INTERFACES: the interfaces alone removed
+ * the duplication between the two apps but left a third copy — the
+ * hand-written `components.schemas` in openapi.json — which nothing compared
+ * against them, and which had drifted into describing an older model
+ * (`User.role`, which the API has never sent; `Permission.category`/`key`
+ * instead of `code`/`resource`/`action`; `Role.isBuiltin` instead of
+ * `isSystem`). Declaring each entity once as a Zod schema and deriving both
+ * the TypeScript type (`z.infer`) and the OpenAPI component from it makes that
+ * third copy generated too, so it cannot state something the types do not.
+ *
  * @author Luca Ostinelli
  */
+
+import { z } from 'zod';
 
 /**
  * A point in time as it appears on either side of the wire: a `Date` when it
  * came from the database driver, an ISO string when it came from JSON.
  */
-export type Timestamp = string | Date;
+/**
+ * A point in time on either side of the wire, tagged so the OpenAPI generator
+ * can publish the wire form.
+ *
+ * The schema is the union because that is what the in-memory type genuinely
+ * is: mysql2 hands the backend `Date` objects, JSON gives the frontend
+ * strings, and `z.infer` must reflect both or every consumer that formats a
+ * `Date` stops compiling. But over the wire a timestamp is *always* a string,
+ * and `z.date()` has no JSON Schema form precisely because there is nothing
+ * truthful to emit for it. The `TIMESTAMP_JSON_SCHEMA` marker lets the
+ * generator replace this node with `{ type: 'string', format: 'date-time' }`
+ * rather than fail or publish a lie — the one place where the published shape
+ * and the in-process type legitimately differ.
+ */
+export const TIMESTAMP_JSON_SCHEMA = { type: 'string', format: 'date-time' } as const;
+export const timestamp = z
+  .union([z.string(), z.date()])
+  // Marked with a plain key rather than `id`: an `id` makes Zod hoist the node
+  // into a local `$defs`, which openapi-typescript cannot resolve.
+  .meta({ wireFormat: 'timestamp' });
+export type Timestamp = z.infer<typeof timestamp>;
 
 /** A fixed capability code that application code checks (data, not behaviour). */
-export interface Permission {
-  id: number;
-  code: string;
-  resource: string;
-  action: string;
-  description?: string;
-}
+export const permissionSchema = z.object({
+  id: z.number().int(),
+  code: z.string(),
+  resource: z.string(),
+  action: z.string(),
+  description: z.string().optional(),
+});
+export type Permission = z.infer<typeof permissionSchema>;
 
 /** A configurable bundle of permissions. System roles cannot be deleted. */
-export interface Role {
-  id: number;
-  name: string;
-  description?: string;
-  isSystem: boolean;
-  permissions?: string[];
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
-}
+export const roleSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  description: z.string().optional(),
+  isSystem: z.boolean(),
+  permissions: z.array(z.string()).optional(),
+  createdAt: timestamp.optional(),
+  updatedAt: timestamp.optional(),
+});
+export type Role = z.infer<typeof roleSchema>;
 
 /** A role granted to a user, optionally scoped to an org unit and time-bound. */
-export interface UserRoleAssignment {
-  roleId: number;
-  roleName: string;
-  scopeOrgUnitId?: number | null;
-  expiresAt?: Timestamp | null;
-}
+export const userRoleAssignmentSchema = z.object({
+  roleId: z.number().int(),
+  roleName: z.string(),
+  scopeOrgUnitId: z.number().int().nullable().optional(),
+  expiresAt: timestamp.nullable().optional(),
+});
+export type UserRoleAssignment = z.infer<typeof userRoleAssignmentSchema>;
 
 /**
  * A single time slot within a schedule, as the API returns it.
@@ -78,27 +113,28 @@ export interface UserRoleAssignment {
  * backend's own type, which extends this one — so the shared fields cannot
  * drift while the richer server model is preserved.
  */
-export interface Shift {
-  id: number;
-  scheduleId: number;
-  scheduleName?: string;
-  departmentId: number;
-  departmentName?: string;
-  templateId?: number;
+export const shiftSchema = z.object({
+  id: z.number().int(),
+  scheduleId: z.number().int(),
+  scheduleName: z.string().optional(),
+  departmentId: z.number().int(),
+  departmentName: z.string().optional(),
+  templateId: z.number().int().optional(),
   /** Calendar date, `YYYY-MM-DD`. */
-  date: Timestamp;
+  date: timestamp,
   /** `HH:MM` (24h). */
-  startTime: string;
+  startTime: z.string(),
   /** `HH:MM` (24h). */
-  endTime: string;
-  minStaff: number;
-  maxStaff: number;
-  assignedStaff: number;
-  status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
-  notes?: string | null;
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
-}
+  endTime: z.string(),
+  minStaff: z.number().int(),
+  maxStaff: z.number().int(),
+  assignedStaff: z.number().int(),
+  status: z.enum(['open', 'assigned', 'confirmed', 'cancelled']),
+  notes: z.string().nullable().optional(),
+  createdAt: timestamp.optional(),
+  updatedAt: timestamp.optional(),
+});
+export type Shift = z.infer<typeof shiftSchema>;
 
 /**
  * A period-based plan for a department, as the API returns it.
@@ -109,24 +145,25 @@ export interface Shift {
  * and the nested `shifts` returned by the with-shifts endpoint) stay on the
  * backend type, which extends this one.
  */
-export interface Schedule {
-  id: number;
-  name: string;
-  startDate: Timestamp;
-  endDate: Timestamp;
-  status: 'draft' | 'published' | 'archived';
-  departmentId?: number;
-  departmentName?: string;
-  createdBy?: number;
-  createdByName?: string;
-  publishedBy?: number;
-  publishedAt?: Timestamp;
-  totalShifts?: number;
-  totalAssignments?: number;
-  notes?: string | null;
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
-}
+export const scheduleSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  startDate: timestamp,
+  endDate: timestamp,
+  status: z.enum(['draft', 'published', 'archived']),
+  departmentId: z.number().int().optional(),
+  departmentName: z.string().optional(),
+  createdBy: z.number().int().optional(),
+  createdByName: z.string().optional(),
+  publishedBy: z.number().int().optional(),
+  publishedAt: timestamp.optional(),
+  totalShifts: z.number().int().optional(),
+  totalAssignments: z.number().int().optional(),
+  notes: z.string().nullable().optional(),
+  createdAt: timestamp.optional(),
+  updatedAt: timestamp.optional(),
+});
+export type Schedule = z.infer<typeof scheduleSchema>;
 
 /**
  * A person with a system account, as the API returns it.
@@ -146,23 +183,24 @@ export interface Schedule {
  * `departments`, `skills`, `preferences`, …) stay on the backend type, which
  * extends this one.
  */
-export interface User {
-  id: number;
-  email: string;
-  firstName: string;
-  lastName: string;
-  employeeId?: string;
-  phone?: string;
-  position?: string;
-  hourlyRate?: number;
-  isActive: boolean;
-  lastLogin?: Timestamp;
+export const userSchema = z.object({
+  id: z.number().int(),
+  email: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  employeeId: z.string().optional(),
+  phone: z.string().optional(),
+  position: z.string().optional(),
+  hourlyRate: z.number().optional(),
+  isActive: z.boolean(),
+  lastLogin: timestamp.optional(),
   /** Roles assigned to the user, each optionally scoped to an org unit. */
-  roles?: UserRoleAssignment[];
+  roles: z.array(userRoleAssignmentSchema).optional(),
   /** Flattened, de-duplicated effective permission codes (e.g. `schedule.manage`). */
-  permissions?: string[];
+  permissions: z.array(z.string()).optional(),
   /** Named org for per-org module overrides; null when the user has none. */
-  organizationName?: string | null;
-  createdAt?: Timestamp;
-  updatedAt?: Timestamp;
-}
+  organizationName: z.string().nullable().optional(),
+  createdAt: timestamp.optional(),
+  updatedAt: timestamp.optional(),
+});
+export type User = z.infer<typeof userSchema>;
