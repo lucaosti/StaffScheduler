@@ -30,7 +30,8 @@ export const createAssignmentsRouter = (pool: Pool) => {
 // from a schema, and the listing is bounded — see AssignmentService for why an
 // oversized unpaginated request is refused rather than truncated.
 router.get('/', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), asyncHandler(async (req: Request, res: Response) => {
-  const filters = res.locals.query;
+  // page/pageSize belong to the pagination envelope, not to the SQL filters.
+  const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
   const pagination = parsePagination(req);
 
   if (pagination) {

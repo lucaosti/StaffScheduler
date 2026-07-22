@@ -18,15 +18,14 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, idAndUserIdParam, createOnCallPeriodBody, updateOnCallPeriodBody, onCallAssignBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, idAndUserIdParam, createOnCallPeriodBody, updateOnCallPeriodBody, onCallAssignBody, onCallMineQuery, onCallPeriodListQuery } from '../schemas';
 import { OnCallService } from '../services/OnCallService';
 
 const error = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
 };
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const createOnCallRouter = (pool: Pool): Router => {
   const router = Router();
@@ -34,25 +33,19 @@ export const createOnCallRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.get('/me', asyncHandler(async (req: Request, res: Response) => {
-    const rangeStart = req.query.start as string | undefined;
-    const rangeEnd = req.query.end as string | undefined;
-    if (rangeStart && !ISO_DATE_RE.test(rangeStart)) return error(res, 400, 'VALIDATION_ERROR', 'start must be an ISO date (YYYY-MM-DD)');
-    if (rangeEnd && !ISO_DATE_RE.test(rangeEnd)) return error(res, 400, 'VALIDATION_ERROR', 'end must be an ISO date (YYYY-MM-DD)');
+  router.get('/me', validateQuery(onCallMineQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { start: rangeStart, end: rangeEnd } = res.locals.query;
     const data = await service.listForUser(req.user!.id, { rangeStart, rangeEnd });
     res.json({ success: true, data });
   }));
 
   // Read access mirrors GET /shifts (schedule.read): on-call periods are
   // schedule-adjacent data, not privileged like reports/audit/settings.
-  router.get('/periods', requirePermission('schedule.read'), asyncHandler(async (req: Request, res: Response) => {
-    const rangeStart = req.query.start as string | undefined;
-    const rangeEnd = req.query.end as string | undefined;
-    if (rangeStart && !ISO_DATE_RE.test(rangeStart)) return error(res, 400, 'VALIDATION_ERROR', 'start must be an ISO date (YYYY-MM-DD)');
-    if (rangeEnd && !ISO_DATE_RE.test(rangeEnd)) return error(res, 400, 'VALIDATION_ERROR', 'end must be an ISO date (YYYY-MM-DD)');
+  router.get('/periods', requirePermission('schedule.read'), validateQuery(onCallPeriodListQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const { start: rangeStart, end: rangeEnd, departmentId, status } = res.locals.query;
     const data = await service.listPeriods({
-      departmentId: req.query.departmentId ? Number(req.query.departmentId) : undefined,
-      status: req.query.status as never,
+      departmentId,
+      status: status as never,
       rangeStart,
       rangeEnd,
     });

@@ -18,12 +18,14 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   idParam,
   responsibilityRuleCreateBody as createRuleBody,
   responsibilityRuleUpdateBody as updateRuleBody,
   responsibilityRuleBulkBody as bulkBody,
+  responsibilityRuleListQuery,
+  responsibilityRuleResolveQuery,
 } from '../schemas';
 import { ResponsibilityRuleService } from '../services/ResponsibilityRuleService';
 import { User } from '../types';
@@ -35,37 +37,22 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   // List rules
-  router.get('/', requirePermission('responsibility.read'), asyncHandler(async (req: Request, res: Response) => {
-    const { subjectType, permissionCode, responsibleOrgUnitId, isActive } = req.query;
-    const rules = await svc.list({
-      subjectType: subjectType as string | undefined,
-      permissionCode: permissionCode as string | undefined,
-      responsibleOrgUnitId: responsibleOrgUnitId ? Number(responsibleOrgUnitId) : undefined,
-      isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
-    });
+  router.get('/', requirePermission('responsibility.read'), validateQuery(responsibilityRuleListQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const rules = await svc.list(res.locals.query);
     res.json({ success: true, data: rules });
   }));
 
   // Resolve responsible users for a given subject + permission
-  router.get('/resolve', requirePermission('responsibility.read'), asyncHandler(async (req: Request, res: Response) => {
-    const { orgUnitId, permissionCode } = req.query;
-
-    if (!permissionCode) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'permissionCode is required' } });
-    }
-
-    const departmentIds = req.query.departmentIds
-      ? String(req.query.departmentIds).split(',').map(Number).filter(Boolean)
-      : [];
-    const roleIds = req.query.roleIds
-      ? String(req.query.roleIds).split(',').map(Number).filter(Boolean)
-      : [];
+  router.get('/resolve', requirePermission('responsibility.read'), validateQuery(responsibilityRuleResolveQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const { permissionCode, orgUnitId, departmentIds: rawDepartmentIds, roleIds: rawRoleIds } = res.locals.query;
+    const idList = (raw?: string) =>
+      raw ? String(raw).split(',').map(Number).filter(Boolean) : [];
 
     const userIds = await svc.resolveResponsibleUsers({
-      permissionCode: permissionCode as string,
-      orgUnitId: orgUnitId ? Number(orgUnitId) : null,
-      departmentIds,
-      roleIds,
+      permissionCode,
+      orgUnitId: orgUnitId ?? null,
+      departmentIds: idList(rawDepartmentIds),
+      roleIds: idList(rawRoleIds),
     });
 
     res.json({ success: true, data: { userIds } });

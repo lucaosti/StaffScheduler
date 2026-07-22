@@ -3,10 +3,17 @@
 /**
  * OpenAPI request-body generator — Zod is the single source of truth.
  *
- * What it does: rewrites every `requestBody` JSON schema in
- * `backend/openapi/openapi.json` from the Zod schemas each route actually
- * validates with, and fails loudly on any mismatch between the spec and the
- * code. Curated prose (summaries, descriptions, response documentation)
+ * What it does: rewrites every `requestBody` JSON schema — and every `query`
+ * parameter — in `backend/openapi/openapi.json` from the Zod schemas each
+ * route actually validates with, and fails loudly on any mismatch between the
+ * spec and the code.
+ *
+ * Query parameters were added here after six endpoints were found documenting
+ * filters their handlers never read: bodies were generated and drift-checked,
+ * parameters were curated prose that nothing verified, so they drifted. Path
+ * parameters stay hand-written (they are structural, and `validateParams`
+ * schemas carry no descriptions worth publishing); only `in: 'query'` entries
+ * are generated, and curated `description` text on them is preserved. Curated prose (summaries, descriptions, response documentation)
  * stays hand-written in the spec file; the machine-checkable part — what the
  * API accepts — is generated.
  *
@@ -89,7 +96,10 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
 interface FoundOp {
   method: string;
   specPath: string;
-  schemaName: string;
+  /** Schema enforced by validateBody, if any. */
+  schemaName?: string;
+  /** Schema enforced by validateQuery, if any. */
+  querySchemaName?: string;
   source: string;
 }
 
@@ -125,14 +135,20 @@ const scanRoutes = (): FoundOp[] => {
     while ((m = re.exec(source))) {
       const [, method, routePath, middlewares] = m;
       const body = middlewares.match(/validateBody\((\w+)\)/);
-      if (!body) continue;
-      const localName = body[1];
-      const schemaName = aliases.get(localName) ?? localName;
+      const query = middlewares.match(/validateQuery\((\w+)\)/);
+      if (!body && !query) continue;
+      const resolve = (local: string) => aliases.get(local) ?? local;
       const specPath = (prefix + (routePath === '/' ? '' : routePath)).replace(
         /:(\w+)\??/g,
         '{$1}'
       );
-      found.push({ method, specPath, schemaName, source: `${file} ${variable}.${method}('${routePath}')` });
+      found.push({
+        method,
+        specPath,
+        schemaName: body ? resolve(body[1]) : undefined,
+        querySchemaName: query ? resolve(query[1]) : undefined,
+        source: `${file} ${variable}.${method}('${routePath}')`,
+      });
     }
   }
   return found;
@@ -145,36 +161,85 @@ const main = (): void => {
   const errors: string[] = [];
   const generatedFor = new Set<string>();
 
-  for (const op of ops) {
-    const schema = (sharedSchemas as Record<string, unknown>)[op.schemaName];
+  const generatedQueryFor = new Set<string>();
+
+  const resolveSchema = (name: string, kind: string, op: FoundOp): z.ZodType | null => {
+    const schema = (sharedSchemas as Record<string, unknown>)[name];
     if (!(schema instanceof z.ZodType)) {
-      errors.push(`${op.source}: validateBody schema '${op.schemaName}' is not exported by @staff-scheduler/shared`);
-      continue;
+      errors.push(`${op.source}: ${kind} schema '${name}' is not exported by @staff-scheduler/shared`);
+      return null;
     }
+    return schema;
+  };
+
+  for (const op of ops) {
     const pathItem = spec.paths[op.specPath];
     const operation = pathItem?.[op.method];
     if (!operation) {
       errors.push(`${op.source}: no OpenAPI operation for '${op.method} ${op.specPath}' — document the endpoint`);
       continue;
     }
-    const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>;
-    delete jsonSchema.$schema; // OpenAPI 3.1 sets the dialect document-wide.
-    operation.requestBody = {
-      required: true,
-      content: {
-        'application/json': {
-          schema: jsonSchema,
-        },
-      },
-    };
-    generatedFor.add(`${op.method} ${op.specPath}`);
+
+    if (op.schemaName) {
+      const schema = resolveSchema(op.schemaName, 'validateBody', op);
+      if (schema) {
+        const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>;
+        delete jsonSchema.$schema; // OpenAPI 3.1 sets the dialect document-wide.
+        operation.requestBody = {
+          required: true,
+          content: { 'application/json': { schema: jsonSchema } },
+        };
+        generatedFor.add(`${op.method} ${op.specPath}`);
+      }
+    }
+
+    if (op.querySchemaName) {
+      const schema = resolveSchema(op.querySchemaName, 'validateQuery', op);
+      if (schema) {
+        const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as {
+          properties?: Record<string, Record<string, unknown>>;
+          required?: string[];
+        };
+        // Curated descriptions are the one part of a parameter worth writing by
+        // hand, so they survive regeneration; everything else is derived.
+        const existing = new Map<string, string>(
+          ((operation.parameters ?? []) as Array<Record<string, unknown>>)
+            .filter((prm) => prm.in === 'query' && typeof prm.description === 'string')
+            .map((prm) => [prm.name as string, prm.description as string])
+        );
+        const nonQuery = ((operation.parameters ?? []) as Array<Record<string, unknown>>)
+          .filter((prm) => prm.in !== 'query');
+        const required = new Set(jsonSchema.required ?? []);
+        const queryParams = Object.entries(jsonSchema.properties ?? {}).map(([name, propSchema]) => {
+          const { description, ...rest } = propSchema as { description?: string };
+          const param: Record<string, unknown> = { name, in: 'query' };
+          const text = existing.get(name) ?? description;
+          if (text) param.description = text;
+          if (required.has(name)) param.required = true;
+          param.schema = rest;
+          return param;
+        });
+        operation.parameters = [...nonQuery, ...queryParams];
+        generatedQueryFor.add(`${op.method} ${op.specPath}`);
+      }
+    }
   }
 
-  for (const [specPath, methods] of Object.entries(spec.paths as Record<string, Record<string, { requestBody?: unknown }>>)) {
+  type SpecOperation = { requestBody?: unknown; parameters?: Array<{ in?: string }> };
+  for (const [specPath, methods] of Object.entries(spec.paths as Record<string, Record<string, SpecOperation>>)) {
     for (const [method, operation] of Object.entries(methods)) {
       if (operation?.requestBody && !generatedFor.has(`${method} ${specPath}`)) {
         errors.push(
           `spec documents a request body for '${method} ${specPath}' but no route validates one — remove it from the spec or add validateBody`
+        );
+      }
+      // The check that would have caught the original defect: a documented
+      // query parameter with no validateQuery behind it means the spec
+      // promises a filter nothing parses.
+      const hasQueryParams = (operation?.parameters ?? []).some((prm) => prm?.in === 'query');
+      if (hasQueryParams && !generatedQueryFor.has(`${method} ${specPath}`)) {
+        errors.push(
+          `spec documents query parameters for '${method} ${specPath}' but no route validates them — remove them from the spec or add validateQuery`
         );
       }
     }
@@ -187,7 +252,10 @@ const main = (): void => {
   }
 
   fs.writeFileSync(SPEC_PATH, JSON.stringify(spec, null, 2) + '\n');
-  console.log(`openapi.json regenerated: ${generatedFor.size} request bodies from shared Zod schemas`);
+  console.log(
+    `openapi.json regenerated: ${generatedFor.size} request bodies and ` +
+      `${generatedQueryFor.size} query contracts from shared Zod schemas`
+  );
 };
 
 main();
