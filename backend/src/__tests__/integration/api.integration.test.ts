@@ -843,11 +843,29 @@ describe('workflow actions run against the real schema', () => {
   const stamp = (): string => `${Date.now()}${process.hrtime()[1]}`;
 
   beforeAll(async () => {
+    // The seeded approval workflows for TimeOff.Request and Loan.Request use
+    // the `unit_manager` scope, so filing refuses (409) unless the requester
+    // has a primary org unit whose manager can decide. Wire that here: the
+    // admin manages orgUnitId and belongs to it primarily, and the loan's
+    // target unit gets a manager too. Without this the fixture is undecidable,
+    // which is a fixture gap — the app's guard against it is correct — not a
+    // schema defect, which is what the `file` helper's loud failure showed.
     const [r] = await admin.query<mysql.ResultSetHeader>(
-      `INSERT INTO org_units (name, is_active) VALUES (?, 1)`,
-      [`wf-unit-${stamp()}`]
+      `INSERT INTO org_units (name, manager_user_id, is_active) VALUES (?, ?, 1)`,
+      [`wf-unit-${stamp()}`, userId]
     );
     secondOrgUnit = r.insertId;
+    await admin.query(`UPDATE org_units SET manager_user_id = ? WHERE id = ?`, [userId, orgUnitId]);
+    await admin.query(
+      `INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE is_primary = 1`,
+      [userId, orgUnitId]
+    );
+    await admin.query(
+      `INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE is_primary = 1`,
+      [delegateeId, orgUnitId]
+    );
   });
 
   /** Files a request through its endpoint and returns the created id. */
