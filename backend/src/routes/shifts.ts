@@ -4,7 +4,7 @@ import { ShiftService } from '../services/ShiftService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { validateParams, validateBody } from '../middleware/validation';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
   scheduleIdParam,
@@ -13,6 +13,7 @@ import {
   updateShiftBody,
   createShiftTemplateBody,
   updateShiftTemplateBody,
+  shiftListQuery,
 } from '../schemas';
 
 export const createShiftsRouter = (pool: Pool) => {
@@ -93,15 +94,17 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 // Shift Routes
 
 // Get all shifts
-router.get('/', authenticate, requirePermission('schedule.read'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(shiftListQuery), asyncHandler(async (req: Request, res: Response) => {
   const scope = req.user?.allowedOrgUnitIds;
+  const { date, startDate, endDate, ...rest } = res.locals.query;
+  // `date` is the documented single-day convenience form; it was published but
+  // never read. An explicit range wins if both are supplied.
   const filters = {
     ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
-    ...(req.query.scheduleId ? { scheduleId: Number(req.query.scheduleId) } : {}),
-    ...(req.query.departmentId ? { departmentId: Number(req.query.departmentId) } : {}),
-    ...(req.query.startDate ? { startDate: req.query.startDate as string } : {}),
-    ...(req.query.endDate ? { endDate: req.query.endDate as string } : {}),
-    ...(req.query.status ? { status: req.query.status as string } : {}),
+    ...rest,
+    ...(date ? { startDate: date, endDate: date } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
   };
   const pagination = parsePagination(req);
   if (pagination) {

@@ -5,8 +5,8 @@ import { RbacService } from '../services/RbacService';
 import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createUserBody, updateUserBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, createUserBody, updateUserBody, userListQuery } from '../schemas';
 import { UpdateUserRequest, User } from '../types';
 
 export const createUsersRouter = (pool: Pool) => {
@@ -34,14 +34,15 @@ export const createUsersRouter = (pool: Pool) => {
   };
 
   // Get all users (scoped by the caller's permissions)
-  router.get('/', authenticate, asyncHandler(async (req, res) => {
+  router.get('/', authenticate, validateQuery(userListQuery), asyncHandler(async (req, res) => {
     const user = req.user as User;
-    const { search, department, roleId } = req.query;
+    const { search, department, roleId, isActive } = res.locals.query;
 
     const filters = {
-      search: search as string | undefined,
-      departmentId: department ? parseInt(department as string) : undefined,
-      roleId: roleId ? parseInt(roleId as string) : undefined,
+      search,
+      departmentId: department ? parseInt(department, 10) : undefined,
+      roleId,
+      isActive,
     };
     const pagination = parsePagination(req);
 

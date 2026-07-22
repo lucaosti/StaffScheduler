@@ -18,15 +18,14 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModuleForUser, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
-import { clockInBody, optionalNotesBody, idParam } from '../schemas';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
+import { clockInBody, optionalNotesBody, idParam, costEstimateQuery, attendanceListQuery } from '../schemas';
 import { AttendanceService } from '../services/AttendanceService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
 };
 
-const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const createAttendanceRouter = (pool: Pool): Router => {
   const router = Router();
@@ -45,32 +44,22 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     res.json({ success: true, data: updated });
   }));
 
-  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), asyncHandler(async (req: Request, res: Response) => {
-    const start = req.query.startDate as string | undefined;
-    const end = req.query.endDate as string | undefined;
-    if (!start || !end || !ISO_DATE_RE.test(start) || !ISO_DATE_RE.test(end)) {
-      return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate (YYYY-MM-DD) are required');
-    }
-    const departmentId = req.query.departmentId ? Number(req.query.departmentId) : undefined;
-    const estimate = await service.getCostEstimate({ startDate: start, endDate: end, departmentId });
+  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), validateQuery(costEstimateQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const { startDate, endDate, departmentId } = res.locals.query;
+    const estimate = await service.getCostEstimate({ startDate, endDate, departmentId });
     res.json({ success: true, data: estimate });
   }));
 
-  router.get('/', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(attendanceListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { userId, status, startDate: rangeStart, endDate: rangeEnd } = res.locals.query;
+    // Approvers may list anyone's records; everyone else is pinned to their own.
     const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
-    const filters = isApprover
-      ? {
-          userId: req.query.userId ? Number(req.query.userId) : undefined,
-          status: req.query.status as never,
-          rangeStart: req.query.startDate as string | undefined,
-          rangeEnd: req.query.endDate as string | undefined,
-        }
-      : {
-          userId: req.user!.id,
-          status: req.query.status as never,
-          rangeStart: req.query.startDate as string | undefined,
-          rangeEnd: req.query.endDate as string | undefined,
-        };
+    const filters = {
+      userId: isApprover ? userId : req.user!.id,
+      status: status as never,
+      rangeStart,
+      rangeEnd,
+    };
     const list = await service.list(filters);
     res.json({ success: true, data: list });
   }));

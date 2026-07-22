@@ -8,8 +8,8 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModuleForUser } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import { validateParams, validateQuery } from '../middleware/validation';
+import { idParam, auditLogListQuery, auditLogExportQuery } from '../schemas';
 import { AuditLogService, AuditLogFilters } from '../services/AuditLogService';
 
 export const createAuditLogsRouter = (pool: Pool): Router => {
@@ -18,37 +18,14 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requireModuleForUser('audit'), requirePermission('audit.read'));
 
-  router.get('/', asyncHandler(async (req: Request, res: Response) => {
-    // Support both legacy ?limit/offset and the new ?page/pageSize convention.
-    const rawPage = req.query.page ? Number(req.query.page) : null;
-    const rawSize = req.query.pageSize ? Number(req.query.pageSize) : null;
-    const limit = rawSize ?? (req.query.limit ? Number(req.query.limit) : undefined);
-    const offset = rawPage != null && rawSize != null
-      ? (rawPage - 1) * rawSize
-      : (req.query.offset ? Number(req.query.offset) : undefined);
+  router.get('/', validateQuery(auditLogListQuery), asyncHandler(async (_req: Request, res: Response) => {
+    // Both the legacy ?limit/offset pairing and the ?page/pageSize convention
+    // are accepted; page/pageSize wins when both are supplied.
+    const { page: rawPage, pageSize: rawSize, limit: rawLimit, offset: rawOffset, ...filters } = res.locals.query;
+    const limit = rawSize ?? rawLimit;
+    const offset = rawPage != null && rawSize != null ? (rawPage - 1) * rawSize : rawOffset;
 
-    const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-    const rawFromDate = req.query.fromDate as string | undefined;
-    const rawToDate = req.query.toDate as string | undefined;
-    if (rawFromDate && !ISO_DATE_RE.test(rawFromDate)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'fromDate must be an ISO date (YYYY-MM-DD)' } });
-    }
-    if (rawToDate && !ISO_DATE_RE.test(rawToDate)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'toDate must be an ISO date (YYYY-MM-DD)' } });
-    }
-
-    const result = await service.list({
-      userId: req.query.userId ? Number(req.query.userId) : undefined,
-      onBehalfOfUserId: req.query.onBehalfOfUserId ? Number(req.query.onBehalfOfUserId) : undefined,
-      action: req.query.action as string | undefined,
-      entityType: req.query.entityType as string | undefined,
-      entityId: req.query.entityId ? Number(req.query.entityId) : undefined,
-      fromDate: rawFromDate,
-      toDate: rawToDate,
-      requestId: req.query.requestId as string | undefined,
-      limit,
-      offset,
-    });
+    const result = await service.list({ ...filters, limit, offset });
 
     if (rawPage != null && rawSize != null) {
       const pageSize = rawSize;
@@ -69,32 +46,9 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
 
   // /export must be registered before /:id to prevent Express from matching
   // the literal string "export" as a numeric ID parameter.
-  router.get('/export', asyncHandler(async (req: Request, res: Response) => {
-    const format = (req.query.format as string | undefined)?.toLowerCase() ?? 'json';
-    if (format !== 'csv' && format !== 'json') {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'format must be csv or json' } });
-    }
-
-    const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-    const rawFromDate = req.query.fromDate as string | undefined;
-    const rawToDate = req.query.toDate as string | undefined;
-    if (rawFromDate && !ISO_DATE_RE.test(rawFromDate)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'fromDate must be YYYY-MM-DD' } });
-    }
-    if (rawToDate && !ISO_DATE_RE.test(rawToDate)) {
-      return res.status(400).json({ success: false, error: { code: 'VALIDATION_ERROR', message: 'toDate must be YYYY-MM-DD' } });
-    }
-
-    const filters: Omit<AuditLogFilters, 'limit' | 'offset'> = {
-      userId: req.query.userId ? Number(req.query.userId) : undefined,
-      onBehalfOfUserId: req.query.onBehalfOfUserId ? Number(req.query.onBehalfOfUserId) : undefined,
-      action: req.query.action as string | undefined,
-      entityType: req.query.entityType as string | undefined,
-      entityId: req.query.entityId ? Number(req.query.entityId) : undefined,
-      fromDate: rawFromDate,
-      toDate: rawToDate,
-      requestId: req.query.requestId as string | undefined,
-    };
+  router.get('/export', validateQuery(auditLogExportQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const { format = 'json', ...rest } = res.locals.query;
+    const filters: Omit<AuditLogFilters, 'limit' | 'offset'> = rest;
 
     const entries = await service.exportAll(filters);
 
