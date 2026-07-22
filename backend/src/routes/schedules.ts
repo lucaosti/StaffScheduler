@@ -18,6 +18,7 @@ import {
   duplicateScheduleBody,
   updateScheduleBody,
   scheduleListQuery,
+  auditReasonBody,
 } from '../schemas';
 
 export const createSchedulesRouter = (pool: Pool) => {
@@ -164,10 +165,10 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHand
 }));
 
 // Publish schedule
-router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+  const reason = res.locals.body.reason;
   const schedule = await scheduleService.publishSchedule(id, req.user!.id, reason);
   res.json({
     success: true,

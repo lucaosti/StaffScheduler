@@ -136,7 +136,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         requireAll?: boolean;
@@ -408,7 +408,9 @@ export interface paths {
         /** List assignments for a department */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    status?: "pending" | "confirmed" | "completed" | "cancelled";
+                };
                 header?: never;
                 path: {
                     departmentId: number;
@@ -590,7 +592,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         status?: string;
@@ -623,7 +625,13 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason?: string;
+                    };
+                };
+            };
             responses: {
                 /** @description Deleted. */
                 200: {
@@ -1679,7 +1687,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         justification?: string | null;
@@ -1734,7 +1742,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         justification?: string | null;
@@ -2118,7 +2126,13 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        justification?: string | null;
+                    };
+                };
+            };
             responses: {
                 /** @description Delegation revoked. */
                 200: {
@@ -2252,7 +2266,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         name?: string;
@@ -2888,7 +2902,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         /** Format: email */
@@ -3496,7 +3510,10 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    unreadOnly?: "0" | "1";
+                    limit?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -3788,7 +3805,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         date?: string;
@@ -3988,7 +4005,12 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    userId?: number;
+                    toOrgUnitId?: number;
+                    fromOrgUnitId?: number;
+                    status?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -4066,7 +4088,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -4151,7 +4173,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -4325,7 +4347,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         name?: string;
@@ -4823,7 +4845,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         /** @enum {string} */
@@ -4866,7 +4888,13 @@ export interface paths {
         /** List policy exceptions */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    policyId?: number;
+                    targetType?: string;
+                    targetId?: number;
+                    status?: string;
+                    requestedByUserId?: number;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -4938,7 +4966,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -5023,7 +5051,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -5134,7 +5162,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         /** @enum {string} */
@@ -5223,7 +5251,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         maxHoursPerWeek?: number;
@@ -5294,7 +5322,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         maxHoursPerWeek?: number;
@@ -5618,7 +5646,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         /** @enum {string} */
@@ -5844,7 +5872,9 @@ export interface paths {
          */
         delete: {
             parameters: {
-                query?: never;
+                query?: {
+                    scopeOrgUnitId?: number;
+                };
                 header?: never;
                 path: {
                     userId: number;
@@ -5852,7 +5882,13 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        justification?: string | null;
+                    };
+                };
+            };
             responses: {
                 /** @description Role revoked. */
                 200: {
@@ -5910,7 +5946,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         name?: string;
@@ -6177,7 +6213,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         name?: string;
@@ -6437,7 +6473,13 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        reason?: string;
+                    };
+                };
+            };
             responses: {
                 /** @description Published. */
                 200: {
@@ -6828,7 +6870,10 @@ export interface paths {
         /** List shift swap requests */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    userId?: number;
+                    status?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -6938,7 +6983,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -7023,7 +7068,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -7323,7 +7368,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         name?: string;
@@ -7419,7 +7464,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         date?: string;
@@ -7689,7 +7734,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -7771,7 +7816,7 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string;
@@ -7822,7 +7867,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -8002,7 +8047,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -8057,7 +8102,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -8109,7 +8154,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         notes?: string | null;
@@ -8276,7 +8321,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         /** Format: email */
@@ -8695,7 +8740,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         note?: string | null;
@@ -8743,7 +8788,7 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody: {
+            requestBody?: {
                 content: {
                     "application/json": {
                         note?: string | null;

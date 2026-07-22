@@ -339,6 +339,56 @@ export const timeOffListQuery = z.object({
   userId: positiveInt.optional(),
 });
 
+/**
+ * Free-text audit justification on a destructive action (role revocation,
+ * delegation removal). Optional, but bounded: these were read straight off
+ * `req.body` with only a `typeof === 'string'` guard, so they were
+ * undocumented and unbounded in length.
+ */
+export const auditJustificationBody = z.object({
+  justification: z.string().max(2000).nullable().optional(),
+});
+
+/** Free-text reason recorded with a publish or a deletion. */
+export const auditReasonBody = z.object({
+  reason: z.string().max(2000).optional(),
+});
+
+export const assignmentsByDepartmentQuery = z.object({
+  status: z.enum(['pending', 'confirmed', 'completed', 'cancelled']).optional(),
+});
+
+export const shiftSwapListQuery = z.object({
+  userId: positiveInt.optional(),
+  status: shortString.optional(),
+});
+
+export const notificationListQuery = z.object({
+  /** `1` means "unread only"; kept as the historical spelling. */
+  unreadOnly: z.enum(['0', '1']).optional(),
+  limit: z.coerce.number().int().positive().max(200).optional(),
+});
+
+export const employeeLoanListQuery = z.object({
+  userId: positiveInt.optional(),
+  toOrgUnitId: positiveInt.optional(),
+  fromOrgUnitId: positiveInt.optional(),
+  status: shortString.optional(),
+});
+
+export const policyExceptionListQuery = z.object({
+  policyId: positiveInt.optional(),
+  targetType: shortString.optional(),
+  targetId: positiveInt.optional(),
+  status: shortString.optional(),
+  requestedByUserId: positiveInt.optional(),
+});
+
+/** Scoped role revocation targets one org-unit grant rather than all of them. */
+export const roleRevokeQuery = z.object({
+  scopeOrgUnitId: positiveInt.optional(),
+});
+
 export const pendingApprovalListQuery = z.object({
   status: shortString.optional(),
 });
