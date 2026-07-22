@@ -104,9 +104,21 @@ describe('employeeService', () => {
 describe('shiftService', () => {
   describe('getShifts', () => {
     it('passes filters as query params', async () => {
-      await shiftService.getShifts({ status: 'open', page: 1, limit: 20 });
+      // The names below are the ones the endpoint's query schema accepts;
+      // `limit` and `department` used to be sent and were never parsed.
+      await shiftService.getShifts({
+        status: 'open',
+        departmentId: 3,
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        page: 1,
+        pageSize: 20,
+      });
       expect(lastUrl()).toContain('status=open');
+      expect(lastUrl()).toContain('departmentId=3');
+      expect(lastUrl()).toContain('startDate=2026-05-01');
       expect(lastUrl()).toContain('page=1');
+      expect(lastUrl()).toContain('pageSize=20');
     });
 
     it('works with no filters', async () => {

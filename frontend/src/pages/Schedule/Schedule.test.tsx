@@ -42,6 +42,9 @@ const Schedule = require('./Schedule').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
+/** The single shift every month-grid assertion is written against. */
+let monthShiftFixture: Record<string, unknown>;
+
 describe('<Schedule />', () => {
   beforeEach(() => {
     const today = new Date();
@@ -61,20 +64,17 @@ describe('<Schedule />', () => {
         },
       ])
     );
-    mockGetShifts.mockResolvedValue(
-      ok([
-        {
-          id: 100,
-          name: 'Day',
-          date: todayIso,
-          startTime: '08:00',
-          endTime: '16:00',
-          departmentId: 10,
-          minStaff: 2,
-          status: 'open',
-        },
-      ])
-    );
+    monthShiftFixture = {
+      id: 100,
+      name: 'Day',
+      date: todayIso,
+      startTime: '08:00',
+      endTime: '16:00',
+      departmentId: 10,
+      minStaff: 2,
+      status: 'open',
+    };
+    mockGetShifts.mockResolvedValue(ok([monthShiftFixture]));
 
     mockGetSchedules.mockResolvedValue(
       ok([
@@ -204,12 +204,21 @@ describe('<Schedule />', () => {
     expect(lastCallArgs).toHaveProperty('endDate');
   });
 
-  it('filters the monthly grid by department', async () => {
+  it('filters the monthly grid by department through the request, not the response', async () => {
     mockGetDepartments.mockResolvedValueOnce(
       ok([
         { id: 10, name: 'Emergency Medicine' },
         { id: 20, name: 'Operations' },
       ])
+    );
+    // The endpoint accepts departmentId, so the grid asks the server for the
+    // narrowed set instead of fetching everything and discarding rows. The
+    // fixture shift belongs to department 10, so a request for 20 comes back
+    // empty and the grid clears.
+    mockGetShifts.mockImplementation((filters: { departmentId?: number } = {}) =>
+      Promise.resolve(
+        ok(filters.departmentId && filters.departmentId !== 10 ? [] : [monthShiftFixture])
+      )
     );
 
     render(<Schedule />);
@@ -219,10 +228,17 @@ describe('<Schedule />', () => {
     const table = await screen.findByRole('table', { name: /monthly shift calendar/i });
     expect(within(table).getAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length).toBeGreaterThan(0);
 
-    // The fixture shift belongs to department 10; selecting the unrelated
-    // department 20 should empty the grid.
     await userEvent.selectOptions(screen.getByRole('combobox'), '20');
-    expect(within(table).queryAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length).toBe(0);
+
+    await waitFor(() => {
+      const lastArgs = mockGetShifts.mock.calls[mockGetShifts.mock.calls.length - 1][0];
+      expect(lastArgs).toMatchObject({ departmentId: 20 });
+    });
+    await waitFor(() => {
+      expect(
+        within(table).queryAllByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00')).length
+      ).toBe(0);
+    });
   });
 });
 

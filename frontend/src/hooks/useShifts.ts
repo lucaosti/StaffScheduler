@@ -26,6 +26,37 @@ interface ShiftsPageData {
 
 const shiftsPageKey = ['shifts-page'] as const;
 
+/**
+ * Shifts for an explicit date range, optionally narrowed to one department.
+ *
+ * The Schedule page's month grid used to load this with a hand-rolled effect
+ * (`setMonthLoading`, a `cancelled` flag, an exhaustive-deps suppression) —
+ * the one page left outside the convention the rest of the frontend follows,
+ * and therefore the one view with no caching or deduplication. `enabled` gates
+ * it so nothing is fetched until the month view is actually shown.
+ *
+ * The department filter is pushed into the query rather than applied to the
+ * response: the endpoint has accepted `departmentId` since its query contract
+ * was declared as a schema, so filtering client-side would fetch rows only to
+ * discard them.
+ */
+export function useShiftsInRange(
+  range: { startDate: string; endDate: string; departmentId?: number },
+  options: { enabled?: boolean } = {}
+) {
+  return useQuery({
+    queryKey: ['shifts-range', range.startDate, range.endDate, range.departmentId ?? null] as const,
+    enabled: options.enabled ?? true,
+    queryFn: async (): Promise<Shift[]> => {
+      const response = await shiftService.getShifts(range);
+      if (!response.success || !response.data) {
+        throw new ApiError(response.error?.message ?? 'Failed to load shifts', 500);
+      }
+      return response.data;
+    },
+  });
+}
+
 /** The Shifts page's three lists as one cached unit. */
 export function useShiftsPageData() {
   return useQuery({
