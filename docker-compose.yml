@@ -171,6 +171,76 @@ services:
     networks:
       - staff_scheduler_network
 
+  # ── Observability stack (opt-in: docker compose --profile ops up) ──────────
+  # Prometheus scrapes the backend /metrics, Grafana visualises it (and Loki
+  # logs), Loki stores logs, Promtail ships the backend's log file to Loki.
+  # All on the internal network; only Grafana is published to the host.
+  prometheus:
+    profiles: ["ops"]
+    image: prom/prometheus:v3.1.0
+    container_name: staff_scheduler_prometheus
+    restart: unless-stopped
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - staff_scheduler_network
+    mem_limit: 512m
+    cpus: 0.5
+
+  grafana:
+    profiles: ["ops"]
+    image: grafana/grafana:11.4.0
+    container_name: staff_scheduler_grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3002}:3000"
+    networks:
+      - staff_scheduler_network
+    mem_limit: 512m
+    cpus: 0.5
+
+  loki:
+    profiles: ["ops"]
+    image: grafana/loki:3.3.2
+    container_name: staff_scheduler_loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yml
+    volumes:
+      - ./ops/loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    networks:
+      - staff_scheduler_network
+    mem_limit: 512m
+    cpus: 0.5
+
+  promtail:
+    profiles: ["ops"]
+    image: grafana/promtail:3.3.2
+    container_name: staff_scheduler_promtail
+    restart: unless-stopped
+    depends_on:
+      - loki
+    command: -config.file=/etc/promtail/promtail-config.yml
+    volumes:
+      - ./ops/promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      # Same volume the backend writes its Winston logs to, mounted read-only.
+      - backend_logs:/app/logs:ro
+    networks:
+      - staff_scheduler_network
+    mem_limit: 128m
+    cpus: 0.25
+
 # Persistent volumes
 volumes:
   mysql_data:
@@ -180,6 +250,12 @@ volumes:
   backend_reports:
     driver: local
   backend_uploads:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+  loki_data:
     driver: local
 
 # Network configuration
