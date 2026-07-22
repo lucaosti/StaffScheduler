@@ -417,54 +417,61 @@ describe('every fixture-free GET runs against the real schema', () => {
 describe('mutations run against the real schema', () => {
   const unique = (prefix: string): string => `${prefix}-${Date.now()}-${Math.floor(process.hrtime()[1] / 1000)}`;
 
+  /**
+   * Bodies are thunks, not literals. `it.each` evaluates its table when the
+   * module is collected — before `beforeAll` has inserted the fixtures — so a
+   * literal referencing `departmentId` captured `undefined` and the request was
+   * rejected by validation before reaching any SQL. That is exactly the silent
+   * non-coverage the 400 assertion below exists to catch, and it caught it.
+   */
   const cases = (): Array<{
     name: string;
     method: 'post' | 'put' | 'patch';
     path: string;
-    body?: Record<string, unknown>;
+    body?: () => Record<string, unknown>;
   }> => [
-    { name: 'POST /departments', method: 'post', path: '/departments', body: { name: unique('Dept') } },
-    { name: 'POST /org/units', method: 'post', path: '/org/units', body: { name: unique('Unit') } },
-    { name: 'POST /roles', method: 'post', path: '/roles', body: { name: unique('Role') } },
+    { name: 'POST /departments', method: 'post', path: '/departments', body: () => ({ name: unique('Dept') }) },
+    { name: 'POST /org/units', method: 'post', path: '/org/units', body: () => ({ name: unique('Unit') }) },
+    { name: 'POST /roles', method: 'post', path: '/roles', body: () => ({ name: unique('Role') }) },
     {
       name: 'POST /users',
       method: 'post',
       path: '/users',
-      body: {
+      body: () => ({
         email: `${unique('user')}@example.com`,
         password: 'Password1!',
         firstName: 'Sweep',
         lastName: 'User',
-      },
+      }),
     },
     {
       name: 'POST /employees',
       method: 'post',
       path: '/employees',
-      body: {
+      body: () => ({
         email: `${unique('emp')}@example.com`,
         password: 'Password1!',
         firstName: 'Sweep',
         lastName: 'Employee',
         departmentIds: [departmentId],
-      },
+      }),
     },
     {
       name: 'POST /schedules',
       method: 'post',
       path: '/schedules',
-      body: {
+      body: () => ({
         name: unique('Schedule'),
         startDate: '2030-01-01',
         endDate: '2030-01-28',
         departmentId,
-      },
+      }),
     },
     {
       name: 'POST /shifts',
       method: 'post',
       path: '/shifts',
-      body: {
+      body: () => ({
         scheduleId,
         departmentId,
         date: '2030-01-02',
@@ -472,87 +479,87 @@ describe('mutations run against the real schema', () => {
         endTime: '17:00',
         minStaff: 1,
         maxStaff: 3,
-      },
+      }),
     },
     {
       name: 'POST /shifts/templates',
       method: 'post',
       path: '/shifts/templates',
-      body: {
+      body: () => ({
         name: unique('Template'),
         departmentId,
         startTime: '09:00',
         endTime: '17:00',
         minStaff: 1,
         maxStaff: 3,
-      },
+      }),
     },
     {
       name: 'POST /assignments',
       method: 'post',
       path: '/assignments',
-      body: { shiftId, userId: delegateeId },
+      body: () => ({ shiftId, userId: delegateeId }),
     },
     {
       name: 'POST /time-off',
       method: 'post',
       path: '/time-off',
-      body: { startDate: '2030-02-01', endDate: '2030-02-03', type: 'vacation' },
+      body: () => ({ startDate: '2030-02-01', endDate: '2030-02-03', type: 'vacation' }),
     },
     {
       name: 'POST /on-call/periods',
       method: 'post',
       path: '/on-call/periods',
-      body: { departmentId, date: '2030-03-01', startTime: '18:00', endTime: '23:00' },
+      body: () => ({ departmentId, date: '2030-03-01', startTime: '18:00', endTime: '23:00' }),
     },
     {
       name: 'POST /policies',
       method: 'post',
       path: '/policies',
-      body: { scopeType: 'global', policyKey: unique('policy_key'), policyValue: 1 },
+      body: () => ({ scopeType: 'global', policyKey: unique('policy_key'), policyValue: 1 }),
     },
     {
       name: 'POST /responsibility-rules',
       method: 'post',
       path: '/responsibility-rules',
-      body: {
+      body: () => ({
         subjectType: 'department',
         permissionCode: 'schedule.read',
         responsibleOrgUnitId: orgUnitId,
-      },
+      }),
     },
     {
       name: 'POST /approval-workflows',
       method: 'post',
       path: '/approval-workflows',
-      body: {
+      body: () => ({
         changeType: unique('change_type').slice(0, 40),
         steps: [{ stepOrder: 1, approverType: 'role', approverRoleId: null, approverUserId: null }],
-      },
+      }),
     },
     {
       name: 'POST /policies/validate/assignment',
       method: 'post',
       path: '/policies/validate/assignment',
-      body: { shiftId, userId: delegateeId },
+      body: () => ({ shiftId, userId: delegateeId }),
     },
     { name: 'POST /calendar/token', method: 'post', path: '/calendar/token' },
-    { name: 'POST /attendance/clock-in', method: 'post', path: '/attendance/clock-in', body: {} },
+    { name: 'POST /attendance/clock-in', method: 'post', path: '/attendance/clock-in', body: () => ({}) },
     { name: 'PATCH /notifications/read-all', method: 'patch', path: '/notifications/read-all' },
-    { name: 'PUT /preferences/me', method: 'put', path: '/preferences/me', body: { maxHoursPerWeek: 40 } },
-    { name: 'PUT /settings/currency', method: 'put', path: '/settings/currency', body: { currency: 'EUR' } },
+    { name: 'PUT /preferences/me', method: 'put', path: '/preferences/me', body: () => ({ maxHoursPerWeek: 40 }) },
+    { name: 'PUT /settings/currency', method: 'put', path: '/settings/currency', body: () => ({ currency: 'EUR' }) },
     {
       name: 'PUT /settings/time-period',
       method: 'put',
       path: '/settings/time-period',
-      body: { timePeriod: 'monthly' },
+      body: () => ({ timePeriod: 'monthly' }),
     },
   ];
 
   it.each(cases().map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
     const cookie = await authCookie();
     const req = request(app)[testCase.method](`/api${testCase.path}`).set('Cookie', cookie);
-    const res = await (testCase.body === undefined ? req : req.send(testCase.body));
+    const res = await (testCase.body === undefined ? req : req.send(testCase.body()));
 
     if (res.status >= 500) {
       throw new Error(
