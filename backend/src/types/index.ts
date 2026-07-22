@@ -7,7 +7,7 @@
 // Permission, Role and UserRoleAssignment are declared once in
 // @staff-scheduler/shared and re-exported here, so both sides cannot drift.
 // Importing them from this barrel keeps every existing call site unchanged.
-import type { Permission, Role, UserRoleAssignment, Timestamp } from '@staff-scheduler/shared';
+import type { Permission, Role, UserRoleAssignment, Timestamp, Shift as SharedShift } from '@staff-scheduler/shared';
 export type { Permission, Role, UserRoleAssignment, Timestamp };
 
 
@@ -291,25 +291,15 @@ export interface UpdateScheduleRequest {
 // SHIFT TYPES
 // ============================================================================
 
-export interface Shift {
-  id: number;
-  scheduleId: number;
-  scheduleName?: string;
-  departmentId: number;
-  departmentName?: string;
-  templateId?: number;
-  date: string | Date;
-  startTime: string;
-  endTime: string;
-  minStaff: number;
-  maxStaff: number;
-  assignedStaff: number;
+export interface Shift extends SharedShift {
+  /**
+   * Server-side enrichments that do not cross the wire in the shared contract:
+   * the skills a shift demands and its current assignments. Kept here rather
+   * than in @staff-scheduler/shared because the UI never reads them and they
+   * reference backend-only types.
+   */
   requiredSkills?: Skill[];
   assignments?: ShiftAssignment[];
-  status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface CreateShiftRequest {

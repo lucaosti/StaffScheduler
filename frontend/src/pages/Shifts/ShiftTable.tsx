@@ -67,7 +67,6 @@ const ShiftTable: React.FC<Props> = ({
       {shifts.map((shift) => {
         const deptName =
           shift.departmentName ||
-          shift.department ||
           (shift.departmentId ? departmentNameById.get(Number(shift.departmentId)) : '') ||
           'Unknown';
         const dateStr = shift.date
@@ -80,7 +79,7 @@ const ShiftTable: React.FC<Props> = ({
           <div key={shift.id} className="col-md-6 col-lg-4 mb-4">
             <div className="card h-100">
               <div className="card-header d-flex justify-content-between align-items-center">
-                <h6 className="mb-0">{shift.name || `${deptName} ${dateStr}`}</h6>
+                <h6 className="mb-0">{`${deptName} ${dateStr}`}</h6>
                 <div className="dropdown">
                   <button
                     className="btn btn-sm btn-outline-secondary"
@@ -146,7 +145,7 @@ const ShiftTable: React.FC<Props> = ({
                     <strong>Required Staff:</strong>
                     <br />
                     <span className="text-muted">
-                      {shift.minStaff ?? shift.minimumStaff ?? 0}
+                      {shift.minStaff ?? 0}
                       {shift.maxStaff ? ` – ${shift.maxStaff}` : ''}
                     </span>
                   </div>
