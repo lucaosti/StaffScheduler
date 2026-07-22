@@ -3,6 +3,14 @@
  * Simplified and aligned with database schema
  */
 
+// ── Shared domain contract ────────────────────────────────────────────────────
+// Permission, Role and UserRoleAssignment are declared once in
+// @staff-scheduler/shared and re-exported here, so both sides cannot drift.
+// Importing them from this barrel keeps every existing call site unchanged.
+import type { Permission, Role, UserRoleAssignment, Timestamp } from '@staff-scheduler/shared';
+export type { Permission, Role, UserRoleAssignment, Timestamp };
+
+
 // ============================================================================
 // USER TYPES
 // ============================================================================
@@ -54,31 +62,6 @@ export interface User {
 // ============================================================================
 // RBAC TYPES — configurable roles and permissions (no hardcoded roles)
 // ============================================================================
-
-export interface Permission {
-  id: number;
-  code: string;
-  resource: string;
-  action: string;
-  description?: string;
-}
-
-export interface Role {
-  id: number;
-  name: string;
-  description?: string;
-  isSystem: boolean;
-  permissions?: string[];
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
-export interface UserRoleAssignment {
-  roleId: number;
-  roleName: string;
-  scopeOrgUnitId?: number | null;
-  expiresAt?: Date | null;
-}
 
 export interface CreateRoleRequest {
   name: string;
