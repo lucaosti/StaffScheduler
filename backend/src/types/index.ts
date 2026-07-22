@@ -7,7 +7,15 @@
 // Permission, Role and UserRoleAssignment are declared once in
 // @staff-scheduler/shared and re-exported here, so both sides cannot drift.
 // Importing them from this barrel keeps every existing call site unchanged.
-import type { Permission, Role, UserRoleAssignment, Timestamp, Shift as SharedShift } from '@staff-scheduler/shared';
+import type {
+  Permission,
+  Role,
+  UserRoleAssignment,
+  Timestamp,
+  Shift as SharedShift,
+  Schedule as SharedSchedule,
+  User as SharedUser,
+} from '@staff-scheduler/shared';
 export type { Permission, Role, UserRoleAssignment, Timestamp };
 
 
@@ -15,48 +23,29 @@ export type { Permission, Role, UserRoleAssignment, Timestamp };
 // USER TYPES
 // ============================================================================
 
-export interface User {
-  id: number;
-  email: string;
-  firstName: string;
-  lastName: string;
-  employeeId?: string;
-  phone?: string;
-  position?: string;
-  hourlyRate?: number;
-  isActive: boolean;
-  lastLogin?: Date;
-  /** Roles assigned to the user, each optionally scoped to an org unit. */
-  roles?: UserRoleAssignment[];
-  /** Flattened, de-duplicated effective permission codes (e.g. `schedule.manage`). */
-  permissions?: string[];
+export interface User extends SharedUser {
   /**
+   * Server-only authorisation context, derived per request — never part of the
+   * wire contract the UI consumes.
+   *
    * Org-unit IDs the user may access (union of all scoped-role subtrees).
-   * `null` means no scoping — the user has full access across all org units.
-   * An empty array means the user has scoped roles but none resolve to any
-   * valid org unit, so they can access nothing.
+   * `null` means no scoping — full access across all org units. An empty array
+   * means the user has scoped roles but none resolve to a valid org unit, so
+   * they can access nothing.
    */
   allowedOrgUnitIds?: number[] | null;
   /**
    * Per-permission org-unit restrictions introduced by scoped delegations.
    * Only populated when the user holds at least one delegation with
-   * scope_org_unit_id set.  Route handlers that perform org-unit gating should
-   * check this before allowing a delegated permission to act outside its scope.
+   * scope_org_unit_id set. Route handlers performing org-unit gating must check
+   * this before allowing a delegated permission to act outside its scope.
    */
   delegationScopes?: Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>;
-  /**
-   * Organization name for per-org module override resolution. Matches
-   * `organization_name` in `organization_module_overrides`. Null means the user
-   * is not assigned to a named org — global module defaults apply.
-   */
-  organizationName?: string | null;
   departments?: UserDepartment[];
-  /** Convenience field: name of the user's primary department (populated by list queries). */
+  /** Convenience field: name of the user's primary department (list queries). */
   department?: string;
   skills?: Skill[];
   preferences?: UserPreferences;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 // ============================================================================
@@ -247,25 +236,11 @@ export interface UpdateSkillRequest {
 // SCHEDULE TYPES
 // ============================================================================
 
-export interface Schedule {
-  id: number;
-  name: string;
-  startDate: string | Date;
-  endDate: string | Date;
-  status: 'draft' | 'published' | 'archived';
-  departmentId?: number;
-  departmentName?: string;
+export interface Schedule extends SharedSchedule {
+  /** Server-only: the owning department's org unit, used for approval routing. */
   departmentOrgUnitId?: number | null;
-  createdBy?: number;
-  createdByName?: string;
-  publishedBy?: number;
-  publishedAt?: Date;
-  totalShifts?: number;
-  totalAssignments?: number;
+  /** Populated by the with-shifts endpoint. */
   shifts?: Shift[];
-  notes?: string;
-  createdAt: Date;
-  updatedAt: Date;
 }
 
 export interface CreateScheduleRequest {
