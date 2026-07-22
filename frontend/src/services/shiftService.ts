@@ -19,15 +19,25 @@ import { ApiResponse, Shift } from '../types';
 import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 
 
+/**
+ * Mirrors the server's `shiftListQuery` schema.
+ *
+ * It had drifted: `department` and `limit` do not exist on the endpoint, and
+ * `sortBy`/`sortOrder` were never accepted at all — since the query contract
+ * became schema-validated they are stripped outright, so sending them looked
+ * like a working sort that silently did nothing. The names below are the ones
+ * the API actually parses.
+ */
 interface ShiftFilters {
-  department?: string;
-  status?: 'open' | 'assigned' | 'confirmed' | 'cancelled';
+  scheduleId?: number;
+  departmentId?: number;
+  /** Single day; equivalent to startDate = endDate = date. */
+  date?: string;
   startDate?: string;
   endDate?: string;
+  status?: 'open' | 'assigned' | 'confirmed' | 'cancelled';
   page?: number;
-  limit?: number;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  pageSize?: number;
 }
 
 interface CreateShiftData {
