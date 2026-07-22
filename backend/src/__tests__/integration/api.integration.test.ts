@@ -417,7 +417,12 @@ describe('every fixture-free GET runs against the real schema', () => {
 describe('mutations run against the real schema', () => {
   const unique = (prefix: string): string => `${prefix}-${Date.now()}-${Math.floor(process.hrtime()[1] / 1000)}`;
 
-  const cases = (): Array<{ name: string; method: 'post' | 'put' | 'patch'; path: string; body?: unknown }> => [
+  const cases = (): Array<{
+    name: string;
+    method: 'post' | 'put' | 'patch';
+    path: string;
+    body?: Record<string, unknown>;
+  }> => [
     { name: 'POST /departments', method: 'post', path: '/departments', body: { name: unique('Dept') } },
     { name: 'POST /org/units', method: 'post', path: '/org/units', body: { name: unique('Unit') } },
     { name: 'POST /roles', method: 'post', path: '/roles', body: { name: unique('Role') } },
