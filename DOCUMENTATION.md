@@ -679,7 +679,9 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 
 `GET /api/audit-logs` supports filtering by `userId`, `action`, `entityType`, `entityId`, `fromDate`, `toDate`, `limit`, `offset`. No `DELETE` endpoint exists.
 
-`GET /api/audit-logs/export` returns all matching entries without row limit (same filters, no `limit`/`offset`). Supported formats: `?format=csv` (returns `text/csv` with `Content-Disposition: attachment`) and `?format=json` (default). Requires `audit.read` permission. Use `fromDate`/`toDate` to scope exports to a specific period and avoid loading the full table.
+`GET /api/audit-logs/export` returns every matching entry (same filters, no `limit`/`offset` paging). Supported formats: `?format=csv` (returns `text/csv` with `Content-Disposition: attachment`) and `?format=json` (default). Requires `audit.read` permission.
+
+The export is capped at **100,000 entries**. Beyond that it returns `400` and asks you to narrow the range rather than returning a partial file: an audit export is a compliance artefact, so a truncated one that looks complete would be worse than an error. Use `fromDate`/`toDate` to scope the export to a period.
 
 ---
 
