@@ -1,5 +1,5 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
-import { ShiftAssignment, CreateAssignmentRequest } from '../types';
+import { ShiftAssignment, CreateAssignmentRequest, SqlParam } from '../types';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
@@ -378,7 +378,7 @@ export class AssignmentService {
       if (!existing) throw new NotFoundError('Assignment not found');
 
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
 
       if (updateData.status) { updates.push('status = ?'); values.push(updateData.status); }
       if (updateData.notes !== undefined) { updates.push('notes = ?'); values.push(updateData.notes); }

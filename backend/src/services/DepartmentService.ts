@@ -13,8 +13,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { 
   Department, 
   CreateDepartmentRequest, 
-  UpdateDepartmentRequest 
-} from '../types';
+  UpdateDepartmentRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
 
 /**
@@ -184,7 +183,7 @@ export class DepartmentService {
       `;
 
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (filters?.isActive !== undefined) {
         conditions.push('d.is_active = ?');
@@ -245,7 +244,7 @@ export class DepartmentService {
 
       // Build dynamic update query
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
 
       if (deptData.name !== undefined) {
         // Check name uniqueness if changing

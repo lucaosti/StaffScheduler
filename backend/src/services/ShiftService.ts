@@ -17,6 +17,7 @@ import {
   ShiftTemplate,
   CreateShiftTemplateRequest,
   UpdateShiftTemplateRequest,
+  SqlParam,
 } from '../types';
 import { logger } from '../config/logger';
 
@@ -253,7 +254,7 @@ export class ShiftService {
       `;
 
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (filters?.scheduleId) {
         conditions.push('s.schedule_id = ?');
@@ -337,7 +338,7 @@ export class ShiftService {
     try {
       let query = `SELECT COUNT(DISTINCT s.id) AS total FROM shifts s LEFT JOIN departments d ON s.department_id = d.id`;
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (filters?.scheduleId) { conditions.push('s.schedule_id = ?'); params.push(filters.scheduleId); }
       if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
@@ -377,7 +378,7 @@ export class ShiftService {
       // user-controlled input.  The UPDATE template is therefore not susceptible to
       // SQL injection through column-name interpolation.
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
 
       if (shiftData.date !== undefined) {
         updates.push('date = ?');
@@ -613,7 +614,7 @@ export class ShiftService {
         LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
       `;
 
-      const params: any[] = [];
+      const params: SqlParam[] = [];
 
       if (scheduleId) {
         query += ' WHERE s.schedule_id = ?';
@@ -681,7 +682,7 @@ export class ShiftService {
     overstaffed: number;
   }> {
     try {
-      const params: any[] = [];
+      const params: SqlParam[] = [];
       let whereClause = '';
 
       if (scheduleId) {
@@ -805,7 +806,7 @@ export class ShiftService {
       // user-controlled input.  The UPDATE template is therefore not susceptible to
       // SQL injection through column-name interpolation.
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
       if (templateData.name !== undefined) {
         updates.push('name = ?');
         values.push(templateData.name);
