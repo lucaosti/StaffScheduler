@@ -262,7 +262,15 @@ Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev prox
 optional stacks run as compose profiles: `docker compose --profile ops up` (Prometheus,
 Grafana, Loki, Promtail — config in `ops/`) and `docker compose --profile backup up`
 (scheduled `mysqldump` with retention; `ops/backup/`). Restores are proven by the
-`backup-restore` CI job, not assumed. See DOCUMENTATION.md §10a for the runbook.
+`backup-restore` CI job, not assumed.
+
+The backend is stateless (shared state in Redis), so it scales horizontally:
+`docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2`
+puts N replicas behind an nginx load balancer, and `ops/deploy/rolling-deploy.sh`
+performs a rolling deploy that **fails if any request is dropped**. Never give the
+backend service a `container_name` — it would make the service un-scalable. Any nginx
+proxying to `backend` must use the Docker resolver with a variable `proxy_pass`,
+otherwise it pins to one replica. See DOCUMENTATION.md §10a for the runbooks.
 
 ## Optimization Engine
 
