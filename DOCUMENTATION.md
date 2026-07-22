@@ -1207,7 +1207,7 @@ migration chain, seeds minimal fixtures, then drops the database. It is
 excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside
 the e2e job, which already provides a MySQL service.
 
-Three layers, 77 tests:
+Four layers, 111 tests:
 
 - **Flows** — login/logout including JTI revocation, refresh-token rotation and
   reuse detection, `POST /api/assignments`, the delegation lifecycle, the user
@@ -1215,10 +1215,16 @@ Three layers, 77 tests:
 - **Every fixture-free GET** (46 endpoints) — asserting only that the statement
   runs, i.e. a status below 500. The subject is whether MySQL understood the
   query, not the response body: a 200, a 403 and a 404 all mean it did.
-- **Mutations** (21 endpoints) — the same assertion for POST/PUT/PATCH, with
-  bodies built from the suite's fixtures. A 400 also fails the case: it means
-  validation rejected the body and no SQL ran, so the endpoint would appear
-  covered while nothing was tested.
+- **Fixture-free mutations** (21 endpoints) — the same assertion for the
+  POST/PUT/PATCH endpoints that need no path parameter, with bodies built from
+  the suite's fixtures. A 400 also fails the case: it means validation rejected
+  the body and no SQL ran, so the endpoint would appear covered while nothing
+  was tested.
+- **Path-parameter mutations** (34 endpoints) — UPDATE and DELETE on a real
+  row. A bogus id would short-circuit at the handler's existence check and
+  never reach the mutation SQL, so each case creates its own disposable row
+  through the admin connection and drives the endpoint against that id. The
+  rows are disposable so a DELETE cannot remove one a later case depends on.
 
 **Adding an endpoint means adding it to the relevant sweep.** This is not
 ceremony: on its first run the GET sweep found four endpoints — `/audit-logs`,
