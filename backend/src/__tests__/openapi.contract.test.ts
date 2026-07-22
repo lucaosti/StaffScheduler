@@ -226,6 +226,60 @@ describe('documented query parameters are backed by validateQuery', () => {
   });
 });
 
+/**
+ * The domain components must state what the shared schemas actually declare.
+ *
+ * They used to be hand-written with nothing comparing them against the types,
+ * and had drifted into describing an older model: `User.role` (a field the API
+ * has never sent — it is what made the Sidebar render `undefined` until it was
+ * removed), `Permission.category`/`key` instead of `code`/`resource`/`action`,
+ * `Role.isBuiltin` instead of `isSystem`. A wrong component is worse than a
+ * missing one: it produces wrong types in any client generated from it.
+ */
+describe('domain components match the shared schemas', () => {
+  const DOMAIN = {
+    Permission: sharedSchemas.permissionSchema,
+    Role: sharedSchemas.roleSchema,
+    Shift: sharedSchemas.shiftSchema,
+    Schedule: sharedSchemas.scheduleSchema,
+    User: sharedSchemas.userSchema,
+  } as const;
+
+  const componentProps = (name: string): string[] =>
+    Object.keys(
+      ((spec.components?.schemas?.[name] as { properties?: Record<string, unknown> })?.properties) ?? {}
+    ).sort();
+
+  const schemaProps = (schema: z.ZodType): string[] =>
+    Object.keys(
+      (z.toJSONSchema(schema, {
+        io: 'output',
+        unrepresentable: 'any',
+      }) as { properties?: Record<string, unknown> }).properties ?? {}
+    ).sort();
+
+  it.each(Object.keys(DOMAIN))('%s declares exactly the schema\'s fields', (name) => {
+    expect(componentProps(name)).toEqual(schemaProps(DOMAIN[name as keyof typeof DOMAIN]));
+  });
+
+  it('does not publish User.role, which the API never sends', () => {
+    expect(componentProps('User')).not.toContain('role');
+  });
+
+  it('publishes the real permission model rather than category/key', () => {
+    expect(componentProps('Permission')).toEqual(['action', 'code', 'description', 'id', 'resource']);
+  });
+
+  it('renders timestamps as wire strings, never as an unrepresentable Date', () => {
+    const date = (spec.components?.schemas?.Shift as {
+      properties?: Record<string, { type?: string; format?: string; $ref?: string }>;
+    })?.properties?.date;
+    expect(date).toEqual({ type: 'string', format: 'date-time' });
+    // A $ref here would be a local $defs, which openapi-typescript cannot resolve.
+    expect(date?.$ref).toBeUndefined();
+  });
+});
+
 describe('error-response envelope contract', () => {
   it.each(['Unauthorized', 'Forbidden', 'NotFound', 'ValidationError'])(
     '%s response documents the { code, message } error shape',
