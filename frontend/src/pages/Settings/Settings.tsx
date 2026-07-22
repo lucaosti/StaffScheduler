@@ -14,7 +14,8 @@ import ProfileSection from '../Settings/ProfileSection';
 import SystemSection from '../Settings/SystemSection';
 import ModulesSection from '../Settings/ModulesSection';
 import CalendarSection from '../Settings/CalendarSection';
-import { getMyPreferences, updateMyPreferences, UserPreferences } from '../../services/preferencesService';
+import { updateMyPreferences } from '../../services/preferencesService';
+import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
 interface UserSettings {
   personalSettings: {
@@ -68,28 +69,22 @@ const Settings: React.FC = () => {
     },
   });
 
-  // Load saved preferences on mount and hydrate work-settings state.
+  // Saved preferences are fetched via TanStack Query (cached/deduped); hydrate
+  // the editable work-settings state once they resolve. Failure is non-fatal —
+  // the query yields null and the defaults above stand.
+  const { data: savedPreferences } = useMyPreferencesQuery();
   useEffect(() => {
-    const loadPreferences = async () => {
-      try {
-        const res = await getMyPreferences();
-        if (res?.success && res?.data) {
-          const prefs = res.data as UserPreferences;
-          setSettings((prev) => ({
-            ...prev,
-            workSettings: {
-              ...prev.workSettings,
-              maxHoursPerWeek: prefs.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
-              maxConsecutiveDays: prefs.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
-            },
-          }));
-        }
-      } catch {
-        // Non-fatal — keep default values if preferences endpoint is unavailable.
-      }
-    };
-    void loadPreferences();
-  }, []);
+    if (!savedPreferences) return;
+    setSettings((prev) => ({
+      ...prev,
+      workSettings: {
+        ...prev.workSettings,
+        maxHoursPerWeek: savedPreferences.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
+        maxConsecutiveDays:
+          savedPreferences.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
+      },
+    }));
+  }, [savedPreferences]);
 
   // Serialise personal settings (theme, language, timezone, notifications) into
   // the `notes` field of user_preferences until dedicated columns are added.
