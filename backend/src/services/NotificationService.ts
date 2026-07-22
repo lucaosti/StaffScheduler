@@ -133,12 +133,14 @@ export class NotificationService {
     if (options.unreadOnly) {
       conditions.push('is_read = 0');
     }
-    params.push(limit);
+    // See AuditLogService.list: a bound LIMIT fails under the prepared-statement
+    // protocol, so GET /api/notifications returned 500 on every call. `limit` is
+    // clamped to 1..200 above, never raw input.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM notifications
         WHERE ${conditions.join(' AND ')}
         ORDER BY created_at DESC
-        LIMIT ?`,
+        LIMIT ${limit}`,
       params
     );
     return rows.map(mapRow);

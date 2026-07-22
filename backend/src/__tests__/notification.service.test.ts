@@ -100,7 +100,9 @@ describe('NotificationService.listForUser', () => {
     execute.mockResolvedValueOnce([[], null]);
     const service = new NotificationService(pool);
     await service.listForUser(7, { limit: 9999 });
-    expect(execute.mock.calls[0][1]).toContain(200);
+    // Inlined, not bound: a placeholder in LIMIT is rejected by the
+    // prepared-statement protocol, which made every listing fail.
+    expect(execute.mock.calls[0][0] as string).toMatch(/LIMIT 200/);
   });
 
   it('filters unread only when requested', async () => {
