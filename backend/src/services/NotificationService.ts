@@ -12,6 +12,7 @@
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { isEmailConfigured } from './MailerService';
 
 interface Notification {
   id: number;
@@ -48,14 +49,52 @@ const mapRow = (row: RowDataPacket): Notification => ({
 export class NotificationService {
   constructor(private pool: Pool) {}
 
-  /** Best-effort write. Callers should not block on the result. */
+  /**
+   * Create an in-app notification and, when email is configured, atomically
+   * enqueue its email in the outbox (transactional outbox pattern). Both writes
+   * commit together or not at all, so a delivered notification always has its
+   * email intent recorded, and a rolled-back one never leaves a phantom email.
+   * The email is delivered later by the outbox worker with retries.
+   */
   async notify(input: CreateNotificationInput): Promise<Notification> {
-    const [res] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO notifications (user_id, type, title, body, link)
-       VALUES (?, ?, ?, ?, ?)`,
-      [input.userId, input.type, input.title, input.body ?? null, input.link ?? null]
-    );
-    const created = await this.getById(res.insertId);
+    const conn = await this.pool.getConnection();
+    let insertId: number;
+    try {
+      await conn.beginTransaction();
+      const [res] = await conn.execute<ResultSetHeader>(
+        `INSERT INTO notifications (user_id, type, title, body, link)
+         VALUES (?, ?, ?, ?, ?)`,
+        [input.userId, input.type, input.title, input.body ?? null, input.link ?? null]
+      );
+      insertId = res.insertId;
+
+      // Same-transaction outbox write — only when email can actually be sent and
+      // the recipient has an address, so a no-SMTP deployment never accumulates
+      // rows and the no-email path is unchanged.
+      if (isEmailConfigured()) {
+        const [users] = await conn.execute<RowDataPacket[]>(
+          `SELECT email FROM users WHERE id = ? LIMIT 1`,
+          [input.userId]
+        );
+        const recipient = users[0]?.email as string | undefined;
+        if (recipient) {
+          const body = input.body ?? input.title;
+          await conn.execute(
+            `INSERT INTO email_outbox (notification_id, recipient_email, subject, body)
+             VALUES (?, ?, ?, ?)`,
+            [insertId, recipient, input.title, body]
+          );
+        }
+      }
+      await conn.commit();
+    } catch (err) {
+      await conn.rollback();
+      throw err;
+    } finally {
+      conn.release();
+    }
+
+    const created = await this.getById(insertId);
     if (!created) throw new Error('Failed to retrieve created notification');
     logger.info(`Notification created: id=${created.id} user=${input.userId} type=${input.type}`);
     return created;
