@@ -13,6 +13,7 @@
     "test:integration": "jest --testMatch='**/*.integration.test.ts' --testPathIgnorePatterns='/node_modules/' --runInBand --coverage=false",
     "test:optimization": "jest --testMatch='**/*optimization*.test.ts'",
     "test:performance": "jest --testMatch='**/*performance*.test.ts' --verbose",
+    "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write src/**/*.ts",

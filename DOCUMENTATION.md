@@ -1194,7 +1194,35 @@ cd backend
 DB_HOST=127.0.0.1 DB_USER=root DB_PASSWORD=... npm run test:integration
 ```
 
-The suite provisions a throwaway `staff_scheduler_itest` database from the migration chain, seeds minimal fixtures, exercises login/logout (including JTI revocation), `POST /api/assignments`, the user directory and the dashboard aggregates, then drops the database. It is excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside the e2e job, which already provides a MySQL service.
+The suite provisions a throwaway `staff_scheduler_itest` database from the
+migration chain, seeds minimal fixtures, then drops the database. It is
+excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside
+the e2e job, which already provides a MySQL service.
+
+Three layers, 77 tests:
+
+- **Flows** — login/logout including JTI revocation, refresh-token rotation and
+  reuse detection, `POST /api/assignments`, the delegation lifecycle, the user
+  directory and the dashboard aggregates.
+- **Every fixture-free GET** (46 endpoints) — asserting only that the statement
+  runs, i.e. a status below 500. The subject is whether MySQL understood the
+  query, not the response body: a 200, a 403 and a 404 all mean it did.
+- **Mutations** (21 endpoints) — the same assertion for POST/PUT/PATCH, with
+  bodies built from the suite's fixtures. A 400 also fails the case: it means
+  validation rejected the body and no SQL ran, so the endpoint would appear
+  covered while nothing was tested.
+
+**Adding an endpoint means adding it to the relevant sweep.** This is not
+ceremony: on its first run the GET sweep found four endpoints — `/audit-logs`,
+`/change-requests`, `/notifications` and `/on-call/me` — returning 500 in every
+deployment, invisible to 2479 mocked tests. A mocked pool asserts that a
+service composed a particular SQL string, never that MySQL accepts it, so line
+coverage says nothing about SQL correctness.
+
+Bodies in the mutation sweep are thunks rather than literals, because
+`it.each` evaluates its table when the module is collected — before `beforeAll`
+inserts the fixtures — so a literal capturing a fixture id would send
+`undefined` and be rejected before reaching the database.
 
 ### Workforce simulation harness
 

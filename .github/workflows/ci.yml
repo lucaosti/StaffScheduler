@@ -68,6 +68,13 @@ jobs:
       - name: Dead-code check (knip)
         run: npm run deadcode
 
+      - name: Type-check (including tests and scripts)
+        # `npm run build` excludes **/*.test.ts so tests never land in dist/,
+        # which left no check on them at all: ts-jest typechecks the unit suites
+        # as it runs them, but the integration suite is outside `npm test`, so a
+        # type error in it reached CI only when the suite failed to compile.
+        run: npm run typecheck
+
       - name: Type-check and build
         run: npm run build
 
