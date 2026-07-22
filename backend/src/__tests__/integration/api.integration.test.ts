@@ -55,6 +55,9 @@ let closeAppPool: () => Promise<void>;
 let userId: number;
 let delegateeId: number;
 let shiftId: number;
+let departmentId: number;
+let scheduleId: number;
+let orgUnitId: number;
 
 const loginCookie = async (email: string, password: string): Promise<string> => {
   const res = await request(app).post('/api/auth/login').send({ email, password });
@@ -101,6 +104,12 @@ beforeAll(async () => {
   const [deptRes] = await admin.query<mysql.ResultSetHeader>(
     `INSERT INTO departments (name, description, is_active) VALUES ('Itest Dept', 'integration', 1)`
   );
+  departmentId = deptRes.insertId;
+  const [orgRes] = await admin.query<mysql.ResultSetHeader>(
+    `INSERT INTO org_units (name, description, parent_id, manager_user_id, is_active)
+     VALUES ('Itest Unit', 'integration', NULL, NULL, 1)`
+  );
+  orgUnitId = orgRes.insertId;
   await admin.query(
     `INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`,
     [userId, deptRes.insertId]
@@ -116,6 +125,7 @@ beforeAll(async () => {
     [schedRes.insertId, deptRes.insertId]
   );
   shiftId = shiftRes.insertId;
+  scheduleId = schedRes.insertId;
 
   // Load the app only now, with DB_NAME already pointing at the itest DB.
   const { database } = require('../../config/database');
@@ -382,4 +392,185 @@ describe('every fixture-free GET runs against the real schema', () => {
       }
     }
   );
+});
+
+/**
+ * Mutations, executed against the real schema.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM THE GET SWEEP: the GET sweep proved its worth
+ * immediately — four listings had been returning 500 in every deployment
+ * because a mocked pool cannot tell a composed SQL string from one MySQL will
+ * accept. Writes are where the remaining risk sits, and it is a different kind:
+ * INSERT and UPDATE are what violate foreign keys, CHECK constraints, NOT NULL
+ * columns and unique indexes, none of which a mock models at all.
+ *
+ * WHY THE BODIES ARE REAL RATHER THAN GENERATED: a sweep that sends an invalid
+ * body gets a 400 from the validation middleware and never reaches the
+ * database, so it would assert nothing while appearing to cover the endpoint.
+ * Each payload below is built from the suite's fixtures precisely so the
+ * statement runs.
+ *
+ * The assertion stays "below 500" for the same reason as the GET sweep: a 201,
+ * a 403 and a 409 all mean MySQL executed the statement and the application
+ * decided the outcome. Only a 500 means the query itself was wrong.
+ */
+describe('mutations run against the real schema', () => {
+  const unique = (prefix: string): string => `${prefix}-${Date.now()}-${Math.floor(process.hrtime()[1] / 1000)}`;
+
+  /**
+   * Bodies are thunks, not literals. `it.each` evaluates its table when the
+   * module is collected — before `beforeAll` has inserted the fixtures — so a
+   * literal referencing `departmentId` captured `undefined` and the request was
+   * rejected by validation before reaching any SQL. That is exactly the silent
+   * non-coverage the 400 assertion below exists to catch, and it caught it.
+   */
+  const cases = (): Array<{
+    name: string;
+    method: 'post' | 'put' | 'patch';
+    path: string;
+    body?: () => Record<string, unknown>;
+  }> => [
+    { name: 'POST /departments', method: 'post', path: '/departments', body: () => ({ name: unique('Dept') }) },
+    { name: 'POST /org/units', method: 'post', path: '/org/units', body: () => ({ name: unique('Unit') }) },
+    { name: 'POST /roles', method: 'post', path: '/roles', body: () => ({ name: unique('Role') }) },
+    {
+      name: 'POST /users',
+      method: 'post',
+      path: '/users',
+      body: () => ({
+        email: `${unique('user')}@example.com`,
+        password: 'Password1!',
+        firstName: 'Sweep',
+        lastName: 'User',
+      }),
+    },
+    {
+      name: 'POST /employees',
+      method: 'post',
+      path: '/employees',
+      body: () => ({
+        email: `${unique('emp')}@example.com`,
+        password: 'Password1!',
+        firstName: 'Sweep',
+        lastName: 'Employee',
+        departmentIds: [departmentId],
+      }),
+    },
+    {
+      name: 'POST /schedules',
+      method: 'post',
+      path: '/schedules',
+      body: () => ({
+        name: unique('Schedule'),
+        startDate: '2030-01-01',
+        endDate: '2030-01-28',
+        departmentId,
+      }),
+    },
+    {
+      name: 'POST /shifts',
+      method: 'post',
+      path: '/shifts',
+      body: () => ({
+        scheduleId,
+        departmentId,
+        date: '2030-01-02',
+        startTime: '09:00',
+        endTime: '17:00',
+        minStaff: 1,
+        maxStaff: 3,
+      }),
+    },
+    {
+      name: 'POST /shifts/templates',
+      method: 'post',
+      path: '/shifts/templates',
+      body: () => ({
+        name: unique('Template'),
+        departmentId,
+        startTime: '09:00',
+        endTime: '17:00',
+        minStaff: 1,
+        maxStaff: 3,
+      }),
+    },
+    {
+      name: 'POST /assignments',
+      method: 'post',
+      path: '/assignments',
+      body: () => ({ shiftId, userId: delegateeId }),
+    },
+    {
+      name: 'POST /time-off',
+      method: 'post',
+      path: '/time-off',
+      body: () => ({ startDate: '2030-02-01', endDate: '2030-02-03', type: 'vacation' }),
+    },
+    {
+      name: 'POST /on-call/periods',
+      method: 'post',
+      path: '/on-call/periods',
+      body: () => ({ departmentId, date: '2030-03-01', startTime: '18:00', endTime: '23:00' }),
+    },
+    {
+      name: 'POST /policies',
+      method: 'post',
+      path: '/policies',
+      body: () => ({ scopeType: 'global', policyKey: unique('policy_key'), policyValue: 1 }),
+    },
+    {
+      name: 'POST /responsibility-rules',
+      method: 'post',
+      path: '/responsibility-rules',
+      body: () => ({
+        subjectType: 'department',
+        permissionCode: 'schedule.read',
+        responsibleOrgUnitId: orgUnitId,
+      }),
+    },
+    {
+      name: 'POST /approval-workflows',
+      method: 'post',
+      path: '/approval-workflows',
+      body: () => ({
+        changeType: unique('change_type').slice(0, 40),
+        steps: [{ stepOrder: 1, approverScope: 'unit_manager' }],
+      }),
+    },
+    {
+      name: 'POST /policies/validate/assignment',
+      method: 'post',
+      path: '/policies/validate/assignment',
+      body: () => ({ shiftId, userId: delegateeId }),
+    },
+    { name: 'POST /calendar/token', method: 'post', path: '/calendar/token' },
+    { name: 'POST /attendance/clock-in', method: 'post', path: '/attendance/clock-in', body: () => ({}) },
+    { name: 'PATCH /notifications/read-all', method: 'patch', path: '/notifications/read-all' },
+    { name: 'PUT /preferences/me', method: 'put', path: '/preferences/me', body: () => ({ maxHoursPerWeek: 40 }) },
+    { name: 'PUT /settings/currency', method: 'put', path: '/settings/currency', body: () => ({ currency: 'EUR' }) },
+    {
+      name: 'PUT /settings/time-period',
+      method: 'put',
+      path: '/settings/time-period',
+      body: () => ({ timePeriod: 'monthly' }),
+    },
+  ];
+
+  it.each(cases().map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
+    const cookie = await authCookie();
+    const req = request(app)[testCase.method](`/api${testCase.path}`).set('Cookie', cookie);
+    const res = await (testCase.body === undefined ? req : req.send(testCase.body()));
+
+    if (res.status >= 500) {
+      throw new Error(
+        `${testCase.method.toUpperCase()} /api${testCase.path} returned ${res.status}: ` +
+          JSON.stringify(res.body?.error ?? res.body)
+      );
+    }
+    // A 400 means the body never reached the database, so the case would be
+    // covering nothing — that is a defect in the fixture, not in the endpoint.
+    expect({ endpoint: testCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({
+      status: 400,
+    });
+  });
 });
