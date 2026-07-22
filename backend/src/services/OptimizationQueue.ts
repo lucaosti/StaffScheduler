@@ -36,6 +36,7 @@ import { config } from '../config';
 import { isRedisConfigured } from '../config/redis';
 import { logger } from '../config/logger';
 import { eventBus } from './EventBus';
+import { setOptimizationQueueDepth } from '../observability/metrics';
 import type { Pool } from 'mysql2/promise';
 
 const QUEUE_NAME = 'schedule-optimization';
@@ -70,6 +71,21 @@ export interface OptimizationJobStatus {
 }
 
 const jobIdFor = (scheduleId: number): string => `schedule:${scheduleId}`;
+
+/**
+ * Refresh the queue-depth metric from the live waiting count. Best-effort: a
+ * metrics update must never break enqueue/worker flow, so failures are swallowed.
+ */
+const refreshQueueDepth = (): void => {
+  try {
+    const pending = queue?.getWaitingCount?.();
+    if (pending && typeof pending.then === 'function') {
+      pending.then((count) => setOptimizationQueueDepth(count)).catch(() => undefined);
+    }
+  } catch {
+    // A metrics update must never break the enqueue/worker flow.
+  }
+};
 
 // BullMQ connects with its own client; give it the same URL as the caches.
 // maxRetriesPerRequest must be null for BullMQ blocking commands.
@@ -141,6 +157,7 @@ export const enqueueOptimization = async (
   }
 
   await q.add('optimize', data, { jobId });
+  refreshQueueDepth();
   return jobId;
 };
 
@@ -203,6 +220,7 @@ export const initOptimizationWorker = (pool: Pool): void => {
         type: 'optimization.completed',
         payload: { scheduleId, ...result },
       });
+      refreshQueueDepth();
       return result as OptimizationResult;
     },
     {
@@ -215,6 +233,7 @@ export const initOptimizationWorker = (pool: Pool): void => {
 
   worker.on('failed', (job, err) => {
     logger.error('Optimization job failed', { jobId: job?.id, message: err.message });
+    refreshQueueDepth();
     if (job) {
       eventBus.publish(job.data.createdBy, {
         type: 'optimization.failed',

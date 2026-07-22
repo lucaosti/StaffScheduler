@@ -28,6 +28,7 @@ jest.mock('bullmq', () => ({
     add: queueAdd,
     getJob: queueGetJob,
     close: queueClose,
+    getWaitingCount: jest.fn().mockResolvedValue(0),
   })),
   Worker: jest.fn().mockImplementation((_name: string, processor: (job: unknown) => Promise<unknown>) => {
     workerProcessor = processor;
