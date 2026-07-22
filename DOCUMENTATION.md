@@ -728,6 +728,54 @@ The bundled profile leaves `METRICS_TOKEN` unset and relies on network isolation
 To require a token, set `METRICS_TOKEN` and add a matching `authorization` block
 to `ops/prometheus/prometheus.yml`.
 
+### Backups and restore
+
+Logical `mysqldump` backups run from a sidecar; the scripts live in `ops/backup/`.
+
+Start the scheduled backup sidecar (also included in the `ops` profile):
+
+```bash
+docker compose --profile backup up -d
+```
+
+It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
+`backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
+dumps older than `BACKUP_RETENTION_DAYS` (default 14). A dump smaller than 1 KB
+is treated as a failure and removed, so an empty/failed dump never masquerades as
+a good backup.
+
+**Restore runbook** (recovering into the running stack):
+
+1. Identify the dump to restore (newest is `--latest`):
+   ```bash
+   docker compose exec backup ls -1t /backups
+   ```
+2. Stop the backend so nothing writes mid-restore:
+   ```bash
+   docker compose stop backend
+   ```
+3. Restore (the script recreates the database if needed):
+   ```bash
+   docker compose exec backup /scripts/restore.sh --latest
+   # or a specific file:
+   docker compose exec backup /scripts/restore.sh /backups/staff_scheduler_YYYYMMDDToooooZ.sql.gz
+   ```
+4. Bring the backend back up and verify:
+   ```bash
+   docker compose start backend
+   curl -fsS http://localhost:3001/api/health
+   ```
+
+To validate a backup **without** touching production data, point `DB_NAME` at a
+scratch database before running `restore.sh`.
+
+**Restores are tested, not assumed.** The `.github/workflows/backup-restore.yml`
+job runs weekly (and whenever the backup scripts or migrations change): it applies
+the migrations, seeds a marker row, runs the real `backup.sh`, DROPs the database,
+runs the real `restore.sh --latest`, and asserts the marker survived the
+round-trip. A broken restore path is therefore a red CI check, not a discovery
+made during an incident.
+
 ---
 
 ## 11. Extension points
