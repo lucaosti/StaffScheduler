@@ -711,7 +711,7 @@ describe('path-parameter mutations run against the real schema', () => {
 
   interface Case {
     name: string;
-    method: 'put' | 'patch' | 'delete';
+    method: 'put' | 'patch' | 'delete' | 'post';
     setup: () => Promise<{ path: string; body?: Record<string, unknown> }>;
   }
 
@@ -767,6 +767,33 @@ describe('path-parameter mutations run against the real schema', () => {
     { name: 'PUT /preferences/:userId', method: 'put', setup: async () => ({ path: `/preferences/${await make.user()}`, body: { maxHoursPerWeek: 40 } }) },
     // Settings
     { name: 'PUT /settings/:category/:key', method: 'put', setup: async () => ({ path: `/settings/scheduling/max_hours_week`, body: { value: '40' } }) },
+    // Modules (org override on a seeded module code)
+    { name: 'PUT /modules/:code', method: 'put', setup: async () => ({ path: `/modules/scheduling`, body: { isEnabled: true } }) },
+    // Join-table membership: distinct INSERT/DELETE SQL with cheap fixtures.
+    { name: 'POST /departments/:id/users', method: 'post' as const, setup: async () => ({ path: `/departments/${departmentId}/users`, body: { userId: await make.user() } }) },
+    { name: 'DELETE /departments/:id/users/:userId', method: 'delete', setup: async () => {
+      const u = await make.user();
+      await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [u, departmentId]);
+      return { path: `/departments/${departmentId}/users/${u}` };
+    } },
+    { name: 'POST /org/units/:id/members', method: 'post' as const, setup: async () => ({ path: `/org/units/${orgUnitId}/members`, body: { userId: await make.user() } }) },
+    { name: 'DELETE /org/units/:id/members/:userId', method: 'delete', setup: async () => {
+      const u = await make.user();
+      await admin.query(`INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 0)`, [u, orgUnitId]);
+      return { path: `/org/units/${orgUnitId}/members/${u}` };
+    } },
+    { name: 'PATCH /org/units/:id/members/:userId/primary', method: 'patch', setup: async () => {
+      const u = await make.user();
+      await admin.query(`INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 0)`, [u, orgUnitId]);
+      return { path: `/org/units/${orgUnitId}/members/${u}/primary` };
+    } },
+    { name: 'POST /roles/users/:userId', method: 'post' as const, setup: async () => ({ path: `/roles/users/${await make.user()}`, body: { roleId: await make.role() } }) },
+    { name: 'DELETE /roles/users/:userId/:roleId', method: 'delete', setup: async () => {
+      const u = await make.user();
+      const role = await make.role();
+      await admin.query(`INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`, [u, role]);
+      return { path: `/roles/users/${u}/${role}` };
+    } },
   ];
 
   it.each(cases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
