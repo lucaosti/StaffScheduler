@@ -8,12 +8,17 @@
  * @author Luca Ostinelli
  */
 
+// MUST be first: starts OpenTelemetry (when enabled) before http/express/mysql2
+// are imported below, so their auto-instrumentation can patch them.
+import './observability/otel-bootstrap';
+
 import { config } from './config';
 import { database } from './config/database';
 import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
 import { eventBus } from './services/EventBus';
 import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
+import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
 
 export async function startServer(): Promise<void> {
@@ -54,6 +59,7 @@ export async function startServer(): Promise<void> {
         try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
         try { await closeRedis(); } catch { /* ignore */ }
+        try { await shutdownTracing(); } catch { /* ignore */ }
         logger.info('Connection pool closed, process exiting');
         process.exit(0);
       });

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks';
 import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
+import { setRequestIdOnSpan } from '../observability/tracing';
 
 interface RequestContext {
   requestId: string;
@@ -22,6 +23,8 @@ export const getRequestUserAgent = (): string | null =>
 export const requestId = (req: Request, res: Response, next: NextFunction): void => {
   const id = randomUUID();
   res.setHeader('X-Request-Id', id);
+  // Correlate the trace with this id (no-op when tracing is off).
+  setRequestIdOnSpan(id);
   requestStorage.run(
     {
       requestId: id,
