@@ -11,7 +11,7 @@
  * @author Luca Ostinelli
  */
 
-import { createUserBody } from '@staff-scheduler/shared';
+import { createUserBody, createShiftBody } from '@staff-scheduler/shared';
 import * as employeeService from './employeeService';
 import * as shiftService from './shiftService';
 import * as scheduleService from './scheduleService';
@@ -147,7 +147,9 @@ describe('shiftService', () => {
   });
 
   describe('createShift', () => {
-    it('POSTs the shift data', async () => {
+    it("POSTs a payload the server's createShiftBody accepts", async () => {
+      // This call omitted maxStaff, which the schema requires — the type said
+      // it was optional, so the test was itself the caller the type misled.
       await shiftService.createShift({
         scheduleId: 1,
         departmentId: 2,
@@ -155,9 +157,11 @@ describe('shiftService', () => {
         startTime: '08:00',
         endTime: '16:00',
         minStaff: 2,
+        maxStaff: 4,
       });
       expect(lastInit().method).toBe('POST');
       expect(lastUrl()).toMatch(/\/shifts$/);
+      expect(createShiftBody.safeParse(JSON.parse(lastInit().body as string)).success).toBe(true);
       const body = JSON.parse(lastInit().body as string);
       expect(body.scheduleId).toBe(1);
     });
