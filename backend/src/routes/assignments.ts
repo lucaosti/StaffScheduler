@@ -10,12 +10,14 @@ import {
   shiftIdParam,
   departmentIdParam,
   assignmentListQuery,
+  assignmentsByDepartmentQuery,
+  auditReasonBody,
   createAssignmentBody,
   bulkCreateAssignmentsBody,
   updateAssignmentBody,
 } from '../schemas';
 import { User } from '../types';
-import { ForbiddenError, NotFoundError, ValidationError } from '../errors';
+import { ForbiddenError, NotFoundError } from '../errors';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 
 export const createAssignmentsRouter = (pool: Pool) => {
@@ -92,9 +94,9 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), validat
 }));
 
 // Delete assignment
-router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
-  const reason = typeof req.body?.reason === 'string' ? req.body.reason : undefined;
+  const reason = res.locals.body.reason;
 
   await assignmentService.deleteAssignment(id, req.user?.id, reason);
   res.json({
@@ -125,17 +127,13 @@ router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage
 }));
 
 // Get assignments by department
-router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), asyncHandler(async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
-  const rawStatus = req.query.status as string | undefined;
-  const VALID_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'];
-  if (rawStatus !== undefined && !VALID_STATUSES.includes(rawStatus)) {
-    throw new ValidationError(`status must be one of: ${VALID_STATUSES.join(', ')}`);
-  }
-
+  // The allowed statuses used to be a literal array checked inline here; the
+  // schema now owns them, so the enum cannot drift from the documented one.
   const assignments = await assignmentService.getAssignmentsByDepartment(
     departmentId,
-    rawStatus
+    res.locals.query.status
   );
   res.json({ success: true, data: assignments });
 }));

@@ -13,8 +13,8 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requireModuleForUser } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams } from '../middleware/validation';
-import { idParam } from '../schemas';
+import { validateParams, validateQuery } from '../middleware/validation';
+import { idParam, notificationListQuery } from '../schemas';
 import { NotificationService } from '../services/NotificationService';
 
 export const createNotificationsRouter = (pool: Pool): Router => {
@@ -24,10 +24,11 @@ export const createNotificationsRouter = (pool: Pool): Router => {
   router.use(authenticate);
   router.use(requireModuleForUser('notifications'));
 
-  router.get('/', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(notificationListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { unreadOnly, limit } = res.locals.query;
     const list = await service.listForUser(req.user!.id, {
-      unreadOnly: req.query.unreadOnly === '1',
-      limit: req.query.limit ? Number(req.query.limit) : undefined,
+      unreadOnly: unreadOnly === '1',
+      limit,
     });
     res.json({ success: true, data: list });
   }));

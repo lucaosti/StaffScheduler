@@ -24,8 +24,8 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody, employeeLoanListQuery } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
@@ -147,16 +147,14 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Loans -------------
 
-  router.get('/loans', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/loans', validateQuery(employeeLoanListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { userId, toOrgUnitId, fromOrgUnitId, status } = res.locals.query;
+    // Approvers may list any loan; everyone else sees only their own, so the
+    // org-unit and userId filters are dropped rather than obeyed for them.
     const isManager = userHasPermission(req.user, 'loan.approve');
     const filters = isManager
-      ? {
-          userId: req.query.userId ? Number(req.query.userId) : undefined,
-          toOrgUnitId: req.query.toOrgUnitId ? Number(req.query.toOrgUnitId) : undefined,
-          fromOrgUnitId: req.query.fromOrgUnitId ? Number(req.query.fromOrgUnitId) : undefined,
-          status: (req.query.status as never) ?? undefined,
-        }
-      : { userId: req.user!.id, status: (req.query.status as never) ?? undefined };
+      ? { userId, toOrgUnitId, fromOrgUnitId, status: status as never }
+      : { userId: req.user!.id, status: status as never };
     res.json({ success: true, data: await loans.list(filters) });
   }));
 

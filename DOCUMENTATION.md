@@ -214,11 +214,24 @@ one or more), and the reporting endpoints published `startDate`/`endDate` while
 the code read `start`/`end`. A caller narrowing by `userId` or `isActive`
 silently received everything.
 
-The generator now refuses to run when an operation documents query parameters
-with no `validateQuery` behind it, and `openapi.contract.test.ts` asserts that
-every documented parameter originates from a shared query schema. Adding a
-parameter to the spec by hand is therefore a failing build, not stale
-documentation.
+The check runs in **both directions**, because each catches a defect the other
+cannot:
+
+- the spec documents a query parameter with no `validateQuery` behind it — the
+  API promises a filter nothing parses;
+- a handler reads `req.query` with no `validateQuery` on its route — the API
+  accepts a filter the spec never mentions, so the generated client cannot
+  offer it and the value reaches the service unvalidated.
+
+Both fail generation, and `openapi.contract.test.ts` asserts the same two
+properties in the normal Jest run. Together they make the query contract
+complete: nothing documented is unparsed, and nothing parsed is undocumented.
+Reading `req.query` or `req.body` directly in a route is therefore a failing
+build, not a stale-documentation problem.
+
+A request body is marked `required` only when its schema has at least one
+required field, so an all-optional body (the free-text audit `reason` /
+`justification` fields) does not force every caller to send `{}`.
 
 `GET /api/assignments` additionally refuses — with `400`, rather than
 truncating — an unpaginated request matching more than 5000 rows.
