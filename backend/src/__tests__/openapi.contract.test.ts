@@ -243,6 +243,9 @@ describe('domain components match the shared schemas', () => {
     Shift: sharedSchemas.shiftSchema,
     Schedule: sharedSchemas.scheduleSchema,
     User: sharedSchemas.userSchema,
+    Department: sharedSchemas.departmentSchema,
+    Policy: sharedSchemas.policySchema,
+    TimeOffRequest: sharedSchemas.timeOffRequestSchema,
   } as const;
 
   const componentProps = (name: string): string[] =>
@@ -268,6 +271,45 @@ describe('domain components match the shared schemas', () => {
 
   it('publishes the real permission model rather than category/key', () => {
     expect(componentProps('Permission')).toEqual(['action', 'code', 'description', 'id', 'resource']);
+  });
+
+  /**
+   * The generalisation of the User.role check, covering the components that
+   * are still hand-written too: a field the spec publishes must exist
+   * somewhere in the source. Four did not — Department.memberCount (the real
+   * one is employeeCount), Employee.employeeNumber (on a component for an
+   * entity the system does not have; employees are users), Policy.valueType
+   * and TimeOffRequest.reviewedBy (the reviewer FK is reviewerId) — so every
+   * generated client carried properties that were always undefined.
+   */
+  it('publishes no field that exists nowhere in the source', () => {
+    const roots = ['src', path.join('..', 'packages', 'shared', 'src'), path.join('..', 'frontend', 'src')];
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+          walk(full);
+        } else if (/\.tsx?$/.test(entry.name) && full.replace(/\\/g, '/').indexOf('api/schema.ts') === -1) {
+          sources.push(fs.readFileSync(full, 'utf8'));
+        }
+      }
+    };
+    for (const root of roots) walk(path.join(__dirname, '..', '..', root));
+    const haystack = sources.join('\n');
+
+    const phantom: string[] = [];
+    for (const [name, schema] of Object.entries(spec.components?.schemas ?? {})) {
+      const props = Object.keys((schema as { properties?: Record<string, unknown> }).properties ?? {});
+      for (const field of props) {
+        // Short names are too generic to attribute; the real defects were all
+        // distinctive identifiers.
+        if (field.length < 4) continue;
+        if (!new RegExp(`\\b${field}\\b`).test(haystack)) phantom.push(`${name}.${field}`);
+      }
+    }
+    expect(phantom).toEqual([]);
   });
 
   it('renders timestamps as wire strings, never as an unrepresentable Date', () => {
