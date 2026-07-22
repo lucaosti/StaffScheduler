@@ -21,7 +21,6 @@ import { logger } from './config/logger';
 import { errorHandler } from './middleware/errorHandler';
 import { requestId } from './middleware/requestContext';
 import { requestLogger } from './middleware/requestLogger';
-import { resolveTenant } from './middleware/tenant';
 
 import { createAuthRouter } from './routes/auth';
 import { createUsersRouter } from './routes/users';
@@ -180,12 +179,6 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   // can be large, but we keep this well below the 50 MB nginx default to limit DoS surface.
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-  // Resolve the tenant for every API request (F13). Requests without an
-  // X-Tenant-Id header fall back to the default tenant, so single-tenant
-  // deployments are unaffected; an explicit unknown/inactive tenant is
-  // rejected up front instead of leaking into per-service filtering later.
-  app.use('/api', resolveTenant(pool));
 
   // Mount all routers under both the legacy /api prefix and the canonical /api/v1 prefix.
   // During the transition period both prefixes are active. A future PR will drop /api/* and
