@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import { setRequestIdOnSpan } from '../observability/tracing';
+import { setRequestIdResolver } from '../config/logger';
 
 interface RequestContext {
   requestId: string;
@@ -10,6 +11,10 @@ interface RequestContext {
 }
 
 export const requestStorage = new AsyncLocalStorage<RequestContext>();
+
+// Register with the logger rather than being imported by it: the logger is the
+// lowest-level module and must not depend on middleware. See the note there.
+setRequestIdResolver(() => requestStorage.getStore()?.requestId);
 
 export const getRequestId = (): string | undefined =>
   requestStorage.getStore()?.requestId;
