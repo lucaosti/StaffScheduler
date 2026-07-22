@@ -204,3 +204,73 @@ export const userSchema = z.object({
   updatedAt: timestamp.optional(),
 });
 export type User = z.infer<typeof userSchema>;
+
+/**
+ * A department, as the API returns it.
+ *
+ * The hand-written component published `memberCount`, a field that exists
+ * nowhere in the codebase — the real one is `employeeCount` — so any client
+ * generated from it carried a property that was always `undefined`. Same class
+ * as `User.role`.
+ */
+export const departmentSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  description: z.string().optional(),
+  managerId: z.number().int().optional(),
+  managerName: z.string().optional(),
+  /** Parent org-unit FK. Absent when the department is not linked to one. */
+  orgUnitId: z.number().int().optional(),
+  isActive: z.boolean(),
+  employeeCount: z.number().int().optional(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type Department = z.infer<typeof departmentSchema>;
+
+/**
+ * A scoped business policy.
+ *
+ * The hand-written component described a different model entirely —
+ * `key`/`label`/`value`/`valueType`/`category` — where the service has always
+ * had `scopeType`/`scopeId`/`policyKey`/`policyValue`/`imposedByUserId`.
+ */
+export const policySchema = z.object({
+  id: z.number().int(),
+  scopeType: z.enum(['global', 'org_unit', 'department', 'user']),
+  scopeId: z.number().int().nullable(),
+  policyKey: z.string(),
+  /** Shape depends on policyKey; validated by the policy engine, not here. */
+  policyValue: z.unknown(),
+  description: z.string().nullable(),
+  imposedByUserId: z.number().int(),
+  isActive: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type Policy = z.infer<typeof policySchema>;
+
+/**
+ * A time-off request.
+ *
+ * The hand-written component published `reviewedBy`, which does not exist —
+ * the reviewer FK is `reviewerId` — and omitted `reviewedAt`, `reviewNotes`
+ * and `unavailabilityId`.
+ */
+export const timeOffRequestSchema = z.object({
+  id: z.number().int(),
+  userId: z.number().int(),
+  startDate: z.string(),
+  endDate: z.string(),
+  type: z.enum(['vacation', 'sick', 'personal', 'other']),
+  reason: z.string().nullable(),
+  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']),
+  reviewerId: z.number().int().nullable(),
+  reviewedAt: timestamp.nullable(),
+  reviewNotes: z.string().nullable(),
+  /** Set when an approved request materialised an unavailability row. */
+  unavailabilityId: z.number().int().nullable(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type TimeOffRequest = z.infer<typeof timeOffRequestSchema>;
