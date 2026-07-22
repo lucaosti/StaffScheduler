@@ -58,6 +58,62 @@ const declaredKeys = (source: string, interfaceName: string): string[] => {
   return keys;
 };
 
+/**
+ * The same guarantee for request payloads.
+ *
+ * `CreateEmployeeData` omitted `password`, which `createUserBody` requires, so
+ * every employee creation from the UI was rejected with a 400 — and the type
+ * hid it, because it described a request the server would never accept.
+ * `CreateShiftData` had the milder form: `maxStaff` optional where the schema
+ * requires it, harmless only because every caller happened to send it.
+ *
+ * A payload type must therefore declare no field its endpoint rejects, and
+ * must mark as required everything the endpoint requires.
+ */
+const PAYLOADS: Array<{ file: string; interfaceName: string; method: string; endpoint: string }> = [
+  { file: 'employeeService.ts', interfaceName: 'CreateEmployeeData', method: 'post', endpoint: '/employees' },
+  { file: 'shiftService.ts', interfaceName: 'CreateShiftData', method: 'post', endpoint: '/shifts' },
+];
+
+const requestBody = (method: string, endpoint: string): { props: Set<string>; required: Set<string> } => {
+  const op = (spec.paths[endpoint] as Record<string, { requestBody?: { content?: Record<string, { schema?: { properties?: Record<string, unknown>; required?: string[] } }> } }>)?.[method];
+  const schema = op?.requestBody?.content?.['application/json']?.schema;
+  if (!schema) throw new Error(`spec has no request body for ${method.toUpperCase()} ${endpoint}`);
+  return { props: new Set(Object.keys(schema.properties ?? {})), required: new Set(schema.required ?? []) };
+};
+
+/** Property names, split by whether TypeScript marks them optional. */
+const splitKeys = (source: string, interfaceName: string): { all: string[]; required: string[] } => {
+  const match = source.match(new RegExp(String.raw`interface ${interfaceName} \{([\s\S]*?)\n\}`));
+  if (!match) throw new Error(`interface ${interfaceName} not found`);
+  const all: string[] = [];
+  const required: string[] = [];
+  const re = /^\s*(\w+)(\??):/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(match[1])) !== null) {
+    all.push(m[1]);
+    if (m[2] !== '?') required.push(m[1]);
+  }
+  return { all, required };
+};
+
+describe('frontend request payloads match the published body contract', () => {
+  it.each(PAYLOADS)('$interfaceName declares no field $endpoint rejects', ({ file, interfaceName, method, endpoint }) => {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const { props } = requestBody(method, endpoint);
+    const rejected = splitKeys(source, interfaceName).all.filter((k) => !props.has(k));
+    expect(rejected).toEqual([]);
+  });
+
+  it.each(PAYLOADS)('$interfaceName requires everything $endpoint requires', ({ file, interfaceName, method, endpoint }) => {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    const { required } = requestBody(method, endpoint);
+    const declared = new Set(splitKeys(source, interfaceName).required);
+    const optionalButRequired = Array.from(required).filter((k) => !declared.has(k)).sort();
+    expect(optionalButRequired).toEqual([]);
+  });
+});
+
 describe('frontend service filters match the published query contract', () => {
   it('covers every service that declares a filter interface', () => {
     const withFilters = fs

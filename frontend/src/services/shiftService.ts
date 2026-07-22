@@ -40,6 +40,14 @@ interface ShiftFilters {
   pageSize?: number;
 }
 
+/**
+ * Mirrors the server's `createShiftBody`.
+ *
+ * `maxStaff` was optional here while the schema requires it: the Shifts page
+ * always sends it (defaulting to `minStaff`), so nothing broke, but a caller
+ * trusting the type and omitting it would have got a 400 — the milder form of
+ * the defect that made employee creation impossible from the UI.
+ */
 interface CreateShiftData {
   scheduleId: number;
   departmentId: number;
@@ -48,7 +56,7 @@ interface CreateShiftData {
   startTime: string;
   endTime: string;
   minStaff: number;
-  maxStaff?: number;
+  maxStaff: number;
   requiredSkillIds?: number[];
   notes?: string;
 }
