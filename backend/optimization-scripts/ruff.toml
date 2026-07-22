@@ -1,0 +1,14 @@
+# Lint gate for the CP-SAT solver.
+#
+# The TypeScript side has knip in CI for dead code; the solver had no
+# equivalent, so unused imports accumulated unnoticed. Its behaviour is well
+# covered — the parity suite runs it against the canonical constraint validator
+# and CI makes that mandatory via REQUIRE_ORTOOLS=1 — but behaviour coverage
+# says nothing about dead code, which is what this closes.
+line-length = 120
+
+[lint]
+# Pyflakes (undefined names, unused imports and variables), pycodestyle errors,
+# and the bugbear set: the checks that catch real mistakes rather than style
+# preferences, matching how eslint is configured on the other side.
+select = ["F", "E", "B"]

@@ -22,8 +22,8 @@ Usage:
 import sys
 import json
 import argparse
-from datetime import datetime, timedelta
-from typing import List, Dict, Set, Tuple, Optional
+from datetime import datetime
+from typing import List, Dict, Tuple
 from ortools.sat.python import cp_model
 
 
@@ -122,8 +122,10 @@ class ScheduleOptimizerORTools:
     
     def _create_assignment_variables(self):
         """Create boolean variables for each (employee, shift) pair."""
-        for shift_id, shift in self.shifts.items():
-            for employee_id, employee in self.employees.items():
+        # Only the ids matter here: the variable is created for every pair, and
+        # the entities themselves are read by the constraint builders.
+        for shift_id in self.shifts:
+            for employee_id in self.employees:
                 var_name = f'assign_e{employee_id}_s{shift_id}'
                 self.assignments[(employee_id, shift_id)] = self.model.NewBoolVar(var_name)
     
