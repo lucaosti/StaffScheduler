@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
+import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
 const mockListUnits = jest.fn();

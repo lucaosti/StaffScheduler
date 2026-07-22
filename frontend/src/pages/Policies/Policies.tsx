@@ -11,17 +11,12 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import * as policyService from '../../services/policyService';
-import * as rbacService from '../../services/rbacService';
-import type {
-  Policy,
-  PolicyExceptionRequest,
-  ApprovalMatrixRow,
-  PolicyScope,
-} from '../../services/policyService';
-import type { Role } from '../../types';
+import type { Policy, ApprovalMatrixRow, PolicyScope } from '../../services/policyService';
+import { policiesKey, usePoliciesPageData } from '../../hooks/usePolicies';
 import PolicyList from '../Policies/PolicyList';
 import ExceptionList from '../Policies/ExceptionList';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -45,13 +40,8 @@ const Policies: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<Tab>('policies');
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-
-  const [policies, setPolicies] = useState<Policy[]>([]);
-  const [exceptions, setExceptions] = useState<PolicyExceptionRequest[]>([]);
-  const [matrix, setMatrix] = useState<ApprovalMatrixRow[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
+  const queryClient = useQueryClient();
 
   const [policyForm, setPolicyForm] = useState({
     scopeType: 'global' as PolicyScope,
@@ -75,31 +65,16 @@ const Policies: React.FC = () => {
     onConfirm: () => undefined,
   });
 
-  const refresh = async () => {
-    try {
-      const [p, e, m, r] = await Promise.all([
-        policyService.listPolicies(),
-        policyService.listExceptions(),
-        isAdmin
-          ? policyService.listMatrix()
-          : Promise.resolve({ success: true as const, data: [] as ApprovalMatrixRow[] }),
-        isAdmin
-          ? rbacService.listRoles()
-          : Promise.resolve({ success: true as const, data: [] as Role[] }),
-      ]);
-      setPolicies(p.data ?? []);
-      setExceptions(e.data ?? []);
-      setMatrix(m.data ?? []);
-      setRoles(r.data ?? []);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  useEffect(() => {
-    refresh().finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Server state via one composite query; mutation handlers keep calling
+  // refresh(), which now invalidates the cached page data so all four lists
+  // reload together as before.
+  const pageQuery = usePoliciesPageData(!!isAdmin);
+  const policies = pageQuery.data?.policies ?? [];
+  const exceptions = pageQuery.data?.exceptions ?? [];
+  const matrix = pageQuery.data?.matrix ?? [];
+  const roles = pageQuery.data?.roles ?? [];
+  const loading = pageQuery.isLoading;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: policiesKey });
 
   const handleCreatePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
