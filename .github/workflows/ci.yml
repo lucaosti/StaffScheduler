@@ -54,6 +54,14 @@ jobs:
       - name: Install optimizer Python dependencies
         run: pip install -r optimization-scripts/requirements.txt
 
+      - name: Lint the CP-SAT solver (ruff)
+        # The TypeScript side has knip for dead code; the solver had no
+        # equivalent, so unused imports and loop variables accumulated
+        # unnoticed. The parity suite covers its behaviour, not its hygiene.
+        run: |
+          pip install ruff
+          ruff check optimization-scripts
+
       - name: Install dependencies (workspace root)
         working-directory: .
         run: npm ci --prefer-offline --no-audit --no-fund
