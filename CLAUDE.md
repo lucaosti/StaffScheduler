@@ -135,6 +135,8 @@ request handler.
 
 **Error handling**: Services throw typed errors from `src/errors` (`NotFoundError` 404, `ConflictError` 409, `ForbiddenError` 403, `ValidationError` 400, `UnauthorizedError` 401); plain `Error` is reserved for internal faults (500). Route handlers are wrapped in `asyncHandler` (from `src/middleware/asyncHandler`) and do not catch errors — the central `errorHandler` middleware in `src/middleware/errorHandler.ts` renders the envelope. Never dispatch on `error.message` substrings (an ESLint rule enforces this in `src/routes`). Custom error codes (e.g. `TOTP_REQUIRED`, `INVALID_STATUS`, `DELEGATION_INVALID`) are preserved by catching the typed error in the route and re-rendering with the custom code.
 
+`UnauthorizedError` is the one member of the hierarchy no service throws, deliberately: authentication is decided in `authenticate`, which is middleware rather than a route handler, so it is not wrapped in `asyncHandler` and a throw would escape Express 4's synchronous error path. It therefore returns its envelope directly — and it needs codes the class cannot express (`MISSING_TOKEN`, `INVALID_TOKEN`, `TOKEN_REVOKED`), which the frontend's refresh logic distinguishes. The class stays available for any service that genuinely needs a 401.
+
 ### Frontend
 
 ```
