@@ -233,6 +233,24 @@ A request body is marked `required` only when its schema has at least one
 required field, so an all-optional body (the free-text audit `reason` /
 `justification` fields) does not force every caller to send `{}`.
 
+The `components.schemas` for the shared domain entities (`Permission`, `Role`,
+`Shift`, `Schedule`, `User`) are generated from the same Zod schemas that
+define their TypeScript types in `packages/shared/src/domain.ts`, where each
+type is a `z.infer` of its schema rather than a second hand-written copy. They
+had previously drifted into describing an older model — `User.role`, a field
+the API has never sent; `Permission.category`/`key` instead of
+`code`/`resource`/`action`; `Role.isBuiltin` instead of `isSystem` — which is
+worse than an omission, because a client generated from them gets wrong types.
+Entities not yet declared in `domain.ts` keep their hand-written component and
+are listed on stdout by every generation run, so the remaining surface is
+stated rather than silently tolerated.
+
+Timestamps are the one place where the published shape and the in-process type
+legitimately differ: the schema is `string | Date`, because mysql2 hands the
+backend `Date` objects, while the wire form is always a string. The shared
+`timestamp` schema is tagged so the generator emits
+`{ type: 'string', format: 'date-time' }` for it.
+
 `GET /api/assignments` additionally refuses — with `400`, rather than
 truncating — an unpaginated request matching more than 5000 rows.
 `shift_assignments` grows by one row per person per shift indefinitely, and a
