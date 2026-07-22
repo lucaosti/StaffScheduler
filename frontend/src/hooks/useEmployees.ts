@@ -49,7 +49,9 @@ export function useEmployeesQuery(search: string, department: string) {
       const res = await employeeService.getEmployees({
         search: search || undefined,
         department: department || undefined,
-        limit: 50,
+        // `pageSize`, not `limit`: the endpoint never parsed `limit`, so this
+        // cap silently did nothing and the list fetched every employee.
+        pageSize: 50,
       });
       if (!res.success || !res.data) {
         throw new Error(res.error?.message ?? 'Failed to load employees.');

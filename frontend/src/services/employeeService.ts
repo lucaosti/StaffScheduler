@@ -21,21 +21,25 @@ import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
 /**
  * Interface for employee filtering and pagination options
  */
+/**
+ * Mirrors the server's `employeeListQuery` schema.
+ *
+ * It had drifted: `position`, `sortBy` and `sortOrder` were never parameters
+ * this endpoint accepts, and the page size is `pageSize`, not `limit`. Since
+ * the query contract became schema-validated those keys are stripped outright,
+ * so sending them looked like a working sort and a working page cap while
+ * neither did anything — `limit: 50` in particular read as a bound on the
+ * employees list while the request actually returned every row.
+ */
 interface EmployeeFilters {
-  /** Filter by department name */
+  /** Filter by department id or name. */
   department?: string;
-  /** Filter by position/role */
-  position?: string;
-  /** Search term for names, emails, or other fields */
+  /** Search term matched against names, email and employee id. */
   search?: string;
-  /** Page number for pagination (1-based) */
+  isActive?: boolean;
+  /** Page number (1-based). Supplying page or pageSize returns the envelope. */
   page?: number;
-  /** Number of items per page */
-  limit?: number;
-  /** Field to sort by */
-  sortBy?: string;
-  /** Sort order direction */
-  sortOrder?: 'asc' | 'desc';
+  pageSize?: number;
 }
 
 /**
@@ -93,8 +97,7 @@ export type UpdateEmployeeData = Partial<CreateEmployeeData>;
  * const filteredEmployees = await getEmployees({
  *   department: 'IT',
  *   page: 1,
- *   limit: 10,
- *   sortBy: 'lastName'
+ *   pageSize: 10,
  * });
  * ```
  */
