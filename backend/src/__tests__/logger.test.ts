@@ -21,6 +21,21 @@ import { logger } from '../config/logger';
 import { requestStorage } from '../middleware/requestContext';
 
 describe('request-id log format', () => {
+  it('stamps no requestId before requestContext has registered its resolver', () => {
+    // The logger no longer imports requestContext — that cycle put the
+    // lowest-level module downstream of middleware. It exposes a hook the
+    // middleware fills in, so this asserts the unregistered default: startup
+    // and cron paths, which run outside any request, log without an id.
+    jest.isolateModules(() => {
+      const { logger: fresh } = require('../config/logger') as typeof import('../config/logger');
+      const info = fresh.format!.transform({ level: 'info', message: 'hi' } as never) as Record<
+        string,
+        unknown
+      >;
+      expect(info.requestId).toBeUndefined();
+    });
+  });
+
   it('stamps requestId when logging inside a request context', () => {
     const info = requestStorage.run(
       { requestId: 'rid-123', ipAddress: null, userAgent: null },

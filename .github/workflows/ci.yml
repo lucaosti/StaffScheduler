@@ -76,6 +76,13 @@ jobs:
       - name: Dead-code check (knip)
         run: npm run deadcode
 
+      - name: Circular-dependency check (madge)
+        # logger -> requestContext -> tracing -> logger was benign only because
+        # every edge is used inside a function, so the bindings resolved by call
+        # time. Load order already carries weight here (otel-bootstrap must be
+        # imported first), so a cycle is worth failing on rather than tolerating.
+        run: npm run deadcode:cycles
+
       - name: Type-check (including tests and scripts)
         # `npm run build` excludes **/*.test.ts so tests never land in dist/,
         # which left no check on them at all: ts-jest typechecks the unit suites
