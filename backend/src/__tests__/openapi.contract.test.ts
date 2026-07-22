@@ -246,6 +246,10 @@ describe('domain components match the shared schemas', () => {
     Department: sharedSchemas.departmentSchema,
     Policy: sharedSchemas.policySchema,
     TimeOffRequest: sharedSchemas.timeOffRequestSchema,
+    OrgUnit: sharedSchemas.orgUnitSchema,
+    ShiftSwapRequest: sharedSchemas.shiftSwapRequestSchema,
+    AuditLogEntry: sharedSchemas.auditLogEntrySchema,
+    Assignment: sharedSchemas.shiftAssignmentSchema,
   } as const;
 
   const componentProps = (name: string): string[] =>
@@ -310,6 +314,15 @@ describe('domain components match the shared schemas', () => {
       }
     }
     expect(phantom).toEqual([]);
+  });
+
+  it('leaves only the envelope types hand-written', () => {
+    // ApiSuccess, ApiError and PaginationMeta describe the response wrapper,
+    // not a domain entity, so there is no schema to derive them from. Every
+    // other component must be generated — a new hand-written entity component
+    // fails here rather than joining the set that drifted.
+    const handWritten = Object.keys(spec.components?.schemas ?? {}).filter((n) => !(n in DOMAIN));
+    expect(handWritten.sort()).toEqual(['ApiError', 'ApiSuccess', 'PaginationMeta']);
   });
 
   it('renders timestamps as wire strings, never as an unrepresentable Date', () => {

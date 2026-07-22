@@ -473,24 +473,29 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "shiftId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "userId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "userName": {
             "type": "string"
           },
           "userEmail": {
-            "type": "string",
-            "format": "email"
+            "type": "string"
           },
           "shiftDate": {
             "type": "string",
-            "format": "date"
+            "format": "date-time"
           },
           "startTime": {
             "type": "string"
@@ -499,7 +504,9 @@
             "type": "string"
           },
           "departmentId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "departmentName": {
             "type": "string"
@@ -524,7 +531,15 @@
           "notes": {
             "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "userId",
+          "status",
+          "assignedAt"
+        ],
+        "additionalProperties": false
       },
       "TimeOffRequest": {
         "type": "object",
@@ -648,59 +663,175 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "requesterUserId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "requesterAssignmentId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "targetUserId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "targetAssignmentId": {
-            "type": "integer"
-          },
-          "notes": {
-            "type": "string"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "status": {
             "type": "string",
             "enum": [
               "pending",
               "approved",
-              "declined",
+              "rejected",
               "cancelled"
+            ]
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewerId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewNotes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "requesterUserId",
+          "requesterAssignmentId",
+          "targetUserId",
+          "targetAssignmentId",
+          "status",
+          "notes",
+          "reviewerId",
+          "reviewedAt",
+          "reviewNotes",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
       },
       "OrgUnit": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "parentId": {
-            "type": "integer",
-            "description": "Null for root units."
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "level": {
-            "type": "integer"
+          "managerUserId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "path": {
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
             "type": "string",
-            "description": "Materialized path, e.g. /1/4/9/"
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "parentId",
+          "managerUserId",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
       },
       "Role": {
         "type": "object",
@@ -848,40 +979,157 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
-          "actorId": {
-            "type": "integer"
+          "userId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "actorEmail": {
-            "type": "string"
+          "onBehalfOfUserId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "action": {
-            "type": "string",
-            "description": "Dot-notation action, e.g. 'schedule.publish'."
+            "type": "string"
           },
           "entityType": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "entityId": {
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "description": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "before": {
-            "type": "object",
-            "description": "State before the change (JSON)."
+          "justification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
-          "after": {
-            "type": "object",
-            "description": "State after the change (JSON)."
+          "beforeSnapshot": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "afterSnapshot": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ipAddress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "userAgent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "userId",
+          "onBehalfOfUserId",
+          "action",
+          "entityType",
+          "entityId",
+          "description",
+          "justification",
+          "ipAddress",
+          "userAgent",
+          "requestId",
+          "createdAt"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {

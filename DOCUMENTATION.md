@@ -233,17 +233,19 @@ A request body is marked `required` only when its schema has at least one
 required field, so an all-optional body (the free-text audit `reason` /
 `justification` fields) does not force every caller to send `{}`.
 
-The `components.schemas` for the shared domain entities (`Permission`, `Role`,
-`Shift`, `Schedule`, `User`) are generated from the same Zod schemas that
-define their TypeScript types in `packages/shared/src/domain.ts`, where each
-type is a `z.infer` of its schema rather than a second hand-written copy. They
+**Every** domain component in `components.schemas` is generated from the Zod
+schemas in `packages/shared/src/domain.ts`, where each type is a `z.infer` of
+its schema rather than a second hand-written copy. Only `ApiSuccess`,
+`ApiError` and `PaginationMeta` remain hand-written: they describe the response
+wrapper, not a domain entity, so there is no schema to derive them from — and a
+contract test asserts that the hand-written set is exactly those three, so a
+new entity component cannot quietly join the surface that drifted. They
 had previously drifted into describing an older model — `User.role`, a field
 the API has never sent; `Permission.category`/`key` instead of
 `code`/`resource`/`action`; `Role.isBuiltin` instead of `isSystem` — which is
 worse than an omission, because a client generated from them gets wrong types.
-Entities not yet declared in `domain.ts` keep their hand-written component and
-are listed on stdout by every generation run, so the remaining surface is
-stated rather than silently tolerated — and a contract test asserts that no
+Every generation run lists whatever is still hand-written, so the remaining
+surface is stated rather than silently tolerated — and a contract test asserts that no
 component, generated or hand-written, publishes a field that exists nowhere in
 the source. Four did: `Department.memberCount` (the real field is
 `employeeCount`), `Policy.valueType`, `TimeOffRequest.reviewedBy` (the reviewer
