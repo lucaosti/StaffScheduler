@@ -498,11 +498,20 @@ npm run test:e2e
 
 ## Technology stack
 
-- Backend: Node.js, Express 4, TypeScript 5, MySQL 8 (`mysql2/promise`),
-  JWT (`jsonwebtoken`), bcrypt, Winston, Zod, Jest, Supertest.
-- Frontend: React 18, TypeScript, React Router v6, React Context, Bootstrap 5.
-- Optimizer: Python 3.8+, Google OR-Tools (CP-SAT).
-- Tooling: Docker Compose, GitHub Actions, Swagger UI, OpenAPI 3.1.
+- Monorepo: npm workspaces — `backend`, `frontend`, `packages/shared` (the canonical
+  Zod contract both sides import).
+- Backend: Node.js, Express 4, TypeScript 5, MySQL 8 (`mysql2/promise`) with dbmate
+  migrations, Redis (`ioredis`) for shared caches and SSE fan-out, BullMQ for
+  optimization jobs, JWT (`jsonwebtoken`), bcrypt, Winston, Zod, nodemailer,
+  Jest, Supertest.
+- Frontend: React 18, TypeScript, React Router v6, TanStack Query (server state),
+  React Hook Form + Zod resolver, Bootstrap 5, Vite.
+- Optimizer: Python 3.8+, Google OR-Tools (CP-SAT), with a TypeScript greedy draft
+  engine held to the same constraint definition by a parity suite.
+- Observability: Prometheus (`prom-client`) + OpenTelemetry; optional Grafana/Loki
+  stack as a compose profile.
+- Tooling: Docker Compose, GitHub Actions, Playwright, Swagger UI, OpenAPI 3.1
+  (generated from the shared schemas).
 
 ## Project policies
 
@@ -517,9 +526,14 @@ The following jobs **must** pass before a PR can merge into `main`:
 
 | Job | What it does |
 | --- | --- |
-| `Backend (lint, typecheck, test, build)` | ESLint, `tsc --noEmit`, Jest unit/integration tests with coverage gates. |
-| `Frontend (lint, test, build)` | ESLint, Jest + React Testing Library tests with coverage, production Vite build. |
-| `Frontend e2e (Playwright) [required]` | Boots MySQL service, seeds demo data, starts the backend, runs Playwright against the Vite dev server. Uploads the HTML report (and traces on failure) as artifacts. |
+| `Backend (lint, typecheck, test, build)` | ESLint, knip dead-code check, `tsc`, OpenAPI drift check, Jest tests with coverage gates. Installs Python + OR-Tools so the optimizer parity suite runs the real CP-SAT engine (`REQUIRE_ORTOOLS=1`). |
+| `Frontend (lint, test, build)` | ESLint, knip, `tsc --noEmit`, generated-client drift check, Jest + React Testing Library tests with coverage, production Vite build. |
+| `Frontend e2e (Playwright) [required]` | Boots MySQL and Redis services, applies migrations, seeds demo data, starts the backend, runs Playwright against the Vite dev server. Uploads the HTML report (and traces on failure) as artifacts. |
+
+A separate [`backup-restore`](./.github/workflows/backup-restore.yml) workflow runs
+weekly (and whenever the backup scripts or migrations change): it migrates a clean
+database, seeds a marker, takes a real backup, drops the database, restores, and
+asserts the marker survived — so "our backups restore" is verified, not assumed.
 
 Run the same checks locally with:
 
