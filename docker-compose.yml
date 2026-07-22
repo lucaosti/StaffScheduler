@@ -9,13 +9,18 @@ services:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-staff_scheduler}
       MYSQL_USER: ${MYSQL_USER:-scheduler_user}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
-    ports:
-      - "${DB_PORT:-3306}:3306"
+    # No host port in production: MySQL is reachable only on the internal compose
+    # network (the backend and migrate services connect by service name). The dev
+    # override republishes 3306 for local tooling; production admin access goes
+    # through the phpmyadmin `dev` profile or an explicit, temporary port forward.
     volumes:
       - mysql_data:/var/lib/mysql
       - ./mysql/conf.d:/etc/mysql/conf.d:ro
+    # Use MySQL 8's default caching_sha2_password (the legacy
+    # mysql_native_password plugin is deprecated and removed in MySQL 9). mysql2
+    # (backend) and go-sql-driver (dbmate) both support it over the internal
+    # network.
     command: >
-      --default-authentication-plugin=mysql_native_password
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
     networks:
