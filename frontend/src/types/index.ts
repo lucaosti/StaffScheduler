@@ -15,6 +15,14 @@
  * @author Luca Ostinelli
  */
 
+// ── Shared domain contract ────────────────────────────────────────────────────
+// Permission, Role and UserRoleAssignment are declared once in
+// @staff-scheduler/shared and re-exported here, so both sides cannot drift.
+// Importing them from this barrel keeps every existing call site unchanged.
+import type { Permission, Role, UserRoleAssignment } from '@staff-scheduler/shared';
+export type { Permission, Role, UserRoleAssignment };
+
+
 // Types for StaffScheduler Frontend (aligned with backend schema)
 
 type ID = number | string;
@@ -230,31 +238,6 @@ export interface DashboardStats {
   monthlyCost: number | null;
   coverageRate: number;
   employeeSatisfaction: number;
-}
-
-export interface Permission {
-  id: number;
-  code: string;
-  resource: string;
-  action: string;
-  description?: string;
-}
-
-export interface Role {
-  id: number;
-  name: string;
-  description?: string;
-  isSystem: boolean;
-  permissions?: string[];
-  createdAt?: string;
-  updatedAt?: string;
-}
-
-export interface UserRoleAssignment {
-  roleId: number;
-  roleName: string;
-  scopeOrgUnitId?: number | null;
-  expiresAt?: string | null;
 }
 
 export interface AuditLogEntry {
