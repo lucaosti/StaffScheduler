@@ -52,10 +52,12 @@ describe('AuditLogService.list', () => {
     const page = await service.list({});
     expect(page.total).toBe(2);
     expect(page.items).toHaveLength(2);
-    expect(execute.mock.calls[1][0]).toMatch(/LIMIT \? OFFSET \?/);
-    const listParams = execute.mock.calls[1][1] as unknown[];
-    expect(listParams.at(-2)).toBe(100);
-    expect(listParams.at(-1)).toBe(0);
+
+    // LIMIT/OFFSET are inlined, not bound: MySQL's prepared-statement protocol
+    // rejects placeholders there, which made every call fail. The clamping is
+    // still what is under test — it just has to be read from the SQL now.
+    const listSql = execute.mock.calls[1][0] as string;
+    expect(listSql).toMatch(/LIMIT 100 OFFSET 0/);
   });
 
   it('clamps a huge limit to 500', async () => {
@@ -66,8 +68,7 @@ describe('AuditLogService.list', () => {
 
     const service = new AuditLogService(pool);
     await service.list({ limit: 9999 });
-    const listParams = execute.mock.calls[1][1] as unknown[];
-    expect(listParams.at(-2)).toBe(500);
+    expect(execute.mock.calls[1][0] as string).toMatch(/LIMIT 500/);
   });
 
   it('clamps a zero limit to 1', async () => {
@@ -78,8 +79,7 @@ describe('AuditLogService.list', () => {
 
     const service = new AuditLogService(pool);
     await service.list({ limit: 0 });
-    const listParams = execute.mock.calls[1][1] as unknown[];
-    expect(listParams.at(-2)).toBe(1);
+    expect(execute.mock.calls[1][0] as string).toMatch(/LIMIT 1 /);
   });
 
   it('clamps a negative offset to 0', async () => {
@@ -90,8 +90,7 @@ describe('AuditLogService.list', () => {
 
     const service = new AuditLogService(pool);
     await service.list({ offset: -5 });
-    const listParams = execute.mock.calls[1][1] as unknown[];
-    expect(listParams.at(-1)).toBe(0);
+    expect(execute.mock.calls[1][0] as string).toMatch(/OFFSET 0/);
   });
 
   it('builds WHERE clause from all supported filters', async () => {

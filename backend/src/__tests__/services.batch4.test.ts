@@ -78,9 +78,9 @@ describe('AuditLogService.list — clampOffset negative offset returns 0', () =>
     const svc = new AuditLogService(pool);
     const result = await svc.list({ offset: -5 });
     expect(result.items).toHaveLength(0);
-    // OFFSET param should be 0 (clamped from -5)
-    const params = execute.mock.calls[1][1] as unknown[];
-    expect(params[params.length - 1]).toBe(0);
+    // OFFSET is clamped from -5 to 0. It is inlined rather than bound, since a
+    // placeholder in LIMIT/OFFSET is rejected by the prepared-statement protocol.
+    expect(execute.mock.calls[1][0] as string).toMatch(/OFFSET 0/);
   });
 });
 

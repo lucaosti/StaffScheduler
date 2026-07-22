@@ -319,6 +319,13 @@ export class OnCallService {
       params.push(options.rangeEnd);
     }
     const [rows] = await this.pool.execute<RowDataPacket[]>(
+      // `a.status` must be grouped, not merely selected: under MySQL 8's default
+      // only_full_group_by it is neither aggregated nor functionally dependent on
+      // p.id, so this failed with ER_WRONG_FIELD_WITH_GROUP and GET /api/on-call/me
+      // returned 500 on every call. Grouping by it rather than wrapping it in
+      // ANY_VALUE keeps the query honest — and cannot multiply rows, because
+      // on_call_assignments is UNIQUE (period_id, user_id) and the WHERE pins
+      // a.user_id, so there is exactly one assignment row per period.
       `SELECT p.*, d.name AS department_name, a.status AS a_status,
               COUNT(DISTINCT a2.id) AS assigned_count
          FROM on_call_assignments a
@@ -327,7 +334,7 @@ export class OnCallService {
          LEFT JOIN on_call_assignments a2 ON a2.period_id = p.id
               AND a2.status IN ('pending', 'confirmed')
         WHERE ${conditions.join(' AND ')}
-        GROUP BY p.id
+        GROUP BY p.id, a.status
         ORDER BY p.date ASC, p.start_time ASC
         LIMIT 500`,
       params
