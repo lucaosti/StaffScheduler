@@ -96,8 +96,7 @@ const Shifts: React.FC = () => {
   const filteredShifts = useMemo(() => shifts.filter((shift) => {
     const matchesSearch =
       !debouncedSearch ||
-      (shift.name || '').toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-      (shift.departmentName || shift.department || '')
+      (shift.departmentName || '')
         .toLowerCase()
         .includes(debouncedSearch.toLowerCase()) ||
       (shift.notes && shift.notes.toLowerCase().includes(debouncedSearch.toLowerCase()));
@@ -105,8 +104,7 @@ const Shifts: React.FC = () => {
     const matchesDepartment =
       !selectedDepartment ||
       String(shift.departmentId) === selectedDepartment ||
-      shift.departmentName === selectedDepartment ||
-      shift.department === selectedDepartment;
+      shift.departmentName === selectedDepartment;
 
     return matchesSearch && matchesDepartment;
   }), [shifts, debouncedSearch, selectedDepartment]);

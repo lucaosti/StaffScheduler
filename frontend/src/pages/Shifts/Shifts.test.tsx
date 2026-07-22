@@ -52,7 +52,8 @@ describe('<Shifts />', () => {
       ok([
         {
           id: 5,
-          name: 'Night',
+          // No `name`: the API's Shift contract has none, so the card is
+          // labelled "<department> <date>".
           date: '2026-04-02',
           startTime: '22:00',
           endTime: '06:00', // crosses midnight -> duration branch
@@ -79,9 +80,11 @@ describe('<Shifts />', () => {
     render(<Shifts />);
     expect(await screen.findByRole('heading', { name: /shift management/i })).toBeInTheDocument();
 
-    // Search term filters the table
-    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'night');
-    expect(screen.getByText(/Night/i)).toBeInTheDocument();
+    // Search term filters the table. The term must match a field the API
+    // actually sends (here `notes`); the search box is debounced by 300ms, so
+    // assert *after* the debounce rather than racing it.
+    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
+    expect(await screen.findByText(/Emergency Medicine 2026-04-02/i)).toBeInTheDocument();
 
     // Open add modal and trigger validation error
     await waitFor(() =>
@@ -112,7 +115,8 @@ describe('<Shifts />', () => {
 
     // Edit existing shift
     await userEvent.clear(screen.getByPlaceholderText(/search shifts/i));
-    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'night');
+    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
+    await screen.findByText(/Emergency Medicine 2026-04-02/i);
     await userEvent.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
     await userEvent.clear(screen.getByLabelText(/notes/i));
     await userEvent.type(screen.getByLabelText(/notes/i), 'updated');
@@ -128,7 +132,7 @@ describe('<Shifts />', () => {
 
   it('does not delete when user cancels the confirm modal', async () => {
     render(<Shifts />);
-    await screen.findByText(/Night/i);
+    await screen.findByText(/Emergency Medicine 2026-04-02/i);
     // Click delete to open the ConfirmModal
     await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
     // Click the Cancel button inside the modal instead of Confirm
