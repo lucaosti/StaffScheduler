@@ -47,8 +47,10 @@ describe('AuditLogService', () => {
 
     await new AuditLogService(pool).list({ limit: 10, offset: 5.7 });
 
-    // LIMIT/OFFSET are integers by contract: 5.7 must arrive as 5.
-    expect(execute.mock.calls[1][1]).toEqual(expect.arrayContaining([5]));
+    // LIMIT/OFFSET are integers by contract: 5.7 must arrive as 5. They are
+    // inlined rather than bound, so the guarantee is read from the SQL — and a
+    // float reaching it would be a syntax error, not a silent coercion.
+    expect(execute.mock.calls[1][0] as string).toMatch(/LIMIT 10 OFFSET 5$/m);
   });
 
   it('wires every optional filter into the WHERE clause', async () => {
