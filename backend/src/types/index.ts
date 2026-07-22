@@ -495,3 +495,18 @@ export interface SystemSetting {
   createdAt: Date;
   updatedAt: Date;
 }
+
+/**
+ * A value that may be bound to a `?` placeholder.
+ *
+ * WHY THIS EXISTS: these arrays were typed `any[]`, so `undefined` flowed into
+ * a query without complaint. mysql2 rejects that at execution time with
+ * ER_WRONG_ARGUMENTS — a 500 rather than a compile error — which is the same
+ * failure the audit-log, change-request and notification listings returned in
+ * every deployment until the real-MySQL sweep found them. Naming the accepted
+ * types moves that class of mistake to the compiler.
+ *
+ * `Date` is included because mysql2 serialises it; `null` is a legitimate bound
+ * value, `undefined` is not.
+ */
+export type SqlParam = string | number | boolean | Date | null;
