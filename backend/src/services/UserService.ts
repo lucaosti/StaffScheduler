@@ -8,7 +8,7 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
 import bcrypt from 'bcrypt';
-import { User, CreateUserRequest, UpdateUserRequest } from '../types';
+import { User, CreateUserRequest, UpdateUserRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
 import { config } from '../config';
 import { AuditLogService } from './AuditLogService';
@@ -151,7 +151,7 @@ export class UserService {
          WHERE ud2.user_id = u.id ORDER BY d.name ASC LIMIT 1) AS department_name
         FROM users u`;
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
       if (filters?.departmentId) {
         query += ' JOIN user_departments ud ON u.id = ud.user_id';
         conditions.push('ud.department_id = ?');
@@ -226,7 +226,7 @@ export class UserService {
     try {
       let query = 'SELECT COUNT(DISTINCT u.id) AS total FROM users u';
       const conditions: string[] = [];
-      const params: any[] = [];
+      const params: SqlParam[] = [];
       if (filters?.departmentId) {
         query += ' JOIN user_departments ud ON u.id = ud.user_id';
         conditions.push('ud.department_id = ?');
@@ -275,7 +275,7 @@ export class UserService {
       // user-controlled input.  The UPDATE template is therefore not susceptible to
       // SQL injection through column-name interpolation.
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
       if (userData.email !== undefined) {
         const [existing] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [userData.email, id]);
         if (existing.length > 0) throw new ConflictError('Email already exists');

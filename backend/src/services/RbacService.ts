@@ -23,6 +23,7 @@ import {
   UserRoleAssignment,
   CreateRoleRequest,
   UpdateRoleRequest,
+  SqlParam,
 } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
@@ -219,7 +220,7 @@ export class RbacService {
     try {
       await connection.beginTransaction();
       const updates: string[] = [];
-      const values: any[] = [];
+      const values: SqlParam[] = [];
       if (input.name !== undefined) {
         updates.push('name = ?');
         values.push(input.name);
