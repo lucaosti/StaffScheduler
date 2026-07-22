@@ -1,0 +1,10 @@
+{
+  "//": "Typechecks everything the build excludes. The project tsconfig omits **/*.test.ts because tests must not land in dist/, but that left no local command checking them at all: ts-jest typechecks the unit suites as it runs them, while the integration suite is outside `npm test`, so a type error in it reached CI unnoticed. `npm run typecheck` closes that gap without changing what is emitted.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["src/**/*", "scripts/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
