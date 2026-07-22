@@ -285,3 +285,88 @@ describe('directory and dashboard (real DB)', () => {
     expect(res.body.data.monthlyCost).not.toBeUndefined();
   });
 });
+
+/**
+ * Every GET that needs no fixture, executed against the real schema.
+ *
+ * WHY A SWEEP RATHER THAN PER-ENDPOINT TESTS: the mocked unit suites assert
+ * that a service composes a particular SQL string, not that MySQL accepts it.
+ * That is how `SELECT id, role FROM users` survived 1900+ mocked tests after
+ * the `role` column was dropped — the failure mode this file was created for.
+ * Before this sweep the suite covered eight of the API's 222 endpoints, so the
+ * guarantee held for a fraction of the SQL in the system.
+ *
+ * The assertion is deliberately weak — any status below 500 — because the
+ * subject is not the response body but whether the statement runs at all. An
+ * unknown column, a bad JOIN or a violated constraint surfaces as a 500 here;
+ * a 200, a 403 or a 404 all mean MySQL understood the query. Anything stronger
+ * would need per-endpoint fixtures and would make the sweep expensive to keep
+ * green for no extra protection against this class.
+ */
+describe('every fixture-free GET runs against the real schema', () => {
+  const ENDPOINTS = [
+    '/approval-workflows',
+    '/assignments',
+    '/attendance',
+    '/audit-logs',
+    '/audit-logs/export',
+    '/change-requests',
+    '/dashboard/activities',
+    '/dashboard/departments',
+    '/dashboard/stats',
+    '/dashboard/upcoming-shifts',
+    '/delegations',
+    '/departments',
+    '/directory/me',
+    '/employees',
+    '/modules',
+    '/notifications',
+    '/notifications/unread-count',
+    '/on-call/me',
+    '/on-call/periods',
+    '/org/loans',
+    '/org/manager-chain',
+    '/org/units',
+    '/org/units/tree',
+    '/pending-approvals',
+    '/pending-approvals/count',
+    '/permissions',
+    '/policies',
+    '/policies/approval-matrix',
+    '/policies/exceptions',
+    '/preferences/me',
+    '/responsibility-rules',
+    '/responsibility-rules/matrix',
+    '/responsibility-rules/my-responsibilities',
+    '/roles',
+    '/schedules',
+    '/settings',
+    '/settings/currency',
+    '/settings/time-period',
+    '/shift-swap',
+    '/shifts',
+    '/shifts/templates',
+    '/system/info',
+    '/time-off',
+    '/users',
+  ];
+
+  it.each(ENDPOINTS)('GET %s does not fail on the SQL', async (endpoint) => {
+    const cookie = await authCookie();
+    const res = await request(app).get(`/api${endpoint}`).set('Cookie', cookie);
+    expect(res.status).toBeLessThan(500);
+  });
+
+  // The reporting endpoints require a date range, so they are swept separately
+  // rather than excluded — their SQL is among the most join-heavy in the app.
+  it.each(['/reports/hours-worked', '/reports/cost-by-department'])(
+    'GET %s does not fail on the SQL',
+    async (endpoint) => {
+      const cookie = await authCookie();
+      const res = await request(app)
+        .get(`/api${endpoint}?startDate=2020-01-01&endDate=2030-12-31`)
+        .set('Cookie', cookie);
+      expect(res.status).toBeLessThan(500);
+    }
+  );
+});
