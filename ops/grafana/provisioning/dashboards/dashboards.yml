@@ -1,0 +1,14 @@
+# Grafana dashboard provider — loads every dashboard JSON in the mounted folder
+# on startup, so the base StaffScheduler dashboard appears without manual import.
+apiVersion: 1
+
+providers:
+  - name: StaffScheduler
+    orgId: 1
+    folder: StaffScheduler
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards
