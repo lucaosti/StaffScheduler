@@ -3,7 +3,12 @@
  *
  * Manages runtime feature flags stored in the `modules` table. Provides a
  * cached look-up so `requireModule` middleware does not issue a DB query on
- * every single request; the cache is invalidated when a module is toggled.
+ * every single request.
+ *
+ * The cache itself lives in `./moduleCache` at module scope (not on the
+ * instance) and is invalidated across every instance AND every backend replica
+ * via Redis pub/sub on each toggle, with a short TTL as a backstop — see that
+ * file for why both mechanisms are used.
  *
  * @author Luca Ostinelli
  */
@@ -11,6 +16,13 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { NotFoundError } from '../errors';
 import { logger } from '../config/logger';
+import {
+  readGlobalModules,
+  writeGlobalModules,
+  readOrgModules,
+  writeOrgModules,
+  invalidateModuleCache,
+} from './moduleCache';
 
 export interface Module {
   id: number;
@@ -29,11 +41,9 @@ export interface ModuleWithOrgOverride extends Module {
 }
 
 export class ModuleService {
-  /** In-process cache: module code → isEnabled (global). Cleared on every toggle. */
-  private cache: Map<string, boolean> | null = null;
-  /** Per-org cache: org name → (code → isEnabled). Cleared on override change for that org. */
-  private orgCache: Map<string, Map<string, boolean>> = new Map();
-
+  // The flag caches live in ./moduleCache at module scope, not on the instance:
+  // several ModuleService instances exist per process (one per router factory),
+  // and invalidation must reach every one of them — and every other replica.
   constructor(private pool: Pool) {}
 
   async list(): Promise<Module[]> {
@@ -63,7 +73,9 @@ export class ModuleService {
       [isEnabled ? 1 : 0, code]
     );
     if (result.affectedRows === 0) throw new NotFoundError(`Module not found: ${code}`);
-    this.cache = null;
+    // A global flag change can alter every org's effective value, so clear all
+    // scopes here and on every other replica.
+    await invalidateModuleCache();
     logger.info(`Module '${code}' ${isEnabled ? 'enabled' : 'disabled'}`);
     const mod = await this.getByCode(code);
     if (!mod) throw new Error('Failed to retrieve module after update');
@@ -88,8 +100,13 @@ export class ModuleService {
    * the first check within a process lifetime.
    */
   async isEnabled(code: string): Promise<boolean> {
-    if (this.cache === null) await this.buildCache();
-    return this.cache!.get(code) ?? false;
+    let cache = readGlobalModules();
+    if (cache === null) {
+      const modules = await this.list();
+      cache = new Map(modules.map((m) => [m.code, m.isEnabled]));
+      writeGlobalModules(cache);
+    }
+    return cache.get(code) ?? false;
   }
 
   /**
@@ -130,7 +147,7 @@ export class ModuleService {
                                updated_at = CURRENT_TIMESTAMP`,
       [org, code, isEnabled ? 1 : 0, updatedBy ?? null]
     );
-    this.orgCache.delete(org);
+    await invalidateModuleCache(org);
     logger.info(`Module override: org='${org}' code='${code}' enabled=${isEnabled}`);
 
     const audit = new (await import('./AuditLogService')).AuditLogService(this.pool);
@@ -161,7 +178,7 @@ export class ModuleService {
       `DELETE FROM organization_module_overrides WHERE organization_name = ? AND module_code = ?`,
       [org, code]
     );
-    this.orgCache.delete(org);
+    await invalidateModuleCache(org);
     if (result.affectedRows === 0) throw new NotFoundError('Override not found');
     logger.info(`Module override removed: org='${org}' code='${code}'`);
   }
@@ -177,21 +194,16 @@ export class ModuleService {
   }
 
   private async loadOrgOverrides(org: string): Promise<Map<string, boolean>> {
-    if (!this.orgCache.has(org)) {
-      const [rows] = await this.pool.execute<import('mysql2/promise').RowDataPacket[]>(
-        `SELECT module_code, is_enabled FROM organization_module_overrides WHERE organization_name = ?`,
-        [org]
-      );
-      const m = new Map<string, boolean>();
-      for (const r of rows as any[]) m.set(r.module_code, Boolean(r.is_enabled));
-      this.orgCache.set(org, m);
-    }
-    return this.orgCache.get(org)!;
-  }
-
-  private async buildCache(): Promise<void> {
-    const modules = await this.list();
-    this.cache = new Map(modules.map((m) => [m.code, m.isEnabled]));
+    const cached = readOrgModules(org);
+    if (cached) return cached;
+    const [rows] = await this.pool.execute<import('mysql2/promise').RowDataPacket[]>(
+      `SELECT module_code, is_enabled FROM organization_module_overrides WHERE organization_name = ?`,
+      [org]
+    );
+    const m = new Map<string, boolean>();
+    for (const r of rows as any[]) m.set(r.module_code, Boolean(r.is_enabled));
+    writeOrgModules(org, m);
+    return m;
   }
 
   private mapRow(r: any): Module {
