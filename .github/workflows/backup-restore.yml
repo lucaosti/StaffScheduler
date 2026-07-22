@@ -1,0 +1,85 @@
+# Proves that our backups actually restore.
+#
+# A backup you have never restored is not a backup. This job spins up a clean
+# MySQL, applies the dbmate migrations, seeds a marker row, runs the real
+# ops/backup/backup.sh, DROPs the database, runs the real ops/backup/restore.sh,
+# and asserts the marker survived — end to end, on the same scripts the compose
+# sidecar uses. It runs on a weekly schedule and on demand, plus whenever the
+# backup scripts or migrations change (so a change can't silently break restore).
+name: Backup restore test
+
+on:
+  schedule:
+    - cron: '17 4 * * 1' # Mondays 04:17 UTC
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'ops/backup/**'
+      - '.github/workflows/backup-restore.yml'
+      - 'backend/db/migrations/**'
+
+permissions:
+  contents: read
+
+jobs:
+  restore:
+    name: Dump, drop and restore into a clean database
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: demo1234
+          MYSQL_DATABASE: staff_scheduler
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -pdemo1234"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: '3306'
+      DB_USER: root
+      DB_PASSWORD: demo1234
+      DB_NAME: staff_scheduler
+      BACKUP_DIR: ${{ github.workspace }}/backups
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -uroot -pdemo1234 --silent; then echo up; exit 0; fi
+            echo "waiting for mysql ($i)…"; sleep 2
+          done
+          echo "mysql did not become ready"; exit 1
+
+      - name: Apply migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql://root:demo1234@127.0.0.1:3306/staff_scheduler
+        run: npx dbmate --no-dump-schema up
+
+      - name: Seed a marker row
+        run: |
+          mysql -h 127.0.0.1 -uroot -pdemo1234 staff_scheduler -e \
+            "CREATE TABLE IF NOT EXISTS backup_marker (id INT PRIMARY KEY, note VARCHAR(64));
+             INSERT INTO backup_marker (id, note) VALUES (1, 'restore-me') ON DUPLICATE KEY UPDATE note=VALUES(note);"
+
+      - name: Back up
+        run: sh ops/backup/backup.sh
+
+      - name: Drop the database (simulate loss)
+        run: mysql -h 127.0.0.1 -uroot -pdemo1234 -e "DROP DATABASE staff_scheduler;"
+
+      - name: Restore the latest backup
+        run: sh ops/backup/restore.sh --latest
+
+      - name: Smoke query — the marker must have survived the round-trip
+        run: |
+          NOTE=$(mysql -h 127.0.0.1 -uroot -pdemo1234 -N -B staff_scheduler \
+            -e "SELECT note FROM backup_marker WHERE id = 1;")
+          echo "marker note: '$NOTE'"
+          test "$NOTE" = "restore-me"
