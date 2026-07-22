@@ -105,6 +105,50 @@ describe('constraintValidator catches deliberate violations', () => {
   it('accepts a legal empty solution', () => {
     expect(findConstraintViolations(problem, [])).toHaveLength(0);
   });
+
+  it('flags exceeding the rolling weekly-hours cap', () => {
+    // Five 10h days inside one 7-day window = 50h against a 40h cap.
+    const weeklyProblem = {
+      shifts: Array.from({ length: 5 }, (_, i) => ({
+        id: `w${i + 1}`,
+        date: `2026-06-0${i + 1}`,
+        start_time: '08:00',
+        end_time: '18:00', // 10h
+        min_staff: 1,
+        max_staff: 1,
+      })),
+      employees: [
+        { id: 'e1', max_hours_per_week: 40, max_consecutive_days: 7, skills: [], unavailable_dates: [] },
+      ],
+      constraints: { min_hours_between_shifts: 8 },
+    };
+    const violations = findConstraintViolations(
+      weeklyProblem,
+      weeklyProblem.shifts.map((s) => ({ employeeId: 'e1', shiftId: s.id }))
+    );
+    const weekly = violations.filter((v) => v.rule === 'weekly-hours');
+    expect(weekly).toHaveLength(1); // reported once per employee
+    expect(weekly[0].detail).toMatch(/50h in the week starting 2026-06-01/);
+  });
+});
+
+describe('coverageShortfalls', () => {
+  it('reports shifts staffed below min_staff and stays silent otherwise', () => {
+    const problem = feasibleFixtures[0].problem; // two shifts, min_staff 1 each
+    const [first, second] = problem.shifts;
+
+    expect(coverageShortfalls(problem, [])).toEqual([
+      { shiftId: first.id, assigned: 0, required: 1 },
+      { shiftId: second.id, assigned: 0, required: 1 },
+    ]);
+
+    expect(
+      coverageShortfalls(problem, [
+        { employeeId: 'e1', shiftId: first.id },
+        { employeeId: 'e2', shiftId: second.id },
+      ])
+    ).toEqual([]);
+  });
 });
 
 describe('greedy engine respects the canonical constraints', () => {
