@@ -10,20 +10,18 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Permission, Role, UserRoleAssignment, Employee } from '../../types';
-import { OrgUnit, listUnits } from '../../services/orgService';
+import { createRole, updateRole, deleteRole, assignRole, removeRole } from '../../services/rbacService';
+import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import {
-  listPermissions,
-  listRoles,
-  createRole,
-  updateRole,
-  deleteRole,
-  getUserRoles,
-  assignRole,
-  removeRole,
-} from '../../services/rbacService';
-import { getEmployees } from '../../services/employeeService';
+  rbacKeys,
+  useRolesAndPermissionsQuery,
+  useRbacOrgUnitsQuery,
+  useEmployeeSearchQuery,
+  useUserRolesQuery,
+} from '../../hooks/useRbac';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,12 +44,19 @@ const EMPTY_FORM: RoleFormState = { name: '', description: '', permissionCodes: 
 const RbacManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('roles');
 
-  // ---- Roles tab state ----
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [rolesLoading, setRolesLoading] = useState(true);
-  const [rolesError, setRolesError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // ---- Roles tab state (server state via TanStack Query) ----
+  const rolesQuery = useRolesAndPermissionsQuery();
+  const roles = rolesQuery.data?.roles ?? [];
+  const permissions = rolesQuery.data?.permissions ?? [];
+  const rolesLoading = rolesQuery.isLoading;
+  const [rolesActionError, setRolesError] = useState<string | null>(null);
+  const rolesError = rolesQuery.isError
+    ? (rolesQuery.error as Error).message ?? 'Failed to load roles.'
+    : rolesActionError;
   const [rolesSuccess, setRolesSuccess] = useState<string | null>(null);
+  const loadRoles = () => queryClient.invalidateQueries({ queryKey: rbacKeys.rolesAndPerms });
 
   const [roleModal, setRoleModal] = useState<{ open: boolean; editing: Role | null }>({
     open: false,
@@ -64,15 +69,26 @@ const RbacManagement: React.FC = () => {
   const [deleting, setDeleting] = useState(false);
 
   // ---- User-roles tab state ----
-  const [orgUnits, setOrgUnits] = useState<OrgUnit[]>([]);
   const [employeeSearch, setEmployeeSearch] = useState('');
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [empLoading, setEmpLoading] = useState(false);
   const [selectedUser, setSelectedUser] = useState<Employee | null>(null);
-  const [userRoles, setUserRoles] = useState<UserRoleAssignment[]>([]);
-  const [userRolesLoading, setUserRolesLoading] = useState(false);
-  const [userRolesError, setUserRolesError] = useState<string | null>(null);
+  const [userRolesActionError, setUserRolesError] = useState<string | null>(null);
   const [userRolesSuccess, setUserRolesSuccess] = useState<string | null>(null);
+
+  // Server state via TanStack Query: org units, a debounced employee search, and
+  // the selected user's roles (both gated on their input via enabled).
+  const orgUnits = useRbacOrgUnitsQuery().data ?? [];
+  const debouncedEmployeeSearch = useDebouncedValue(employeeSearch, 300);
+  const employeeSearchQuery = useEmployeeSearchQuery(debouncedEmployeeSearch);
+  const employees = employeeSearchQuery.data ?? [];
+  const empLoading = employeeSearchQuery.isFetching;
+  const userRolesQuery = useUserRolesQuery(selectedUser?.id ? Number(selectedUser.id) : null);
+  const userRoles = userRolesQuery.data ?? [];
+  const userRolesLoading = selectedUser !== null && userRolesQuery.isLoading;
+  const userRolesError = userRolesQuery.isError
+    ? (userRolesQuery.error as Error).message ?? 'Failed to load user roles.'
+    : userRolesActionError;
+  const loadUserRoles = () =>
+    queryClient.invalidateQueries({ queryKey: ['rbac', 'user-roles'] });
 
   const [grantForm, setGrantForm] = useState<{
     roleId: number | '';
@@ -87,69 +103,16 @@ const RbacManagement: React.FC = () => {
   const [revoking, setRevoking] = useState(false);
 
   // ---------------------------------------------------------------------------
-  // Data loading
+  // Selection — the queries above react to selectedUser / employeeSearch.
   // ---------------------------------------------------------------------------
 
-  const loadRoles = useCallback(async () => {
-    setRolesLoading(true);
-    setRolesError(null);
-    try {
-      const [rolesRes, permsRes] = await Promise.all([listRoles(), listPermissions()]);
-      if (rolesRes.success && rolesRes.data) setRoles(rolesRes.data);
-      if (permsRes.success && permsRes.data) setPermissions(permsRes.data);
-    } catch (e) {
-      setRolesError((e as Error).message ?? 'Failed to load roles.');
-    } finally {
-      setRolesLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadRoles();
-    listUnits().then((res) => {
-      if (res.success && res.data) setOrgUnits(res.data);
-    }).catch(() => {});
-  }, [loadRoles]);
-
-  const searchEmployees = useCallback(async (q: string) => {
-    if (!q.trim()) { setEmployees([]); return; }
-    setEmpLoading(true);
-    try {
-      const res = await getEmployees({ search: q.trim() });
-      if (res.success && res.data) setEmployees(res.data);
-    } catch {
-      setEmployees([]);
-    } finally {
-      setEmpLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const t = setTimeout(() => void searchEmployees(employeeSearch), 300);
-    return () => clearTimeout(t);
-  }, [employeeSearch, searchEmployees]);
-
-  const loadUserRoles = async (userId: number) => {
-    setUserRolesLoading(true);
-    setUserRolesError(null);
-    try {
-      const res = await getUserRoles(userId);
-      if (res.success && res.data) setUserRoles(res.data);
-      else setUserRolesError('Failed to load user roles.');
-    } catch (e) {
-      setUserRolesError((e as Error).message ?? 'Failed to load user roles.');
-    } finally {
-      setUserRolesLoading(false);
-    }
-  };
-
   const handleSelectUser = (emp: Employee) => {
-    setSelectedUser(emp);
-    setEmployees([]);
+    // Clearing the search disables the employee-search query (hiding results);
+    // setting the user drives the user-roles query.
     setEmployeeSearch('');
     setUserRolesSuccess(null);
     setUserRolesError(null);
-    void loadUserRoles(Number(emp.id));
+    setSelectedUser(emp);
   };
 
   // ---------------------------------------------------------------------------
@@ -243,7 +206,7 @@ const RbacManagement: React.FC = () => {
       });
       setGrantForm({ roleId: '', scopeOrgUnitId: '', expiresAt: '', justification: '' });
       setUserRolesSuccess('Role granted successfully.');
-      await loadUserRoles(Number(selectedUser.id));
+      await loadUserRoles();
     } catch (e) {
       setUserRolesError((e as Error).message ?? 'Failed to grant role.');
     } finally {
@@ -266,7 +229,7 @@ const RbacManagement: React.FC = () => {
       setUserRolesSuccess(`Role "${revokeTarget.roleName}" revoked.`);
       setRevokeTarget(null);
       setRevokeJustification('');
-      await loadUserRoles(Number(selectedUser.id));
+      await loadUserRoles();
     } catch (e) {
       setUserRolesError((e as Error).message ?? 'Failed to revoke role.');
     } finally {
@@ -475,7 +438,7 @@ const RbacManagement: React.FC = () => {
                     </div>
                     <button
                       className="btn btn-sm btn-outline-secondary ms-auto"
-                      onClick={() => { setSelectedUser(null); setUserRoles([]); }}
+                      onClick={() => { setSelectedUser(null); }}
                     >
                       Change
                     </button>
