@@ -8,9 +8,9 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  listChangeRequests,
   createChangeRequest,
   approveChangeRequest,
   rejectChangeRequest,
@@ -19,6 +19,7 @@ import {
   ChangeRequestStatus,
   CreateChangeRequestInput,
 } from '../../services/changeRequestService';
+import { useChangeRequestsQuery } from '../../hooks/useGovernance';
 import { useAuth } from '../../contexts/AuthContext';
 
 const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
@@ -39,10 +40,7 @@ const EMPTY_FORM: Omit<CreateChangeRequestInput, 'proposedPayload'> & { payloadT
 
 const ChangeRequests: React.FC = () => {
   const { user } = useAuth();
-  const [items, setItems] = useState<ChangeRequest[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<'mine' | 'all'>('mine');
   const [statusFilter, setStatusFilter] = useState<ChangeRequestStatus | ''>('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -62,28 +60,19 @@ const ChangeRequests: React.FC = () => {
 
   const canReview = user?.permissions?.includes('change_request.review') ?? false;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = {
-        ...(tab === 'mine' ? { proposerUserId: Number(user?.id) } : {}),
-        ...(statusFilter ? { status: statusFilter as ChangeRequestStatus } : {}),
-        limit: 50,
-        offset: 0,
-      };
-      const res = await listChangeRequests(params);
-      const page = res.data;
-      setItems(page?.items ?? []);
-      setTotal(page?.total ?? 0);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load change requests.');
-    } finally {
-      setLoading(false);
-    }
-  }, [tab, statusFilter, user?.id]);
-
-  useEffect(() => { void load(); }, [load]);
+  // Server state via TanStack Query, keyed by the tab (mine/all) and status
+  // filter so switching either refetches. Shares the cache entry with the
+  // Governance page's change-request view.
+  const proposerUserId = tab === 'mine' ? Number(user?.id) : undefined;
+  const crQuery = useChangeRequestsQuery(true, statusFilter, proposerUserId);
+  const items = crQuery.data?.items ?? [];
+  const total = crQuery.data?.total ?? 0;
+  const loading = crQuery.isLoading;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = crQuery.isError
+    ? (crQuery.error as Error).message ?? 'Failed to load change requests.'
+    : actionError;
+  const load = () => queryClient.invalidateQueries({ queryKey: ['change-requests'] });
 
   // ---------- Create ----------
 
