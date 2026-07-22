@@ -23,8 +23,8 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
-import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam } from '../schemas';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
+import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam, policyExceptionListQuery } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
@@ -68,18 +68,15 @@ export const createPoliciesRouter = (pool: Pool): Router => {
 
   // ------------- Exceptions (declared before /:id) -------------
 
-  router.get('/exceptions', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/exceptions', validateQuery(policyExceptionListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { requestedByUserId, status, ...rest } = res.locals.query;
+    // Approvers may list anyone's exception requests; everyone else is pinned
+    // to their own, so a requestedByUserId filter from them is ignored.
     const isManager = userHasPermission(req.user, 'policy.approve');
     const filters = {
-      policyId: req.query.policyId ? Number(req.query.policyId) : undefined,
-      targetType: (req.query.targetType as string) ?? undefined,
-      targetId: req.query.targetId ? Number(req.query.targetId) : undefined,
-      status: (req.query.status as never) ?? undefined,
-      requestedByUserId: isManager
-        ? req.query.requestedByUserId
-          ? Number(req.query.requestedByUserId)
-          : undefined
-        : req.user!.id,
+      ...rest,
+      status: status as never,
+      requestedByUserId: isManager ? requestedByUserId : req.user!.id,
     };
     res.json({ success: true, data: await exceptions.list(filters) });
   }));

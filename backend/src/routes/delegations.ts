@@ -15,7 +15,7 @@ import { ConflictError } from '../errors';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createDelegationBody } from '../schemas';
+import { idParam, createDelegationBody, auditJustificationBody } from '../schemas';
 
 export const createDelegationsRouter = (pool: Pool): Router => {
   const router = Router();
@@ -55,10 +55,10 @@ export const createDelegationsRouter = (pool: Pool): Router => {
   }));
 
   // Revoke a delegation
-  router.delete('/:id', authenticate, requirePermission('delegation.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/:id', authenticate, requirePermission('delegation.manage'), validateParams(idParam), validateBody(auditJustificationBody), asyncHandler(async (req: Request, res: Response) => {
     const { id } = res.locals.params;
 
-    const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
+    const justification = res.locals.body.justification ?? null;
     await delegationService.revokeDelegation(id, req.user!.id, justification);
     res.json({ success: true, message: 'Delegation revoked' });
   }));
