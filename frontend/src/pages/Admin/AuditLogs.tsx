@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
 import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
+import ErrorAlert from '../../components/ErrorAlert';
 
 const PAGE_SIZE = 50;
 
@@ -208,11 +209,7 @@ const AuditLogs: React.FC = () => {
       </div>
 
       {/* Error */}
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={() => logsQuery.refetch()} />}
 
       {/* Table */}
       <div className="card">
