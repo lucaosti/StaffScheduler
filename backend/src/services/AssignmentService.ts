@@ -1,6 +1,6 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment, CreateAssignmentRequest } from '../types';
-import { ConflictError, NotFoundError } from '../errors';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { PolicyValidator } from './PolicyValidator';
@@ -8,6 +8,48 @@ import { AssignmentValidator } from './AssignmentValidator';
 import { AssignmentOrchestrator } from './AssignmentOrchestrator';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
+
+/** Filters accepted by the assignment listing, mirrored by the route's query schema. */
+export interface AssignmentFilters {
+  shiftId?: number;
+  userId?: number;
+  scheduleId?: number;
+  departmentId?: number;
+  status?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+/**
+ * Rows an unpaginated listing may return before it refuses. Chosen to be large
+ * enough for any plausible single-department, single-period view and far below
+ * the point where the four-way join becomes a memory problem.
+ */
+const MAX_UNPAGINATED_ROWS = 5000;
+
+/**
+ * Builds the shared WHERE clause for the list and count queries.
+ *
+ * Both must apply exactly the same predicates, or the pagination envelope
+ * reports a total that does not match the rows returned. Deriving them from one
+ * function makes that impossible rather than merely unlikely.
+ */
+const buildAssignmentFilters = (
+  filters?: AssignmentFilters
+): { where: string; params: (string | number)[] } => {
+  const conditions: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (filters?.shiftId) { conditions.push('sa.shift_id = ?'); params.push(filters.shiftId); }
+  if (filters?.userId) { conditions.push('sa.user_id = ?'); params.push(filters.userId); }
+  if (filters?.scheduleId) { conditions.push('s.schedule_id = ?'); params.push(filters.scheduleId); }
+  if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
+  if (filters?.status) { conditions.push('sa.status = ?'); params.push(filters.status); }
+  if (filters?.startDate) { conditions.push('s.date >= ?'); params.push(filters.startDate); }
+  if (filters?.endDate) { conditions.push('s.date <= ?'); params.push(filters.endDate); }
+
+  return { where: conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '', params };
+};
 
 export class AssignmentService {
   private policyValidator: PolicyValidator;
@@ -205,15 +247,25 @@ export class AssignmentService {
     }
   }
 
-  async getAllAssignments(filters?: {
-    shiftId?: number;
-    userId?: number;
-    scheduleId?: number;
-    departmentId?: number;
-    status?: string;
-    startDate?: string;
-    endDate?: string;
-  }): Promise<ShiftAssignment[]> {
+  /**
+   * Lists assignments matching the given filters.
+   *
+   * WHY THERE IS A HARD CAP: `shift_assignments` is the fastest-growing table
+   * in the system — it gains a row per person per shift, forever — and this
+   * query joins it four ways. An unbounded `SELECT` here loads the entire
+   * operational history into memory on a single request. Callers that need
+   * more than `MAX_UNPAGINATED_ROWS` must either narrow the filters or use
+   * `?page`/`?pageSize`.
+   *
+   * WHY IT REFUSES INSTEAD OF TRUNCATING: silently returning the first N rows
+   * of a list the caller believes is complete is the failure mode that hides
+   * missing assignments — the same reasoning applied to the audit export. An
+   * explicit error is recoverable; a short list that looks whole is not.
+   */
+  async getAllAssignments(
+    filters?: AssignmentFilters,
+    pagination?: { limit: number; offset: number }
+  ): Promise<ShiftAssignment[]> {
     try {
       let query = `
         SELECT
@@ -228,21 +280,27 @@ export class AssignmentService {
         JOIN departments d ON s.department_id = d.id
       `;
 
-      const conditions: string[] = [];
-      const params: any[] = [];
-
-      if (filters?.shiftId) { conditions.push('sa.shift_id = ?'); params.push(filters.shiftId); }
-      if (filters?.userId) { conditions.push('sa.user_id = ?'); params.push(filters.userId); }
-      if (filters?.scheduleId) { conditions.push('s.schedule_id = ?'); params.push(filters.scheduleId); }
-      if (filters?.departmentId) { conditions.push('s.department_id = ?'); params.push(filters.departmentId); }
-      if (filters?.status) { conditions.push('sa.status = ?'); params.push(filters.status); }
-      if (filters?.startDate) { conditions.push('s.date >= ?'); params.push(filters.startDate); }
-      if (filters?.endDate) { conditions.push('s.date <= ?'); params.push(filters.endDate); }
-
-      if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
+      const { where, params } = buildAssignmentFilters(filters);
+      query += where;
       query += ' ORDER BY s.date ASC, s.start_time ASC';
 
+      if (pagination) {
+        query += ' LIMIT ? OFFSET ?';
+        params.push(pagination.limit, pagination.offset);
+      } else {
+        // Fetch one row beyond the cap so an overflow is detectable rather
+        // than indistinguishable from an exactly-full page.
+        query += ` LIMIT ${MAX_UNPAGINATED_ROWS + 1}`;
+      }
+
       const [rows] = await this.pool.execute<RowDataPacket[]>(query, params);
+
+      if (!pagination && rows.length > MAX_UNPAGINATED_ROWS) {
+        throw new ValidationError(
+          `Too many assignments match this query (more than ${MAX_UNPAGINATED_ROWS}). ` +
+            'Narrow the filters or request a page with ?page and ?pageSize.'
+        );
+      }
 
       return rows.map((row: any) => ({
         id: row.id,
@@ -262,6 +320,23 @@ export class AssignmentService {
       }));
     } catch (error) {
       logger.error('Failed to get all assignments:', error);
+      throw error;
+    }
+  }
+
+  /** Total rows matching the same filters, for the pagination envelope. */
+  async countAssignments(filters?: AssignmentFilters): Promise<number> {
+    try {
+      const { where, params } = buildAssignmentFilters(filters);
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS total
+         FROM shift_assignments sa
+         JOIN shifts s ON sa.shift_id = s.id${where}`,
+        params
+      );
+      return Number(rows[0]?.total ?? 0);
+    } catch (error) {
+      logger.error('Failed to count assignments:', error);
       throw error;
     }
   }
