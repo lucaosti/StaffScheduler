@@ -171,6 +171,45 @@ services:
     networks:
       - staff_scheduler_network
 
+  # ── Scheduled logical backups (opt-in: docker compose --profile backup up) ──
+  # A mysqldump sidecar that writes a consistent, retention-pruned gzip dump on
+  # an interval. Uses the mysql image only for its client tools. Also joins the
+  # `ops` profile so the observability bring-up includes backups.
+  backup:
+    profiles: ["backup", "ops"]
+    image: mysql:8.0.42
+    container_name: staff_scheduler_backup
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-staff_scheduler}
+      DB_USER: ${MYSQL_USER:-scheduler_user}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set in .env}
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    entrypoint: ["/bin/sh", "-c"]
+    # Run one backup immediately, then every BACKUP_INTERVAL_SECONDS. A failed
+    # run is logged but never kills the loop, so one bad dump doesn't stop the
+    # schedule.
+    command:
+      - |
+        while true; do
+          /scripts/backup.sh || echo "[backup] run failed";
+          sleep "${BACKUP_INTERVAL_SECONDS:-86400}";
+        done
+    volumes:
+      - ./ops/backup:/scripts:ro
+      - backup_data:/backups
+    networks:
+      - staff_scheduler_network
+    mem_limit: 256m
+    cpus: 0.25
+
   # ── Observability stack (opt-in: docker compose --profile ops up) ──────────
   # Prometheus scrapes the backend /metrics, Grafana visualises it (and Loki
   # logs), Loki stores logs, Promtail ships the backend's log file to Loki.
@@ -256,6 +295,8 @@ volumes:
   grafana_data:
     driver: local
   loki_data:
+    driver: local
+  backup_data:
     driver: local
 
 # Network configuration
