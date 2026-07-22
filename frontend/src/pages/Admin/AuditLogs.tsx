@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { AuditLogEntry } from '../../types';
-import { listAuditLogs, buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
+import React, { useState, useCallback } from 'react';
+import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
+import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
 
 const PAGE_SIZE = 50;
 
@@ -43,11 +43,7 @@ const JsonBlock: React.FC<{ data: Record<string, unknown> | null | undefined; la
 const AuditLogs: React.FC = () => {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
-  const [entries, setEntries] = useState<AuditLogEntry[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const toApiFilters = useCallback((f: Filters, p: number): AuditLogFilters => ({
@@ -61,23 +57,15 @@ const AuditLogs: React.FC = () => {
     pageSize: PAGE_SIZE,
   }), []);
 
-  const load = useCallback(async (f: Filters, p: number) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listAuditLogs(toApiFilters(f, p));
-      setEntries(res.data ?? []);
-      setTotal(res.meta?.total ?? 0);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load audit logs.');
-    } finally {
-      setLoading(false);
-    }
-  }, [toApiFilters]);
-
-  useEffect(() => {
-    void load(applied, page);
-  }, [applied, page, load]);
+  // Server state via TanStack Query, keyed by the applied filters + page so
+  // each combination is cached and changing either refetches.
+  const logsQuery = useAuditLogsQuery(toApiFilters(applied, page));
+  const entries = logsQuery.data?.entries ?? [];
+  const total = logsQuery.data?.total ?? 0;
+  const loading = logsQuery.isLoading || logsQuery.isFetching;
+  const error = logsQuery.isError
+    ? (logsQuery.error as Error).message ?? 'Failed to load audit logs.'
+    : null;
 
   const applyFilters = () => {
     setPage(1);

@@ -9,7 +9,8 @@
  * @author Luca Ostinelli
  */
 
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
+import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
 const mockUseAuth = jest.fn();
