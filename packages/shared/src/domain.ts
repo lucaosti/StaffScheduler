@@ -99,3 +99,70 @@ export interface Shift {
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }
+
+/**
+ * A period-based plan for a department, as the API returns it.
+ *
+ * The frontend copy additionally declared `description?`, which the API never
+ * sends — the server persists that value as `notes` (the create/update service
+ * already maps one to the other). Backend-only enrichments (`departmentOrgUnitId`,
+ * and the nested `shifts` returned by the with-shifts endpoint) stay on the
+ * backend type, which extends this one.
+ */
+export interface Schedule {
+  id: number;
+  name: string;
+  startDate: Timestamp;
+  endDate: Timestamp;
+  status: 'draft' | 'published' | 'archived';
+  departmentId?: number;
+  departmentName?: string;
+  createdBy?: number;
+  createdByName?: string;
+  publishedBy?: number;
+  publishedAt?: Timestamp;
+  totalShifts?: number;
+  totalAssignments?: number;
+  notes?: string | null;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+/**
+ * A person with a system account, as the API returns it.
+ *
+ * WHY THE OLD FRONTEND COPY WAS A PROBLEM, beyond duplication: it declared
+ * `passwordHash`, `salt`, `resetToken`, `resetTokenExpiry` and
+ * `notificationToken` on a type consumed by the browser. Nothing read them
+ * (verified), but declaring credential fields on a client-side model invites
+ * code that does, and quietly asserts that the API might send them — which it
+ * must never do. They are gone.
+ *
+ * It also declared `role?: string`, which the API does not send: authorisation
+ * is the RBAC model (`roles`, plus flattened `permissions`). Anything rendering
+ * `user.role` was rendering `undefined`.
+ *
+ * Backend-only enrichments (`allowedOrgUnitIds`, `delegationScopes`,
+ * `departments`, `skills`, `preferences`, …) stay on the backend type, which
+ * extends this one.
+ */
+export interface User {
+  id: number;
+  email: string;
+  firstName: string;
+  lastName: string;
+  employeeId?: string;
+  phone?: string;
+  position?: string;
+  hourlyRate?: number;
+  isActive: boolean;
+  lastLogin?: Timestamp;
+  /** Roles assigned to the user, each optionally scoped to an org unit. */
+  roles?: UserRoleAssignment[];
+  /** Flattened, de-duplicated effective permission codes (e.g. `schedule.manage`). */
+  permissions?: string[];
+  /** Named org for per-org module overrides; null when the user has none. */
+  organizationName?: string | null;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}

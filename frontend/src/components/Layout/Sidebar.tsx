@@ -184,7 +184,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
             <small>
               {user.email}
               <br />
-              <span className="text-muted">{user.role}</span>
+              <span className="text-muted">{(user.roles ?? []).map((r) => r.roleName).join(', ')}</span>
             </small>
           </div>
         )}

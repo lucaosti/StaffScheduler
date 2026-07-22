@@ -13,7 +13,7 @@ import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
 
 interface AuthState {
-  user: Omit<User, 'passwordHash' | 'salt'> | null;
+  user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   error: string | null;
@@ -29,10 +29,10 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 type AuthAction =
   | { type: 'LOGIN_START' }
-  | { type: 'LOGIN_SUCCESS'; payload: { user: Omit<User, 'passwordHash' | 'salt'> } }
+  | { type: 'LOGIN_SUCCESS'; payload: { user: User } }
   | { type: 'LOGIN_FAILURE'; payload?: string }
   | { type: 'LOGOUT' }
-  | { type: 'SET_USER'; payload: Omit<User, 'passwordHash' | 'salt'> }
+  | { type: 'SET_USER'; payload: User }
   | { type: 'SET_LOADING'; payload: boolean };
 
 const authReducer = (state: AuthState, action: AuthAction): AuthState => {

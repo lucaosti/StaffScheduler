@@ -19,8 +19,15 @@
 // Permission, Role and UserRoleAssignment are declared once in
 // @staff-scheduler/shared and re-exported here, so both sides cannot drift.
 // Importing them from this barrel keeps every existing call site unchanged.
-import type { Permission, Role, UserRoleAssignment, Shift } from '@staff-scheduler/shared';
-export type { Permission, Role, UserRoleAssignment, Shift };
+import type {
+  Permission,
+  Role,
+  UserRoleAssignment,
+  Shift,
+  Schedule,
+  User,
+} from '@staff-scheduler/shared';
+export type { Permission, Role, UserRoleAssignment, Shift, Schedule, User };
 
 
 // Types for StaffScheduler Frontend (aligned with backend schema)
@@ -28,40 +35,9 @@ export type { Permission, Role, UserRoleAssignment, Shift };
 type ID = number | string;
 
 // User Authentication (with N-level hierarchy)
-export interface User {
-  id: ID;
-  email: string;
-  firstName: string;
-  lastName: string;
-  // Role is a configurable string defined in the DB; do not compare against literals.
-  // Optional: the backend returns roles[] via the RBAC model, not a single role string.
-  role?: string;
-  // Permission keys granted to the user (populated by the RBAC layer).
-  permissions?: string[];
-  employeeId?: string;
-  phone?: string;
-  isActive: boolean;
-  lastLogin?: string | Date;
-  createdAt: string | Date;
-  updatedAt: string | Date;
-
-  // Legacy / UI-only fields (optional)
-  username?: string;
-  passwordHash?: string;
-  salt?: string;
-  parentSupervisor?: ID;
-  hierarchyLevel?: number;
-  hierarchyPath?: string;
-  createdBy?: ID;
-  resetToken?: string;
-  resetTokenExpiry?: Date;
-  notificationToken?: string;
-  maxSubordinateLevel?: number;
-  organizationName?: string;
-}
 
 export interface LoginResponse {
-  user: Omit<User, 'passwordHash' | 'salt'>;
+  user: User;
 }
 
 // Employee (with matrix organization support)
@@ -148,24 +124,6 @@ export interface AttendanceCostEstimate {
 }
 
 // Schedule management types
-export interface Schedule {
-  id: ID;
-  name: string;
-  description?: string;
-  startDate: string | Date;
-  endDate: string | Date;
-  status: 'draft' | 'published' | 'archived';
-  departmentId?: ID;
-  departmentName?: string;
-  createdBy?: ID;
-  createdAt: string | Date;
-  updatedAt: string | Date;
-  publishedAt?: string | Date;
-  publishedBy?: ID;
-  notes?: string | null;
-  totalShifts?: number;
-  totalAssignments?: number;
-}
 
 // API Response types
 export interface ApiResponse<T = unknown> {
