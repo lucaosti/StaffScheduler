@@ -9114,10 +9114,10 @@ export interface components {
             };
         };
         PaginationMeta: {
-            total?: number;
-            page?: number;
-            limit?: number;
-            totalPages?: number;
+            total: number;
+            page: number;
+            pageSize: number;
+            pages: number;
         };
         User: {
             id: number;
