@@ -4,13 +4,14 @@ import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
   idAndUserIdParam,
   createDepartmentBody,
   updateDepartmentBody,
   addUserToDepartmentBody,
+  departmentListQuery,
 } from '../schemas';
 import { UpdateDepartmentRequest } from '../types';
 
@@ -20,12 +21,15 @@ export const createDepartmentsRouter = (pool: Pool) => {
   const userService = new UserService(pool);
 
   // Get all departments
-  router.get('/', authenticate, asyncHandler(async (req, res) => {
+  // The isActive/orgUnitId filters were documented but never read; they now
+  // apply to the unrestricted listing. The scoped listing stays unfiltered:
+  // it already returns only the caller's own departments.
+  router.get('/', authenticate, validateQuery(departmentListQuery), asyncHandler(async (req, res) => {
     const user = req.user!;
 
     let departments;
     if (userHasPermission(user, 'settings.manage')) {
-      departments = await departmentService.getAllDepartments();
+      departments = await departmentService.getAllDepartments(res.locals.query);
     } else {
       departments = await departmentService.getDepartmentsForUser(user.id);
     }

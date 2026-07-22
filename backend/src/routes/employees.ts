@@ -4,19 +4,20 @@ import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody, employeeListQuery } from '../schemas';
 
 export const createEmployeesRouter = (pool: Pool) => {
   const router = Router();
   const employeeService = new EmployeeService(pool);
 
 // Get all employees
-router.get('/', authenticate, requirePermission('employee.read'), asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
   const scope = req.user?.allowedOrgUnitIds;
-  const { search, department } = req.query;
-  const filters: { orgUnitIds?: number[]; search?: string; departmentId?: number; departmentName?: string } = {};
+  const { search, department, isActive } = res.locals.query;
+  const filters: { orgUnitIds?: number[]; search?: string; departmentId?: number; departmentName?: string; isActive?: boolean } = {};
   if (scope !== null && scope !== undefined) filters.orgUnitIds = scope;
+  if (isActive !== undefined) filters.isActive = isActive;
   if (typeof search === 'string' && search.length > 0) filters.search = search;
   if (typeof department === 'string' && department.length > 0) {
     const deptId = parseInt(department, 10);

@@ -9,7 +9,7 @@ import {
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
-import { validateParams, validateBody } from '../middleware/validation';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
   departmentIdParam,
@@ -17,6 +17,7 @@ import {
   createScheduleBody,
   duplicateScheduleBody,
   updateScheduleBody,
+  scheduleListQuery,
 } from '../schemas';
 
 export const createSchedulesRouter = (pool: Pool) => {
@@ -24,9 +25,16 @@ export const createSchedulesRouter = (pool: Pool) => {
   const scheduleService = new ScheduleService(pool);
 
 // Get all schedules
-router.get('/', authenticate, requirePermission('schedule.read'), asyncHandler(async (req: Request, res: Response) => {
+// departmentId/startDate/endDate were documented but never read: the handler
+// applied only the caller's org-unit scope, so a filtered request returned
+// every schedule the caller could see.
+router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(scheduleListQuery), asyncHandler(async (req: Request, res: Response) => {
   const scope = req.user?.allowedOrgUnitIds;
-  const filters = scope !== null && scope !== undefined ? { orgUnitIds: scope } : undefined;
+  const { page: _page, pageSize: _pageSize, ...queryFilters } = res.locals.query;
+  const filters = {
+    ...queryFilters,
+    ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
+  };
   const pagination = parsePagination(req);
   if (pagination) {
     const [total, schedules] = await Promise.all([

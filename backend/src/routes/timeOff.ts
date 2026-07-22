@@ -15,8 +15,8 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateBody, validateParams } from '../middleware/validation';
-import { createTimeOffBody, optionalNotesBody, idParam } from '../schemas';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
+import { createTimeOffBody, optionalNotesBody, idParam, timeOffListQuery } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -40,14 +40,14 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     res.status(201).json({ success: true, data: created });
   }));
 
-  router.get('/', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(timeOffListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { userId, status } = res.locals.query;
+    // Approvers may list anyone's requests; everyone else is pinned to their
+    // own, so a userId filter from a non-approver is ignored rather than obeyed.
     const isManager = userHasPermission(req.user, 'timeoff.approve');
     const filters = isManager
-      ? {
-          userId: req.query.userId ? Number(req.query.userId) : undefined,
-          status: req.query.status as never,
-        }
-      : { userId: req.user!.id, status: req.query.status as never };
+      ? { userId, status: status as never }
+      : { userId: req.user!.id, status: status as never };
     const list = await service.list(filters);
     res.json({ success: true, data: list });
   }));

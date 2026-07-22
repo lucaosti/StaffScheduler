@@ -254,7 +254,7 @@ export interface paths {
                     userId?: number;
                     scheduleId?: number;
                     departmentId?: number;
-                    status?: "pending" | "confirmed" | "cancelled" | "completed";
+                    status?: "pending" | "confirmed" | "completed" | "cancelled";
                     startDate?: string;
                     endDate?: string;
                     /** @description Page number (1-based). Supplying page or pageSize returns the paginated envelope with a meta block. */
@@ -855,7 +855,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description `csv` returns `text/csv` with `Content-Disposition: attachment`. */
-                    format?: "json" | "csv";
+                    format?: "csv" | "json";
                     userId?: number;
                     onBehalfOfUserId?: number;
                     action?: string;
@@ -1346,8 +1346,8 @@ export interface paths {
          */
         get: {
             parameters: {
-                query: {
-                    token: string;
+                query?: {
+                    token?: string;
                 };
                 header?: {
                     "If-None-Match"?: string;
@@ -1412,8 +1412,8 @@ export interface paths {
          */
         get: {
             parameters: {
-                query: {
-                    token: string;
+                query?: {
+                    token?: string;
                 };
                 header?: {
                     "If-None-Match"?: string;
@@ -1548,7 +1548,7 @@ export interface paths {
                 query?: {
                     proposerUserId?: number;
                     approverUserId?: number;
-                    status?: "pending" | "approved" | "rejected" | "applied" | "cancelled";
+                    status?: string;
                     changeType?: string;
                     targetEntityType?: string;
                     limit?: number;
@@ -2148,7 +2148,8 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    isActive?: boolean;
+                    search?: string;
+                    isActive?: boolean | ("true" | "false");
                     /** @description Filter by parent org unit. */
                     orgUnitId?: number;
                 };
@@ -2733,10 +2734,12 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    departmentId?: number;
-                    isActive?: boolean;
-                    page?: components["parameters"]["pageQuery"];
+                    page?: number;
                     limit?: components["parameters"]["limitQuery"];
+                    search?: string;
+                    department?: string;
+                    isActive?: boolean | ("true" | "false");
+                    pageSize?: number;
                 };
                 header?: never;
                 path?: never;
@@ -5337,6 +5340,9 @@ export interface paths {
                 query?: {
                     startDate?: string;
                     endDate?: string;
+                    start?: string;
+                    end?: string;
+                    departmentId?: number;
                 };
                 header?: never;
                 path?: never;
@@ -5415,6 +5421,8 @@ export interface paths {
                 query?: {
                     startDate?: string;
                     endDate?: string;
+                    start?: string;
+                    end?: string;
                     departmentId?: number;
                 };
                 header?: never;
@@ -5455,10 +5463,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    subjectType?: "org_unit" | "department" | "role" | "all";
+                    subjectType?: string;
                     permissionCode?: string;
                     responsibleOrgUnitId?: number;
-                    isActive?: boolean;
+                    isActive?: boolean | ("true" | "false");
                 };
                 header?: never;
                 path?: never;
@@ -5973,12 +5981,13 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    page?: number;
+                    limit?: components["parameters"]["limitQuery"];
                     departmentId?: number;
                     status?: "draft" | "published" | "archived";
                     startDate?: string;
                     endDate?: string;
-                    page?: components["parameters"]["pageQuery"];
-                    limit?: components["parameters"]["limitQuery"];
+                    pageSize?: number;
                 };
                 header?: never;
                 path?: never;
@@ -7052,11 +7061,15 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
+                    page?: number;
+                    limit?: components["parameters"]["limitQuery"];
                     scheduleId?: number;
                     departmentId?: number;
                     date?: string;
-                    page?: components["parameters"]["pageQuery"];
-                    limit?: components["parameters"]["limitQuery"];
+                    startDate?: string;
+                    endDate?: string;
+                    status?: "open" | "assigned" | "confirmed" | "cancelled";
+                    pageSize?: number;
                 };
                 header?: never;
                 path?: never;
@@ -7557,10 +7570,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    status?: "pending" | "approved" | "rejected" | "cancelled";
-                    userId?: number;
                     page?: components["parameters"]["pageQuery"];
                     limit?: components["parameters"]["limitQuery"];
+                    status?: string;
+                    userId?: number;
                 };
                 header?: never;
                 path?: never;
@@ -7852,7 +7865,12 @@ export interface paths {
         /** List attendance records (own, or all for attendance.read/attendance.approve holders) */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    userId?: number;
+                    status?: string;
+                    startDate?: string;
+                    endDate?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -8130,10 +8148,13 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    role?: string;
-                    isActive?: boolean;
-                    page?: components["parameters"]["pageQuery"];
+                    page?: number;
                     limit?: components["parameters"]["limitQuery"];
+                    search?: string;
+                    department?: string;
+                    roleId?: number;
+                    isActive?: boolean | ("true" | "false");
+                    pageSize?: number;
                 };
                 header?: never;
                 path?: never;
@@ -8573,7 +8594,7 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Filter by approval status. Omit to return all. */
-                    status?: "pending" | "approved" | "rejected" | "escalated";
+                    status?: string;
                 };
                 header?: never;
                 path?: never;

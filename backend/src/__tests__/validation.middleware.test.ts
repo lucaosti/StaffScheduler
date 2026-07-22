@@ -12,8 +12,8 @@
 
 import express from 'express';
 import request from 'supertest';
-import { validateParams, validateBody } from '../middleware/validation';
-import { idParam, createUserBody } from '../schemas';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { idParam, createUserBody, shiftListQuery, userListQuery } from '../schemas';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Unit tests for validateParams
@@ -110,6 +110,67 @@ describe('validateBody', () => {
     const res = await request(makeApp()).post('/').send({});
     expect(res.status).toBe(400);
     expect(res.body.error.details.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Unit tests for validateQuery
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('validateQuery', () => {
+  const makeApp = (schema: Parameters<typeof validateQuery>[0]) => {
+    const app = express();
+    app.get('/', validateQuery(schema), (_req, res) => {
+      res.json({ success: true, data: res.locals.query });
+    });
+    return app;
+  };
+
+  it('coerces numeric and boolean strings, since every query value arrives as text', async () => {
+    const res = await request(makeApp(userListQuery)).get('/?roleId=3&isActive=true&page=2');
+    expect(res.status).toBe(200);
+    expect(res.body.data.roleId).toBe(3);
+    expect(res.body.data.isActive).toBe(true);
+    expect(res.body.data.page).toBe(2);
+  });
+
+  it('accepts isActive=false as the boolean false, not a truthy string', async () => {
+    const res = await request(makeApp(userListQuery)).get('/?isActive=false');
+    expect(res.body.data.isActive).toBe(false);
+  });
+
+  it('returns 400 VALIDATION_ERROR with field details for a malformed value', async () => {
+    const res = await request(makeApp(userListQuery)).get('/?roleId=abc');
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    expect(res.body.error.message).toBe('Invalid query parameters');
+    expect(res.body.error.details[0].field).toBe('roleId');
+  });
+
+  it('strips unknown parameters rather than rejecting them', async () => {
+    const res = await request(makeApp(userListQuery)).get('/?roleId=3&somethingElse=x');
+    expect(res.status).toBe(200);
+    expect(res.body.data.somethingElse).toBeUndefined();
+  });
+
+  it('enforces cross-field rules such as an inverted date range', async () => {
+    const res = await request(makeApp(shiftListQuery)).get(
+      '/?startDate=2026-05-31&endDate=2026-05-01'
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('rejects a date that is not YYYY-MM-DD', async () => {
+    const res = await request(makeApp(shiftListQuery)).get('/?date=31-05-2026');
+    expect(res.status).toBe(400);
+  });
+
+  it('leaves omitted optional filters undefined rather than defaulting them', async () => {
+    const res = await request(makeApp(shiftListQuery)).get('/');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({});
   });
 });
 

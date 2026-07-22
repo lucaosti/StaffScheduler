@@ -30,6 +30,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import Ajv2020 from 'ajv/dist/2020';
 import addFormats from 'ajv-formats';
+import { z } from 'zod';
+import * as sharedSchemas from '@staff-scheduler/shared';
 
 interface JsonObject {
   [key: string]: unknown;
@@ -38,7 +40,16 @@ interface JsonObject {
 const spec = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', 'openapi', 'openapi.json'), 'utf8')
 ) as {
-  paths: Record<string, Record<string, { requestBody?: { content?: { 'application/json'?: { schema?: JsonObject } } } }>>;
+  paths: Record<
+    string,
+    Record<
+      string,
+      {
+        requestBody?: { content?: { 'application/json'?: { schema?: JsonObject } } };
+        parameters?: Array<{ name: string; in: string; schema?: JsonObject; required?: boolean }>;
+      }
+    >
+  >;
   components?: { responses?: Record<string, JsonObject>; schemas?: Record<string, JsonObject> };
 };
 
@@ -114,6 +125,81 @@ describe('request bodies enforce their documented contract', () => {
       check({ email: 'a@b.com', password: 'secret12', firstName: 'A', lastName: 'B' })
     ).toBe(true);
     expect(check({ email: 'a@b.com', password: 'secret12', firstName: 'A' })).toBe(false);
+  });
+});
+
+/**
+ * Every documented query parameter must be backed by a `validateQuery` schema.
+ *
+ * This is the regression guard for the defect that motivated the mechanism:
+ * `parameters` used to be hand-curated prose that nothing compared against the
+ * code, so six endpoints published filters their handlers never read — a caller
+ * narrowing by `userId` or `isActive` silently received everything. The
+ * generator now derives them and refuses to run on a mismatch; this test makes
+ * the same guarantee visible in the normal suite, where a developer sees it.
+ */
+describe('documented query parameters are backed by validateQuery', () => {
+  const documented: Array<{ id: string; params: Array<{ name: string; schema?: JsonObject }> }> = [];
+  for (const [routePath, methods] of Object.entries(spec.paths)) {
+    for (const [method, op] of Object.entries(methods)) {
+      const query = (op.parameters ?? []).filter((prm) => prm.in === 'query');
+      if (query.length > 0) {
+        documented.push({
+          id: `${method.toUpperCase()} ${routePath}`,
+          params: query.map((prm) => ({ name: prm.name, schema: prm.schema })),
+        });
+      }
+    }
+  }
+
+  /**
+   * Every `*Query` schema the shared package exports, as JSON Schema. A
+   * documented parameter must be a property of one of these — that is what
+   * "derived from the code" means, and hand-adding a parameter to the spec
+   * (the original defect) makes this fail.
+   */
+  const queryShapes = Object.entries(sharedSchemas as Record<string, unknown>)
+    .filter(([name, value]) => name.endsWith('Query') && value instanceof z.ZodType)
+    .map(([name, value]) => {
+      const json = z.toJSONSchema(value as z.ZodType, { io: 'input' }) as {
+        properties?: Record<string, JsonObject>;
+      };
+      return { name, properties: json.properties ?? {} };
+    });
+
+  it('documents query parameters on the endpoints that filter', () => {
+    // Sanity floor, so an empty spec cannot make the assertions below vacuous.
+    expect(documented.length).toBeGreaterThanOrEqual(20);
+    expect(queryShapes.length).toBeGreaterThanOrEqual(15);
+  });
+
+  it('every documented parameter comes from a shared query schema', () => {
+    const orphans: string[] = [];
+    for (const { id, params } of documented) {
+      for (const { name } of params) {
+        const known = queryShapes.some((shape) => name in shape.properties);
+        if (!known) orphans.push(`${id} -> ${name}`);
+      }
+    }
+    expect(orphans).toEqual([]);
+  });
+
+  it('every documented parameter carries a schema, so the type is published', () => {
+    const untyped = documented.flatMap(({ id, params }) =>
+      params.filter((prm) => !prm.schema || Object.keys(prm.schema).length === 0).map((prm) => `${id} -> ${prm.name}`)
+    );
+    expect(untyped).toEqual([]);
+  });
+
+  it('wires validateQuery at least once per endpoint that documents filters', () => {
+    const routesDir = path.join(__dirname, '..', 'routes');
+    const allRouteSource = fs
+      .readdirSync(routesDir)
+      .filter((f) => f.endsWith('.ts'))
+      .map((f) => fs.readFileSync(path.join(routesDir, f), 'utf8'))
+      .join('\n');
+    const wired = (allRouteSource.match(/validateQuery\(/g) ?? []).length;
+    expect(wired).toBeGreaterThanOrEqual(documented.length);
   });
 });
 
