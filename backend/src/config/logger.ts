@@ -22,10 +22,32 @@
 
 import winston from 'winston';
 import { config } from '../config';
-import { getRequestId } from '../middleware/requestContext';
+
+/**
+ * Resolves the current request id, when a request context is active.
+ *
+ * WHY A HOOK RATHER THAN AN IMPORT: this module used to import `getRequestId`
+ * from `middleware/requestContext`, which imports `observability/tracing`,
+ * which imports this module — a cycle. It was benign, because every edge is
+ * used inside a function rather than at module scope, so the bindings resolve
+ * by call time. But it put the dependency the wrong way round: the logger is
+ * the lowest-level module in the tree (everything logs) and should not depend
+ * on middleware, and load order already carries weight here because
+ * `otel-bootstrap` must be imported first to patch libraries.
+ *
+ * `requestContext` now registers its resolver instead. Until it does, logs
+ * simply carry no request id, which is the correct behaviour for the
+ * startup and cron paths that run outside any request.
+ */
+let resolveRequestId: () => string | undefined = () => undefined;
+
+/** Called once by `middleware/requestContext` when it loads. */
+export const setRequestIdResolver = (resolver: () => string | undefined): void => {
+  resolveRequestId = resolver;
+};
 
 const requestIdFormat = winston.format((info) => {
-  const id = getRequestId();
+  const id = resolveRequestId();
   if (id) info.requestId = id;
   return info;
 });
