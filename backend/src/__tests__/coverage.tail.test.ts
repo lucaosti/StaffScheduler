@@ -71,14 +71,17 @@ describe('AuditLogService', () => {
     }
   });
 
-  it('warns when exportAll returns an unexpectedly large result set', async () => {
+  it('warns and refuses when exportAll would exceed the export cap', async () => {
     const { pool, execute } = makePool();
+    // One row past the cap; exportAll fetches cap+1 purely to detect overflow.
     const big = Array.from({ length: 100_001 }, (_, i) => ({ id: i }));
     execute.mockResolvedValueOnce([big, null]);
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
 
     try {
-      await new AuditLogService(pool).exportAll();
+      // Refusing beats truncating: a partial audit export that looks complete
+      // is a compliance failure.
+      await expect(new AuditLogService(pool).exportAll()).rejects.toThrow(/more than 100000/i);
       expect(warn).toHaveBeenCalled();
     } finally {
       warn.mockRestore();

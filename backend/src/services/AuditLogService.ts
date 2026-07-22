@@ -17,7 +17,15 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { ValidationError } from '../errors';
 import { getRequestId, getRequestIp, getRequestUserAgent } from '../middleware/requestContext';
+
+/**
+ * Hard ceiling on a single audit export. Sized so a full export still fits
+ * comfortably in memory; beyond it the caller must narrow the range (see
+ * exportAll for why this refuses instead of truncating).
+ */
+const EXPORT_MAX_ROWS = 100_000;
 
 export interface AuditLogEntry {
   id: number;
@@ -180,12 +188,25 @@ export class AuditLogService {
   }
 
   /**
-   * Exports all audit log entries matching the given filters — without row
-   * limit. Intended for compliance exports; callers should stream or buffer
-   * the result themselves. Returns entries ordered by created_at ASC so the
-   * chronological record is preserved.
+   * Exports the audit log entries matching the given filters, ordered by
+   * created_at ASC so the chronological record is preserved.
+   *
+   * WHY THIS IS BOUNDED, AND WHY IT REFUSES RATHER THAN TRUNCATES: this used to
+   * run an unlimited `SELECT *` and materialise every row, warning only *after*
+   * 50k rows had already been loaded — so it reported the problem instead of
+   * preventing it. `audit_logs` is append-only and grows with every sensitive
+   * mutation, so one unscoped export could exhaust the heap and take the process
+   * down.
+   *
+   * The obvious alternative — silently capping the result — is worse than the
+   * bug for this table: an audit export is a compliance artefact, and returning
+   * a partial one that *looks* complete is a correctness failure. So the query
+   * fetches one row past the cap purely to detect overflow and throws a
+   * ValidationError telling the caller to narrow the range. Callers get either
+   * a complete export or a clear, actionable refusal — never a quiet half-truth.
    *
    * @param filters Same filter options as list(), but limit/offset are ignored.
+   * @throws ValidationError when the result would exceed EXPORT_MAX_ROWS.
    */
   async exportAll(filters: Omit<AuditLogFilters, 'limit' | 'offset'> = {}): Promise<AuditLogEntry[]> {
     const conditions: string[] = [];
@@ -201,15 +222,21 @@ export class AuditLogService {
     if (filters.requestId) { conditions.push('request_id = ?'); params.push(filters.requestId); }
 
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
+    // Fetch one row beyond the cap: its presence is the overflow signal, and it
+    // costs one row rather than a second COUNT(*) pass over the table.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM audit_logs${where} ORDER BY created_at ASC`,
+      `SELECT * FROM audit_logs${where} ORDER BY created_at ASC LIMIT ${EXPORT_MAX_ROWS + 1}`,
       params
     );
-    const entries = (rows as RowDataPacket[]).map(mapRow);
-    if (entries.length > 50_000) {
-      logger.warn('audit exportAll returned a very large result set', { count: entries.length });
+    if (rows.length > EXPORT_MAX_ROWS) {
+      logger.warn('audit export refused: result exceeds the export cap', {
+        cap: EXPORT_MAX_ROWS,
+      });
+      throw new ValidationError(
+        `Export matches more than ${EXPORT_MAX_ROWS} entries. Narrow the range with fromDate/toDate or additional filters, then export again.`
+      );
     }
-    return entries;
+    return (rows as RowDataPacket[]).map(mapRow);
   }
 
   /**

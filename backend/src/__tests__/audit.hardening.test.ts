@@ -14,6 +14,7 @@
  */
 
 import { AuditLogService } from '../services/AuditLogService';
+import { ValidationError } from '../errors';
 
 // Shared pool helper
 const makePool = () => {
@@ -77,7 +78,7 @@ const entry = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe('AuditLogService.exportAll', () => {
-  it('returns all entries without limit/offset', async () => {
+  it('returns every matching entry, with no paging offset, under a safety cap', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[entry(), entry({ id: 2 }), entry({ id: 3 })], null]);
 
@@ -85,10 +86,24 @@ describe('AuditLogService.exportAll', () => {
     const result = await svc.exportAll({});
 
     expect(result).toHaveLength(3);
-    // Verify SELECT does NOT contain LIMIT or OFFSET clauses.
     const [sql] = execute.mock.calls[0] as [string, ...unknown[]];
-    expect(sql.toUpperCase()).not.toContain('LIMIT');
+    // Paging must not apply to an export...
     expect(sql.toUpperCase()).not.toContain('OFFSET');
+    // ...but the query is bounded so one unscoped export cannot exhaust memory.
+    // The cap is fetched + 1 purely to detect overflow.
+    expect(sql.toUpperCase()).toContain('LIMIT 100001');
+  });
+
+  it('refuses (rather than silently truncating) when the export exceeds the cap', async () => {
+    const { pool, execute } = makePool();
+    // One row past the 100_000 cap is enough to signal overflow.
+    const overflow = Array.from({ length: 100_001 }, (_, i) => entry({ id: i + 1 }));
+    execute.mockResolvedValue([overflow, null]); // both assertions below re-query
+
+    const svc = new AuditLogService(pool);
+    // A partial audit export that looks complete would be worse than an error.
+    await expect(svc.exportAll({})).rejects.toThrow(ValidationError);
+    await expect(svc.exportAll({})).rejects.toThrow(/more than 100000 entries/i);
   });
 
   it('uses ASC ordering for chronological compliance record', async () => {
