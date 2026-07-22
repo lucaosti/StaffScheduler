@@ -1,4 +1,4 @@
-import { screen, within, fireEvent } from '@testing-library/react';
+import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
@@ -124,26 +124,28 @@ describe('<Schedule />', () => {
     await userEvent.click(screen.getByTestId('open-create-schedule'));
     expect(screen.getByRole('heading', { name: /create schedule/i })).toBeInTheDocument();
 
-    // Submit empty -> validation error
-    // jsdom 26 enforces HTML5 constraint validation; submit the form directly
-    // to bypass it and let the React handler run its own validation check.
+    // Submit empty -> the shared Zod schema (via zodResolver) blocks the submit
+    // and surfaces inline field errors; no request is made.
     const modalForm = screen.getByRole('button', { name: /create schedule/i }).closest('form')!;
     fireEvent.submit(modalForm);
-    expect(await screen.findByRole('alert')).toHaveTextContent(/please fill in name/i);
+    expect(await screen.findByText(/name is required/i)).toBeInTheDocument();
+    expect(mockCreateSchedule).not.toHaveBeenCalled();
 
-    // Fill dates invalid -> end before start
+    // Fill dates invalid -> end before start (schema's dateOrder refine, attached
+    // to the endDate field).
     await userEvent.type(screen.getByLabelText(/name \*/i), 'My Schedule');
     await userEvent.type(screen.getByLabelText(/start date \*/i), '2026-04-10');
     await userEvent.type(screen.getByLabelText(/end date \*/i), '2026-04-01');
     await userEvent.selectOptions(screen.getByLabelText(/department \*/i), '10');
     await userEvent.click(screen.getByRole('button', { name: /create schedule/i }));
-    expect(screen.getByRole('alert')).toHaveTextContent(/end date must be after start date/i);
+    expect(await screen.findByText(/endDate must not be before startDate/i)).toBeInTheDocument();
+    expect(mockCreateSchedule).not.toHaveBeenCalled();
 
     // Fix end date -> success
     await userEvent.clear(screen.getByLabelText(/end date \*/i));
     await userEvent.type(screen.getByLabelText(/end date \*/i), '2026-04-11');
     await userEvent.click(screen.getByRole('button', { name: /create schedule/i }));
-    expect(mockCreateSchedule).toHaveBeenCalled();
+    await waitFor(() => expect(mockCreateSchedule).toHaveBeenCalled());
   });
 
   it('renders assignments and covers view toggles + generate modal guard', async () => {
