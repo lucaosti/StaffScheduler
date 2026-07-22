@@ -62,24 +62,44 @@ jobs:
           DATABASE_URL: mysql://root:demo1234@127.0.0.1:3306/staff_scheduler
         run: npx dbmate --no-dump-schema up
 
+      # All MySQL client work runs inside the mysql:8.0 image — the same genuine
+      # client the production backup sidecar uses. The GitHub runner ships
+      # MariaDB's client tools, whose mysqldump emits a sandbox-mode marker
+      # (/*!999999… */) that a MySQL 8.0 server rejects on restore; using the
+      # real client avoids that cross-vendor mismatch and matches production.
       - name: Seed a marker row
         run: |
-          mysql -h 127.0.0.1 -uroot -pdemo1234 staff_scheduler -e \
+          docker run --rm --network host mysql:8.0 \
+            mysql -h 127.0.0.1 -uroot -pdemo1234 staff_scheduler -e \
             "CREATE TABLE IF NOT EXISTS backup_marker (id INT PRIMARY KEY, note VARCHAR(64));
              INSERT INTO backup_marker (id, note) VALUES (1, 'restore-me') ON DUPLICATE KEY UPDATE note=VALUES(note);"
 
       - name: Back up
-        run: sh ops/backup/backup.sh
+        run: |
+          mkdir -p "$BACKUP_DIR"
+          docker run --rm --network host \
+            -e DB_HOST=127.0.0.1 -e DB_PORT=3306 -e DB_USER=root -e DB_PASSWORD=demo1234 \
+            -e DB_NAME=staff_scheduler -e BACKUP_DIR=/backups \
+            -v "$BACKUP_DIR:/backups" -v "${{ github.workspace }}/ops/backup:/scripts:ro" \
+            mysql:8.0 sh /scripts/backup.sh
 
       - name: Drop the database (simulate loss)
-        run: mysql -h 127.0.0.1 -uroot -pdemo1234 -e "DROP DATABASE staff_scheduler;"
+        run: |
+          docker run --rm --network host mysql:8.0 \
+            mysql -h 127.0.0.1 -uroot -pdemo1234 -e "DROP DATABASE staff_scheduler;"
 
       - name: Restore the latest backup
-        run: sh ops/backup/restore.sh --latest
+        run: |
+          docker run --rm --network host \
+            -e DB_HOST=127.0.0.1 -e DB_PORT=3306 -e DB_USER=root -e DB_PASSWORD=demo1234 \
+            -e DB_NAME=staff_scheduler -e BACKUP_DIR=/backups \
+            -v "$BACKUP_DIR:/backups" -v "${{ github.workspace }}/ops/backup:/scripts:ro" \
+            mysql:8.0 sh /scripts/restore.sh --latest
 
       - name: Smoke query — the marker must have survived the round-trip
         run: |
-          NOTE=$(mysql -h 127.0.0.1 -uroot -pdemo1234 -N -B staff_scheduler \
+          NOTE=$(docker run --rm --network host mysql:8.0 \
+            mysql -h 127.0.0.1 -uroot -pdemo1234 -N -B staff_scheduler \
             -e "SELECT note FROM backup_marker WHERE id = 1;")
           echo "marker note: '$NOTE'"
           test "$NOTE" = "restore-me"
