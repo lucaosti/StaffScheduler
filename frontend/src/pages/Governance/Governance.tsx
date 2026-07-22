@@ -13,7 +13,8 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import * as responsibilitySvc from '../../services/responsibilityService';
 import * as changeRequestSvc from '../../services/changeRequestService';
@@ -23,10 +24,14 @@ import type {
   ResponsibilitySubjectType,
 } from '../../services/responsibilityService';
 import type {
-  ChangeRequest,
   ChangeRequestStatus,
   CreateChangeRequestInput,
 } from '../../services/changeRequestService';
+import {
+  governanceKeys,
+  useResponsibilityRulesQuery,
+  useChangeRequestsQuery,
+} from '../../hooks/useGovernance';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 type Tab = 'matrix' | 'changeRequests';
@@ -57,11 +62,10 @@ const Governance: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const queryClient = useQueryClient();
 
   // ── Responsibility Matrix state ──────────────────────────────────────────
 
-  const [rules, setRules] = useState<ResponsibilityRule[]>([]);
-  const [matrixLoading, setMatrixLoading] = useState(false);
   const [showRuleForm, setShowRuleForm] = useState(false);
   const [ruleForm, setRuleForm] = useState<CreateResponsibilityRuleInput>({
     subjectType: 'department',
@@ -69,22 +73,12 @@ const Governance: React.FC = () => {
     responsibleOrgUnitId: 0,
   });
 
-  const loadRules = useCallback(async () => {
-    if (!canReadMatrix) return;
-    setMatrixLoading(true);
-    try {
-      const res = await responsibilitySvc.listResponsibilityRules({ isActive: true });
-      if (res.success) setRules(res.data as ResponsibilityRule[]);
-    } catch {
-      setError('Failed to load responsibility rules');
-    } finally {
-      setMatrixLoading(false);
-    }
-  }, [canReadMatrix]);
-
-  useEffect(() => {
-    if (activeTab === 'matrix') loadRules();
-  }, [activeTab, loadRules]);
+  // Rules load only when the matrix tab is open (and the user can read it);
+  // mutation handlers call loadRules() which now invalidates the cached query.
+  const rulesQuery = useResponsibilityRulesQuery(canReadMatrix && activeTab === 'matrix');
+  const rules = rulesQuery.data ?? [];
+  const matrixLoading = rulesQuery.isLoading;
+  const loadRules = () => queryClient.invalidateQueries({ queryKey: governanceKeys.rules });
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,9 +128,6 @@ const Governance: React.FC = () => {
 
   // ── Change Requests state ────────────────────────────────────────────────
 
-  const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>([]);
-  const [crTotal, setCrTotal] = useState(0);
-  const [crLoading, setCrLoading] = useState(false);
   const [crFilter, setCrFilter] = useState<ChangeRequestStatus | ''>('');
   const [myOnly, setMyOnly] = useState(!canReview);
   const [showCrForm, setShowCrForm] = useState(false);
@@ -151,28 +142,16 @@ const Governance: React.FC = () => {
   const [actionTargetId, setActionTargetId] = useState<number | null>(null);
   const [crAction, setCrAction] = useState<'approve' | 'reject' | 'apply' | null>(null);
 
-  const loadChangeRequests = useCallback(async () => {
-    setCrLoading(true);
-    try {
-      const filters: Parameters<typeof changeRequestSvc.listChangeRequests>[0] = {};
-      if (crFilter) filters.status = crFilter;
-      if (myOnly && user?.id) filters.proposerUserId = Number(user.id);
-      const res = await changeRequestSvc.listChangeRequests(filters);
-      if (res.success && res.data) {
-        const page = res.data as { total: number; items: ChangeRequest[] };
-        setChangeRequests(page.items);
-        setCrTotal(page.total);
-      }
-    } catch {
-      setError('Failed to load change requests');
-    } finally {
-      setCrLoading(false);
-    }
-  }, [crFilter, myOnly, user?.id]);
-
-  useEffect(() => {
-    if (activeTab === 'changeRequests') loadChangeRequests();
-  }, [activeTab, loadChangeRequests]);
+  // Change requests load only on their tab; the query key includes the status
+  // and my-only filters, so changing a filter refetches. Mutation handlers call
+  // loadChangeRequests() which invalidates the whole change-request family.
+  const crProposerId = myOnly && user?.id ? Number(user.id) : undefined;
+  const crQuery = useChangeRequestsQuery(activeTab === 'changeRequests', crFilter, crProposerId);
+  const changeRequests = crQuery.data?.items ?? [];
+  const crTotal = crQuery.data?.total ?? 0;
+  const crLoading = crQuery.isLoading;
+  const loadChangeRequests = () =>
+    queryClient.invalidateQueries({ queryKey: ['change-requests'] });
 
   const handleCreateCr = async (e: React.FormEvent) => {
     e.preventDefault();
