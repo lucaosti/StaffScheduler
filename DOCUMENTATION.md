@@ -235,11 +235,19 @@ required field, so an all-optional body (the free-text audit `reason` /
 
 **Every** domain component in `components.schemas` is generated from the Zod
 schemas in `packages/shared/src/domain.ts`, where each type is a `z.infer` of
-its schema rather than a second hand-written copy. Only `ApiSuccess`,
-`ApiError` and `PaginationMeta` remain hand-written: they describe the response
-wrapper, not a domain entity, so there is no schema to derive them from — and a
-contract test asserts that the hand-written set is exactly those three, so a
-new entity component cannot quietly join the surface that drifted. They
+its schema rather than a second hand-written copy. Only `ApiSuccess` and `ApiError` remain hand-written: they describe the
+response wrapper itself, not a domain entity, so there is no single type to
+derive them from — and a contract test asserts the hand-written set is exactly
+those two, so nothing can quietly rejoin the surface that drifted.
+
+`PaginationMeta` was on that list until it turned out to be wrong: it published
+`limit` and `totalPages` while `sendPaginated` has always emitted `pageSize`
+and `pages`, so every paginated response documented two fields that never
+arrive and omitted two that do. It survived the phantom-field check because
+that check is textual — it asks whether a name exists anywhere in the source,
+not whether it belongs to that entity — and `totalPages` existed in a second,
+unused pagination helper with a different shape. Deriving the component made
+the comparison exact, and the dead helper is gone. They
 had previously drifted into describing an older model — `User.role`, a field
 the API has never sent; `Permission.category`/`key` instead of
 `code`/`resource`/`action`; `Role.isBuiltin` instead of `isSystem` — which is

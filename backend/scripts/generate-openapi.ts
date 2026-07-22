@@ -212,6 +212,7 @@ const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
   ShiftSwapRequest: sharedSchemas.shiftSwapRequestSchema,
   AuditLogEntry: sharedSchemas.auditLogEntrySchema,
   Assignment: sharedSchemas.shiftAssignmentSchema,
+  PaginationMeta: sharedSchemas.paginationMetaSchema,
 };
 
 const main = (): void => {

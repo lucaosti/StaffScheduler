@@ -368,3 +368,25 @@ export const shiftAssignmentSchema = z.object({
   notes: z.string().optional(),
 });
 export type ShiftAssignment = z.infer<typeof shiftAssignmentSchema>;
+
+/**
+ * The envelope every paginated listing returns alongside `data`.
+ *
+ * The hand-written component published `limit` and `totalPages` while
+ * `sendPaginated` has always emitted `pageSize` and `pages` — two fields that
+ * never arrive and two that arrive undocumented, on the envelope of every
+ * paginated response in the API.
+ *
+ * It survived the phantom-field guard because that check asks whether a name
+ * exists anywhere in the source, not whether it belongs to this entity:
+ * `limit` appears everywhere, and `totalPages` appeared in a second,
+ * unused pagination helper whose shape differed. Deriving the component
+ * removes the ambiguity — the comparison becomes exact rather than textual.
+ */
+export const paginationMetaSchema = z.object({
+  total: z.number().int(),
+  page: z.number().int(),
+  pageSize: z.number().int(),
+  pages: z.number().int(),
+});
+export type PaginationMeta = z.infer<typeof paginationMetaSchema>;

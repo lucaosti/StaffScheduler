@@ -131,13 +131,4 @@ describe('ResponseUtils', () => {
       error: { code: 'X', message: 'm', details: { d: 1 } },
     });
   });
-
-  it('paginated computes totalPages correctly', () => {
-    const out = ResponseUtils.paginated([1, 2], 5, 1, 2);
-    expect(out.success).toBe(true);
-    expect(out.data).toEqual([1, 2]);
-    expect(out.meta.total).toBe(5);
-    // 5 items / 2 per page = 3 pages.
-    expect(out.meta.totalPages).toBe(3);
-  });
 });
