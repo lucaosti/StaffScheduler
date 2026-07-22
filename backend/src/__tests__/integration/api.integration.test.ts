@@ -813,3 +813,111 @@ describe('path-parameter mutations run against the real schema', () => {
     });
   });
 });
+
+
+/**
+ * Workflow actions (approve / reject / cancel / apply) against the real schema.
+ *
+ * WHY FILE THROUGH THE API RATHER THAN INSERT THE ROW: these actions read
+ * across pending_approvals and the request table with joins, and an
+ * approve/reject reaches an UPDATE only when the request is in a decidable
+ * state. Hand-inserting a pending_approvals row would mean reproducing the
+ * workflow/step wiring the filing path builds — brittle, and it would not
+ * exercise that filing SQL. Filing through the endpoint creates the request in
+ * its real state and, as a bonus, runs the filing INSERTs against the real
+ * schema too.
+ *
+ * WHY <500 IS STILL THE BAR: a cancel by the owner reaches its UPDATE; an
+ * approve with no pending-approval row returns 409, but the join-heavy read SQL
+ * has already run, which is the schema-drift risk this exists to catch. Both
+ * are the application deciding on a statement MySQL executed. Only a 500 means
+ * the query itself was wrong.
+ *
+ * The pending-approvals/:id/* endpoints are deliberately not here: they need a
+ * pending_approval routed to the actor, which needs an approval matrix
+ * configured — a per-domain fixture rather than a filing call, tracked in the
+ * #419 follow-up.
+ */
+describe('workflow actions run against the real schema', () => {
+  let secondOrgUnit: number;
+  const stamp = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  beforeAll(async () => {
+    const [r] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO org_units (name, is_active) VALUES (?, 1)`,
+      [`wf-unit-${stamp()}`]
+    );
+    secondOrgUnit = r.insertId;
+  });
+
+  /** Files a request through its endpoint and returns the created id. */
+  const file = async (path: string, body: Record<string, unknown>): Promise<number> => {
+    const cookie = await authCookie();
+    const res = await request(app).post(`/api${path}`).set('Cookie', cookie).send(body);
+    if (res.status >= 400) {
+      throw new Error(`filing ${path} failed with ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
+    }
+    const id = res.body?.data?.id;
+    if (typeof id !== 'number') {
+      throw new Error(`filing ${path} returned no numeric id: ${JSON.stringify(res.body)}`);
+    }
+    return id;
+  };
+
+  const fileTimeOff = (): Promise<number> =>
+    file('/time-off', { startDate: '2031-01-01', endDate: '2031-01-03', type: 'vacation' });
+  const fileChangeRequest = (): Promise<number> =>
+    file('/change-requests', {
+      changeType: 'GenericTest',
+      targetEntityType: 'schedule',
+      targetEntityId: scheduleId,
+      proposedPayload: { note: 'itest' },
+    });
+  const filePolicyException = (): Promise<number> =>
+    file('/policies/exceptions', { policyId: 1, targetType: 'user', targetId: delegateeId });
+  const fileLoan = (): Promise<number> =>
+    file('/org/loans', {
+      userId: delegateeId,
+      fromOrgUnitId: orgUnitId,
+      toOrgUnitId: secondOrgUnit,
+      startDate: '2031-02-01',
+      endDate: '2031-02-28',
+    });
+
+  interface WfCase {
+    name: string;
+    action: (id: number) => Promise<request.Response>;
+    file: () => Promise<number>;
+  }
+
+  const post = (path: string, body?: Record<string, unknown>) => async () => {
+    const cookie = await authCookie();
+    const req = request(app).post(`/api${path}`).set('Cookie', cookie);
+    return body === undefined ? req : req.send(body);
+  };
+
+  const wfCases: WfCase[] = [
+    { name: 'POST /time-off/:id/approve', file: fileTimeOff, action: (id) => post(`/time-off/${id}/approve`, {})() },
+    { name: 'POST /time-off/:id/reject', file: fileTimeOff, action: (id) => post(`/time-off/${id}/reject`, {})() },
+    { name: 'POST /time-off/:id/cancel', file: fileTimeOff, action: (id) => post(`/time-off/${id}/cancel`)() },
+    { name: 'POST /change-requests/:id/approve', file: fileChangeRequest, action: (id) => post(`/change-requests/${id}/approve`, {})() },
+    { name: 'POST /change-requests/:id/reject', file: fileChangeRequest, action: (id) => post(`/change-requests/${id}/reject`, {})() },
+    { name: 'POST /change-requests/:id/cancel', file: fileChangeRequest, action: (id) => post(`/change-requests/${id}/cancel`)() },
+    { name: 'POST /change-requests/:id/apply', file: fileChangeRequest, action: (id) => post(`/change-requests/${id}/apply`, {})() },
+    { name: 'POST /policies/exceptions/:id/approve', file: filePolicyException, action: (id) => post(`/policies/exceptions/${id}/approve`, {})() },
+    { name: 'POST /policies/exceptions/:id/reject', file: filePolicyException, action: (id) => post(`/policies/exceptions/${id}/reject`, {})() },
+    { name: 'POST /policies/exceptions/:id/cancel', file: filePolicyException, action: (id) => post(`/policies/exceptions/${id}/cancel`)() },
+    { name: 'POST /org/loans/:id/approve', file: fileLoan, action: (id) => post(`/org/loans/${id}/approve`, {})() },
+    { name: 'POST /org/loans/:id/reject', file: fileLoan, action: (id) => post(`/org/loans/${id}/reject`, {})() },
+    { name: 'POST /org/loans/:id/cancel', file: fileLoan, action: (id) => post(`/org/loans/${id}/cancel`)() },
+  ];
+
+  it.each(wfCases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, wfCase) => {
+    const id = await wfCase.file();
+    const res = await wfCase.action(id);
+    if (res.status >= 500) {
+      throw new Error(`${wfCase.name} returned ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
+    }
+    expect({ endpoint: wfCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({ status: 400 });
+  });
+});
