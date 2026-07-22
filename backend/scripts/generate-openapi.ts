@@ -13,7 +13,19 @@
  * parameters were curated prose that nothing verified, so they drifted. Path
  * parameters stay hand-written (they are structural, and `validateParams`
  * schemas carry no descriptions worth publishing); only `in: 'query'` entries
- * are generated, and curated `description` text on them is preserved. Curated prose (summaries, descriptions, response documentation)
+ * are generated, and curated `description` text on them is preserved.
+ *
+ * The query check runs in BOTH directions, because each catches a defect the
+ * other cannot:
+ *
+ *   - spec documents a query parameter with no `validateQuery` behind it →
+ *     the API promises a filter nothing parses (the original defect);
+ *   - a handler reads `req.query` with no `validateQuery` on its route →
+ *     the API accepts a filter the spec never mentions, so the generated
+ *     client cannot offer it and the value reaches the service unvalidated.
+ *
+ * Together they make the query contract complete: nothing documented is
+ * unparsed, and nothing parsed is undocumented. Curated prose (summaries, descriptions, response documentation)
  * stays hand-written in the spec file; the machine-checkable part — what the
  * API accepts — is generated.
  *
@@ -100,6 +112,8 @@ interface FoundOp {
   schemaName?: string;
   /** Schema enforced by validateQuery, if any. */
   querySchemaName?: string;
+  /** Query keys the handler reads straight off `req.query`. */
+  rawQueryReads: string[];
   source: string;
 }
 
@@ -136,7 +150,23 @@ const scanRoutes = (): FoundOp[] => {
       const [, method, routePath, middlewares] = m;
       const body = middlewares.match(/validateBody\((\w+)\)/);
       const query = middlewares.match(/validateQuery\((\w+)\)/);
-      if (!body && !query) continue;
+      // The handler body reaches to the next registration (or end of file), so
+      // a raw req.query read anywhere inside it belongs to this route.
+      // Terminate on ANY router variable, not just this one: rbac.ts declares
+      // two (`roles` and `permissions`) interleaved, and stopping only at the
+      // same variable attributed one router's req.query reads to the other.
+      const handlerStart = m.index + m[0].length;
+      const nextRe = /\b\w+\.(?:get|post|put|patch|delete)\(\s*'/g;
+      nextRe.lastIndex = handlerStart;
+      const nextMatch = nextRe.exec(source);
+      const handler = source.slice(handlerStart, nextMatch ? nextMatch.index : undefined);
+      const rawQueryReads = [
+        ...new Set([
+          ...[...handler.matchAll(/req\.query\.(\w+)/g)].map((r) => r[1]),
+          ...[...handler.matchAll(/req\.query\[['"](\w+)/g)].map((r) => r[1]),
+        ]),
+      ];
+      if (!body && !query && rawQueryReads.length === 0) continue;
       const resolve = (local: string) => aliases.get(local) ?? local;
       const specPath = (prefix + (routePath === '/' ? '' : routePath)).replace(
         /:(\w+)\??/g,
@@ -147,6 +177,7 @@ const scanRoutes = (): FoundOp[] => {
         specPath,
         schemaName: body ? resolve(body[1]) : undefined,
         querySchemaName: query ? resolve(query[1]) : undefined,
+        rawQueryReads,
         source: `${file} ${variable}.${method}('${routePath}')`,
       });
     }
@@ -183,10 +214,17 @@ const main = (): void => {
     if (op.schemaName) {
       const schema = resolveSchema(op.schemaName, 'validateBody', op);
       if (schema) {
-        const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown>;
+        const jsonSchema = z.toJSONSchema(schema, { io: 'input' }) as Record<string, unknown> & {
+          required?: string[];
+        };
         delete jsonSchema.$schema; // OpenAPI 3.1 sets the dialect document-wide.
+        // A body whose properties are all optional must not itself be
+        // required, or every caller is forced to send `{}` — which is what
+        // happened when the free-text audit `reason`/`justification` fields
+        // moved from raw req.body reads into validateBody schemas.
+        const bodyRequired = (jsonSchema.required ?? []).length > 0;
         operation.requestBody = {
-          required: true,
+          required: bodyRequired,
           content: { 'application/json': { schema: jsonSchema } },
         };
         generatedFor.add(`${op.method} ${op.specPath}`);
@@ -223,6 +261,14 @@ const main = (): void => {
         generatedQueryFor.add(`${op.method} ${op.specPath}`);
       }
     }
+  }
+
+  for (const op of ops) {
+    if (op.querySchemaName || op.rawQueryReads.length === 0) continue;
+    errors.push(
+      `${op.source}: reads req.query (${op.rawQueryReads.join(', ')}) with no validateQuery — ` +
+        'the API accepts filters the spec never documents; declare a query schema in @staff-scheduler/shared'
+    );
   }
 
   type SpecOperation = { requestBody?: unknown; parameters?: Array<{ in?: string }> };

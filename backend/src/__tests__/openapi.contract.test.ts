@@ -191,6 +191,29 @@ describe('documented query parameters are backed by validateQuery', () => {
     expect(untyped).toEqual([]);
   });
 
+  it('no route reads req.query without a validateQuery on the same file', () => {
+    // The inverse direction of the guard above. Without it the contract can
+    // still lie — by omission: a handler that reads req.query raw accepts a
+    // filter the spec never mentions, so the generated client cannot offer it
+    // and the value reaches the service unvalidated (it used to arrive through
+    // `req.query.status as never` casts). Six endpoints were in that state.
+    const routesDir = path.join(__dirname, '..', 'routes');
+    const offenders: string[] = [];
+    for (const file of fs.readdirSync(routesDir).filter((f) => f.endsWith('.ts'))) {
+      const source = fs.readFileSync(path.join(routesDir, file), 'utf8');
+      const reads = [
+        ...new Set([
+          ...[...source.matchAll(/req\.query\.(\w+)/g)].map((m) => m[1]),
+          ...[...source.matchAll(/req\.query\[['"](\w+)/g)].map((m) => m[1]),
+        ]),
+      ];
+      if (reads.length > 0 && !source.includes('validateQuery(')) {
+        offenders.push(`${file} -> ${reads.join(', ')}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it('wires validateQuery at least once per endpoint that documents filters', () => {
     const routesDir = path.join(__dirname, '..', 'routes');
     const allRouteSource = fs

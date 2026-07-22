@@ -23,7 +23,7 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission, invalidateAuthContext } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateBody } from '../middleware/validation';
+import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
 import {
   idParam,
@@ -33,6 +33,8 @@ import {
   updateRoleBody,
   assignRoleBody,
   bulkAssignRoleBody,
+  roleRevokeQuery,
+  auditJustificationBody,
 } from '../schemas';
 import { NotFoundError } from '../errors';
 
@@ -115,13 +117,12 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     res.status(201).json({ success: true });
   }));
 
-  roles.delete('/users/:userId/:roleId', validateParams(userIdAndRoleIdParam), asyncHandler(async (req: Request, res: Response) => {
-    const rawScope = req.query.scopeOrgUnitId;
-    const scope = rawScope ? (() => {
-      const n = parseInt(String(rawScope), 10);
-      return isNaN(n) || n <= 0 ? null : n;
-    })() : null;
-    const justification = typeof req.body?.justification === 'string' ? req.body.justification : null;
+  roles.delete('/users/:userId/:roleId', validateParams(userIdAndRoleIdParam), validateQuery(roleRevokeQuery), validateBody(auditJustificationBody), asyncHandler(async (req: Request, res: Response) => {
+    // A scoped grant is revoked by naming its org unit; omitting it revokes
+    // the unscoped grant. The schema rejects a non-positive value outright,
+    // where the inline parse used to silently coerce it to "unscoped".
+    const scope = res.locals.query.scopeOrgUnitId ?? null;
+    const justification = res.locals.body.justification ?? null;
     await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
     await invalidateAuthContext(res.locals.params.userId);
     res.json({ success: true });
