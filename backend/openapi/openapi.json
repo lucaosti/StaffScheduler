@@ -234,7 +234,9 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string"
@@ -242,21 +244,44 @@
           "description": {
             "type": "string"
           },
+          "managerId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "managerName": {
+            "type": "string"
+          },
           "orgUnitId": {
             "type": "integer",
-            "description": "Parent org-unit FK. Null if the department is not linked to an org unit."
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "isActive": {
             "type": "boolean"
           },
-          "memberCount": {
-            "type": "integer"
+          "employeeCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
       },
       "Schedule": {
         "type": "object",
@@ -501,61 +526,24 @@
           }
         }
       },
-      "Employee": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "integer"
-          },
-          "userId": {
-            "type": "integer"
-          },
-          "firstName": {
-            "type": "string"
-          },
-          "lastName": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string",
-            "format": "email"
-          },
-          "employeeNumber": {
-            "type": "string"
-          },
-          "position": {
-            "type": "string"
-          },
-          "departmentId": {
-            "type": "integer"
-          },
-          "departmentName": {
-            "type": "string"
-          },
-          "hourlyRate": {
-            "type": "number"
-          },
-          "isActive": {
-            "type": "boolean"
-          }
-        }
-      },
       "TimeOffRequest": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "userId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "startDate": {
-            "type": "string",
-            "format": "date"
+            "type": "string"
           },
           "endDate": {
-            "type": "string",
-            "format": "date"
+            "type": "string"
           },
           "type": {
             "type": "string",
@@ -567,7 +555,14 @@
             ]
           },
           "reason": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "status": {
             "type": "string",
@@ -578,14 +573,76 @@
               "cancelled"
             ]
           },
-          "reviewedBy": {
-            "type": "integer"
+          "reviewerId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reviewNotes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unavailabilityId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "userId",
+          "startDate",
+          "endDate",
+          "type",
+          "reason",
+          "status",
+          "reviewerId",
+          "reviewedAt",
+          "reviewNotes",
+          "unavailabilityId",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
       },
       "ShiftSwapRequest": {
         "type": "object",
@@ -717,34 +774,75 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
-          "key": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "value": {},
-          "valueType": {
+          "scopeType": {
             "type": "string",
             "enum": [
-              "integer",
-              "float",
-              "boolean",
-              "string"
+              "global",
+              "org_unit",
+              "department",
+              "user"
             ]
           },
-          "category": {
+          "scopeId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "policyKey": {
             "type": "string"
+          },
+          "policyValue": {},
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "imposedByUserId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "isActive": {
             "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "scopeType",
+          "scopeId",
+          "policyKey",
+          "policyValue",
+          "description",
+          "imposedByUserId",
+          "isActive",
+          "createdAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
       },
       "AuditLogEntry": {
         "type": "object",
@@ -3967,7 +4065,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/Employee"
+                        "$ref": "#/components/schemas/User"
                       }
                     }
                   }
