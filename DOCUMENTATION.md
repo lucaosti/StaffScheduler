@@ -23,8 +23,6 @@ This document is the single reference for architecture, domain model, database s
 14. [Contribution and review process](#14-contribution-and-review-process)
 15. [Security policy](#15-security-policy)
 16. [End-to-end tests](#16-end-to-end-tests)
-17. [Scalability analysis](#17-scalability-analysis)
-18. [Market benchmark](#18-market-benchmark)
 
 ---
 
@@ -45,12 +43,15 @@ The frontend is a React SPA. The backend is an Express REST API. Durable state l
 
 ```
 backend/src/
-├── config/           # env vars, database pool factory, Winston logger
-├── middleware/        # authenticate, requirePermission, requireModule, validation helpers, requestContext
-├── schemas/          # Zod schemas shared across routes
+├── config/           # env vars, database pool factory, Redis client, Winston logger
+├── errors/           # AppError hierarchy (NotFound/Conflict/Forbidden/Validation/Unauthorized)
+├── middleware/       # authenticate, requirePermission, requireModule, validation, asyncHandler,
+│                     #   errorHandler, requestContext
+├── observability/    # Prometheus metrics + OpenTelemetry tracing bootstrap
+├── schemas/          # re-exports the canonical Zod schemas from @staff-scheduler/shared
 ├── routes/           # 30+ router factories; each is createXRouter(pool)
 ├── services/         # one class per domain; receives pool in constructor
-├── optimization/     # Python OR-Tools bridge
+├── optimization/     # Python OR-Tools bridge + the canonical constraint validator
 └── types/index.ts    # canonical TypeScript interfaces (single source of truth)
 ```
 
@@ -71,21 +72,33 @@ Two god-classes were broken up to keep service files under 500 lines:
 - The ID is written to the `X-Request-Id` response header.
 - `getRequestId()` can be called anywhere in the call stack (services, utilities) to retrieve the current request's ID for structured logging.
 
-Apply the middleware early in `src/index.ts` before any route handlers.
+The middleware is applied early in `src/app.ts`, before any route handlers — and,
+when tracing is enabled, the same id is stamped onto the active OpenTelemetry span
+as `request.id`, so logs, the response header and traces all correlate.
 
 ### Frontend structure
 
 ```
 frontend/src/
 ├── contexts/AuthContext.tsx    # JWT state (login / logout / token refresh)
+├── api/                        # generated OpenAPI types + typed fetch client
+├── lib/queryClient.ts          # shared TanStack Query client (one cache)
+├── hooks/                      # server-state hooks: queries + mutations per domain
 ├── services/
 │   ├── apiUtils.ts             # ApiError, handleResponse<T>, getAuthHeaders
 │   └── (per-domain clients)
 ├── pages/                      # route-level components
-└── components/                 # reusable UI
+├── components/                 # reusable UI (incl. QueryState / ErrorAlert)
+└── test-utils/                 # render helper providing an isolated QueryClient
 ```
 
-All service files import `handleResponse` and `getAuthHeaders` from `./apiUtils`. The frontend proxies all `/api/*` requests to `http://localhost:3001` in development.
+**Server state lives in TanStack Query hooks, not in components.** Pages read data
+through a hook in `hooks/` and mutate through that hook's mutations, which invalidate
+the relevant query key — so a component never hand-rolls loading/error flags or manual
+refetch-after-mutation. Service modules still expose the HTTP calls; they use the
+generated typed client (`api/client`) where the endpoint is in the OpenAPI spec, and
+otherwise `handleResponse` + `getAuthHeaders` from `./apiUtils`. The frontend proxies
+all `/api/*` requests to `http://localhost:3001` in development.
 
 ---
 
@@ -919,19 +932,34 @@ Route tests mock `../middleware/auth` with `authenticate`, `requirePermission`, 
 
 ### Adding a new API endpoint
 
-1. Add the Zod schema to `backend/src/schemas/index.ts`.
+1. Add the Zod schema to `packages/shared/src/schemas.ts` — the shared package is
+   the canonical contract; `backend/src/schemas` re-exports it.
 2. Add the business logic to an existing service or create a new one in `backend/src/services/`.
-3. Add the route handler to the appropriate file in `backend/src/routes/`, or create a new one and mount it in `backend/src/index.ts`.
-4. Update `backend/openapi/openapi.json` with the new path.
+   Services throw typed errors from `src/errors`; they never format HTTP responses.
+3. Add the route handler in `backend/src/routes/`, wrapped in `asyncHandler`, using
+   `validateBody`/`validateParams` with the shared schema. Mount new routers in
+   `backend/src/app.ts` (under both the `/api` and `/api/v1` prefixes).
+4. Regenerate the contract: `npm run openapi:generate` (backend) — request bodies in
+   `backend/openapi/openapi.json` are **generated** from the Zod schemas and CI fails on
+   drift. Only curated prose (summaries, response descriptions) is edited by hand.
+   Then regenerate the frontend client: `npm run api:generate` (frontend).
 5. Write tests in `backend/src/__tests__/`.
 6. Update the relevant section of `DOCUMENTATION.md` in the same PR.
 
 ### Adding a new frontend page
 
 1. Create the page component in `frontend/src/pages/`.
-2. Add the API client wrapper in `frontend/src/services/` (use `handleResponse` + `getAuthHeaders` from `apiUtils`).
+2. Put server state in a TanStack Query hook under `frontend/src/hooks/` (queries plus
+   mutations that invalidate the relevant key) rather than hand-written loading/error
+   state in the component. Service modules call the generated typed client
+   (`src/api/client`) where the endpoint exists in the OpenAPI spec.
 3. Add the route in `frontend/src/App.tsx`.
-4. Add types to `frontend/src/types/index.ts` (do not duplicate from backend — keep them in sync manually).
+4. Reuse the contract types: import request/response shapes from
+   `@staff-scheduler/shared` or the generated `src/api/schema.ts`. Do not hand-copy
+   backend types — the shared package exists precisely so they cannot drift.
+5. Wrap async regions in the shared `QueryState` component so loading/error/empty
+   states are consistent across pages. Page tests must import `render` from
+   `src/test-utils/renderWithClient` (it provides an isolated QueryClient).
 
 ### Database schema changes
 
@@ -1075,150 +1103,6 @@ npm run sim:campaign   # many simulations, each on a freshly created database
 
 - `sim:run` simulates a whole organization in rolling rounds: employee actors file time-off / employee-loan / shift-swap requests, manager actors decide or delegate every pending approval, the period schedule is generated with the real `AutoScheduleService`, and every outcome is verified against actual database state plus the production `ComplianceEngine`.
 - `sim:campaign` fans out N runs over parallel lanes. Each run derives its org structure, pacing, and approval-authorization model deterministically from `--baseSeed`, and gets a fresh per-lane database (drop, re-create, schema init, demo seed). Requires root credentials via `DB_ROOT_PASSWORD` (or `MYSQL_ROOT_PASSWORD`). Results land in `backend/scripts/simulation/output/campaign-<timestamp>/` (`run-XX.log` per run plus `summary.log`); the exit code is non-zero if any run reports a verification failure.
-
----
-
-## 17. Scalability analysis
-
-This section evaluates how the current architecture behaves at four scale tiers and identifies the first bottlenecks at each level.
-
-### Current baseline
-
-- Single Node.js/Express process (stateless — JWT-based auth, no server-side session).
-- Single MySQL 8.0 instance, connection pool capped at **10 connections** (`connectionLimit: 10` in `config/database.ts`).
-- No caching layer (no Redis, no in-process TTL cache beyond the module flag cache in `ModuleService`).
-- Notifications delivered synchronously within the request handler via `NotificationService`.
-- Schedule optimization runs as a synchronous child process (`child_process.spawn`) inside the request lifecycle.
-- No message queue; no read replica.
-
----
-
-### Tier 1 — 100 users / 1 org unit
-
-**What works without change**
-
-Everything. A single process with a pool of 10 connections is more than sufficient. The `WITH RECURSIVE` CTE for org-unit subtrees returns results in milliseconds on a shallow tree. Permission resolution (`RbacService.getEffectivePermissions`) involves two or three indexed queries and is negligible at this scale. MySQL single-instance handles all read and write traffic comfortably within the Docker memory limit (512 MB set in `docker-compose.yml`).
-
-**Adequate but worth noting**
-
-- The connection pool default of 10 is undersized relative to Express's default concurrency ceiling; it will never be saturated at this tier, but should be raised before leaving development.
-- OR-Tools optimization spawns a Python child process; at this scale a few concurrent optimization requests are unlikely, but there is no concurrency guard on simultaneous spawns.
-
----
-
-### Tier 2 — 1,000 users / 10 departments
-
-**Scale trigger**: P95 auth latency > 50 ms, or MySQL connection pool wait time > 10 ms on average.
-
-**First bottlenecks**
-
-1. **Permission resolution on every request.** `authenticate` middleware calls `RbacService.getEffectivePermissions()` and `RbacService.getUserRoles()` on every authenticated request — two to three indexed queries per call. At ~1,000 concurrent users making frequent requests, this becomes a measurable fraction of total DB load. Permissions and role grants change infrequently; caching is safe.
-
-   Recommended fix: add a Redis (or in-process LRU) cache in `RbacService.getEffectivePermissions()` keyed by `userId`, with a 5-minute TTL. Invalidate on role grant/revoke and delegation create/revoke. This reduces per-request DB round-trips for auth from three to zero for cache hits.
-
-2. **Connection pool exhaustion under burst load.** With `connectionLimit: 10`, a burst of concurrent requests (e.g., all managers publishing schedules simultaneously) will queue on pool acquisition. Set `DB_POOL_LIMIT=30` (or higher) and `DB_QUEUE_LIMIT=50` in `backend/.env` to configure the pool and cap the queue for this tier.
-
-3. **Synchronous notification delivery.** `NotificationService` writes notification rows inside the main request transaction. For endpoints that trigger notifications to many users (e.g., publishing a schedule to 50+ employees), this adds latency proportional to the number of notifications and introduces a failure surface: a notification write error can roll back the business operation.
-
-   Recommended fix: collect notification payloads after the business transaction commits and dispatch them asynchronously (fire-and-forget at minimum; a proper queue at the next tier).
-
-**What still works**
-
-- Single MySQL instance handles this load. A schedule query joining `schedules → shifts → shift_assignments → users` with proper indexes (all join columns are indexed in the schema) executes well under 100 ms.
-- Horizontal scaling is not yet needed; stateless JWT means it is possible at any point.
-- OR-Tools optimization is infrequent enough that serialized spawns are acceptable.
-
----
-
-### Tier 3 — 10,000 users / 100 departments
-
-**Scale trigger**: Report endpoint P95 > 2 s, or MySQL read IOPS > 80% of instance capacity, or pool utilization > 70%.
-
-**Critical bottlenecks**
-
-1. **MySQL single instance becomes a bottleneck for reporting queries.** The reporting module (`ReportsService`) generates workforce analytics by joining schedules, shifts, assignments, and users across multiple departments. At 100 departments and thousands of assignments per period, these queries become multi-second operations. A single writer instance cannot absorb simultaneous heavy reads and the regular write traffic.
-
-   Recommended fix: add a MySQL read replica. Route all `SELECT` queries in `ReportsService`, `CalendarService`, and `AuditLogService` to the replica; keep write queries on the primary. This requires a connection abstraction that distinguishes read and write pools.
-
-2. **Permission cache is mandatory.** Without caching, `authenticate` generates 30,000+ DB queries per minute at moderate request rates. Redis with a 5-minute TTL (introduced at Tier 2) becomes a hard dependency at this scale, not an optimization.
-
-3. **Notification volume requires an async queue.** Publishing a schedule for a 1,000-person department triggers 1,000 notification inserts. Doing this synchronously in the request handler causes timeouts. Replace synchronous notification dispatch with a job queue (BullMQ + Redis is the natural choice given Redis is already required for caching). The queue worker processes notification batches independently.
-
-4. **Backend horizontal scaling becomes necessary.** A single Express process saturates at ~500–1,000 req/s on typical hardware. Multiple instances behind a load balancer (nginx or AWS ALB) are needed. The current architecture already supports this — sessions are JWT, no shared in-process state except the module flag cache. The module cache must move to Redis to be consistent across instances.
-
-5. **OR-Tools optimization concurrency.** With 100 departments, multiple simultaneous optimization requests are likely. The current model (unconstrained `child_process.spawn`) can exhaust CPU cores. A concurrency limiter (semaphore or BullMQ job queue with worker concurrency = CPU count - 1) is required.
-
-**What still works**
-
-- The org-unit `WITH RECURSIVE` CTE remains efficient (subtree queries are bounded by tree depth, typically under 10 levels).
-- Audit log writes (`AuditLogService.write` swallows errors) do not block business operations; the existing design holds.
-- The RBAC model (data-driven, no hardcoded roles) scales without change — permission resolution is a query pattern problem, not a model problem.
-
----
-
-### Tier 4 — 100,000 users / 1,000 departments
-
-**Architecture changes required**
-
-At this scale the system is no longer a single-server application. The following structural changes are prerequisites:
-
-| Component | Required change |
-|---|---|
-| MySQL | Primary + multiple read replicas; consider partitioning `shift_assignments` and `audit_logs` by date range |
-| Cache | Redis Cluster (or Redis Sentinel with sharding) for permission cache, module flag cache, session metadata |
-| Notifications | BullMQ or equivalent message queue with dedicated worker processes; fanout for large-audience events |
-| Reporting / analytics | Separate OLAP layer (ClickHouse, Redshift, or Elasticsearch) fed by CDC from MySQL; complex aggregations must not run on the transactional primary |
-| Backend | Stateless horizontal fleet behind a load balancer; health checks already wired (`/api/health`) |
-| Rate limiting | Per-org-unit rate limits (not just per-IP); the current `express-rate-limit` on login is insufficient for multi-tenant API abuse prevention |
-| Audit log | Async write via queue; the current synchronous-but-swallowed pattern is acceptable at lower tiers but becomes a throughput limiter when every request generates an audit row |
-| Search | Full-text search on users, schedules, and audit logs requires a dedicated search index; MySQL `LIKE` queries do not scale |
-| Optimization | Dedicated worker pool; optimization jobs must be fully async with status polling via `GET /api/schedules/:id/optimization-status` |
-
-**What scales without change**
-
-- The permission-code-based RBAC model (no role names in application code) remains correct at any scale.
-- JWT stateless auth eliminates the need for a distributed session store.
-- The `WITH RECURSIVE` CTE for org-unit subtrees continues to perform well as long as tree depth remains bounded; index coverage is already in place.
-- The module system (in-process cache, Redis-backed at Tier 3+) is a minor concern compared to the above.
-
----
-
-## 18. Market benchmark
-
-This section compares Staff Scheduler against the four most comparable market products: **Deputy**, **When I Work**, **Shiftboard**, and **UKG Ready** (the mid-market tier of UKG/Kronos). The comparison covers features relevant to the target segment (shift-based, multi-department SME to lower enterprise).
-
-Legend: ✅ Fully supported / ⚠️ Partial or limited / ❌ Not present
-
-| Feature | Staff Scheduler | Deputy | When I Work | Shiftboard | UKG Ready |
-|---|---|---|---|---|---|
-| **Shift scheduling UI** | ⚠️ (API complete, basic UI) | ✅ | ✅ | ✅ | ✅ |
-| **Employee availability management** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Time-off requests and approval** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Shift swap requests** | ✅ (managed) | ✅ | ✅ | ✅ | ✅ |
-| **Self-service shift swap marketplace** | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **In-app notifications** | ✅ (polling; SSE stream exists but is not yet wired to any UI) | ✅ | ✅ | ✅ | ✅ |
-| **Mobile app (iOS/Android)** | ❌ | ✅ | ✅ | ✅ | ✅ |
-| **Configurable RBAC** | ✅ (full, data-driven) | ⚠️ | ⚠️ | ⚠️ | ✅ |
-| **Multi-department / multi-location** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **Org-unit hierarchy** | ✅ | ⚠️ | ❌ | ⚠️ | ✅ |
-| **Approval workflows (multi-step)** | ✅ | ⚠️ | ❌ | ⚠️ | ✅ |
-| **Delegation of authority** | ✅ | ❌ | ❌ | ❌ | ⚠️ |
-| **Module system (feature flags)** | ✅ | ❌ | ❌ | ❌ | ⚠️ |
-| **Audit trail** | ✅ | ✅ | ⚠️ | ✅ | ✅ |
-| **Compliance / labor law rules** | ⚠️ (engine present, rules thin) | ✅ | ⚠️ | ✅ | ✅ |
-| **Predictive demand forecasting** | ⚠️ (module defined, not built) | ✅ | ❌ | ✅ | ✅ |
-| **AI / automated schedule generation** | ✅ (OR-Tools CP-SAT) | ✅ | ⚠️ | ✅ | ✅ |
-| **Payroll integration** | ❌ | ✅ (ADP, Gusto, QuickBooks) | ✅ (Gusto, ADP) | ✅ (ADP, SAP, Oracle) | ✅ (native) |
-| **SSO / SAML** | ❌ | ✅ | ❌ | ✅ | ✅ |
-| **Webhook / event push** | ⚠️ (SSE stream only) | ✅ | ⚠️ | ✅ | ✅ |
-| **Bulk import (CSV)** | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **OpenAPI spec** | ✅ | ✅ | ✅ | ⚠️ | ⚠️ |
-| **Geofencing clock-in** | ❌ | ✅ | ✅ | ⚠️ | ⚠️ |
-| **On-call roster** | ✅ | ⚠️ | ❌ | ✅ | ⚠️ |
-
-**Reading the table**: Staff Scheduler is ahead of all four competitors on RBAC expressiveness, org-unit hierarchy depth, approval workflow configurability, and delegation — capabilities that require significant engineering effort to retrofit. The main gaps are on the product surface: no mobile app, no payroll connectors, no SSO, and no self-service shift swap marketplace.
-
----
 
 ---
 
