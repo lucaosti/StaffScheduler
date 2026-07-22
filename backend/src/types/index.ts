@@ -15,6 +15,8 @@ import type {
   Shift as SharedShift,
   Schedule as SharedSchedule,
   User as SharedUser,
+  Department as SharedDepartment,
+  ShiftAssignment as SharedShiftAssignment,
 } from '@staff-scheduler/shared';
 export type { Permission, Role, UserRoleAssignment, Timestamp };
 
@@ -179,18 +181,7 @@ export interface UpdateUserRequest {
 // DEPARTMENT TYPES
 // ============================================================================
 
-export interface Department {
-  id: number;
-  name: string;
-  description?: string;
-  managerId?: number;
-  managerName?: string;
-  orgUnitId?: number;
-  isActive: boolean;
-  employeeCount?: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
+export type Department = SharedDepartment;
 
 export interface CreateDepartmentRequest {
   name: string;
@@ -346,22 +337,7 @@ export interface EmployeeSkill {
 // ASSIGNMENT TYPES
 // ============================================================================
 
-export interface ShiftAssignment {
-  id: number;
-  shiftId: number;
-  userId: number;
-  userName?: string;
-  userEmail?: string;
-  shiftDate?: string | Date;
-  startTime?: string;
-  endTime?: string;
-  departmentId?: number;
-  departmentName?: string;
-  status: 'pending' | 'confirmed' | 'cancelled' | 'completed';
-  assignedAt: Date;
-  confirmedAt?: Date;
-  notes?: string;
-}
+export type ShiftAssignment = SharedShiftAssignment;
 
 export interface CreateAssignmentRequest {
   shiftId: number;

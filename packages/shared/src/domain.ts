@@ -274,3 +274,97 @@ export const timeOffRequestSchema = z.object({
   updatedAt: timestamp,
 });
 export type TimeOffRequest = z.infer<typeof timeOffRequestSchema>;
+
+/**
+ * A node in the organisational tree.
+ *
+ * The hand-written component omitted `description`, `managerUserId`,
+ * `isActive`, `createdAt` and `updatedAt` — an incompleteness rather than a
+ * falsehood, but one that left half the entity invisible to any generated
+ * client.
+ */
+export const orgUnitSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  description: z.string().nullable(),
+  parentId: z.number().int().nullable(),
+  managerUserId: z.number().int().nullable(),
+  isActive: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type OrgUnit = z.infer<typeof orgUnitSchema>;
+
+/** A proposed swap of two assignments between two employees. */
+export const shiftSwapRequestSchema = z.object({
+  id: z.number().int(),
+  requesterUserId: z.number().int(),
+  requesterAssignmentId: z.number().int(),
+  targetUserId: z.number().int(),
+  targetAssignmentId: z.number().int(),
+  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']),
+  notes: z.string().nullable(),
+  reviewerId: z.number().int().nullable(),
+  reviewedAt: timestamp.nullable(),
+  reviewNotes: z.string().nullable(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type ShiftSwapRequest = z.infer<typeof shiftSwapRequestSchema>;
+
+/**
+ * One append-only audit record.
+ *
+ * The hand-written component omitted precisely the substance of the trail —
+ * who acted (`userId`), on whose behalf (`onBehalfOfUserId`), with what
+ * `justification`, from where (`ipAddress`, `userAgent`), under which
+ * `requestId`, and the `beforeSnapshot`/`afterSnapshot` pair that makes a
+ * record reconstructable. A consumer reading the published contract would
+ * conclude the audit log carries far less than it does.
+ */
+export const auditLogEntrySchema = z.object({
+  id: z.number().int(),
+  userId: z.number().int().nullable(),
+  /** Set when the action was performed for another user (proxy / approval). */
+  onBehalfOfUserId: z.number().int().nullable(),
+  action: z.string(),
+  entityType: z.string().nullable(),
+  entityId: z.number().int().nullable(),
+  description: z.string().nullable(),
+  justification: z.string().nullable(),
+  beforeSnapshot: z.record(z.string(), z.unknown()).nullable().optional(),
+  afterSnapshot: z.record(z.string(), z.unknown()).nullable().optional(),
+  ipAddress: z.string().nullable(),
+  userAgent: z.string().nullable(),
+  /** Correlates the record with the request that produced it. */
+  requestId: z.string().nullable(),
+  createdAt: timestamp,
+});
+export type AuditLogEntry = z.infer<typeof auditLogEntrySchema>;
+
+/**
+ * One employee assigned to one shift, as the API returns it.
+ *
+ * The hand-written component was already accurate; deriving it removes the
+ * last domain entity from the hand-maintained surface, leaving only the
+ * envelope types (`ApiSuccess`, `ApiError`, `PaginationMeta`), which describe
+ * the response wrapper rather than a domain entity and have no schema to
+ * derive from.
+ */
+export const shiftAssignmentSchema = z.object({
+  id: z.number().int(),
+  shiftId: z.number().int(),
+  userId: z.number().int(),
+  userName: z.string().optional(),
+  userEmail: z.string().optional(),
+  shiftDate: timestamp.optional(),
+  startTime: z.string().optional(),
+  endTime: z.string().optional(),
+  departmentId: z.number().int().optional(),
+  departmentName: z.string().optional(),
+  status: z.enum(['pending', 'confirmed', 'cancelled', 'completed']),
+  assignedAt: timestamp,
+  confirmedAt: timestamp.optional(),
+  notes: z.string().optional(),
+});
+export type ShiftAssignment = z.infer<typeof shiftAssignmentSchema>;

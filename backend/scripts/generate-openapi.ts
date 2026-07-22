@@ -208,6 +208,10 @@ const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
   Department: sharedSchemas.departmentSchema,
   Policy: sharedSchemas.policySchema,
   TimeOffRequest: sharedSchemas.timeOffRequestSchema,
+  OrgUnit: sharedSchemas.orgUnitSchema,
+  ShiftSwapRequest: sharedSchemas.shiftSwapRequestSchema,
+  AuditLogEntry: sharedSchemas.auditLogEntrySchema,
+  Assignment: sharedSchemas.shiftAssignmentSchema,
 };
 
 const main = (): void => {
