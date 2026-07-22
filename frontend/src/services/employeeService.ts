@@ -45,39 +45,31 @@ interface EmployeeFilters {
 /**
  * Interface for creating new employee records
  */
+/**
+ * Mirrors the server's `createUserBody` schema.
+ *
+ * It had drifted the same way `EmployeeFilters` did: `address`,
+ * `certifications`, `department`, `employeeType`, `hireDate`,
+ * `maxHoursPerWeek`, `notes` and `skills` are not fields `POST /employees`
+ * accepts. Since request bodies are schema-validated the server strips them,
+ * so a caller sending them got a 201 and silently lost the data.
+ *
+ * `skillIds` and `roleIds` are the real ways to attach skills and roles.
+ */
 export interface CreateEmployeeData {
-  /** Unique employee identifier */
-  employeeId: string;
-  /** Employee's first name */
-  firstName: string;
-  /** Employee's last name */
-  lastName: string;
-  /** Employee's email address */
+  /** Login address; also the account's unique identity. */
   email: string;
-  /** Employee's phone number (optional) */
+  password: string;
+  firstName: string;
+  lastName: string;
+  /** Human-facing staff number, distinct from the numeric user id. */
+  employeeId?: string;
   phone?: string;
-  /** Employee's address (optional) */
-  address?: string;
-  /** Department assignment (optional, display name) */
-  department?: string;
-  /** Department IDs for server-side assignment */
-  departmentIds?: number[];
-  /** Job position/role (optional) */
   position?: string;
-  /** Date of hire in ISO format (optional) */
-  hireDate?: string;
-  /** Employment type classification */
-  employeeType?: 'full-time' | 'part-time' | 'contractor';
-  /** Hourly pay rate (optional) */
   hourlyRate?: number;
-  /** Maximum weekly hours (optional) */
-  maxHoursPerWeek?: number;
-  /** List of skills/competencies (optional) */
-  skills?: string[];
-  /** Professional certifications (optional) */
-  certifications?: string[];
-  /** Additional notes (optional) */
-  notes?: string;
+  departmentIds?: number[];
+  skillIds?: number[];
+  roleIds?: number[];
 }
 
 export type UpdateEmployeeData = Partial<CreateEmployeeData>;
