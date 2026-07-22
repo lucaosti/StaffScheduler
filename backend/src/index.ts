@@ -19,6 +19,7 @@ import { logger } from './config/logger';
 import { eventBus } from './services/EventBus';
 import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
 import { startOutboxWorker, stopOutboxWorker } from './services/OutboxWorker';
+import { initModuleCacheInvalidation } from './services/moduleCache';
 import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
 
@@ -43,6 +44,9 @@ export async function startServer(): Promise<void> {
     // Wire the SSE bus onto Redis pub/sub so events fan out across instances.
     // No-op without Redis; never throws (degrades to single-instance delivery).
     await eventBus.init();
+
+    // Subscribe to cross-replica module-flag invalidations (no-op without Redis).
+    await initModuleCacheInvalidation();
 
     // Start the in-process optimization worker (no-op without Redis; then
     // /generate runs synchronously instead).

@@ -16,6 +16,12 @@
  */
 
 import { ModuleService } from '../services/ModuleService';
+import { resetModuleCacheForTests } from '../services/moduleCache';
+
+// The flag cache is process-wide (shared by every ModuleService instance, and
+// invalidated across replicas), so each test must start from an empty cache —
+// otherwise a previous test's snapshot would satisfy the next one's lookup.
+beforeEach(() => resetModuleCacheForTests());
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Pool mock helper
