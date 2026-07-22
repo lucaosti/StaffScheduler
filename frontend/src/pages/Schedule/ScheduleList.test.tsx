@@ -16,7 +16,6 @@ const makeSchedule = (overrides: Partial<Schedule> = {}): Schedule => ({
   endDate: '2025-01-31',
   departmentId: 1,
   departmentName: 'Cardiology',
-  description: '',
   createdAt: '2025-01-01',
   updatedAt: '2025-01-01',
   ...overrides,
