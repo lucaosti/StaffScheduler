@@ -63,9 +63,12 @@ describe('ApprovalEngineService.processEscalations', () => {
       escalatedToUserId: 7,
     });
 
-    // UPDATE must set status = 'escalated'.
+    // UPDATE must set the escalated status — now supplied as a bound parameter
+    // derived from the approval state machine, not an inline literal.
     const updateCall = execute.mock.calls[1];
-    expect(updateCall[0]).toContain("status = 'escalated'");
+    expect(updateCall[0]).toContain('SET status = ?');
+    expect(updateCall[0]).toContain("AND status = 'pending'");
+    expect(updateCall[1][0]).toBe('escalated'); // state machine: pending --escalate--> escalated
     expect(updateCall[1]).toContain(1); // pending_approval id
 
     // INSERT must assign to manager (id=7).

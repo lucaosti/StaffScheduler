@@ -15,6 +15,7 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
+import { nextState, actionForDecision } from './ApprovalStateMachine';
 import {
   ApprovalWorkflow,
   ApprovalStep,
@@ -504,12 +505,17 @@ export class ApprovalEngineService {
     const authorized = await this.isAuthorizedToDecide(pa, userId);
     if (!authorized) throw new ForbiddenError('Not authorized to act on this pending approval');
 
+    // Derive the target status through the state machine — the single authority
+    // on legal approval transitions — rather than writing the literal here. A
+    // row not in 'pending' cannot be decided (nextState throws), and the
+    // WHERE-status guard below is the concurrency backstop for the same rule.
+    const targetStatus = nextState('pending', actionForDecision(decision));
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE pending_approvals
           SET status = ?, decided_at = CURRENT_TIMESTAMP, decision_note = ?,
               decided_by_user_id = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ? AND status = 'pending'`,
-      [decision, note, userId, pendingApprovalId]
+      [targetStatus, note, userId, pendingApprovalId]
     );
     if (result.affectedRows === 0) {
       const current = await this.getPendingApprovalById(pendingApprovalId);
@@ -761,14 +767,18 @@ export class ApprovalEngineService {
         escalatedToUserId: (row.manager_id as number | null) ?? null,
       }));
 
-    // Batch UPDATE — mark all overdue items escalated in one statement.
+    // Batch UPDATE — mark all overdue items escalated in one statement. The
+    // target status comes from the state machine (the single authority on legal
+    // transitions) rather than a literal; the WHERE-status guard keeps the same
+    // rule under concurrency.
+    const escalatedStatus = nextState('pending', 'escalate');
     const paIds = items.map((i) => i.pendingApprovalId);
     const placeholders = paIds.map(() => '?').join(', ');
     await this.pool.execute(
       `UPDATE pending_approvals
-          SET status = 'escalated', escalated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+          SET status = ?, escalated_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
         WHERE id IN (${placeholders}) AND status = 'pending'`,
-      paIds
+      [escalatedStatus, ...paIds]
     );
 
     // Batch INSERT — one row per item that has an identified manager. All
