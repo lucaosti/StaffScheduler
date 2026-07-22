@@ -11,6 +11,7 @@
  * @author Luca Ostinelli
  */
 
+import { createUserBody } from '@staff-scheduler/shared';
 import * as employeeService from './employeeService';
 import * as shiftService from './shiftService';
 import * as scheduleService from './scheduleService';
@@ -76,17 +77,25 @@ describe('employeeService', () => {
   });
 
   describe('createEmployee', () => {
-    it('POSTs the employee payload', async () => {
-      await employeeService.createEmployee({
+    it('POSTs a payload the server\'s createUserBody accepts', async () => {
+      const payload = {
         employeeId: 'E1',
         firstName: 'John',
         lastName: 'Doe',
         email: 'john@x.com',
-      });
+        password: 'Password1!',
+      };
+      await employeeService.createEmployee(payload);
       expect(lastInit().method).toBe('POST');
       expect(lastUrl()).toMatch(/\/employees$/);
+
+      // The payload used to omit `password`, which createUserBody requires, so
+      // every creation from the UI was rejected with a 400. Validating the sent
+      // body against the shared schema — rather than spot-checking one field —
+      // is what makes that impossible to reintroduce.
       const body = JSON.parse(lastInit().body as string);
       expect(body.email).toBe('john@x.com');
+      expect(createUserBody.safeParse(body).success).toBe(true);
     });
   });
 

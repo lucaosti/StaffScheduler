@@ -1,6 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
+import { createUserBody } from '@staff-scheduler/shared';
 
 const mockGetEmployees = jest.fn();
 const mockCreateEmployee = jest.fn();
@@ -122,10 +123,20 @@ describe('<Employees />', () => {
     await userEvent.type(screen.getByLabelText(/^email \*/i), 'new@example.com');
     await userEvent.type(screen.getByLabelText(/first name/i), 'New');
     await userEvent.type(screen.getByLabelText(/last name/i), 'Person');
+    await userEvent.type(screen.getByLabelText(/initial password/i), 'Password1!');
     await userEvent.selectOptions(screen.getByLabelText(/^department$/i), '1');
     await userEvent.type(screen.getByLabelText(/^position$/i), 'Engineer');
     await userEvent.click(screen.getByRole('button', { name: /create employee/i }));
     expect(mockCreateEmployee).toHaveBeenCalled();
+
+    // Asserting only that the service was called is what let a broken flow
+    // pass: the form collected no password, which createUserBody requires, so
+    // every real creation was rejected with a 400 while this test stayed
+    // green. Validate the payload the form actually built against the schema
+    // the server enforces.
+    const sent = mockCreateEmployee.mock.calls[0][0];
+    const parsed = createUserBody.safeParse(sent);
+    expect(parsed.success).toBe(true);
 
     // Delete flow: click delete button, confirm via modal
     const delBtn = within(adaRow as HTMLElement).getByTitle(/delete employee/i);
