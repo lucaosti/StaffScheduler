@@ -19,8 +19,8 @@
 // Permission, Role and UserRoleAssignment are declared once in
 // @staff-scheduler/shared and re-exported here, so both sides cannot drift.
 // Importing them from this barrel keeps every existing call site unchanged.
-import type { Permission, Role, UserRoleAssignment } from '@staff-scheduler/shared';
-export type { Permission, Role, UserRoleAssignment };
+import type { Permission, Role, UserRoleAssignment, Shift } from '@staff-scheduler/shared';
+export type { Permission, Role, UserRoleAssignment, Shift };
 
 
 // Types for StaffScheduler Frontend (aligned with backend schema)
@@ -96,39 +96,6 @@ export interface Employee {
 }
 
 // Shift (including special shifts)
-export interface Shift {
-  id: ID;
-  name?: string;
-  startTime: string;  // Time format HH:MM
-  endTime: string;    // Time format HH:MM
-  date: string | Date;       // ISO date YYYY-MM-DD
-  scheduleId?: ID;
-  departmentId?: ID;
-  departmentName?: string;
-  templateId?: ID;
-  minStaff?: number;
-  maxStaff?: number;
-  assignedStaff?: number;
-  notes?: string | null;
-  status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
-
-  // Legacy fields (optional)
-  department?: string;
-  position?: string;
-  requiredSkills?: string[];
-  minimumStaff?: number;
-  maximumStaff?: number;
-  type?: 'regular' | 'special';
-  specialType?: 'on_call' | 'overtime' | 'emergency' | 'holiday';
-  priority?: number;
-  location?: string;
-  description?: string;
-  rolesRequired?: Record<string, number>;  // role -> minimum count
-  createdBy?: ID;
-  createdAt?: string | Date;
-  updatedAt?: string | Date;
-  createdByName?: string | null;
-}
 
 export interface Assignment {
   id: ID;

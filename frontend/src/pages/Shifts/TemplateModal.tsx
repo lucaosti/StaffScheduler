@@ -182,7 +182,7 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-min"
                     name="minStaff"
                     className="form-control"
-                    defaultValue={editingShift?.minStaff ?? editingShift?.minimumStaff ?? 1}
+                    defaultValue={editingShift?.minStaff ?? 1}
                     required
                     disabled={submitting}
                   />
@@ -198,7 +198,7 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-max"
                     name="maxStaff"
                     className="form-control"
-                    defaultValue={editingShift?.maxStaff ?? editingShift?.maximumStaff ?? ''}
+                    defaultValue={editingShift?.maxStaff ?? ''}
                     disabled={submitting}
                   />
                 </div>
