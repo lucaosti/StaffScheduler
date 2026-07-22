@@ -574,3 +574,215 @@ describe('mutations run against the real schema', () => {
     });
   });
 });
+
+/**
+ * PUT / PATCH / DELETE against the real schema, on real rows.
+ *
+ * WHY A SEPARATE BLOCK FROM THE POST SWEEP: the fixture-free sweeps could pass a
+ * body with no path parameter. UPDATE and DELETE need a row that exists — a
+ * bogus id would short-circuit at the handler's existence check and never reach
+ * the mutation SQL, which is the SQL this is here to exercise. So each case
+ * creates its own disposable row through the admin connection (independent of
+ * the API under test) and then drives the endpoint against that id.
+ *
+ * Disposable rather than shared: a DELETE case must not remove a row a later
+ * case depends on, and an UPDATE must not leave shared state a later assertion
+ * reads. Every case is self-contained, so the block is order-independent.
+ *
+ * The assertion is the same "below 500" as the sweeps: a 200, a 403, a 404 and
+ * a 409 all mean MySQL executed the statement and the application decided the
+ * outcome. Only a 500 means the query itself was wrong. A 400 also fails the
+ * case — it means validation rejected the body and no SQL ran, so the fixture
+ * is wrong rather than the endpoint.
+ */
+describe('path-parameter mutations run against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  // Each factory INSERTs one row and returns its id, using the admin connection
+  // so setup never depends on the code under test.
+  const make = {
+    async department(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO departments (name, is_active) VALUES (?, 1)`,
+        [`d-${tag()}`]
+      );
+      return r.insertId;
+    },
+    async role(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO roles (name, is_system) VALUES (?, 0)`,
+        [`r-${tag()}`]
+      );
+      return r.insertId;
+    },
+    async orgUnit(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO org_units (name, is_active) VALUES (?, 1)`,
+        [`u-${tag()}`]
+      );
+      return r.insertId;
+    },
+    async user(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+         VALUES (?, 'x', 'Disp', 'User', 1)`,
+        [`disp-${tag()}@example.com`]
+      );
+      return r.insertId;
+    },
+    async schedule(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+         VALUES (?, CURDATE(), CURDATE() + INTERVAL 7 DAY, ?, 'draft', ?)`,
+        [`s-${tag()}`, departmentId, userId]
+      );
+      return r.insertId;
+    },
+    async shift(schedule: number): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL 2 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+        [schedule, departmentId]
+      );
+      return r.insertId;
+    },
+    async assignment(shift: number, user: number): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`,
+        [shift, user]
+      );
+      return r.insertId;
+    },
+    async template(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shift_templates (name, department_id, start_time, end_time, min_staff, max_staff, is_active)
+         VALUES (?, ?, '09:00:00', '17:00:00', 1, 3, 1)`,
+        [`t-${tag()}`, departmentId]
+      );
+      return r.insertId;
+    },
+    async onCallPeriod(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO on_call_periods (department_id, date, start_time, end_time, status)
+         VALUES (?, CURDATE() + INTERVAL 3 DAY, '18:00:00', '23:00:00', 'open')`,
+        [departmentId]
+      );
+      return r.insertId;
+    },
+    async policy(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO policies (scope_type, scope_id, policy_key, policy_value, imposed_by_user_id, is_active)
+         VALUES ('global', NULL, ?, '1', ?, 1)`,
+        [`pk-${tag()}`, userId]
+      );
+      return r.insertId;
+    },
+    async responsibilityRule(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO responsibility_rules (subject_type, subject_id, permission_code, responsible_org_unit_id, is_active)
+         VALUES ('department', ?, 'schedule.read', ?, 1)`,
+        [departmentId, orgUnitId]
+      );
+      return r.insertId;
+    },
+    async approvalWorkflow(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO approval_workflows (change_type, require_all) VALUES (?, 0)`,
+        [`ct-${tag()}`.slice(0, 40)]
+      );
+      return r.insertId;
+    },
+    async notification(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO notifications (user_id, type, title, is_read) VALUES (?, 'info', 'disp', 0)`,
+        [userId]
+      );
+      return r.insertId;
+    },
+    async delegation(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO delegations (delegator_id, delegatee_id, permission_codes, expires_at, is_active)
+         VALUES (?, ?, '["schedule.read"]', CURDATE() + INTERVAL 30 DAY, 1)`,
+        [userId, delegateeId]
+      );
+      return r.insertId;
+    },
+  };
+
+  interface Case {
+    name: string;
+    method: 'put' | 'patch' | 'delete';
+    setup: () => Promise<{ path: string; body?: Record<string, unknown> }>;
+  }
+
+  const cases: Case[] = [
+    // Departments
+    { name: 'PUT /departments/:id', method: 'put', setup: async () => ({ path: `/departments/${await make.department()}`, body: { name: `d-${tag()}` } }) },
+    { name: 'DELETE /departments/:id', method: 'delete', setup: async () => ({ path: `/departments/${await make.department()}` }) },
+    // Roles
+    { name: 'PUT /roles/:id', method: 'put', setup: async () => ({ path: `/roles/${await make.role()}`, body: { name: `r-${tag()}` } }) },
+    { name: 'DELETE /roles/:id', method: 'delete', setup: async () => ({ path: `/roles/${await make.role()}` }) },
+    // Org units
+    { name: 'PUT /org/units/:id', method: 'put', setup: async () => ({ path: `/org/units/${await make.orgUnit()}`, body: { name: `u-${tag()}` } }) },
+    { name: 'DELETE /org/units/:id', method: 'delete', setup: async () => ({ path: `/org/units/${await make.orgUnit()}` }) },
+    // Users
+    { name: 'PUT /users/:id', method: 'put', setup: async () => ({ path: `/users/${await make.user()}`, body: { firstName: 'Renamed' } }) },
+    { name: 'DELETE /users/:id', method: 'delete', setup: async () => ({ path: `/users/${await make.user()}` }) },
+    // Employees (users)
+    { name: 'PUT /employees/:id', method: 'put', setup: async () => ({ path: `/employees/${await make.user()}`, body: { firstName: 'Renamed' } }) },
+    { name: 'DELETE /employees/:id', method: 'delete', setup: async () => ({ path: `/employees/${await make.user()}` }) },
+    // Schedules
+    { name: 'PUT /schedules/:id', method: 'put', setup: async () => ({ path: `/schedules/${await make.schedule()}`, body: { name: `s-${tag()}` } }) },
+    { name: 'DELETE /schedules/:id', method: 'delete', setup: async () => ({ path: `/schedules/${await make.schedule()}` }) },
+    { name: 'PATCH /schedules/:id/publish', method: 'patch', setup: async () => ({ path: `/schedules/${await make.schedule()}/publish` }) },
+    { name: 'PATCH /schedules/:id/archive', method: 'patch', setup: async () => ({ path: `/schedules/${await make.schedule()}/archive` }) },
+    // Shifts
+    { name: 'PUT /shifts/:id', method: 'put', setup: async () => { const s = await make.schedule(); return { path: `/shifts/${await make.shift(s)}`, body: { minStaff: 2 } }; } },
+    { name: 'DELETE /shifts/:id', method: 'delete', setup: async () => { const s = await make.schedule(); return { path: `/shifts/${await make.shift(s)}` }; } },
+    // Shift templates
+    { name: 'PUT /shifts/templates/:id', method: 'put', setup: async () => ({ path: `/shifts/templates/${await make.template()}`, body: { minStaff: 2 } }) },
+    { name: 'DELETE /shifts/templates/:id', method: 'delete', setup: async () => ({ path: `/shifts/templates/${await make.template()}` }) },
+    // Assignments
+    { name: 'PUT /assignments/:id', method: 'put', setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/${await make.assignment(sh, delegateeId)}`, body: { status: 'confirmed' } }; } },
+    { name: 'PATCH /assignments/:id/confirm', method: 'patch', setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/${await make.assignment(sh, delegateeId)}/confirm` }; } },
+    { name: 'PATCH /assignments/:id/decline', method: 'patch', setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/${await make.assignment(sh, delegateeId)}/decline` }; } },
+    { name: 'PATCH /assignments/:id/complete', method: 'patch', setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/${await make.assignment(sh, delegateeId)}/complete` }; } },
+    { name: 'DELETE /assignments/:id', method: 'delete', setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/${await make.assignment(sh, delegateeId)}` }; } },
+    // On-call
+    { name: 'PUT /on-call/periods/:id', method: 'put', setup: async () => ({ path: `/on-call/periods/${await make.onCallPeriod()}`, body: { status: 'cancelled' } }) },
+    { name: 'DELETE /on-call/periods/:id', method: 'delete', setup: async () => ({ path: `/on-call/periods/${await make.onCallPeriod()}` }) },
+    // Policies
+    { name: 'PUT /policies/:id', method: 'put', setup: async () => ({ path: `/policies/${await make.policy()}`, body: { isActive: false } }) },
+    { name: 'DELETE /policies/:id', method: 'delete', setup: async () => ({ path: `/policies/${await make.policy()}` }) },
+    // Responsibility rules
+    { name: 'PUT /responsibility-rules/:id', method: 'put', setup: async () => ({ path: `/responsibility-rules/${await make.responsibilityRule()}`, body: { isActive: false } }) },
+    { name: 'DELETE /responsibility-rules/:id', method: 'delete', setup: async () => ({ path: `/responsibility-rules/${await make.responsibilityRule()}` }) },
+    // Approval workflows
+    { name: 'DELETE /approval-workflows/:id', method: 'delete', setup: async () => ({ path: `/approval-workflows/${await make.approvalWorkflow()}` }) },
+    // Notifications
+    { name: 'PATCH /notifications/:id/read', method: 'patch', setup: async () => ({ path: `/notifications/${await make.notification()}/read` }) },
+    // Delegations
+    { name: 'DELETE /delegations/:id', method: 'delete', setup: async () => ({ path: `/delegations/${await make.delegation()}` }) },
+    // Preferences
+    { name: 'PUT /preferences/:userId', method: 'put', setup: async () => ({ path: `/preferences/${await make.user()}`, body: { maxHoursPerWeek: 40 } }) },
+    // Settings
+    { name: 'PUT /settings/:category/:key', method: 'put', setup: async () => ({ path: `/settings/scheduling/max_hours_week`, body: { value: '40' } }) },
+  ];
+
+  it.each(cases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
+    const cookie = await authCookie();
+    const { path: reqPath, body } = await testCase.setup();
+    const req = request(app)[testCase.method](`/api${reqPath}`).set('Cookie', cookie);
+    const res = await (body === undefined ? req : req.send(body));
+
+    if (res.status >= 500) {
+      throw new Error(
+        `${testCase.method.toUpperCase()} /api${reqPath} returned ${res.status}: ` +
+          JSON.stringify(res.body?.error ?? res.body)
+      );
+    }
+    expect({ endpoint: testCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({
+      status: 400,
+    });
+  });
+});
