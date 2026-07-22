@@ -1232,6 +1232,32 @@ Bodies in the mutation sweep are thunks rather than literals, because
 inserts the fixtures — so a literal capturing a fixture id would send
 `undefined` and be rejected before reaching the database.
 
+### Finding code kept alive only by its tests
+
+```bash
+cd backend
+npm run deadcode:tests
+```
+
+`knip.json` lists the test files as entry points. That is right for its
+purpose — without it, every helper exported purely so a unit test can reach it
+is reported as unused — but it also means anything a test reaches counts as
+used, so production code kept alive by nothing but its own tests sits behind a
+green dead-code gate. Three separate reviews found instances: `CryptoUtils`,
+`HierarchyUtils` and `ResponseUtils`; `ResponseUtils.paginated`; and
+`SkillService`, 634 lines implementing a skill catalog no route ever exposed.
+
+Configuring knip with a production entry point does not substitute for this —
+verified against the tree that still contained `SkillService`, it reported
+nothing.
+
+The script **warns and exits 0** by design. A test-only export is not
+automatically a defect: internal helpers exposed for unit testing (`parseCsv`,
+`hotp`, `buildVCard`), declared test hooks (`resetModuleCacheForTests`) and the
+canonical constraint validator — which is by construction the specification
+both scheduling engines are held to — are all legitimate. The output is a list
+to judge, not a gate to satisfy.
+
 ### Workforce simulation harness
 
 `backend/scripts/simulation/` contains a database-level simulation harness that complements the Playwright UI smoke tests:
