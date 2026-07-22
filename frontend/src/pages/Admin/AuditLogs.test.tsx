@@ -4,7 +4,7 @@
  * @author Luca Ostinelli
  */
 
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 import AuditLogs from './AuditLogs';
@@ -79,6 +79,20 @@ describe('<AuditLogs />', () => {
     render(<AuditLogs />);
     expect(await screen.findByText('module.toggle')).toBeInTheDocument();
     expect(screen.getByText('role.assign')).toBeInTheDocument();
+  });
+
+  it('shows who performed each action', async () => {
+    // The actor column used to read `entry.actorId`, a field the API never
+    // sends — it returns `userId` — so the column rendered em-dashes for every
+    // row while the data was right there in the response. Nothing asserted the
+    // column, which is why it survived.
+    render(<AuditLogs />);
+    const row = (await screen.findByText('module.toggle')).closest('tr');
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText('5')).toBeInTheDocument();
+
+    const secondRow = screen.getByText('role.assign').closest('tr');
+    expect(within(secondRow as HTMLElement).getByText('3')).toBeInTheDocument();
   });
 
   it('shows the total entry count', async () => {
