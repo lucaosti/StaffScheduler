@@ -6,6 +6,11 @@
  * exactly once, request-id correlation onto the active span, and shutdown.
  */
 
+// Makes this file a module (own scope) rather than a global script, so its
+// top-level `const load` doesn't collide with the same name in other suites
+// under ts-jest's shared program.
+export {};
+
 const sdkStart = jest.fn();
 const sdkShutdown = jest.fn().mockResolvedValue(undefined);
 const NodeSDK = jest.fn().mockImplementation(() => ({ start: sdkStart, shutdown: sdkShutdown }));
