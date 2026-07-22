@@ -88,7 +88,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: production
-    container_name: staff_scheduler_backend
+    # Deliberately no container_name: a fixed name makes the service
+    # un-scalable, and the API is stateless (shared state lives in Redis/MySQL)
+    # so it is meant to run as N replicas — see docker-compose.scale.yml.
     restart: unless-stopped
     depends_on:
       mysql:
