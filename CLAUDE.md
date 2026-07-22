@@ -79,17 +79,28 @@ backend/src/
 ├── config/
 │   ├── index.ts               # All env var reads; fail-safe defaults
 │   ├── database.ts            # Singleton Database class (pool, query helpers, transactions)
+│   ├── redis.ts               # Redis client (on by default; in-process fallback)
 │   └── logger.ts              # Winston singleton — use this, never console.log/error
+├── errors/                    # AppError hierarchy — services throw these, never format HTTP
 ├── middleware/
 │   ├── auth.ts                # JWT verification → req.user; authenticate, requirePermission, requireModule
 │   ├── validation.ts          # Zod-based validateBody / validateParams helpers
+│   ├── asyncHandler.ts        # Wraps route handlers; errors go to the central errorHandler
 │   └── requestContext.ts      # AsyncLocalStorage request IDs; X-Request-Id response header; getRequestId()
-├── schemas/                   # Zod schemas shared across routes (imported by validateBody/validateParams)
+├── observability/
+│   ├── metrics.ts             # Prometheus registry, HTTP histogram, DB-pool + queue gauges
+│   ├── tracing.ts             # OpenTelemetry SDK (env-gated) + request-id span correlation
+│   └── otel-bootstrap.ts      # Imported FIRST by index.ts so instrumentation can patch libs
+├── schemas/                   # Re-exports the canonical Zod schemas from @staff-scheduler/shared
 ├── routes/                    # One file per resource; factory pattern createXxxRouter(pool)
 ├── services/                  # Stateless business logic classes, constructed with Pool
 │   ├── RbacService.ts         # Permission resolution, org-unit scoping, role grants
 │   ├── DelegationService.ts   # Temporary authority transfer between users
 │   ├── ApprovalEngineService.ts  # Multi-step configurable approval workflows, escalation
+│   ├── ApprovalStateMachine.ts   # THE authority on legal approval transitions — see below
+│   ├── OptimizationQueue.ts   # BullMQ schedule-optimization jobs (202 + status/cancel)
+│   ├── MailerService.ts       # nodemailer transport, gated by isEmailConfigured()
+│   ├── OutboxWorker.ts        # Delivers email_outbox rows (at-least-once, retries)
 │   ├── ModuleService.ts       # Runtime module enable/disable with in-process cache
 │   ├── AssignmentValidator.ts # Validation logic extracted from AssignmentService
 │   ├── AssignmentOrchestrator.ts  # Orchestration logic extracted from AssignmentService
@@ -97,8 +108,19 @@ backend/src/
 │   └── (other per-domain services)
 └── optimization/
     ├── ScheduleOptimizerORTools.ts  # Spawns backend/optimization-scripts/schedule_optimizer.py
-    └── ScheduleOptimizer.ts         # Pure-TypeScript fallback optimizer
+    └── constraintValidator.ts       # Canonical hard-constraint set both engines are held to
 ```
+
+**Approval transitions**: every status change on `pending_approvals` derives its target
+through `ApprovalStateMachine.nextState()` — never a status literal. The machine declares
+the only legal transitions (pending → approved/rejected/escalated; those three terminal)
+and throws `ConflictError` otherwise, so an illegal transition is impossible by
+construction. Keep the raw-SQL `WHERE status = 'pending'` guard as the concurrency backstop.
+
+**Notification emails** use a transactional outbox: `NotificationService.notify()` writes
+the in-app row and (only when `isEmailConfigured()`) the `email_outbox` row in one
+transaction; `OutboxWorker` delivers them with retries. Never send email inline from a
+request handler.
 
 **Route → Service pattern**: Routes validate input (via Zod middleware), instantiate a service, call one method, and return JSON. Services own all SQL and business rules; they throw named errors on failure.
 
@@ -119,15 +141,37 @@ backend/src/
 frontend/src/
 ├── index.tsx / App.tsx        # Entry point and React Router v6 routing
 ├── contexts/AuthContext.tsx   # Global JWT state (login / logout / token refresh)
+├── api/                       # Generated OpenAPI types (schema.ts) + typed fetch client
+├── lib/queryClient.ts         # Shared TanStack Query client (one cache for the app)
+├── hooks/                     # Server-state hooks: queries + mutations, one file per domain
 ├── services/
 │   ├── apiUtils.ts            # Shared ApiError, handleResponse<T>, getAuthHeaders
 │   └── (authService, employeeService, shiftService, scheduleService, ...)
 ├── pages/                     # Route-level components
-├── components/                # Reusable UI components
+├── components/                # Reusable UI (incl. QueryState, ErrorAlert)
+├── test-utils/                # renderWithClient — render helper with an isolated QueryClient
 └── types/index.ts             # Canonical TypeScript interfaces — single source of truth
 ```
 
-All service files import `handleResponse` and `getAuthHeaders` from `./apiUtils`. Do not re-define them locally. Import `ApiError` from `./apiUtils` only if a specific service needs to catch or throw typed API errors.
+**Server state belongs in TanStack Query hooks, not in components.** A page reads data
+through a hook in `hooks/` and mutates through that hook's mutations, which invalidate the
+affected query key. Do not add `useState` loading/error flags, mount-fetch effects, or
+manual "reload after save" calls to a page — that is exactly what the hooks replace.
+Gate optional fetches with `enabled` rather than conditional effects.
+
+Wrap async regions in `QueryState` (and use `ErrorAlert`) so loading/error/empty states
+look the same everywhere. **Any test that renders a component using a query hook must
+import `render` from `src/test-utils/renderWithClient`** — plain RTL `render` throws
+"No QueryClient set".
+
+Forms use React Hook Form with `zodResolver` over the schema from
+`@staff-scheduler/shared`, so client validation is the server's by construction (see
+`CreateScheduleModal` for the pattern).
+
+Service files use the generated typed client (`src/api/client`) where the endpoint exists
+in the OpenAPI spec; otherwise they import `handleResponse` and `getAuthHeaders` from
+`./apiUtils` — never re-defined locally. Import `ApiError` from `./apiUtils` only if a
+service needs to catch or throw typed API errors.
 
 The frontend dev server proxies all `/api/*` requests to `http://localhost:3001` (via `server.proxy` in `frontend/vite.config.ts`).
 
@@ -153,6 +197,9 @@ The `code` field is required in all error responses.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
 - **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`). Do not create additional root-level `.md` files.
 - **OpenAPI**: request bodies in `backend/openapi/openapi.json` are GENERATED from the shared Zod schemas — never edit them by hand; run `npm run openapi:generate` (backend) after changing a schema or a `validateBody` middleware (CI fails on drift). Curated prose (summaries, responses) is still edited in the file. Update `DOCUMENTATION.md` in the same PR when endpoints change.
+- **Tests**: a test file that declares top-level `const`s but has no top-level `import`/`export` is a *global script* under ts-jest and its names collide with other suites (`TS2451: Cannot redeclare block-scoped variable`). Add `export {};` to such files. Frontend tests that render a component using a query hook must import `render` from `src/test-utils/renderWithClient`.
+- **Database triggers**: always give a trigger a `BEGIN ... END` body, even for a single statement. `mysqldump` wraps trigger bodies in a `/*!50003 ... */` comment; with a bare single statement its terminating `;` lands inside that comment and the dump cannot be restored (the backup-restore CI job catches this).
+- **Observability**: new metrics are registered on the shared registry in `src/observability/metrics.ts`. Never label a metric with a raw path, id or other unbounded value — use the matched route pattern, as the HTTP histogram does.
 
 ## Workflow (issue-first)
 
@@ -199,6 +246,23 @@ is NOT behind `authenticate` — it works precisely when the access token has
 expired. The frontend refreshes proactively (`AuthContext`) and on mount.
 
 Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev proxy handles it by default).
+
+**Optional subsystems**, all off/no-op unless configured — none is required to run locally:
+
+| Env | Effect |
+|---|---|
+| `REDIS_URL` / `REDIS_ENABLED` | Shared caches, SSE fan-out and the BullMQ optimization queue. On by default with an in-process fallback; without Redis, `/generate` runs synchronously. |
+| `METRICS_TOKEN` | Bearer token required to scrape `GET /metrics`. Unset leaves it open (dev only). |
+| `OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Starts OpenTelemetry tracing; spans carry `request.id`. |
+| `EMAIL_HOST` + `EMAIL_USER` + `EMAIL_PASSWORD` | Enables real email delivery via the outbox. Without them no email intent is recorded at all. |
+
+## Observability and operations
+
+`GET /metrics` exposes Prometheus metrics; OpenTelemetry tracing is env-gated. The
+optional stacks run as compose profiles: `docker compose --profile ops up` (Prometheus,
+Grafana, Loki, Promtail — config in `ops/`) and `docker compose --profile backup up`
+(scheduled `mysqldump` with retention; `ops/backup/`). Restores are proven by the
+`backup-restore` CI job, not assumed. See DOCUMENTATION.md §10a for the runbook.
 
 ## Optimization Engine
 
