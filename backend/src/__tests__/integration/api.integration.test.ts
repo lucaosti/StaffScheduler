@@ -534,7 +534,7 @@ describe('mutations run against the real schema', () => {
       path: '/approval-workflows',
       body: () => ({
         changeType: unique('change_type').slice(0, 40),
-        steps: [{ stepOrder: 1, approverType: 'role', approverRoleId: null, approverUserId: null }],
+        steps: [{ stepOrder: 1, approverScope: 'unit_manager' }],
       }),
     },
     {
