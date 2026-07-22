@@ -88,6 +88,14 @@ const Schedule: React.FC = () => {
   const formatDate = (date: Date) =>
     date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
 
+  /**
+   * A shift's own calendar date, used as its label. The API contract has no
+   * `Shift.name`, so the row previously rendered `undefined`; the date is the
+   * shift's natural identifier (ShiftTable already falls back to it).
+   */
+  const formatShiftDate = (date: string | Date): string =>
+    typeof date === 'string' ? date.slice(0, 10) : new Date(date).toISOString().slice(0, 10);
+
   const departmentNameById = useMemo(() => {
     const map = new Map<number, string>();
     for (const d of departments) map.set(d.id, d.name);
@@ -99,7 +107,7 @@ const Schedule: React.FC = () => {
       shifts.filter(
         (shift) =>
           !selectedDepartment ||
-          String(shift.departmentId ?? shift.department) === selectedDepartment
+          String(shift.departmentId) === selectedDepartment
       ),
     [shifts, selectedDepartment]
   );
@@ -164,7 +172,7 @@ const Schedule: React.FC = () => {
       monthShifts.filter(
         (shift) =>
           !selectedDepartment ||
-          String(shift.departmentId ?? shift.department) === selectedDepartment
+          String(shift.departmentId) === selectedDepartment
       ),
     [monthShifts, selectedDepartment]
   );
@@ -521,7 +529,6 @@ const Schedule: React.FC = () => {
                     filteredShifts.map((shift) => {
                       const deptName =
                         shift.departmentName ||
-                        shift.department ||
                         (shift.departmentId
                           ? departmentNameById.get(Number(shift.departmentId))
                           : '') ||
@@ -530,7 +537,7 @@ const Schedule: React.FC = () => {
                         <tr key={shift.id}>
                           <td className="align-middle">
                             <div>
-                              <strong>{shift.name}</strong>
+                              <strong>{formatShiftDate(shift.date)}</strong>
                               <br />
                               <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
                               <br />
@@ -566,10 +573,10 @@ const Schedule: React.FC = () => {
                                       );
                                     })}
                                     {dayAssignments.length <
-                                      (shift.minStaff ?? shift.minimumStaff ?? 0) && (
+                                      (shift.minStaff ?? 0) && (
                                       <small className="text-danger">
                                         Need{' '}
-                                        {(shift.minStaff ?? shift.minimumStaff ?? 0) -
+                                        {(shift.minStaff ?? 0) -
                                           dayAssignments.length}{' '}
                                         more
                                       </small>

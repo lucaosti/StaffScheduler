@@ -57,3 +57,45 @@ export interface UserRoleAssignment {
   scopeOrgUnitId?: number | null;
   expiresAt?: Timestamp | null;
 }
+
+/**
+ * A single time slot within a schedule, as the API returns it.
+ *
+ * WHY THIS SHAPE: the two hand-written copies disagreed on more than dates. The
+ * frontend made `scheduleId`, `departmentId`, `minStaff` and `maxStaff`
+ * optional, declared `requiredSkills` as `string[]` where the backend used
+ * `Skill[]`, and carried a block of "legacy" fields (`minimumStaff`,
+ * `maximumStaff`, `department`, `position`, `rolesRequired`, `specialType`,
+ * `priority`, `location`, …). An audit of the frontend showed every one of those
+ * legacy fields was either never read or read only as a `??` fallback for a
+ * field the API always sends — so they described a shape the server never
+ * produced, and the optional markers made call sites defend against absences
+ * that cannot happen.
+ *
+ * This interface is therefore the API's actual contract: required where the
+ * server always sends a value. Backend-only enrichments that never cross the
+ * wire in this form (`requiredSkills: Skill[]`, `assignments`) stay on the
+ * backend's own type, which extends this one — so the shared fields cannot
+ * drift while the richer server model is preserved.
+ */
+export interface Shift {
+  id: number;
+  scheduleId: number;
+  scheduleName?: string;
+  departmentId: number;
+  departmentName?: string;
+  templateId?: number;
+  /** Calendar date, `YYYY-MM-DD`. */
+  date: Timestamp;
+  /** `HH:MM` (24h). */
+  startTime: string;
+  /** `HH:MM` (24h). */
+  endTime: string;
+  minStaff: number;
+  maxStaff: number;
+  assignedStaff: number;
+  status: 'open' | 'assigned' | 'confirmed' | 'cancelled';
+  notes?: string | null;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
