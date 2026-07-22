@@ -9205,22 +9205,21 @@ export interface components {
             updatedAt?: string;
         };
         Assignment: {
-            id?: number;
-            shiftId?: number;
-            userId?: number;
+            id: number;
+            shiftId: number;
+            userId: number;
             userName?: string;
-            /** Format: email */
             userEmail?: string;
-            /** Format: date */
+            /** Format: date-time */
             shiftDate?: string;
             startTime?: string;
             endTime?: string;
             departmentId?: number;
             departmentName?: string;
             /** @enum {string} */
-            status?: "pending" | "confirmed" | "cancelled" | "completed";
+            status: "pending" | "confirmed" | "cancelled" | "completed";
             /** Format: date-time */
-            assignedAt?: string;
+            assignedAt: string;
             /** Format: date-time */
             confirmedAt?: string;
             notes?: string;
@@ -9245,25 +9244,33 @@ export interface components {
             updatedAt: string;
         };
         ShiftSwapRequest: {
-            id?: number;
-            requesterUserId?: number;
-            requesterAssignmentId?: number;
-            targetUserId?: number;
-            targetAssignmentId?: number;
-            notes?: string;
+            id: number;
+            requesterUserId: number;
+            requesterAssignmentId: number;
+            targetUserId: number;
+            targetAssignmentId: number;
             /** @enum {string} */
-            status?: "pending" | "approved" | "declined" | "cancelled";
+            status: "pending" | "approved" | "rejected" | "cancelled";
+            notes: string | null;
+            reviewerId: number | null;
+            reviewedAt: string | null;
+            reviewNotes: string | null;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         OrgUnit: {
-            id?: number;
-            name?: string;
-            /** @description Null for root units. */
-            parentId?: number;
-            level?: number;
-            /** @description Materialized path, e.g. /1/4/9/ */
-            path?: string;
+            id: number;
+            name: string;
+            description: string | null;
+            parentId: number | null;
+            managerUserId: number | null;
+            isActive: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         Role: {
             id: number;
@@ -9299,20 +9306,25 @@ export interface components {
             updatedAt: string;
         };
         AuditLogEntry: {
-            id?: number;
-            actorId?: number;
-            actorEmail?: string;
-            /** @description Dot-notation action, e.g. 'schedule.publish'. */
-            action?: string;
-            entityType?: string;
-            entityId?: number;
-            description?: string;
-            /** @description State before the change (JSON). */
-            before?: Record<string, never>;
-            /** @description State after the change (JSON). */
-            after?: Record<string, never>;
+            id: number;
+            userId: number | null;
+            onBehalfOfUserId: number | null;
+            action: string;
+            entityType: string | null;
+            entityId: number | null;
+            description: string | null;
+            justification: string | null;
+            beforeSnapshot?: {
+                [key: string]: unknown;
+            } | null;
+            afterSnapshot?: {
+                [key: string]: unknown;
+            } | null;
+            ipAddress: string | null;
+            userAgent: string | null;
+            requestId: string | null;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
         };
     };
     responses: {
