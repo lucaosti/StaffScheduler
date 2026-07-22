@@ -271,6 +271,63 @@ describe('AssignmentService read paths', () => {
     expect(sql).toMatch(/s\.date <= \?/);
   });
 
+  it('getAllAssignments caps an unpaginated query and refuses on overflow', async () => {
+    const { pool, execute } = makePool();
+    const svc = new AssignmentService(pool);
+
+    // The service fetches cap+1 rows precisely so it can tell "exactly full"
+    // from "there is more"; returning cap+1 must be treated as overflow.
+    const overflow = Array.from({ length: 5001 }, () => assignmentRow());
+    execute.mockResolvedValueOnce([overflow, null] as Tuple);
+
+    await expect(svc.getAllAssignments()).rejects.toThrow(/Too many assignments/);
+    expect(execute.mock.calls[0][0] as string).toMatch(/LIMIT 5001/);
+  });
+
+  it('getAllAssignments returns an exactly-full unpaginated result without refusing', async () => {
+    const { pool, execute } = makePool();
+    const svc = new AssignmentService(pool);
+    execute.mockResolvedValueOnce([Array.from({ length: 5000 }, () => assignmentRow()), null] as Tuple);
+    expect((await svc.getAllAssignments()).length).toBe(5000);
+  });
+
+  it('getAllAssignments paginates with LIMIT/OFFSET and never refuses', async () => {
+    const { pool, execute } = makePool();
+    const svc = new AssignmentService(pool);
+    execute.mockResolvedValueOnce([[assignmentRow()], null] as Tuple);
+
+    await svc.getAllAssignments({ userId: 7 }, { limit: 25, offset: 50 });
+
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/LIMIT \? OFFSET \?/);
+    expect(sql).not.toMatch(/LIMIT 5001/);
+    expect(params).toEqual([7, 25, 50]);
+  });
+
+  it('countAssignments applies the same filters as the listing', async () => {
+    const { pool, execute } = makePool();
+    const svc = new AssignmentService(pool);
+    execute.mockResolvedValueOnce([[{ total: 42 }], null] as Tuple);
+
+    expect(await svc.countAssignments({ userId: 7, status: 'pending' })).toBe(42);
+
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/COUNT\(\*\)/);
+    expect(sql).toMatch(/sa\.user_id = \?/);
+    expect(sql).toMatch(/sa\.status = \?/);
+    expect(params).toEqual([7, 'pending']);
+  });
+
+  it('countAssignments returns 0 when the count row is missing and bubbles errors', async () => {
+    const { pool, execute } = makePool();
+    const svc = new AssignmentService(pool);
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    expect(await svc.countAssignments()).toBe(0);
+
+    execute.mockRejectedValueOnce(new Error('boom'));
+    await expect(svc.countAssignments()).rejects.toThrow(/boom/);
+  });
+
   it('getAllAssignments propagates errors', async () => {
     const { pool, execute } = makePool();
     execute.mockRejectedValueOnce(new Error('boom'));
