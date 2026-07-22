@@ -12,10 +12,15 @@
 const pingMock = jest.fn();
 const quitMock = jest.fn();
 const onMock = jest.fn();
+// The subscriber is a duplicate() of the shared client — a separate connection
+// is mandatory because a client in subscriber mode cannot issue other commands.
+const subscriberOnMock = jest.fn();
+const duplicateMock = jest.fn(() => ({ on: subscriberOnMock, quit: quitMock }));
 const RedisCtor = jest.fn().mockImplementation(() => ({
   ping: pingMock,
   quit: quitMock,
   on: onMock,
+  duplicate: duplicateMock,
 }));
 
 jest.mock('ioredis', () => ({ __esModule: true, default: RedisCtor }));
@@ -131,5 +136,40 @@ describe('redis config (enabled by default)', () => {
     handlers.error(new Error('new outage'));
     // Two distinct outages logged, the mid-storm duplicate suppressed.
     expect(onMock).toHaveBeenCalled();
+  });
+});
+
+describe('getRedisSubscriber', () => {
+  beforeEach(() => {
+    RedisCtor.mockClear();
+    duplicateMock.mockClear();
+    subscriberOnMock.mockClear();
+  });
+
+  it('returns null when Redis is disabled', () => {
+    const redis = loadRedis({ enabled: false });
+    expect(redis.getRedisSubscriber()).toBeNull();
+    expect(duplicateMock).not.toHaveBeenCalled();
+  });
+
+  it('duplicates the shared client once and caches the subscriber', () => {
+    const redis = loadRedis();
+    const first = redis.getRedisSubscriber();
+    const second = redis.getRedisSubscriber();
+
+    expect(first).not.toBeNull();
+    expect(second).toBe(first); // cached, not duplicated again
+    expect(duplicateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches an error handler that does not throw', () => {
+    const redis = loadRedis();
+    redis.getRedisSubscriber();
+
+    const errorHandler = subscriberOnMock.mock.calls.find(([evt]) => evt === 'error')?.[1] as
+      | ((err: Error) => void)
+      | undefined;
+    expect(errorHandler).toBeDefined();
+    expect(() => errorHandler!(new Error('subscriber down'))).not.toThrow();
   });
 });
