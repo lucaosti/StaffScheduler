@@ -2769,7 +2769,7 @@ export interface paths {
                     content: {
                         "application/json": {
                             success?: boolean;
-                            data?: components["schemas"]["Employee"][];
+                            data?: components["schemas"]["User"][];
                         };
                     };
                 };
@@ -9145,15 +9145,18 @@ export interface components {
             updatedAt?: string;
         };
         Department: {
-            id?: number;
-            name?: string;
+            id: number;
+            name: string;
             description?: string;
-            /** @description Parent org-unit FK. Null if the department is not linked to an org unit. */
+            managerId?: number;
+            managerName?: string;
             orgUnitId?: number;
-            isActive?: boolean;
-            memberCount?: number;
+            isActive: boolean;
+            employeeCount?: number;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         Schedule: {
             id: number;
@@ -9222,35 +9225,24 @@ export interface components {
             confirmedAt?: string;
             notes?: string;
         };
-        Employee: {
-            id?: number;
-            userId?: number;
-            firstName?: string;
-            lastName?: string;
-            /** Format: email */
-            email?: string;
-            employeeNumber?: string;
-            position?: string;
-            departmentId?: number;
-            departmentName?: string;
-            hourlyRate?: number;
-            isActive?: boolean;
-        };
         TimeOffRequest: {
-            id?: number;
-            userId?: number;
-            /** Format: date */
-            startDate?: string;
-            /** Format: date */
-            endDate?: string;
+            id: number;
+            userId: number;
+            startDate: string;
+            endDate: string;
             /** @enum {string} */
-            type?: "vacation" | "sick" | "personal" | "other";
-            reason?: string;
+            type: "vacation" | "sick" | "personal" | "other";
+            reason: string | null;
             /** @enum {string} */
-            status?: "pending" | "approved" | "rejected" | "cancelled";
-            reviewedBy?: number;
+            status: "pending" | "approved" | "rejected" | "cancelled";
+            reviewerId: number | null;
+            reviewedAt: string | null;
+            reviewNotes: string | null;
+            unavailabilityId: number | null;
             /** Format: date-time */
-            createdAt?: string;
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         ShiftSwapRequest: {
             id?: number;
@@ -9292,15 +9284,19 @@ export interface components {
             description?: string;
         };
         Policy: {
-            id?: number;
-            key?: string;
-            label?: string;
-            description?: string;
-            value?: unknown;
+            id: number;
             /** @enum {string} */
-            valueType?: "integer" | "float" | "boolean" | "string";
-            category?: string;
-            isActive?: boolean;
+            scopeType: "global" | "org_unit" | "department" | "user";
+            scopeId: number | null;
+            policyKey: string;
+            policyValue: unknown;
+            description: string | null;
+            imposedByUserId: number;
+            isActive: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         AuditLogEntry: {
             id?: number;

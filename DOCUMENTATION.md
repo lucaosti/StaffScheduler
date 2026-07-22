@@ -243,7 +243,13 @@ the API has never sent; `Permission.category`/`key` instead of
 worse than an omission, because a client generated from them gets wrong types.
 Entities not yet declared in `domain.ts` keep their hand-written component and
 are listed on stdout by every generation run, so the remaining surface is
-stated rather than silently tolerated.
+stated rather than silently tolerated — and a contract test asserts that no
+component, generated or hand-written, publishes a field that exists nowhere in
+the source. Four did: `Department.memberCount` (the real field is
+`employeeCount`), `Policy.valueType`, `TimeOffRequest.reviewedBy` (the reviewer
+FK is `reviewerId`), and `Employee.employeeNumber` — the last on a component
+for an entity the system does not have, since `GET /employees` returns users.
+That component is gone and the endpoint references `User`.
 
 Timestamps are the one place where the published shape and the in-process type
 legitimately differ: the schema is `string | Date`, because mysql2 hands the
