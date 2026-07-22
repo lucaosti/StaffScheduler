@@ -40,10 +40,20 @@ const lastInit = () => fetchMock().mock.calls[0][1] as RequestInit;
 describe('employeeService', () => {
   describe('getEmployees', () => {
     it('passes filters as query params', async () => {
-      await employeeService.getEmployees({ department: 'ICU', page: 2, limit: 5 });
+      // These are the names the endpoint's query schema accepts; `limit`,
+      // `position`, `sortBy` and `sortOrder` used to be sent and never parsed.
+      await employeeService.getEmployees({
+        department: 'ICU',
+        search: 'rossi',
+        isActive: true,
+        page: 2,
+        pageSize: 5,
+      });
       expect(lastUrl()).toContain('department=ICU');
+      expect(lastUrl()).toContain('search=rossi');
+      expect(lastUrl()).toContain('isActive=true');
       expect(lastUrl()).toContain('page=2');
-      expect(lastUrl()).toContain('limit=5');
+      expect(lastUrl()).toContain('pageSize=5');
     });
 
     it('skips undefined filter values', async () => {
