@@ -8,14 +8,15 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  listDelegations,
   createDelegation,
   revokeDelegation,
   Delegation,
   CreateDelegationBody,
 } from '../../services/delegationService';
+import { delegationsKey, useDelegationsQuery } from '../../hooks/useDelegations';
 
 const EMPTY_FORM: CreateDelegationBody & { permissionInput: string } = {
   delegateeId: 0,
@@ -27,9 +28,15 @@ const EMPTY_FORM: CreateDelegationBody & { permissionInput: string } = {
 };
 
 const Delegations: React.FC = () => {
-  const [items, setItems] = useState<Delegation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const delegationsQuery = useDelegationsQuery();
+  const items = delegationsQuery.data ?? [];
+  const loading = delegationsQuery.isLoading;
+  const error = delegationsQuery.isError
+    ? (delegationsQuery.error as Error).message ?? 'Failed to load delegations.'
+    : null;
+  // Reload after a mutation = invalidate the cached list.
+  const load = () => queryClient.invalidateQueries({ queryKey: delegationsKey });
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
@@ -42,21 +49,6 @@ const Delegations: React.FC = () => {
   const [revokeNote, setRevokeNote] = useState('');
   const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listDelegations();
-      setItems(res.data ?? []);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load delegations.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
 
   // ---------- Create ----------
 
