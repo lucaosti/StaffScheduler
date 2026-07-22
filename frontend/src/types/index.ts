@@ -26,8 +26,19 @@ import type {
   Shift,
   Schedule,
   User,
+  AuditLogEntry,
+  Timestamp,
 } from '@staff-scheduler/shared';
-export type { Permission, Role, UserRoleAssignment, Shift, Schedule, User };
+export type {
+  Permission,
+  Role,
+  UserRoleAssignment,
+  Shift,
+  Schedule,
+  User,
+  AuditLogEntry,
+  Timestamp,
+};
 
 
 // Types for StaffScheduler Frontend (aligned with backend schema)
@@ -165,24 +176,6 @@ export interface DashboardStats {
   employeeSatisfaction: number;
 }
 
-export interface AuditLogEntry {
-  id: number;
-  actorId: number | null;
-  actorEmail?: string;
-  onBehalfOfUserId?: number | null;
-  onBehalfOfEmail?: string;
-  action: string;
-  entityType: string;
-  entityId?: number | null;
-  description?: string;
-  justification?: string | null;
-  beforeSnapshot?: Record<string, unknown> | null;
-  afterSnapshot?: Record<string, unknown> | null;
-  ipAddress?: string | null;
-  userAgent?: string | null;
-  requestId?: string | null;
-  createdAt: string;
-}
 
 export interface Module {
   id: number;

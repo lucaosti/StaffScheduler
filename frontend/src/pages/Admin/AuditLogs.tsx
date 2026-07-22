@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
 import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
 import ErrorAlert from '../../components/ErrorAlert';
+import type { Timestamp } from '../../types';
 
 const PAGE_SIZE = 50;
 
@@ -96,11 +97,13 @@ const AuditLogs: React.FC = () => {
   const handleFilterChange = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
-  const formatDate = (iso: string) => {
+  // Timestamp is `string | Date`: JSON gives strings, but the shared contract
+  // admits the Date the backend's driver produces, so narrow at the point of use.
+  const formatDate = (value: Timestamp) => {
     try {
-      return new Date(iso).toLocaleString();
+      return new Date(value).toLocaleString();
     } catch {
-      return iso;
+      return String(value);
     }
   };
 
@@ -257,7 +260,7 @@ const AuditLogs: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td className="text-muted small">{entry.actorId ?? '—'}</td>
+                      <td className="text-muted small">{entry.userId ?? '—'}</td>
                       <td className="small" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {entry.description ?? '—'}
                       </td>
