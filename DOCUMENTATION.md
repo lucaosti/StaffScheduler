@@ -804,13 +804,44 @@ override:
   forced. Both the backend driver (`mysql2`) and the migration runner
   (`dbmate`/go-sql-driver) authenticate with it over the internal network.
 
-**Rolling deploys.** Externalising all shared state to Redis (Phase 3 — JTI
-blacklist, auth-context cache, module cache, SSE fan-out) removed the implicit
-"exactly one backend instance" constraint, so the backend can now run as N
-replicas and be rolled one at a time without logging everyone out. The current
-compose runs a single backend for simplicity; standing up two replicas behind an
-nginx upstream for zero-downtime rolling deploys is the remaining step, tracked in
-issue #352.
+### Replicas and zero-downtime rolling deploys
+
+Externalising all shared state to Redis (JTI blacklist, auth-context cache,
+module flags, SSE fan-out) removed the implicit "exactly one backend instance"
+constraint: replicas are interchangeable, so one can be replaced while the others
+serve traffic. The default compose file runs a single backend; the
+`docker-compose.scale.yml` overlay adds the deployment side.
+
+```bash
+# Run N replicas behind an nginx load balancer (which owns the API host port)
+docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2
+```
+
+The overlay clears the backend's published port (several replicas cannot share
+one host port) and puts `backend-lb` (nginx, `ops/nginx/backend-lb.conf`) in
+front. Both that load balancer and the frontend's own `/api` proxy resolve the
+`backend` hostname **through Docker's DNS with a short TTL, via a variable
+`proxy_pass`** — nginx resolves a literal `proxy_pass` hostname only once at
+startup, which would pin every request to a single replica and break when that
+replica is replaced. Both also disable proxy buffering and raise the read timeout
+so the SSE stream (`/api/events`) works through them.
+
+Rolling deploy:
+
+```bash
+ops/deploy/rolling-deploy.sh 2      # replica count (default 2)
+```
+
+Compose has no native per-replica rolling update, so the script does the standard
+scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
+start alongside the old), wait until the load balancer answers, then scale back
+**down** to N — Compose removes the oldest containers, i.e. the previous image.
+Throughout, a poller hits `/api/health` twice a second and the script **fails the
+deploy if a single request was dropped**, so "zero downtime" is verified rather
+than asserted.
+
+Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
+process-local and replicas would disagree with each other.
 
 ---
 

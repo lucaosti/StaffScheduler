@@ -1,0 +1,44 @@
+# Multi-replica overlay: run the backend as N replicas behind an nginx load
+# balancer, which is what makes zero-downtime rolling deploys possible.
+#
+# The API is stateless — the token-revocation blacklist, auth-context cache,
+# module flags and SSE fan-out all live in Redis (Phase 3), so any replica can
+# serve any request and replicas can be replaced one at a time without logging
+# anyone out. This file only adds the deployment side; no application code
+# differs between one replica and many.
+#
+# Usage (see also ops/deploy/rolling-deploy.sh):
+#   docker compose -f docker-compose.yml -f docker-compose.scale.yml \
+#     up -d --scale backend=2
+#
+# Requires Redis (the default) — with REDIS_ENABLED=false the caches are
+# process-local and replicas would disagree.
+
+services:
+  backend:
+    # A published host port cannot be shared by several replicas; the load
+    # balancer below owns the host port instead. `!reset` clears the base
+    # file's ports list rather than appending to it.
+    ports: !reset []
+
+  # nginx in front of the backend replicas; owns the API's host port.
+  backend-lb:
+    image: nginx:1.27-alpine
+    container_name: staff_scheduler_backend_lb
+    restart: unless-stopped
+    depends_on:
+      - backend
+    volumes:
+      - ./ops/nginx/backend-lb.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "${BACKEND_PORT:-3001}:80"
+    networks:
+      - staff_scheduler_network
+    mem_limit: 128m
+    cpus: 0.25
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
