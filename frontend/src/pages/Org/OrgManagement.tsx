@@ -12,15 +12,16 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import * as orgService from '../../services/orgService';
-import type {
-  OrgUnit,
-  OrgUnitNode,
-  UserOrgUnit,
-  EmployeeLoan,
-} from '../../services/orgService';
+import {
+  orgKeys,
+  useOrgUnitsQuery,
+  useOrgUnitMembersQuery,
+  useOrgLoansQuery,
+} from '../../hooks/useOrg';
 import OrgTree from '../orgManagement/OrgTree';
 import MemberList from '../orgManagement/MemberList';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -44,10 +45,7 @@ const OrgManagement: React.FC = () => {
     user?.permissions?.includes('org_unit.read');
 
   const [activeTab, setActiveTab] = useState<Tab>('tree');
-  const [units, setUnits] = useState<OrgUnit[]>([]);
-  const [tree, setTree] = useState<OrgUnitNode[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const [confirm, setConfirm] = useState<ConfirmState>({
@@ -64,14 +62,12 @@ const OrgManagement: React.FC = () => {
 
   // Members form
   const [selectedUnitId, setSelectedUnitId] = useState<number | null>(null);
-  const [members, setMembers] = useState<UserOrgUnit[]>([]);
   const [memberForm, setMemberForm] = useState<{ userId: string; isPrimary: boolean }>({
     userId: '',
     isPrimary: false,
   });
 
-  // Loans form + inbox
-  const [loans, setLoans] = useState<EmployeeLoan[]>([]);
+  // Loans form
   const [loanForm, setLoanForm] = useState({
     userId: '',
     fromOrgUnitId: '',
@@ -81,44 +77,27 @@ const OrgManagement: React.FC = () => {
     reason: '',
   });
 
-  const refreshUnits = async () => {
-    try {
-      const [list, t] = await Promise.all([orgService.listUnits(), orgService.getTree()]);
-      setUnits(list.data ?? []);
-      setTree(t.data ?? []);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
+  // Server state via TanStack Query. The mutation handlers below keep calling
+  // refreshUnits/refreshMembers/refreshLoans, but those now invalidate the
+  // relevant cache key (so a single edit refreshes exactly the affected data)
+  // rather than re-fetching into local state by hand.
+  const queryClient = useQueryClient();
+  const unitsQuery = useOrgUnitsQuery();
+  const loansQuery = useOrgLoansQuery();
+  const membersQuery = useOrgUnitMembersQuery(selectedUnitId);
 
-  const refreshMembers = async (unitId: number) => {
-    try {
-      const res = await orgService.listMembers(unitId);
-      setMembers(res.data ?? []);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
+  const units = unitsQuery.data?.units ?? [];
+  const tree = unitsQuery.data?.tree ?? [];
+  const loans = loansQuery.data ?? [];
+  const members = membersQuery.data ?? [];
+  const loading = unitsQuery.isLoading || loansQuery.isLoading;
 
-  const refreshLoans = async () => {
-    try {
-      const res = await orgService.listLoans();
-      setLoans(res.data ?? []);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
-
-  useEffect(() => {
-    Promise.all([refreshUnits(), refreshLoans()])
-      .catch(err => setError(err instanceof Error ? err.message : 'Failed to refresh data'))
-      .finally(() => setLoading(false));
-
-  }, []);
-
-  useEffect(() => {
-    if (selectedUnitId !== null) refreshMembers(selectedUnitId);
-  }, [selectedUnitId]);
+  const refreshUnits = () => queryClient.invalidateQueries({ queryKey: orgKeys.units });
+  const refreshLoans = () => queryClient.invalidateQueries({ queryKey: orgKeys.loans });
+  // The members query is keyed by the currently-selected unit, so invalidating
+  // the whole family refreshes whichever unit is in view.
+  const refreshMembers = () =>
+    queryClient.invalidateQueries({ queryKey: ['org', 'unit-members'] });
 
   const handleCreateUnit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -170,7 +149,7 @@ const OrgManagement: React.FC = () => {
     try {
       await orgService.addMember(selectedUnitId, Number(memberForm.userId), memberForm.isPrimary);
       setMemberForm({ userId: '', isPrimary: false });
-      await refreshMembers(selectedUnitId);
+      await refreshMembers();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -184,7 +163,7 @@ const OrgManagement: React.FC = () => {
     setError(null);
     try {
       await orgService.setPrimaryMember(selectedUnitId, userId);
-      await refreshMembers(selectedUnitId);
+      await refreshMembers();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -204,7 +183,7 @@ const OrgManagement: React.FC = () => {
         setError(null);
         try {
           await orgService.removeMember(selectedUnitId!, userId);
-          await refreshMembers(selectedUnitId!);
+          await refreshMembers();
         } catch (err) {
           setError((err as Error).message);
         } finally {
