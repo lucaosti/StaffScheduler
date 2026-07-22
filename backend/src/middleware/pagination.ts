@@ -14,13 +14,12 @@
  */
 
 import { Request, Response } from 'express';
+import type { PaginationMeta } from '@staff-scheduler/shared';
 
-export interface PaginationMeta {
-  total: number;
-  page: number;
-  pageSize: number;
-  pages: number;
-}
+// Declared once in the shared package, from which the OpenAPI component is
+// generated: the hand-written component had drifted to `limit`/`totalPages`
+// while this shape has always been `pageSize`/`pages`.
+export type { PaginationMeta };
 
 export interface PaginationParams {
   page: number;

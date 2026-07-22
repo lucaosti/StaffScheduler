@@ -250,6 +250,7 @@ describe('domain components match the shared schemas', () => {
     ShiftSwapRequest: sharedSchemas.shiftSwapRequestSchema,
     AuditLogEntry: sharedSchemas.auditLogEntrySchema,
     Assignment: sharedSchemas.shiftAssignmentSchema,
+    PaginationMeta: sharedSchemas.paginationMetaSchema,
   } as const;
 
   const componentProps = (name: string): string[] =>
@@ -311,6 +312,13 @@ describe('domain components match the shared schemas', () => {
         // distinctive identifiers.
         if (field.length < 4) continue;
         if (!new RegExp(`\\b${field}\\b`).test(haystack)) phantom.push(`${name}.${field}`);
+        // NOTE: this check is textual — it asks whether the name exists
+        // anywhere, not whether it belongs to this entity. That is why
+        // PaginationMeta.limit and .totalPages slipped through: `limit` is
+        // everywhere, and `totalPages` lived in a second, unused pagination
+        // helper with a different shape. It is a backstop for the components
+        // that are still hand-written; the generated ones are compared field
+        // for field against their schema above, which is exact.
       }
     }
     expect(phantom).toEqual([]);
@@ -322,7 +330,11 @@ describe('domain components match the shared schemas', () => {
     // other component must be generated — a new hand-written entity component
     // fails here rather than joining the set that drifted.
     const handWritten = Object.keys(spec.components?.schemas ?? {}).filter((n) => !(n in DOMAIN));
-    expect(handWritten.sort()).toEqual(['ApiError', 'ApiSuccess', 'PaginationMeta']);
+    // Only the two envelope shapes remain. PaginationMeta was here too, and was
+    // wrong — it published `limit`/`totalPages` where the code emits
+    // `pageSize`/`pages` — which is the argument for leaving nothing on this
+    // list that has a real type behind it.
+    expect(handWritten.sort()).toEqual(['ApiError', 'ApiSuccess']);
   });
 
   it('renders timestamps as wire strings, never as an unrepresentable Date', () => {
