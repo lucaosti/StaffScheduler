@@ -212,17 +212,6 @@ export interface Skill {
   createdAt: Date;
 }
 
-export interface CreateSkillRequest {
-  name: string;
-  description?: string;
-}
-
-export interface UpdateSkillRequest {
-  name?: string;
-  description?: string;
-  isActive?: boolean;
-}
-
 // ============================================================================
 // SCHEDULE TYPES
 // ============================================================================
