@@ -16,6 +16,7 @@ This document is the single reference for architecture, domain model, database s
 8. [Delegation framework](#8-delegation-framework)
 9. [Approval workflows](#9-approval-workflows)
 10. [Audit trail](#10-audit-trail)
+10a. [Observability and operations](#10a-observability-and-operations)
 11. [Extension points](#11-extension-points)
 12. [Development guidelines](#12-development-guidelines)
 13. [Architectural decisions](#13-architectural-decisions)
@@ -666,6 +667,66 @@ Audited actions: `user.create`, `user.update`, `user.delete`, `role.grant`, `rol
 `GET /api/audit-logs` supports filtering by `userId`, `action`, `entityType`, `entityId`, `fromDate`, `toDate`, `limit`, `offset`. No `DELETE` endpoint exists.
 
 `GET /api/audit-logs/export` returns all matching entries without row limit (same filters, no `limit`/`offset`). Supported formats: `?format=csv` (returns `text/csv` with `Content-Disposition: attachment`) and `?format=json` (default). Requires `audit.read` permission. Use `fromDate`/`toDate` to scope exports to a specific period and avoid loading the full table.
+
+---
+
+## 10a. Observability and operations
+
+The backend exposes both halves of observability; a self-hosted stack to consume
+them ships as an opt-in Docker Compose profile.
+
+### Metrics
+
+`GET /metrics` renders Prometheus metrics (`backend/src/observability/metrics.ts`):
+
+- default process metrics (event loop, memory, GC);
+- `http_request_duration_seconds` — request-duration histogram labelled by
+  `method` / `route` / `status_code`. The label is the matched **route pattern**
+  (e.g. `/api/v1/schedules/:id`), never the concrete path, so ids can't explode
+  label cardinality. The `_count` series doubles as the request/error counter;
+- `db_pool_connections` — a gauge of the mysql2 pool by state
+  (`total`/`free`/`in_use`/`queued`), sampled at scrape time;
+- `optimization_queue_depth` — optimization jobs waiting in the BullMQ queue.
+
+`/metrics` is mounted **outside** `/api` (a scraper is not a JWT user) and guarded
+by a static bearer token: set `METRICS_TOKEN` and scrapers must send
+`Authorization: Bearer <token>`. When unset, the endpoint is open — only
+appropriate for local dev or when `/metrics` is not reachable from outside the
+internal network (as in the bundled `ops` profile).
+
+### Tracing
+
+OpenTelemetry (`backend/src/observability/tracing.ts`) adds distributed traces
+with HTTP/Express/mysql2 auto-instrumentation. It is **off by default** and
+starts only when `OTEL_ENABLED=true` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set;
+`otel-bootstrap.ts` is imported first in `index.ts` so instrumentation patches
+the libraries before they load. Every span carries `request.id`, matching the
+`X-Request-Id` header and the logs — so an operator can pivot from a log line or
+a response header to the exact trace and back.
+
+### The `ops` compose profile
+
+```bash
+docker compose --profile ops up -d
+```
+
+Starts Prometheus, Grafana, Loki and Promtail (config under `ops/`), all on the
+internal network with only Grafana published (`GRAFANA_PORT`, default `3002`;
+login `admin` / `GRAFANA_ADMIN_PASSWORD`):
+
+- **Prometheus** scrapes `backend:3001/metrics` every 15s and loads the alert
+  rules in `ops/prometheus/alerts.yml` (high 5xx rate, high p95 latency, DB pool
+  near exhaustion, optimization-queue backlog, backend down).
+- **Grafana** is pre-provisioned with the Prometheus and Loki datasources and a
+  base "Service health" dashboard (request rate by status, 5xx ratio, p95
+  latency, DB pool, queue depth).
+- **Loki** stores logs; **Promtail** tails the backend's Winston log file from
+  the shared `backend_logs` volume and ships it to Loki, so logs are queryable in
+  Grafana alongside the metrics.
+
+The bundled profile leaves `METRICS_TOKEN` unset and relies on network isolation.
+To require a token, set `METRICS_TOKEN` and add a matching `authorization` block
+to `ops/prometheus/prometheus.yml`.
 
 ---
 

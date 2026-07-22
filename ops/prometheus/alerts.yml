@@ -1,0 +1,59 @@
+# Starter alert rules for StaffScheduler. Thresholds are intentionally
+# conservative starting points — tune them to your traffic before relying on
+# them for paging. Each maps to a metric introduced in observability/metrics.ts.
+groups:
+  - name: staff-scheduler
+    rules:
+      # More than 5% of requests returning 5xx over 5 minutes.
+      - alert: HighServerErrorRate
+        expr: |
+          sum(rate(http_request_duration_seconds_count{status_code=~"5.."}[5m]))
+            / sum(rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High 5xx error rate (>5%)
+          description: 'More than 5% of requests have failed with a 5xx for 5 minutes.'
+
+      # 95th-percentile request latency above 1s over 5 minutes.
+      - alert: HighRequestLatencyP95
+        expr: |
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High p95 request latency (>1s)
+          description: 'The 95th-percentile request latency has exceeded 1s for 5 minutes.'
+
+      # The connection pool has fewer than 2 free connections for 5 minutes —
+      # the classic precursor to request queueing and latency cliffs.
+      - alert: DbPoolNearExhaustion
+        expr: db_pool_connections{state="free"} < 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: MySQL connection pool nearly exhausted
+          description: 'Fewer than 2 free DB connections for 5 minutes; requests may be queueing.'
+
+      # Optimization jobs backing up: more than 5 waiting for 10 minutes.
+      - alert: OptimizationQueueBacklog
+        expr: optimization_queue_depth > 5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Optimization queue backing up
+          description: 'More than 5 optimization jobs have been waiting for 10 minutes.'
+
+      # The backend has been unreachable by Prometheus for 2 minutes.
+      - alert: BackendDown
+        expr: up{job="staff-scheduler-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Backend target down
+          description: 'Prometheus has not been able to scrape the backend for 2 minutes.'
