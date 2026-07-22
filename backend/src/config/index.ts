@@ -136,6 +136,11 @@ export const config = {
     mutationRate: parseFloat(process.env.OPTIMIZATION_MUTATION_RATE || '0.1'),
     crossoverRate: parseFloat(process.env.OPTIMIZATION_CROSSOVER_RATE || '0.8'),
   },
+  metrics: {
+    // Static bearer token protecting GET /metrics. Empty leaves the endpoint
+    // open (dev only); set it in any networked deployment.
+    token: process.env.METRICS_TOKEN || '',
+  },
   logging: {
     level: process.env.LOG_LEVEL || 'info',
     file: process.env.LOG_FILE || './logs/app.log',
