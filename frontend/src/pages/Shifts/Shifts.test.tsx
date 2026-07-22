@@ -80,9 +80,11 @@ describe('<Shifts />', () => {
     render(<Shifts />);
     expect(await screen.findByRole('heading', { name: /shift management/i })).toBeInTheDocument();
 
-    // Search term filters the table
-    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'night');
-    expect(screen.getByText(/Emergency Medicine 2026-04-02/i)).toBeInTheDocument();
+    // Search term filters the table. The term must match a field the API
+    // actually sends (here `notes`); the search box is debounced by 300ms, so
+    // assert *after* the debounce rather than racing it.
+    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
+    expect(await screen.findByText(/Emergency Medicine 2026-04-02/i)).toBeInTheDocument();
 
     // Open add modal and trigger validation error
     await waitFor(() =>
@@ -113,7 +115,8 @@ describe('<Shifts />', () => {
 
     // Edit existing shift
     await userEvent.clear(screen.getByPlaceholderText(/search shifts/i));
-    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'night');
+    await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
+    await screen.findByText(/Emergency Medicine 2026-04-02/i);
     await userEvent.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
     await userEvent.clear(screen.getByLabelText(/notes/i));
     await userEvent.type(screen.getByLabelText(/notes/i), 'updated');
