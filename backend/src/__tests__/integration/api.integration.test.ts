@@ -354,7 +354,16 @@ describe('every fixture-free GET runs against the real schema', () => {
   it.each(ENDPOINTS)('GET %s does not fail on the SQL', async (endpoint) => {
     const cookie = await authCookie();
     const res = await request(app).get(`/api${endpoint}`).set('Cookie', cookie);
-    expect(res.status).toBeLessThan(500);
+    // Surface the error envelope: a bare "expected < 500, received 500" says
+    // nothing about which column or join is wrong, which is the whole point.
+    expect({ endpoint, status: res.status, error: res.body?.error }).toMatchObject({
+      status: expect.any(Number),
+    });
+    if (res.status >= 500) {
+      throw new Error(
+        `GET /api${endpoint} returned ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`
+      );
+    }
   });
 
   // The reporting endpoints require a date range, so they are swept separately
@@ -366,7 +375,11 @@ describe('every fixture-free GET runs against the real schema', () => {
       const res = await request(app)
         .get(`/api${endpoint}?startDate=2020-01-01&endDate=2030-12-31`)
         .set('Cookie', cookie);
-      expect(res.status).toBeLessThan(500);
+      if (res.status >= 500) {
+        throw new Error(
+          `GET /api${endpoint} returned ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`
+        );
+      }
     }
   );
 });
