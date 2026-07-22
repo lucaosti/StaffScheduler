@@ -33,6 +33,8 @@ import {
 } from '../../services/pendingApprovalService';
 import { listMembersDetailed, OrgUnitMemberDetail } from '../../services/orgService';
 import { pendingApprovalsKey, usePendingApprovalsQuery } from '../../hooks/usePendingApprovals';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 
 type DecisionMode = 'approve' | 'reject';
 
@@ -229,25 +231,21 @@ const PendingApprovals: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={() => queueQuery.refetch()} />}
 
       <div className="card">
         <div className="card-body p-0">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label="Loading"></span>
-              <span>Loading…</span>
-            </div>
-          ) : items.length === 0 ? (
-            <div className="text-center text-muted py-5">
-              <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>
-              No pending approvals for you.
-            </div>
-          ) : (
+          <QueryState
+            isLoading={loading}
+            loadingMessage="Loading…"
+            isEmpty={items.length === 0}
+            empty={
+              <div className="text-center text-muted py-5">
+                <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>
+                No pending approvals for you.
+              </div>
+            }
+          >
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
@@ -426,7 +424,7 @@ const PendingApprovals: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       </div>
 
