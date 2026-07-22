@@ -1,9 +1,12 @@
 /**
  * OpenAPI / Swagger UI route (F17).
  *
- * Serves a hand-maintained OpenAPI 3.1 document and a static Swagger UI page
- * that loads it. Spec lives at `backend/openapi/openapi.json`; the HTML page
- * pulls Swagger UI from the public CDN so we don't add a dependency.
+ * Serves the OpenAPI 3.1 document and a static Swagger UI page that loads it.
+ * The spec lives at `backend/openapi/openapi.json`; its request bodies are
+ * GENERATED from the shared Zod schemas (`npm run openapi:generate`, CI fails on
+ * drift) and only the curated prose — summaries and response descriptions — is
+ * edited by hand. The HTML page pulls Swagger UI from the public unpkg CDN so we
+ * don't add a dependency; see the scoped CSP override below.
  *
  * @author Luca Ostinelli
  */
