@@ -776,6 +776,29 @@ runs the real `restore.sh --latest`, and asserts the marker survived the
 round-trip. A broken restore path is therefore a red CI check, not a discovery
 made during an incident.
 
+### Deployment hardening and scaling
+
+The production compose file (`docker-compose.yml`) is hardened relative to the dev
+override:
+
+- **MySQL is not published to the host.** It listens only on the internal compose
+  network; the backend and the migration runner reach it by service name. Local
+  tooling gets a host port back through the dev override, and production admin
+  access goes through the `dev`-profile phpMyAdmin or a temporary, explicit port
+  forward — the database is never exposed to the host by default.
+- **`caching_sha2_password`.** MySQL uses its 8.x default authentication plugin;
+  the legacy `mysql_native_password` (deprecated, removed in MySQL 9) is no longer
+  forced. Both the backend driver (`mysql2`) and the migration runner
+  (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+
+**Rolling deploys.** Externalising all shared state to Redis (Phase 3 — JTI
+blacklist, auth-context cache, module cache, SSE fan-out) removed the implicit
+"exactly one backend instance" constraint, so the backend can now run as N
+replicas and be rolled one at a time without logging everyone out. The current
+compose runs a single backend for simplicity; standing up two replicas behind an
+nginx upstream for zero-downtime rolling deploys is the remaining step, tracked in
+issue #352.
+
 ---
 
 ## 11. Extension points
