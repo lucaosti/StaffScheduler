@@ -19,7 +19,7 @@ import * as shiftService from '../../services/shiftService';
 import { useSchedulePageData } from '../../hooks/useSchedulePage';
 import { ApiError } from '../../services/apiUtils';
 import ScheduleList from '../Schedule/ScheduleList';
-import CreateScheduleModal from '../Schedule/CreateScheduleModal';
+import CreateScheduleModal, { type CreateScheduleValues } from '../Schedule/CreateScheduleModal';
 import StatsBadge from '../Schedule/StatsBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
@@ -220,40 +220,23 @@ const Schedule: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, selectedWeek]);
 
-  const handleCreateSchedule = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  // Values arrive already validated against the shared createScheduleBody schema
+  // (the modal uses it via zodResolver), so this handler only performs the API
+  // call and its async bookkeeping — no re-validation needed.
+  const handleCreateSchedule = async (values: CreateScheduleValues) => {
     setCreateError(null);
-    const formData = new FormData(event.currentTarget);
-
-    const name = (formData.get('name') as string)?.trim();
-    const startDate = formData.get('startDate') as string;
-    const endDate = formData.get('endDate') as string;
-    const departmentIdRaw = formData.get('departmentId') as string;
-    const description = (formData.get('description') as string)?.trim() || undefined;
-
-    if (!name || !startDate || !endDate || !departmentIdRaw) {
-      setCreateError('Please fill in name, start date, end date and department.');
-      return;
-    }
-    if (new Date(startDate) >= new Date(endDate)) {
-      setCreateError('End date must be after start date.');
-      return;
-    }
-
-    const payload = {
-      name,
-      description,
-      startDate,
-      endDate,
-      departmentId: Number(departmentIdRaw),
-    };
-
     setIsCreating(true);
     try {
-      const response = await scheduleService.createSchedule(payload);
+      const response = await scheduleService.createSchedule({
+        name: values.name,
+        startDate: values.startDate,
+        endDate: values.endDate,
+        departmentId: values.departmentId,
+        notes: values.notes,
+      });
       if (response.success) {
         setShowCreateModal(false);
-        setInfo(`Schedule "${name}" created.`);
+        setInfo(`Schedule "${values.name}" created.`);
         await loadData();
       } else {
         setCreateError(response.error?.message || 'Failed to create schedule.');
