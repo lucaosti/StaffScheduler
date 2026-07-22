@@ -16,6 +16,11 @@
  * @author Luca Ostinelli
  */
 
+// Force email off so NotificationService.notify skips the outbox write here,
+// regardless of a developer's local .env (EMAIL_* set). This isolates the
+// null-after-insert guard under test from email configuration.
+jest.mock('../services/MailerService', () => ({ isEmailConfigured: () => false }));
+
 import { ScheduleService } from '../services/ScheduleService';
 import { AuditLogService } from '../services/AuditLogService';
 import { DelegationService } from '../services/DelegationService';
@@ -138,10 +143,17 @@ describe('ModuleService.setEnabled — null after update', () => {
 
 describe('NotificationService.notify — null after insert', () => {
   it('throws Failed to retrieve created notification when getById returns null', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([{ insertId: 7 }, null] as Tuple) // INSERT notification
-      .mockResolvedValueOnce([[], null] as Tuple);               // getById → null
+    // notify() commits in a transaction (outbox pattern); getById runs after on
+    // the pool and returns null here.
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest.fn().mockResolvedValueOnce([{ insertId: 7 }, null]), // INSERT notification
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const execute = jest.fn().mockResolvedValueOnce([[], null]); // getById → null
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute } as never;
     const svc = new NotificationService(pool);
     await expect(
       svc.notify({ userId: 3, type: 'system', title: 'Hi', body: 'Test' })
