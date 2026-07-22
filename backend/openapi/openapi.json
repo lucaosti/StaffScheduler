@@ -120,11 +120,12 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "email": {
-            "type": "string",
-            "format": "email"
+            "type": "string"
           },
           "firstName": {
             "type": "string"
@@ -132,12 +133,84 @@
           "lastName": {
             "type": "string"
           },
-          "role": {
-            "type": "string",
-            "description": "Legacy role field. Use RBAC permissions for fine-grained access control."
+          "employeeId": {
+            "type": "string"
+          },
+          "phone": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          },
+          "hourlyRate": {
+            "type": "number"
           },
           "isActive": {
             "type": "boolean"
+          },
+          "lastLogin": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "roleId": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "roleName": {
+                  "type": "string"
+                },
+                "scopeOrgUnitId": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "expiresAt": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "roleId",
+                "roleName"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "organizationName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -147,7 +220,15 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "email",
+          "firstName",
+          "lastName",
+          "isActive"
+        ],
+        "additionalProperties": false
       },
       "Department": {
         "type": "object",
@@ -181,24 +262,20 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string"
           },
-          "departmentId": {
-            "type": "integer"
-          },
-          "departmentName": {
-            "type": "string"
-          },
           "startDate": {
             "type": "string",
-            "format": "date"
+            "format": "date-time"
           },
           "endDate": {
             "type": "string",
-            "format": "date"
+            "format": "date-time"
           },
           "status": {
             "type": "string",
@@ -208,18 +285,50 @@
               "archived"
             ]
           },
+          "departmentId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "departmentName": {
+            "type": "string"
+          },
+          "createdBy": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "createdByName": {
+            "type": "string"
+          },
+          "publishedBy": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
           "publishedAt": {
             "type": "string",
             "format": "date-time"
           },
           "totalShifts": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "totalAssignments": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "notes": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "createdAt": {
             "type": "string",
@@ -229,56 +338,111 @@
             "type": "string",
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "startDate",
+          "endDate",
+          "status"
+        ],
+        "additionalProperties": false
       },
       "Shift": {
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "scheduleId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "scheduleName": {
+            "type": "string"
           },
           "departmentId": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "departmentName": {
             "type": "string"
           },
+          "templateId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
           "date": {
             "type": "string",
-            "format": "date"
+            "format": "date-time"
           },
           "startTime": {
-            "type": "string",
-            "description": "HH:MM"
+            "type": "string"
           },
           "endTime": {
-            "type": "string",
-            "description": "HH:MM"
+            "type": "string"
           },
           "minStaff": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "maxStaff": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "assignedStaff": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "status": {
             "type": "string",
             "enum": [
               "open",
-              "filled",
-              "overstaffed"
+              "assigned",
+              "confirmed",
+              "cancelled"
             ]
           },
           "notes": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "scheduleId",
+          "departmentId",
+          "date",
+          "startTime",
+          "endTime",
+          "minStaff",
+          "maxStaff",
+          "assignedStaff",
+          "status"
+        ],
+        "additionalProperties": false
       },
       "Assignment": {
         "type": "object",
@@ -485,7 +649,9 @@
         "type": "object",
         "properties": {
           "id": {
-            "type": "integer"
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string"
@@ -493,32 +659,59 @@
           "description": {
             "type": "string"
           },
-          "isBuiltin": {
+          "isSystem": {
             "type": "boolean"
           },
           "permissions": {
             "type": "array",
             "items": {
               "type": "string"
-            },
-            "description": "Permission keys assigned to this role, e.g. 'schedule.manage'."
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "name",
+          "isSystem"
+        ],
+        "additionalProperties": false
       },
       "Permission": {
         "type": "object",
         "properties": {
-          "key": {
-            "type": "string",
-            "description": "Dot-notation key, e.g. 'schedule.manage'."
+          "id": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "code": {
+            "type": "string"
+          },
+          "resource": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
           },
           "description": {
             "type": "string"
-          },
-          "category": {
-            "type": "string"
           }
-        }
+        },
+        "required": [
+          "id",
+          "code",
+          "resource",
+          "action"
+        ],
+        "additionalProperties": false
       },
       "Policy": {
         "type": "object",

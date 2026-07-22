@@ -25,7 +25,16 @@
  *     client cannot offer it and the value reaches the service unvalidated.
  *
  * Together they make the query contract complete: nothing documented is
- * unparsed, and nothing parsed is undocumented. Curated prose (summaries, descriptions, response documentation)
+ * unparsed, and nothing parsed is undocumented.
+ *
+ * `components.schemas` for the shared domain entities are generated too. They
+ * were hand-written and nothing compared them against the types, so they had
+ * drifted into describing an older model — `User.role`, a field the API has
+ * never sent and which rendered as `undefined` in the UI until it was removed;
+ * `Permission.category`/`key` instead of `code`/`resource`/`action`;
+ * `Role.isBuiltin` instead of `isSystem`. Entities not yet declared in
+ * `domain.ts` keep their hand-written component and are listed on stdout, so
+ * the remaining gap is stated rather than silently tolerated. Curated prose (summaries, descriptions, response documentation)
  * stays hand-written in the spec file; the machine-checkable part — what the
  * API accepts — is generated.
  *
@@ -185,6 +194,19 @@ const scanRoutes = (): FoundOp[] => {
   return found;
 };
 
+/**
+ * Domain entities whose OpenAPI component is generated from the shared Zod
+ * schema. Adding an entity to `domain.ts` and to this map is what moves it
+ * from hand-written to derived.
+ */
+const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
+  Permission: sharedSchemas.permissionSchema,
+  Role: sharedSchemas.roleSchema,
+  Shift: sharedSchemas.shiftSchema,
+  Schedule: sharedSchemas.scheduleSchema,
+  User: sharedSchemas.userSchema,
+};
+
 const main = (): void => {
   const spec = JSON.parse(fs.readFileSync(SPEC_PATH, 'utf8'));
   const ops = scanRoutes();
@@ -291,6 +313,38 @@ const main = (): void => {
     }
   }
 
+  // ---- components.schemas from the shared domain schemas ----
+  const components = (spec.components ??= {});
+  const schemas = (components.schemas ??= {} as Record<string, unknown>);
+  for (const [name, schema] of Object.entries(DOMAIN_COMPONENTS)) {
+    if (!(name in schemas)) {
+      errors.push(`domain schema '${name}' has no component in the spec — document the entity`);
+      continue;
+    }
+    const jsonSchema = z.toJSONSchema(schema, {
+      io: 'output',
+      // `Date` has no JSON Schema form. Every occurrence here is the shared
+      // `timestamp` union, whose wire representation is always a string; the
+      // marker on that schema says so, and this replaces the node with it.
+      unrepresentable: 'any',
+      override: (ctx) => {
+        const meta = (ctx.zodSchema as { meta?: () => Record<string, unknown> | undefined }).meta?.();
+        if (meta?.wireFormat === 'timestamp') {
+          for (const key of Object.keys(ctx.jsonSchema)) delete (ctx.jsonSchema as Record<string, unknown>)[key];
+          Object.assign(ctx.jsonSchema, sharedSchemas.TIMESTAMP_JSON_SCHEMA);
+        }
+      },
+    }) as Record<string, unknown>;
+    delete jsonSchema.$schema;
+    schemas[name] = jsonSchema;
+  }
+
+  // Entities still hand-written: stated, not silently tolerated, so the
+  // remaining surface is visible in every generation run.
+  const handWritten = Object.keys(schemas)
+    .filter((name) => !(name in DOMAIN_COMPONENTS))
+    .sort();
+
   if (errors.length > 0) {
     console.error(`openapi generation failed with ${errors.length} contract mismatch(es):`);
     for (const e of errors) console.error('  - ' + e);
@@ -299,9 +353,15 @@ const main = (): void => {
 
   fs.writeFileSync(SPEC_PATH, JSON.stringify(spec, null, 2) + '\n');
   console.log(
-    `openapi.json regenerated: ${generatedFor.size} request bodies and ` +
-      `${generatedQueryFor.size} query contracts from shared Zod schemas`
+    `openapi.json regenerated: ${generatedFor.size} request bodies, ` +
+      `${generatedQueryFor.size} query contracts and ` +
+      `${Object.keys(DOMAIN_COMPONENTS).length} domain components from shared Zod schemas`
   );
+  if (handWritten.length > 0) {
+    console.log(
+      `  still hand-written (not yet in domain.ts): ${handWritten.join(', ')}`
+    );
+  }
 };
 
 main();
