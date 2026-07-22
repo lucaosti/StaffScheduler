@@ -10,9 +10,9 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
-  listWorkflows,
   createWorkflow,
   updateWorkflow,
   deleteWorkflow,
@@ -21,6 +21,7 @@ import {
   ApproverScope,
   CreateWorkflowBody,
 } from '../../services/approvalWorkflowService';
+import { approvalWorkflowsKey, useApprovalWorkflowsQuery } from '../../hooks/useApprovalWorkflows';
 
 const SCOPE_LABELS: Record<ApproverScope, string> = {
   policy_owner: 'Policy Owner',
@@ -42,9 +43,8 @@ const EMPTY_STEP: ApprovalStep = {
 };
 
 const ApprovalWorkflows: React.FC = () => {
-  const [workflows, setWorkflows] = useState<ApprovalWorkflow[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const [actionError, setError] = useState<string | null>(null);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
@@ -66,22 +66,14 @@ const ApprovalWorkflows: React.FC = () => {
   // Expand state for viewing steps inline
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listWorkflows();
-      setWorkflows(res.data ?? []);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load workflows.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Server state via TanStack Query; mutation handlers call load() to invalidate.
+  const workflowsQuery = useApprovalWorkflowsQuery();
+  const workflows = workflowsQuery.data ?? [];
+  const loading = workflowsQuery.isLoading;
+  const error = workflowsQuery.isError
+    ? (workflowsQuery.error as Error).message ?? 'Failed to load workflows.'
+    : actionError;
+  const load = () => queryClient.invalidateQueries({ queryKey: approvalWorkflowsKey });
 
   // ---------- Modal helpers ----------
 

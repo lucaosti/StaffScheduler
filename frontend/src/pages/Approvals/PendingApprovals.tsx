@@ -18,10 +18,10 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  listPendingApprovals,
   approvePendingItem,
   rejectPendingItem,
   keepPendingItem,
@@ -32,6 +32,7 @@ import {
   DecisionChain,
 } from '../../services/pendingApprovalService';
 import { listMembersDetailed, OrgUnitMemberDetail } from '../../services/orgService';
+import { pendingApprovalsKey, usePendingApprovalsQuery } from '../../hooks/usePendingApprovals';
 
 type DecisionMode = 'approve' | 'reject';
 
@@ -52,10 +53,9 @@ const PendingApprovals: React.FC = () => {
   const { user } = useAuth();
   const currentUserId = user?.id ? Number(user.id) : null;
 
-  const [items, setItems] = useState<PendingApprovalItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [actionError, setError] = useState<string | null>(null);
 
   // Decision modal state
   const [decisionTarget, setDecisionTarget] = useState<PendingApprovalItem | null>(null);
@@ -73,23 +73,16 @@ const PendingApprovals: React.FC = () => {
   const [delegating, setDelegating] = useState(false);
   const [delegateError, setDelegateError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const status = filter === 'pending' ? 'pending' : undefined;
-      const res = await listPendingApprovals(status as string);
-      setItems(res.data?.items ?? []);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load pending approvals.');
-    } finally {
-      setLoading(false);
-    }
-  }, [filter]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Main queue via TanStack Query (keyed by filter); decision mutations call
+  // load() to invalidate it. Load errors come from the query; action/chain
+  // errors are set locally.
+  const queueQuery = usePendingApprovalsQuery(filter);
+  const items = queueQuery.data ?? [];
+  const loading = queueQuery.isLoading;
+  const error = queueQuery.isError
+    ? (queueQuery.error as Error).message ?? 'Failed to load pending approvals.'
+    : actionError;
+  const load = () => queryClient.invalidateQueries({ queryKey: pendingApprovalsKey });
 
   const toggleExpand = async (item: PendingApprovalItem) => {
     if (expandedId === item.id) {
