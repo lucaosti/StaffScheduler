@@ -1,11 +1,31 @@
 /**
- * CreateScheduleModal — Modal form for creating a new schedule.
+ * CreateScheduleModal — modal form for creating a new schedule.
+ *
+ * WHY REACT HOOK FORM + THE SHARED ZOD SCHEMA
+ * -------------------------------------------
+ * This form validates against `createScheduleBody` from `@staff-scheduler/shared`
+ * — the exact schema the backend validates the request with. Reusing it via
+ * `zodResolver` means the client and server agree on the rules by construction:
+ * a field the API would reject (empty name, non-positive department, end date
+ * before start) is caught here before a request is sent, and the two can never
+ * drift because there is only one schema. React Hook Form manages the field
+ * state, wiring and error display so the component holds no manual value state.
+ *
+ * The parent still owns the async concerns (submitting flag, server error), so
+ * this component takes `isCreating`/`createError` and hands validated, typed
+ * values to `onSubmit` — it never touches the API itself.
  *
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+import { createScheduleBody } from '@staff-scheduler/shared';
 import type { Department } from '../../services/departmentService';
+
+export type CreateScheduleValues = z.infer<typeof createScheduleBody>;
 
 interface Props {
   show: boolean;
@@ -13,7 +33,7 @@ interface Props {
   isCreating: boolean;
   createError: string | null;
   onClose: () => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onSubmit: (values: CreateScheduleValues) => void;
 }
 
 const CreateScheduleModal: React.FC<Props> = ({
@@ -24,6 +44,22 @@ const CreateScheduleModal: React.FC<Props> = ({
   onClose,
   onSubmit,
 }) => {
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors },
+  } = useForm<CreateScheduleValues>({
+    resolver: zodResolver(createScheduleBody),
+    defaultValues: { name: '', startDate: '', endDate: '', notes: '' },
+  });
+
+  // Reset the fields whenever the modal is (re)opened so a previous draft or the
+  // last submission never leaks into a fresh create.
+  useEffect(() => {
+    if (show) reset({ name: '', startDate: '', endDate: '', notes: '' });
+  }, [show, reset]);
+
   if (!show) return null;
 
   return (
@@ -48,7 +84,7 @@ const CreateScheduleModal: React.FC<Props> = ({
               onClick={onClose}
             ></button>
           </div>
-          <form onSubmit={onSubmit}>
+          <form onSubmit={handleSubmit(onSubmit)} noValidate>
             <div className="modal-body">
               {createError && (
                 <div className="alert alert-danger" role="alert">
@@ -61,13 +97,13 @@ const CreateScheduleModal: React.FC<Props> = ({
                 </label>
                 <input
                   id="schedule-name"
-                  name="name"
                   type="text"
-                  className="form-control"
+                  className={`form-control${errors.name ? ' is-invalid' : ''}`}
                   placeholder="e.g. April 2026 — ER"
-                  required
                   disabled={isCreating}
+                  {...register('name')}
                 />
+                {errors.name && <div className="invalid-feedback">{errors.name.message}</div>}
               </div>
               <div className="row">
                 <div className="col-md-6 mb-3">
@@ -76,12 +112,14 @@ const CreateScheduleModal: React.FC<Props> = ({
                   </label>
                   <input
                     id="schedule-start"
-                    name="startDate"
                     type="date"
-                    className="form-control"
-                    required
+                    className={`form-control${errors.startDate ? ' is-invalid' : ''}`}
                     disabled={isCreating}
+                    {...register('startDate')}
                   />
+                  {errors.startDate && (
+                    <div className="invalid-feedback">{errors.startDate.message}</div>
+                  )}
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="schedule-end" className="form-label">
@@ -89,12 +127,14 @@ const CreateScheduleModal: React.FC<Props> = ({
                   </label>
                   <input
                     id="schedule-end"
-                    name="endDate"
                     type="date"
-                    className="form-control"
-                    required
+                    className={`form-control${errors.endDate ? ' is-invalid' : ''}`}
                     disabled={isCreating}
+                    {...register('endDate')}
                   />
+                  {errors.endDate && (
+                    <div className="invalid-feedback">{errors.endDate.message}</div>
+                  )}
                 </div>
               </div>
               <div className="mb-3">
@@ -103,11 +143,10 @@ const CreateScheduleModal: React.FC<Props> = ({
                 </label>
                 <select
                   id="schedule-department"
-                  name="departmentId"
-                  className="form-select"
-                  required
+                  className={`form-select${errors.departmentId ? ' is-invalid' : ''}`}
                   disabled={isCreating || departments.length === 0}
                   defaultValue=""
+                  {...register('departmentId', { valueAsNumber: true })}
                 >
                   <option value="" disabled>
                     {departments.length === 0
@@ -120,6 +159,9 @@ const CreateScheduleModal: React.FC<Props> = ({
                     </option>
                   ))}
                 </select>
+                {errors.departmentId && (
+                  <div className="invalid-feedback">Please select a department.</div>
+                )}
               </div>
               <div className="mb-3">
                 <label htmlFor="schedule-description" className="form-label">
@@ -127,11 +169,11 @@ const CreateScheduleModal: React.FC<Props> = ({
                 </label>
                 <textarea
                   id="schedule-description"
-                  name="description"
                   className="form-control"
                   rows={2}
                   placeholder="Optional notes about this schedule"
                   disabled={isCreating}
+                  {...register('notes')}
                 />
               </div>
             </div>
