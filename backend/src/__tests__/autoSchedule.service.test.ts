@@ -87,7 +87,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
-    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+    conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]);
 
     const service = new AutoScheduleService(pool);
     const out = await service.generate(1, 7);
@@ -99,6 +99,36 @@ describe('AutoScheduleService.generate', () => {
     expect(out.engine).toBe('greedy');
     expect(out.degraded).toBe(false);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('persists with one multi-row INSERT and counts only rows actually inserted', async () => {
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
+      .mockResolvedValueOnce([
+        [
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 2, max_staff: 5, department_id: 3, skill_names: '' },
+          { id: 11, date: '2026-05-01', start_time: '16:00', end_time: '23:59', min_staff: 1, max_staff: 4, department_id: 3, skill_names: null },
+        ],
+        null,
+      ])
+      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null]);
+    // INSERT IGNORE skipped one row (a duplicate assignment already existed).
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    // Two assignments -> ONE statement with two value groups, not two statements.
+    expect(conn.execute).toHaveBeenCalledTimes(1);
+    const [sql, params] = conn.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/VALUES \(\?, \?, \?, \?\), \(\?, \?, \?, \?\)/);
+    expect(params).toHaveLength(8); // 4 bound values per row
+
+    // ...and the count reflects rows the database actually inserted, so an
+    // IGNOREd duplicate is not reported as created.
+    expect(out.assignmentsCreated).toBe(1);
   });
 
   it('rolls back when an INSERT fails', async () => {
@@ -122,7 +152,8 @@ describe('AutoScheduleService.generate', () => {
   });
 
   it('expands an unavailability date range into a per-day list per user', async () => {
-    const { pool, execute } = makePool();
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]); // chunked bulk INSERT
     execute
       .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
       .mockResolvedValueOnce([[

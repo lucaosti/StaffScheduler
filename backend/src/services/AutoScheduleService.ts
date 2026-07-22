@@ -28,7 +28,7 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { NotFoundError } from '../errors';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
@@ -216,17 +216,38 @@ export class AutoScheduleService {
     }
 
     // 4. Persist assignments.
+    //
+    // Written as chunked multi-row INSERTs rather than one statement per
+    // assignment: a month-long schedule produces hundreds to thousands of rows,
+    // and a per-row round-trip held an open transaction (and a pooled
+    // connection, shared with request traffic) for the whole time. Chunking
+    // keeps each statement well under max_allowed_packet.
+    //
+    // `inserted` now comes from affectedRows, not a manual counter. INSERT
+    // IGNORE skips rows that violate the unique (shift_id, user_id) constraint,
+    // so counting attempts overstated the result whenever the optimizer
+    // re-proposed an assignment that already existed — the reported coverage was
+    // wrong in exactly the case where it mattered (a re-run).
+    const INSERT_CHUNK_SIZE = 500;
     const conn = await this.pool.getConnection();
     let inserted = 0;
     try {
       await conn.beginTransaction();
-      for (const a of assignments) {
-        await conn.execute(
+      for (let i = 0; i < assignments.length; i += INSERT_CHUNK_SIZE) {
+        const chunk = assignments.slice(i, i + INSERT_CHUNK_SIZE);
+        const placeholders = chunk.map(() => '(?, ?, ?, ?)').join(', ');
+        const values = chunk.flatMap((a) => [
+          Number(a.shiftId),
+          Number(a.employeeId),
+          'pending',
+          createdBy,
+        ]);
+        const [result] = await conn.execute<ResultSetHeader>(
           `INSERT IGNORE INTO shift_assignments (shift_id, user_id, status, assigned_by)
-           VALUES (?, ?, 'pending', ?)`,
-          [Number(a.shiftId), Number(a.employeeId), createdBy]
+           VALUES ${placeholders}`,
+          values
         );
-        inserted++;
+        inserted += result.affectedRows;
       }
       await conn.commit();
     } catch (err) {
