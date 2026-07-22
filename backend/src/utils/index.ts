@@ -1,66 +1,20 @@
 /**
- * Utility Functions for Staff Scheduler Backend
- * 
- * Collection of common utility functions for cryptography, validation,
- * data transformation, and general-purpose operations.
- * 
- * Modules:
- * - CryptoUtils: Password hashing and token generation
- * - ValidationUtils: Input validation and sanitization
- * - DateUtils: Date/time manipulation and formatting
- * - StringUtils: String processing and transformation
- * 
+ * Shared date and validation helpers.
+ *
+ * WHY THIS FILE SHRANK: it also exported CryptoUtils, HierarchyUtils and
+ * ResponseUtils — 126 of its 291 lines — none of which had a single production
+ * consumer; the only references anywhere in `src/` were their own unit tests.
+ * knip did not flag them because the barrel itself is used and a test import
+ * counts as usage, so they sat behind a green dead-code gate.
+ *
+ * CryptoUtils was the one worth removing on more than tidiness grounds: it
+ * offered `hashPassword` returning `{ hash, salt }`, a second way to handle
+ * credentials next to the real path, which is bcrypt through UserService
+ * against the `password_hash` column. Unused code that looks like the
+ * authentication helper is an invitation to use it.
+ *
  * @author Luca Ostinelli
  */
-
-import bcrypt from 'bcrypt';
-import crypto from 'crypto';
-import { config } from '../config';
-
-/**
- * Cryptographic utility functions for secure password handling
- * and token generation.
- */
-export class CryptoUtils {
-  /**
-   * Hash a password using bcrypt with salt
-   * @param password - Plain text password to hash
-   * @returns Promise resolving to hash and salt
-   */
-  static async hashPassword(password: string): Promise<{ hash: string; salt: string }> {
-    const salt = await bcrypt.genSalt(config.security.bcryptRounds);
-    const hash = await bcrypt.hash(password, salt);
-    return { hash, salt };
-  }
-
-  /**
-   * Verify a password against a hash
-   */
-  static async verifyPassword(password: string, hash: string): Promise<boolean> {
-    return bcrypt.compare(password, hash);
-  }
-
-  /**
-   * Generate a random token
-   */
-  static generateToken(length: number = 32): string {
-    return crypto.randomBytes(length).toString('hex');
-  }
-
-  /**
-   * Generate a UUID v4
-   */
-  static generateUUID(): string {
-    return crypto.randomUUID();
-  }
-
-  /**
-   * Generate a secure random salt
-   */
-  static generateSalt(length: number = 16): string {
-    return crypto.randomBytes(length).toString('hex');
-  }
-}
 
 export class DateUtils {
   /**
@@ -202,90 +156,3 @@ export class ValidationUtils {
   }
 }
 
-export class HierarchyUtils {
-  /**
-   * Build materialized path for hierarchy
-   */
-  static buildPath(parentPath: string | null, nodeId: string): string {
-    if (!parentPath) {
-      return '0'; // Root level
-    }
-    return `${parentPath}.${nodeId}`;
-  }
-
-  /**
-   * Get hierarchy level from path
-   */
-  static getLevel(path: string): number {
-    return path.split('.').length - 1;
-  }
-
-  /**
-   * Check if child is descendant of parent
-   */
-  static isDescendant(childPath: string, parentPath: string): boolean {
-    return childPath.startsWith(parentPath + '.') || childPath === parentPath;
-  }
-
-  /**
-   * Get all parent paths from a given path
-   */
-  static getParentPaths(path: string): string[] {
-    const parts = path.split('.');
-    const paths: string[] = [];
-    
-    for (let i = 1; i <= parts.length; i++) {
-      paths.push(parts.slice(0, i).join('.'));
-    }
-    
-    return paths;
-  }
-
-  /**
-   * Find common ancestor path
-   */
-  static findCommonAncestor(path1: string, path2: string): string {
-    const parts1 = path1.split('.');
-    const parts2 = path2.split('.');
-    const commonParts: string[] = [];
-    
-    const minLength = Math.min(parts1.length, parts2.length);
-    for (let i = 0; i < minLength; i++) {
-      if (parts1[i] === parts2[i]) {
-        commonParts.push(parts1[i]);
-      } else {
-        break;
-      }
-    }
-    
-    return commonParts.join('.');
-  }
-}
-
-export class ResponseUtils {
-  /**
-   * Create standardized API response
-   */
-  static success<T>(data: T, meta?: any) {
-    return {
-      success: true,
-      data,
-      meta
-    };
-  }
-
-  /**
-   * Create standardized error response
-   */
-  static error(code: string, message: string, details?: any) {
-    return {
-      success: false,
-      error: {
-        code,
-        message,
-        details
-      }
-    };
-  }
-
-}

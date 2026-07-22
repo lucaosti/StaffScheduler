@@ -6,34 +6,9 @@
  */
 
 import {
-  CryptoUtils,
   DateUtils,
-  HierarchyUtils,
-  ResponseUtils,
   ValidationUtils,
 } from '../utils';
-
-describe('CryptoUtils', () => {
-  it('hashPassword + verifyPassword round-trip', async () => {
-    const { hash } = await CryptoUtils.hashPassword('correct-horse');
-    expect(await CryptoUtils.verifyPassword('correct-horse', hash)).toBe(true);
-    expect(await CryptoUtils.verifyPassword('wrong', hash)).toBe(false);
-  });
-
-  it('generateToken returns hex of the requested byte length', () => {
-    expect(CryptoUtils.generateToken(8)).toMatch(/^[a-f0-9]{16}$/);
-  });
-
-  it('generateUUID returns a v4 UUID', () => {
-    expect(CryptoUtils.generateUUID()).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
-    );
-  });
-
-  it('generateSalt is hex of length*2', () => {
-    expect(CryptoUtils.generateSalt(8)).toMatch(/^[a-f0-9]{16}$/);
-  });
-});
 
 describe('DateUtils', () => {
   const sample = new Date('2026-04-26T13:14:15.000Z');
@@ -84,7 +59,9 @@ describe('ValidationUtils', () => {
   });
 
   it('isValidUUID accepts a v4 string', () => {
-    expect(ValidationUtils.isValidUUID(CryptoUtils.generateUUID())).toBe(true);
+    // A literal rather than CryptoUtils.generateUUID(): that helper is gone,
+    // and the subject here is the validator, not how the value was produced.
+    expect(ValidationUtils.isValidUUID('f47ac10b-58cc-4372-a567-0e02b2c3d479')).toBe(true);
   });
 
   it('sanitizeString trims and strips angle brackets', () => {
@@ -92,43 +69,3 @@ describe('ValidationUtils', () => {
   });
 });
 
-describe('HierarchyUtils', () => {
-  it('buildPath returns "0" for root and concatenates otherwise', () => {
-    expect(HierarchyUtils.buildPath(null, 'A')).toBe('0');
-    expect(HierarchyUtils.buildPath('0.A', 'B')).toBe('0.A.B');
-  });
-
-  it('getLevel counts dot segments', () => {
-    expect(HierarchyUtils.getLevel('0')).toBe(0);
-    expect(HierarchyUtils.getLevel('0.A.B')).toBe(2);
-  });
-
-  it('isDescendant matches direct and self', () => {
-    expect(HierarchyUtils.isDescendant('0.A.B', '0.A')).toBe(true);
-    expect(HierarchyUtils.isDescendant('0.A', '0.A')).toBe(true);
-    expect(HierarchyUtils.isDescendant('0.A', '0.B')).toBe(false);
-  });
-
-  it('getParentPaths walks every ancestor', () => {
-    expect(HierarchyUtils.getParentPaths('0.A.B')).toEqual(['0', '0.A', '0.A.B']);
-  });
-
-  it('findCommonAncestor stops at the first divergence', () => {
-    expect(HierarchyUtils.findCommonAncestor('0.A.B', '0.A.C')).toBe('0.A');
-    expect(HierarchyUtils.findCommonAncestor('0.A', '1.X')).toBe('');
-  });
-});
-
-describe('ResponseUtils', () => {
-  it('success wraps data and optional meta', () => {
-    expect(ResponseUtils.success(42)).toEqual({ success: true, data: 42, meta: undefined });
-    expect(ResponseUtils.success(1, { foo: 'bar' })).toEqual({ success: true, data: 1, meta: { foo: 'bar' } });
-  });
-
-  it('error wraps code/message/details', () => {
-    expect(ResponseUtils.error('X', 'm', { d: 1 })).toEqual({
-      success: false,
-      error: { code: 'X', message: 'm', details: { d: 1 } },
-    });
-  });
-});
