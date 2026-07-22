@@ -51,7 +51,20 @@ export interface LoginResponse {
   user: User;
 }
 
-// Employee (with matrix organization support)
+/**
+ * An employee, as the API returns it — which is a user row: EmployeeService
+ * delegates to UserService, so this is `User` plus the display-only extras the
+ * employees endpoints join in.
+ *
+ * The previous declaration modelled a matrix organisation the server never
+ * implemented: `employeeType`, `hireDate`, `contractFrom`/`contractTo`,
+ * `primaryUnit`/`secondaryUnits`, `primarySupervisor`/`secondarySupervisors`,
+ * `hierarchyPath`, `targetHours` and `supervisorName` exist nowhere in the
+ * backend, so nothing could ever populate them. None was read, which is the
+ * only reason they were harmless — a phantom field stays inert until something
+ * reads it, and then it becomes the audit log's actor column rendering an
+ * em-dash on every row.
+ */
 export interface Employee {
   id: ID; // backend user.id
   employeeId?: string;
@@ -60,26 +73,17 @@ export interface Employee {
   email: string;
   phone?: string;
   position?: string;
+  /** Display name of the primary department, joined by the list endpoints. */
   department?: string;
-  employeeType?: string; // full-time, part-time, contract
-  hourlyRate?: number; // Hourly wage rate
-  maxHoursPerWeek?: number; // Maximum weekly hours
-  hireDate?: string;
-  contractFrom?: string; // ISO date
-  contractTo?: string;   // ISO date
+  hourlyRate?: number;
+  maxHoursPerWeek?: number;
   skills?: string[];
-  primaryUnit?: string; // Main organizational unit
-  secondaryUnits?: string[]; // Additional units for cross-functional work
-  primarySupervisor?: string; // Main supervisor ID
-  secondarySupervisors?: string[]; // Matrix supervisors for specific projects
-  hierarchyPath?: string; // Materialized path in org tree
-  restHours?: number; // Override default role rest hours
-  targetHours?: Record<string, number>; // per horizon type
-  roles?: string[]; // Can cover multiple roles, no seniority
+  /** Override for the default rest-hours rule. */
+  restHours?: number;
+  roles?: string[];
   isActive: boolean;
   createdAt: string | Date;
   updatedAt: string | Date;
-  supervisorName?: string | null;
 }
 
 // Shift (including special shifts)
@@ -103,9 +107,6 @@ export interface Assignment {
   // Legacy fields (optional)
   employeeId?: ID;
   role?: string;
-  approvedBy?: ID;
-  approvedAt?: string | Date;
-  rejectedReason?: string;
 }
 
 // Attendance tracking (clock-in / clock-out) types

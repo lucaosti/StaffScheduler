@@ -326,6 +326,8 @@ const Employees: React.FC = () => {
                     firstName: formData.get('firstName') as string,
                     lastName: formData.get('lastName') as string,
                     email: formData.get('email') as string,
+                    // Required by createUserBody on create; absent on update.
+                    password: (formData.get('password') as string) ?? '',
                     phone: (formData.get('phone') as string) || undefined,
                     position: (formData.get('position') as string) || undefined,
                     departmentIds: !isNaN(deptId) && deptId > 0 ? [deptId] : undefined,
@@ -372,6 +374,33 @@ const Employees: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/*
+                    POST /employees validates against the shared createUserBody
+                    schema, which requires a password of at least 8 characters.
+                    The form did not collect one, so every creation from the UI
+                    was rejected with a 400 — invisible because the frontend
+                    payload type did not declare the field either. Updates go
+                    through updateUserBody, which has no password, so this is
+                    shown and required only when creating.
+                  */}
+                  {!editingEmployee && (
+                    <div className="row">
+                      <div className="col-md-6 mb-3">
+                        <label htmlFor="password" className="form-label">Initial Password *</label>
+                        <input
+                          type="password"
+                          className="form-control"
+                          id="password"
+                          name="password"
+                          minLength={8}
+                          autoComplete="new-password"
+                          required
+                        />
+                        <div className="form-text">At least 8 characters.</div>
+                      </div>
+                    </div>
+                  )}
                   
                   <div className="row">
                     <div className="col-md-6 mb-3">
