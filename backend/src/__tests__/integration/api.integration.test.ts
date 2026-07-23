@@ -692,6 +692,24 @@ describe('path-parameter mutations run against the real schema', () => {
       );
       return r.insertId;
     },
+    async skill(): Promise<number> {
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO skills (name, is_active) VALUES (?, 1)`,
+        [`sk-${tag()}`]
+      );
+      return r.insertId;
+    },
+    async attendanceRecord(): Promise<number> {
+      // An open (not clocked-out) record for the admin, so clock-out and the
+      // approve/reject actions have a real row to act on. shift_assignment_id
+      // is nullable, so no shift fixture is needed.
+      const [r] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO attendance_records (user_id, clock_in, status)
+         VALUES (?, NOW(), 'pending')`,
+        [userId]
+      );
+      return r.insertId;
+    },
     async notification(): Promise<number> {
       const [r] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO notifications (user_id, type, title, is_read) VALUES (?, 'info', 'disp', 0)`,
@@ -769,6 +787,50 @@ describe('path-parameter mutations run against the real schema', () => {
     { name: 'PUT /settings/:category/:key', method: 'put', setup: async () => ({ path: `/settings/scheduling/max_hours_week`, body: { value: '40' } }) },
     // Modules (org override on a seeded module code)
     { name: 'PUT /modules/:code', method: 'put', setup: async () => ({ path: `/modules/scheduling`, body: { isEnabled: true } }) },
+    // Employee skills
+    { name: 'POST /employees/:id/skills', method: 'post' as const, setup: async () => ({ path: `/employees/${await make.user()}/skills`, body: { skillId: await make.skill(), proficiencyLevel: 3 } }) },
+    { name: 'DELETE /employees/:id/skills/:skillId', method: 'delete', setup: async () => {
+      const u = await make.user(); const sk = await make.skill();
+      await admin.query(`INSERT INTO user_skills (user_id, skill_id, proficiency_level) VALUES (?, ?, 3)`, [u, sk]);
+      return { path: `/employees/${u}/skills/${sk}` };
+    } },
+    // Directory fields
+    { name: 'PUT /directory/users/:id/fields', method: 'put', setup: async () => ({ path: `/directory/users/${await make.user()}/fields`, body: { fields: [{ key: 'nickname', value: 'itest' }] } }) },
+    { name: 'DELETE /directory/users/:id/fields/:key', method: 'delete', setup: async () => {
+      const u = await make.user();
+      await admin.query(`INSERT INTO user_custom_fields (user_id, field_key, field_value, is_public) VALUES (?, 'nickname', 'x', 1)`, [u]);
+      return { path: `/directory/users/${u}/fields/nickname` };
+    } },
+    // Module org override
+    { name: 'PUT /modules/:code/org/:org', method: 'put', setup: async () => ({ path: `/modules/scheduling/org/itest-org`, body: { isEnabled: true } }) },
+    { name: 'DELETE /modules/:code/org/:org', method: 'delete', setup: async () => {
+      await admin.query(`INSERT INTO organization_module_overrides (organization_name, module_code, is_enabled) VALUES ('itest-org2', 'scheduling', 1) ON DUPLICATE KEY UPDATE is_enabled = 1`);
+      return { path: `/modules/scheduling/org/itest-org2` };
+    } },
+    // Settings reset, approval matrix
+    { name: 'POST /settings/:category/:key/reset', method: 'post' as const, setup: async () => ({ path: `/settings/scheduling/max_hours_week/reset` }) },
+    { name: 'PUT /policies/approval-matrix/:changeType', method: 'put', setup: async () => ({ path: `/policies/approval-matrix/TimeOff.Request`, body: { approverScope: 'unit_manager' } }) },
+    // Bulk operations
+    { name: 'POST /roles/bulk-assign', method: 'post' as const, setup: async () => ({ path: `/roles/bulk-assign`, body: { roleId: await make.role(), userIds: [await make.user()] } }) },
+    { name: 'POST /responsibility-rules/bulk', method: 'post' as const, setup: async () => ({ path: `/responsibility-rules/bulk`, body: { subjectType: 'department', subjectIds: [departmentId], permissionCodes: ['schedule.read'], responsibleOrgUnitId: orgUnitId } }) },
+    { name: 'POST /assignments/bulk', method: 'post' as const, setup: async () => { const s = await make.schedule(); const sh = await make.shift(s); return { path: `/assignments/bulk`, body: { assignments: [{ shiftId: sh, userId: delegateeId }] } }; } },
+    // On-call assignment
+    { name: 'POST /on-call/periods/:id/assign', method: 'post' as const, setup: async () => ({ path: `/on-call/periods/${await make.onCallPeriod()}/assign`, body: { userId: delegateeId } }) },
+    { name: 'DELETE /on-call/periods/:id/assign/:userId', method: 'delete', setup: async () => {
+      const per = await make.onCallPeriod();
+      await admin.query(`INSERT INTO on_call_assignments (period_id, user_id, status) VALUES (?, ?, 'pending')`, [per, delegateeId]);
+      return { path: `/on-call/periods/${per}/assign/${delegateeId}` };
+    } },
+    // Schedule duplicate / optimization clear
+    { name: 'POST /schedules/:id/duplicate', method: 'post' as const, setup: async () => ({ path: `/schedules/${await make.schedule()}/duplicate`, body: { name: `dup-${tag()}`, startDate: '2032-01-01', endDate: '2032-01-07' } }) },
+    { name: 'DELETE /schedules/:id/optimization', method: 'delete', setup: async () => ({ path: `/schedules/${await make.schedule()}/optimization` }) },
+    // Global actions
+    { name: 'POST /approval-workflows/escalate', method: 'post' as const, setup: async () => ({ path: `/approval-workflows/escalate` }) },
+    { name: 'POST /calendar/token/rotate', method: 'post' as const, setup: async () => ({ path: `/calendar/token/rotate` }) },
+    // Attendance
+    { name: 'POST /attendance/:id/clock-out', method: 'post' as const, setup: async () => ({ path: `/attendance/${await make.attendanceRecord()}/clock-out`, body: {} }) },
+    { name: 'POST /attendance/:id/approve', method: 'post' as const, setup: async () => ({ path: `/attendance/${await make.attendanceRecord()}/approve`, body: {} }) },
+    { name: 'POST /attendance/:id/reject', method: 'post' as const, setup: async () => ({ path: `/attendance/${await make.attendanceRecord()}/reject`, body: {} }) },
     // Join-table membership: distinct INSERT/DELETE SQL with cheap fixtures.
     { name: 'POST /departments/:id/users', method: 'post' as const, setup: async () => ({ path: `/departments/${departmentId}/users`, body: { userId: await make.user() } }) },
     { name: 'DELETE /departments/:id/users/:userId', method: 'delete', setup: async () => {
@@ -981,5 +1043,98 @@ describe('workflow actions run against the real schema', () => {
       throw new Error(`${wfCase.name} returned ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
     }
     expect({ endpoint: wfCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({ status: 400 });
+  });
+});
+
+
+/**
+ * Shift-swap and CSV import against the real schema.
+ *
+ * Shift-swap is the multi-actor case: a swap is between two assignments held
+ * by two different users, so the fixture creates two shifts, assigns one to
+ * each of admin and delegatee, then files the swap and drives its actions. The
+ * import endpoints take a CSV/vCard body and run batch INSERTs — worth
+ * exercising against the real schema, with a one-row payload.
+ */
+describe('shift-swap and import run against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const makeShift = async (): Promise<number> => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE(), CURDATE() + INTERVAL 7 DAY, ?, 'draft', ?)`,
+      [`swap-s-${tag()}`, departmentId, userId]
+    );
+    const [sh] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL 2 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+      [sc.insertId, departmentId]
+    );
+    return sh.insertId;
+  };
+
+  const makeAssignment = async (shift: number, user: number): Promise<number> => {
+    const [r] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
+      [shift, user]
+    );
+    return r.insertId;
+  };
+
+  /** Files a swap between a fresh admin assignment and a fresh delegatee one. */
+  const fileSwap = async (): Promise<number> => {
+    const mine = await makeAssignment(await makeShift(), userId);
+    const theirs = await makeAssignment(await makeShift(), delegateeId);
+    const cookie = await authCookie();
+    const res = await request(app)
+      .post('/api/shift-swap')
+      .set('Cookie', cookie)
+      .send({ requesterAssignmentId: mine, targetAssignmentId: theirs });
+    if (res.status >= 400) {
+      throw new Error(`filing shift-swap failed with ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
+    }
+    return res.body.data.id as number;
+  };
+
+  const drive = async (
+    method: 'post',
+    path: string,
+    body?: Record<string, unknown>
+  ): Promise<request.Response> => {
+    const cookie = await authCookie();
+    const req = request(app)[method](`/api${path}`).set('Cookie', cookie);
+    return body === undefined ? req : req.send(body);
+  };
+
+  interface SwapCase { name: string; run: () => Promise<request.Response>; }
+
+  const cases: SwapCase[] = [
+    { name: 'POST /shift-swap', run: async () => {
+      const mine = await makeAssignment(await makeShift(), userId);
+      const theirs = await makeAssignment(await makeShift(), delegateeId);
+      return drive('post', '/shift-swap', { requesterAssignmentId: mine, targetAssignmentId: theirs });
+    } },
+    { name: 'POST /shift-swap/:id/approve', run: async () => drive('post', `/shift-swap/${await fileSwap()}/approve`, {}) },
+    { name: 'POST /shift-swap/:id/decline', run: async () => drive('post', `/shift-swap/${await fileSwap()}/decline`, {}) },
+    { name: 'POST /shift-swap/:id/cancel', run: async () => drive('post', `/shift-swap/${await fileSwap()}/cancel`) },
+    { name: 'POST /import/employees', run: async () => drive('post', '/import/employees', {
+      csv: `email,firstName,lastName\nimp-${tag()}@example.com,Imp,Ort`,
+      defaultPassword: 'Password1!',
+    }) },
+    { name: 'POST /import/shifts', run: async () => drive('post', '/import/shifts', {
+      csv: `scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n${scheduleId},${departmentId},2033-01-02,09:00,17:00,1,2`,
+    }) },
+    { name: 'POST /directory/import-vcard', run: async () => drive('post', '/directory/import-vcard', {
+      vcf: `BEGIN:VCARD\nVERSION:3.0\nFN:Imp Ort\nEMAIL:vc-${tag()}@example.com\nEND:VCARD`,
+      defaultPassword: 'Password1!',
+    }) },
+  ];
+
+  it.each(cases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
+    const res = await testCase.run();
+    if (res.status >= 500) {
+      throw new Error(`${testCase.name} returned ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
+    }
+    expect({ endpoint: testCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({ status: 400 });
   });
 });
