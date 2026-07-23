@@ -930,7 +930,51 @@ describe('workflow actions run against the real schema', () => {
     { name: 'POST /org/loans/:id/cancel', file: fileLoan, action: (id) => post(`/org/loans/${id}/cancel`)() },
   ];
 
-  it.each(wfCases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, wfCase) => {
+  /**
+   * Files a time-off request and returns the id of the pending_approval it
+   * created — now that the admin manages orgUnitId, the seeded TimeOff.Request
+   * workflow routes the first step to the admin, so a real pending_approval
+   * exists to act on. Read straight from the table via the admin connection so
+   * the id is deterministic rather than scraped from a list response.
+   */
+  const filePendingApproval = async (): Promise<number> => {
+    const requestId = await fileTimeOff();
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT id FROM pending_approvals WHERE time_off_request_id = ? AND status = 'pending' LIMIT 1`,
+      [requestId]
+    );
+    if (rows.length === 0) {
+      throw new Error(`no pending_approval created for time_off_request ${requestId}`);
+    }
+    return rows[0].id as number;
+  };
+
+  /**
+   * A structure-assigned pending approval: `keep`, `open-to-structure` and
+   * `delegate` are reassignment actions a structure head takes, so they
+   * require `assigned_to_org_unit_id` set and reject (400) a decision routed to
+   * a single user — which is what the seeded TimeOff.Request step produces.
+   * Reassign the created row to orgUnitId, whose manager is the admin, so the
+   * precondition holds and the reassignment SQL runs.
+   */
+  const fileStructurePendingApproval = async (): Promise<number> => {
+    const id = await filePendingApproval();
+    await admin.query(
+      `UPDATE pending_approvals SET assigned_to_user_id = NULL, assigned_to_org_unit_id = ? WHERE id = ?`,
+      [orgUnitId, id]
+    );
+    return id;
+  };
+
+  const pendingCases: WfCase[] = [
+    { name: 'POST /pending-approvals/:id/approve', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/approve`, {})() },
+    { name: 'POST /pending-approvals/:id/reject', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/reject`, {})() },
+    { name: 'POST /pending-approvals/:id/keep', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/keep`)() },
+    { name: 'POST /pending-approvals/:id/open-to-structure', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/open-to-structure`)() },
+    { name: 'POST /pending-approvals/:id/delegate', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/delegate`, { targetUserId: delegateeId })() },
+  ];
+
+  it.each([...wfCases, ...pendingCases].map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, wfCase) => {
     const id = await wfCase.file();
     const res = await wfCase.action(id);
     if (res.status >= 500) {
