@@ -949,12 +949,29 @@ describe('workflow actions run against the real schema', () => {
     return rows[0].id as number;
   };
 
+  /**
+   * A structure-assigned pending approval: `keep`, `open-to-structure` and
+   * `delegate` are reassignment actions a structure head takes, so they
+   * require `assigned_to_org_unit_id` set and reject (400) a decision routed to
+   * a single user — which is what the seeded TimeOff.Request step produces.
+   * Reassign the created row to orgUnitId, whose manager is the admin, so the
+   * precondition holds and the reassignment SQL runs.
+   */
+  const fileStructurePendingApproval = async (): Promise<number> => {
+    const id = await filePendingApproval();
+    await admin.query(
+      `UPDATE pending_approvals SET assigned_to_user_id = NULL, assigned_to_org_unit_id = ? WHERE id = ?`,
+      [orgUnitId, id]
+    );
+    return id;
+  };
+
   const pendingCases: WfCase[] = [
     { name: 'POST /pending-approvals/:id/approve', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/approve`, {})() },
     { name: 'POST /pending-approvals/:id/reject', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/reject`, {})() },
-    { name: 'POST /pending-approvals/:id/keep', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/keep`)() },
-    { name: 'POST /pending-approvals/:id/open-to-structure', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/open-to-structure`)() },
-    { name: 'POST /pending-approvals/:id/delegate', file: filePendingApproval, action: (id) => post(`/pending-approvals/${id}/delegate`, { targetUserId: delegateeId })() },
+    { name: 'POST /pending-approvals/:id/keep', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/keep`)() },
+    { name: 'POST /pending-approvals/:id/open-to-structure', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/open-to-structure`)() },
+    { name: 'POST /pending-approvals/:id/delegate', file: fileStructurePendingApproval, action: (id) => post(`/pending-approvals/${id}/delegate`, { targetUserId: delegateeId })() },
   ];
 
   it.each([...wfCases, ...pendingCases].map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, wfCase) => {
