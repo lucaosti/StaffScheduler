@@ -1118,7 +1118,9 @@ describe('shift-swap and import run against the real schema', () => {
     { name: 'POST /shift-swap/:id/decline', run: async () => drive('post', `/shift-swap/${await fileSwap()}/decline`, {}) },
     { name: 'POST /shift-swap/:id/cancel', run: async () => drive('post', `/shift-swap/${await fileSwap()}/cancel`) },
     { name: 'POST /import/employees', run: async () => drive('post', '/import/employees', {
-      csv: `email,firstName,lastName\nimp-${tag()}@example.com,Imp,Ort`,
+      // `role` is a required column; without it the import returns 400 with
+      // per-row errors — the SQL runs either way, but a clean 200 is a truer check.
+      csv: `email,firstName,lastName,role\nimp-${tag()}@example.com,Imp,Ort,Employee`,
       defaultPassword: 'Password1!',
     }) },
     { name: 'POST /import/shifts', run: async () => drive('post', '/import/shifts', {
