@@ -1207,7 +1207,7 @@ migration chain, seeds minimal fixtures, then drops the database. It is
 excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside
 the e2e job, which already provides a MySQL service.
 
-Five layers, 137 tests:
+Six layers, 164 tests:
 
 - **Flows** — login/logout including JTI revocation, refresh-token rotation and
   reuse detection, `POST /api/assignments`, the delegation lifecycle, the user
@@ -1233,6 +1233,15 @@ Five layers, 137 tests:
   requester's primary org unit to have a resolvable manager, wired in the
   block's fixture — then drives the action, reaching the decision
   state-machine SQL that is the app's most join-heavy path.
+- **Remaining mutations** — the cheap-fixture endpoints the layers above
+  missed (skills, directory fields, module overrides, bulk operations,
+  on-call assignment, schedule duplicate, attendance, calendar tokens), the
+  multi-actor shift-swap (two assignments on two users), and the CSV/vCard
+  imports. Deliberately excluded: `auth/2fa/*` (enabling 2FA on the shared
+  admin fixture invalidates the login cookie every later test needs, and the
+  endpoints need valid TOTP codes; their single-table SQL is unit-tested) and
+  `schedules/:id/generate` (runs the optimizer, covered by the parity suite;
+  its DB write is the assignment INSERT already swept).
 
 **Adding an endpoint means adding it to the relevant sweep.** This is not
 ceremony: on its first run the GET sweep found four endpoints — `/audit-logs`,
