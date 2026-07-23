@@ -1207,7 +1207,7 @@ migration chain, seeds minimal fixtures, then drops the database. It is
 excluded from `npm test` (see `testPathIgnorePatterns`) and runs in CI inside
 the e2e job, which already provides a MySQL service.
 
-Four layers, 111 tests:
+Five layers, 137 tests:
 
 - **Flows** — login/logout including JTI revocation, refresh-token rotation and
   reuse detection, `POST /api/assignments`, the delegation lifecycle, the user
@@ -1220,11 +1220,19 @@ Four layers, 111 tests:
   the suite's fixtures. A 400 also fails the case: it means validation rejected
   the body and no SQL ran, so the endpoint would appear covered while nothing
   was tested.
-- **Path-parameter mutations** (34 endpoints) — UPDATE and DELETE on a real
-  row. A bogus id would short-circuit at the handler's existence check and
-  never reach the mutation SQL, so each case creates its own disposable row
-  through the admin connection and drives the endpoint against that id. The
-  rows are disposable so a DELETE cannot remove one a later case depends on.
+- **Path-parameter mutations** (42 endpoints) — UPDATE and DELETE on a real
+  row, including the membership join tables. A bogus id would short-circuit at
+  the handler's existence check and never reach the mutation SQL, so each case
+  creates its own disposable row through the admin connection and drives the
+  endpoint against that id. The rows are disposable so a DELETE cannot remove
+  one a later case depends on.
+- **Workflow actions** (18 endpoints) — approve / reject / cancel / apply for
+  time-off, change-requests, policy-exceptions and org-loans, plus the
+  pending-approval decision actions (approve, reject, keep, open-to-structure,
+  delegate). Each files a real request through its endpoint — which needs the
+  requester's primary org unit to have a resolvable manager, wired in the
+  block's fixture — then drives the action, reaching the decision
+  state-machine SQL that is the app's most join-heavy path.
 
 **Adding an endpoint means adding it to the relevant sweep.** This is not
 ceremony: on its first run the GET sweep found four endpoints — `/audit-logs`,
