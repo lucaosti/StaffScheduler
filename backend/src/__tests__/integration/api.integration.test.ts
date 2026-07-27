@@ -1145,3 +1145,131 @@ describe('shift-swap and import run against the real schema', () => {
     expect({ endpoint: testCase.name, status: res.status, error: res.body?.error }).not.toMatchObject({ status: 400 });
   });
 });
+
+/**
+ * Overnight shifts, end to end against real MySQL.
+ *
+ * WHY THIS BLOCK IS MANDATORY RATHER THAN NICE TO HAVE: the fix for #465
+ * introduced new SQL — `TIMESTAMP(s.date, s.start_time)` plus a computed
+ * `INTERVAL ... SECOND` — and the unit suite can only prove that a string was
+ * composed. Whether MySQL parses that expression, and whether it produces the
+ * right answer, is exactly what a mocked pool cannot show. This is the same
+ * class of gap that let three list endpoints return 500 in every deployment
+ * while 2479 mocked tests passed.
+ *
+ * The assertions here are stronger than the sweeps above: those ask only "did
+ * MySQL execute this", because their subject is SQL validity. Here the subject
+ * is the ANSWER, so each case asserts which conflicts come back.
+ */
+describe('overnight shifts run against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  /** A shift on `date`, assigned to the admin fixture user. Returns its id. */
+  const assignedShift = async (
+    date: string,
+    startTime: string,
+    endTime: string
+  ): Promise<number> => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, ?, ?, ?, 'draft', ?)`,
+      [`on-${tag()}`, date, date, departmentId, userId]
+    );
+    const [sh] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, ?, ?, ?, 1, 3, 'open')`,
+      [sc.insertId, departmentId, date, startTime, endTime]
+    );
+    await admin.query(
+      `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
+      [sh.insertId, userId]
+    );
+    return sh.insertId;
+  };
+
+  const conflictsFor = async (date: string, startTime: string, endTime: string) => {
+    const { AssignmentValidator } = require('../../services/AssignmentValidator');
+    const { database } = require('../../config/database');
+    return new AssignmentValidator(database.getPool()).checkConflicts(
+      userId,
+      date,
+      startTime,
+      endTime
+    );
+  };
+
+  it('accepts an overnight shift through the API', async () => {
+    const cookie = await authCookie();
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, '2033-06-01', '2033-06-30', ?, 'draft', ?)`,
+      [`on-api-${tag()}`, departmentId, userId]
+    );
+    // The request schema used to reject this outright with
+    // "overnight shifts are not supported", while every downstream consumer
+    // implemented them. A 400 here means that refusal came back.
+    const res = await request(app)
+      .post('/api/shifts')
+      .set('Cookie', cookie)
+      .send({
+        scheduleId: sc.insertId,
+        departmentId,
+        date: '2033-06-02',
+        startTime: '22:00',
+        endTime: '06:00',
+        minStaff: 1,
+        maxStaff: 2,
+      });
+    expect(res.status).toBeLessThan(400);
+  });
+
+  it('still rejects a zero-length shift', async () => {
+    const cookie = await authCookie();
+    const res = await request(app)
+      .post('/api/shifts')
+      .set('Cookie', cookie)
+      .send({
+        scheduleId,
+        departmentId,
+        date: '2033-06-03',
+        startTime: '08:00',
+        endTime: '08:00',
+        minStaff: 1,
+        maxStaff: 2,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('detects two overnight shifts overlapping on the same date', async () => {
+    // 22:00-06:00 and 23:00-07:00 both dated the 10th genuinely overlap.
+    // The old wall-clock query missed this: '22:00' < '07:00' is false as a
+    // string comparison once the clock has wrapped.
+    await assignedShift('2033-07-10', '22:00:00', '06:00:00');
+    const conflicts = await conflictsFor('2033-07-10', '23:00', '07:00');
+    expect(conflicts.length).toBeGreaterThan(0);
+  });
+
+  it('detects an overnight shift overlapping the following morning', async () => {
+    // 22:00-06:00 on the 20th vs 02:00-08:00 on the 21st: a real overlap of
+    // 02:00-06:00. The old query filtered on `s.date = '2033-07-21'` and never
+    // looked at the row dated the 20th.
+    await assignedShift('2033-07-20', '22:00:00', '06:00:00');
+    const conflicts = await conflictsFor('2033-07-21', '02:00', '08:00');
+    expect(conflicts.length).toBeGreaterThan(0);
+  });
+
+  it('does not report a conflict once the overnight shift has ended', async () => {
+    // 22:00-06:00 on the 25th vs 09:00-17:00 on the 26th: adjacent, not
+    // overlapping. Widening the date filter to the neighbouring days must not
+    // turn every nearby shift into a conflict.
+    await assignedShift('2033-07-25', '22:00:00', '06:00:00');
+    const conflicts = await conflictsFor('2033-07-26', '09:00', '17:00');
+    expect(conflicts).toEqual([]);
+  });
+
+  it('does not report a conflict for a shift ending before the overnight one starts', async () => {
+    await assignedShift('2033-08-05', '22:00:00', '06:00:00');
+    const conflicts = await conflictsFor('2033-08-05', '09:00', '17:00');
+    expect(conflicts).toEqual([]);
+  });
+});
