@@ -229,6 +229,22 @@ complete: nothing documented is unparsed, and nothing parsed is undocumented.
 Reading `req.query` or `req.body` directly in a route is therefore a failing
 build, not a stale-documentation problem.
 
+Both directions resolve `$ref` parameters before classifying them, because a
+`$ref` entry carries only `$ref` and no `in`: testing `parameter.in === 'query'`
+reads `undefined` and treats a referenced query parameter as though it were not
+one. Since query parameters are generated, a referenced one is by construction
+hand-written — precisely the case that needed checking, and the only one the
+guards skipped. That blind spot let two reusable parameters,
+`components.parameters.pageQuery` and `limitQuery`, publish a `limit` filter on
+six operations no schema accepts (queries are schema-validated, so a client
+following the contract had it stripped silently) and a duplicate `page` on four
+of them, through a generator reporting a clean run. Both components are gone;
+`limit` on `GET /api/dashboard/activities` — where the handler took `_req` and
+hardcoded `LIMIT 10` — is now a real, validated parameter bounded at 50, since
+that feed is a preview of the audit trail and `/api/audit-logs` is the endpoint
+for reading through it. A reusable parameter no operation references now fails
+generation, and `in: 'path'` refs (the structural `id`) stay hand-written.
+
 A request body is marked `required` only when its schema has at least one
 required field, so an all-optional body (the free-text audit `reason` /
 `justification` fields) does not force every caller to send `{}`.

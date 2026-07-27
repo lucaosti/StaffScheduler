@@ -10,6 +10,10 @@
  *   other users receive `monthlyCost: null`.
  * - The recent-activities feed reads from `audit_logs` and is therefore
  *   guarded exactly like /api/audit-logs: `audit` module + `audit.read`.
+ *   Its `limit` was documented in the spec but never parsed (the handler took
+ *   `_req` and hardcoded the value); it is now a validated query parameter,
+ *   bounded low because this is a preview of the trail and `/api/audit-logs`
+ *   is the endpoint for reading through it.
  *
  * @author Luca Ostinelli
  */
@@ -23,6 +27,11 @@ import {
   userHasPermission,
 } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
+import { validateQuery } from '../middleware/validation';
+import { dashboardActivitiesQuery } from '../schemas';
+
+/** Feed size when the caller does not ask for one. Unchanged from the hardcoded value. */
+const DEFAULT_ACTIVITY_LIMIT = 10;
 
 // Sargable month window: [first day of current month, first day of next month).
 // Keeps idx_date usable, unlike MONTH(...)/YEAR(...) predicates.
@@ -182,8 +191,14 @@ export const createDashboardRouter = (pool: Pool) => {
     authenticate,
     requireModuleForUser('audit'),
     requirePermission('audit.read'),
+    validateQuery(dashboardActivitiesQuery),
     asyncHandler(async (_req: Request, res: Response) => {
-      // Fetch real activities from audit_logs table
+      // The schema has already clamped this to a positive integer <= 50, and
+      // it is inlined rather than bound: MySQL's binary prepared-statement
+      // protocol rejects placeholders in LIMIT with ER_WRONG_ARGUMENTS, which
+      // is what made the audit-log, change-request and notification lists
+      // return 500 in every deployment until it was found.
+      const limit = (res.locals.query.limit as number | undefined) ?? DEFAULT_ACTIVITY_LIMIT;
       const activitiesQuery = `
         SELECT
           al.id,
@@ -194,7 +209,7 @@ export const createDashboardRouter = (pool: Pool) => {
         FROM audit_logs al
         LEFT JOIN users u ON al.user_id = u.id
         ORDER BY al.created_at DESC
-        LIMIT 10
+        LIMIT ${limit}
       `;
 
       const activities = await queryAll<{
