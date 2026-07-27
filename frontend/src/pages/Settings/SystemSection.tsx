@@ -7,11 +7,44 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { updateCurrency, updateTimePeriod, getSystemSettings } from '../../services/settingsService';
+import {
+  updateCurrency,
+  updateTimePeriod,
+  getSystemSettings,
+  isCurrency,
+  isTimePeriod,
+  type Currency,
+  type TimePeriod,
+} from '../../services/settingsService';
+
+/**
+ * Option lists typed against the contract enums.
+ *
+ * Declaring them this way rather than as literal `<option value="…">` markup
+ * means an option whose value the endpoint does not accept is a compile error.
+ * The two lists previously matched the schema by coincidence; a fifth time
+ * period added to the UI would have looked like a working setting and been
+ * rejected on save. Labels stay here because they are presentation.
+ */
+const CURRENCY_OPTIONS: ReadonlyArray<{ value: Currency; label: string }> = [
+  { value: 'EUR', label: 'EUR — Euro' },
+  { value: 'USD', label: 'USD — US Dollar' },
+];
+
+const TIME_PERIOD_OPTIONS: ReadonlyArray<{ value: TimePeriod; label: string }> = [
+  { value: 'daily', label: 'Daily' },
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'yearly', label: 'Yearly' },
+];
 
 const SystemSection: React.FC = () => {
-  const [currency, setCurrency] = useState<string>('EUR');
-  const [timePeriod, setTimePeriod] = useState<string>('monthly');
+  // Narrowed to the values the endpoints accept, rather than `string`. The
+  // select offers exactly these, so nothing the user can pick changes; what it
+  // stops is the load path below feeding an unexpected stored value straight
+  // back to a PUT that rejects it.
+  const [currency, setCurrency] = useState<Currency>('EUR');
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('monthly');
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState<string | null>(null);
@@ -28,8 +61,18 @@ const SystemSection: React.FC = () => {
           const periodSetting = result.data.find(
             (s) => s.category === 'schedule' && s.key === 'default_time_period'
           );
-          if (currencySetting) setCurrency(currencySetting.value);
-          if (periodSetting) setTimePeriod(periodSetting.value);
+          // `system_settings` is a free-text key/value table, so a stored value
+          // is not guaranteed to be one the endpoint still accepts (an older
+          // release, a manual edit, a seed). Feeding it back unchecked left the
+          // select with no matching option — silently showing the wrong
+          // setting — and then submitted it, earning a 400 the user could not
+          // act on. An unrecognised value keeps the default instead.
+          if (currencySetting && isCurrency(currencySetting.value)) {
+            setCurrency(currencySetting.value);
+          }
+          if (periodSetting && isTimePeriod(periodSetting.value)) {
+            setTimePeriod(periodSetting.value);
+          }
         }
       } catch {
         // Non-critical: the form defaults are still usable.
@@ -95,10 +138,15 @@ const SystemSection: React.FC = () => {
                       className="form-select"
                       id="currency"
                       value={currency}
-                      onChange={(e) => setCurrency(e.target.value)}
+                      onChange={(e) => {
+                        if (isCurrency(e.target.value)) setCurrency(e.target.value);
+                      }}
                     >
-                      <option value="EUR">EUR — Euro</option>
-                      <option value="USD">USD — US Dollar</option>
+                      {CURRENCY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="col-md-6 mb-3">
@@ -107,12 +155,15 @@ const SystemSection: React.FC = () => {
                       className="form-select"
                       id="timePeriod"
                       value={timePeriod}
-                      onChange={(e) => setTimePeriod(e.target.value)}
+                      onChange={(e) => {
+                        if (isTimePeriod(e.target.value)) setTimePeriod(e.target.value);
+                      }}
                     >
-                      <option value="daily">Daily</option>
-                      <option value="weekly">Weekly</option>
-                      <option value="monthly">Monthly</option>
-                      <option value="yearly">Yearly</option>
+                      {TIME_PERIOD_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
