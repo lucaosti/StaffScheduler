@@ -83,9 +83,32 @@ type RequestOptions<P extends keyof paths, M extends HttpMethod> =
       ? { query?: undefined }
       : { query?: QueryParams<P, M> });
 
-/** Substitutes `{name}` placeholders in a path template with param values. */
+/**
+ * Substitutes `{name}` placeholders in a path template with param values.
+ *
+ * A `NaN` param is refused rather than serialised. Every path parameter in the
+ * contract is a positive integer (`idParam` and friends are `positiveInt`), and
+ * services coerce with `Number(id)` because React Router hands route params over
+ * as strings. When that coercion fails — a non-numeric id reaching the service —
+ * `String(NaN)` produces the literal `"NaN"`, so the client would send
+ * `/shifts/NaN` and the caller would get a puzzling 400 from the server about a
+ * path parameter they believed they had supplied. Failing here names the actual
+ * mistake at the actual call site. Same reasoning as refusing an over-large
+ * audit export instead of truncating it: a wrong request that looks plausible is
+ * worse than a loud error.
+ */
 const buildPath = (path: string, params?: Record<string, unknown>): string =>
-  params ? path.replace(/\{(\w+)\}/g, (_, key) => encodeURIComponent(String(params[key]))) : path;
+  params
+    ? path.replace(/\{(\w+)\}/g, (_, key) => {
+        const value = params[key];
+        if (typeof value === 'number' && Number.isNaN(value)) {
+          throw new TypeError(
+            `path parameter '${key}' for '${path}' is NaN — the contract requires a positive integer`
+          );
+        }
+        return encodeURIComponent(String(value));
+      })
+    : path;
 
 /** Serializes a query object, skipping null/undefined, into `?a=1&b=2`. */
 const buildQuery = (query?: Record<string, unknown>): string => {

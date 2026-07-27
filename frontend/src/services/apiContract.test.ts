@@ -60,11 +60,24 @@ const documentedQuery = (endpoint: string): Set<string> => {
  * below fails if one is forgotten.
  */
 const SERVICES: Array<{ file: string; interfaceName: string; endpoint: string }> = [
-  { file: 'shiftService.ts', interfaceName: 'ShiftFilters', endpoint: '/shifts' },
-  { file: 'employeeService.ts', interfaceName: 'EmployeeFilters', endpoint: '/employees' },
   { file: 'attendanceService.ts', interfaceName: 'AttendanceFilters', endpoint: '/attendance' },
   { file: 'auditLogService.ts', interfaceName: 'AuditLogFilters', endpoint: '/audit-logs' },
 ];
+
+/**
+ * A type written as `type X = paths[...]` is the contract by construction, so
+ * there is nothing left for this test to compare — it cannot drift from a
+ * document it is projected from. Comparing a derived type against its own
+ * source would assert only that TypeScript indexes objects correctly.
+ *
+ * `shiftService` and `employeeService` moved here when they were routed through
+ * the generated client; both had drifted twice before, and each fix re-copied
+ * the schema by hand, which resets the clock rather than stopping it.
+ * Derivation is therefore the *stronger* guarantee, and the coverage assertion
+ * below accepts either: a service must derive its types from `paths` OR appear
+ * in SERVICES. A new service can do neither only by failing the suite.
+ */
+const derivesFromContract = (source: string): boolean => /=\s*(?:NonNullable<)?\s*paths\[/.test(source);
 
 /** Property names declared by an interface in a service source file. */
 const declaredKeys = (source: string, interfaceName: string): string[] => {
@@ -90,8 +103,11 @@ const declaredKeys = (source: string, interfaceName: string): string[] => {
  * must mark as required everything the endpoint requires.
  */
 const PAYLOADS: Array<{ file: string; interfaceName: string; method: string; endpoint: string }> = [
-  { file: 'employeeService.ts', interfaceName: 'CreateEmployeeData', method: 'post', endpoint: '/employees' },
-  { file: 'shiftService.ts', interfaceName: 'CreateShiftData', method: 'post', endpoint: '/shifts' },
+  // Both entries that used to live here — CreateEmployeeData and
+  // CreateShiftData — are now `type X = paths[...]['requestBody'][...]`, so
+  // the property this test asserted holds by construction. Kept as the guard
+  // for any payload type still written by hand; the coverage assertion below
+  // is what stops a new one from skipping both routes.
 ];
 
 const requestBody = (method: string, endpoint: string): { props: Set<string>; required: Set<string> } => {
@@ -116,7 +132,13 @@ const splitKeys = (source: string, interfaceName: string): { all: string[]; requ
   return { all, required };
 };
 
-describe('frontend request payloads match the published body contract', () => {
+// `it.each([])` is a Jest error, and PAYLOADS is legitimately empty now that
+// both entries derive from `paths`. Guarding keeps the machinery in place for
+// the next hand-written payload rather than deleting it and rediscovering the
+// need later.
+const describePayloads = PAYLOADS.length > 0 ? describe : describe.skip;
+
+describePayloads('frontend request payloads match the published body contract', () => {
   it.each(PAYLOADS)('$interfaceName declares no field $endpoint rejects', ({ file, interfaceName, method, endpoint }) => {
     const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
     const { props } = requestBody(method, endpoint);
@@ -134,12 +156,30 @@ describe('frontend request payloads match the published body contract', () => {
 });
 
 describe('frontend service filters match the published query contract', () => {
-  it('covers every service that declares a filter interface', () => {
-    const withFilters = fs
+  /**
+   * The coverage rule, and the reason this file keeps earning its place: a
+   * service may satisfy the contract either by DERIVING its types from `paths`
+   * or by being listed in SERVICES for comparison. Doing neither — a fresh
+   * hand-written `*Filters` interface nothing checks — is how `ShiftFilters`
+   * and `EmployeeFilters` drifted in the first place, so it fails here.
+   */
+  it('leaves no service both hand-written and unchecked', () => {
+    const unchecked = fs
       .readdirSync(__dirname)
       .filter((f) => f.endsWith('Service.ts'))
-      .filter((f) => /interface \w*Filters \{/.test(fs.readFileSync(path.join(__dirname, f), 'utf8')));
-    expect(withFilters.sort()).toEqual(SERVICES.map((s) => s.file).sort());
+      .filter((f) => {
+        const source = fs.readFileSync(path.join(__dirname, f), 'utf8');
+        return /interface \w*Filters \{/.test(source) && !derivesFromContract(source);
+      })
+      .filter((f) => !SERVICES.some((s) => s.file === f));
+    expect(unchecked).toEqual([]);
+  });
+
+  it('still checks the services that have not been converted yet', () => {
+    // Sanity floor: if SERVICES empties out because every service was
+    // converted, say so deliberately rather than letting the suite pass
+    // vacuously with nothing left to compare.
+    expect(SERVICES.length).toBeGreaterThan(0);
   });
 
   it.each(SERVICES)('$file sends only parameters $endpoint documents', ({ file, interfaceName, endpoint }) => {
