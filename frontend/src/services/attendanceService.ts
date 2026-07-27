@@ -1,79 +1,86 @@
+/**
+ * Attendance service — wraps the `/api/attendance` endpoints (clock in/out,
+ * the record list, approval decisions and the cost estimate).
+ *
+ * Routed through the generated client so path, method, body and query are all
+ * checked against the OpenAPI contract at compile time; the filter and body
+ * types are derived from it rather than retyped. See `departmentService` for
+ * the full rationale, and `employeeService` for what hand-mirrored payload
+ * types have cost in this codebase.
+ *
+ * WHY THE `notes ? { notes } : {}` DANCE IS GONE: the four action endpoints
+ * take an all-optional body, so `{}` and `{ notes }` are equally valid and the
+ * conditional was expressing nothing. Passing the object directly lets the
+ * derived body type carry the optionality, and the client omits the field when
+ * it is undefined.
+ *
+ * `AttendanceRecord` and `AttendanceCostEstimate` stay hand-written: neither is
+ * declared in `packages/shared/src/domain.ts` yet, so there is nothing to
+ * derive the response shapes from.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { ApiResponse, AttendanceRecord, AttendanceCostEstimate } from '../types';
-import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
-interface AttendanceFilters {
-  userId?: number;
-  status?: 'pending' | 'approved' | 'rejected';
-  startDate?: string;
-  endDate?: string;
-}
+export type AttendanceFilters = NonNullable<paths['/attendance']['get']['parameters']['query']>;
+export type CostEstimateParams = NonNullable<
+  paths['/attendance/cost-estimate']['get']['parameters']['query']
+>;
 
-interface CostEstimateParams {
-  startDate: string;
-  endDate: string;
-  departmentId?: number;
-}
+type NotesBody = NonNullable<
+  paths['/attendance/clock-in']['post']['requestBody']
+>['content']['application/json'];
 
-const buildQuery = <T extends object>(params: T): string => {
-  const query = new URLSearchParams();
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) query.append(key, String(value));
-  });
-  const qs = query.toString();
-  return qs ? `?${qs}` : '';
-};
+export const clockIn = (notes?: string): Promise<ApiResponse<AttendanceRecord>> =>
+  apiClient.post<AttendanceRecord, '/attendance/clock-in'>('/attendance/clock-in', {
+    notes,
+  } satisfies NotesBody);
 
-export const clockIn = async (notes?: string): Promise<ApiResponse<AttendanceRecord>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance/clock-in`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify(notes ? { notes } : {}),
-  });
-  return handleResponse<AttendanceRecord>(response);
-};
+export const clockOut = (
+  id: number | string,
+  notes?: string
+): Promise<ApiResponse<AttendanceRecord>> =>
+  apiClient.post<AttendanceRecord, '/attendance/{id}/clock-out'>(
+    '/attendance/{id}/clock-out',
+    { notes },
+    { params: { id: Number(id) } }
+  );
 
-export const clockOut = async (id: number | string, notes?: string): Promise<ApiResponse<AttendanceRecord>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance/${id}/clock-out`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify(notes ? { notes } : {}),
-  });
-  return handleResponse<AttendanceRecord>(response);
-};
+export const getAttendanceRecords = (
+  filters: AttendanceFilters = {}
+): Promise<ApiResponse<AttendanceRecord[]>> =>
+  apiClient.get<AttendanceRecord[], '/attendance'>('/attendance', { query: filters });
 
-export const getAttendanceRecords = async (filters: AttendanceFilters = {}): Promise<ApiResponse<AttendanceRecord[]>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance${buildQuery(filters)}`, {
-    method: 'GET',
-    ...getAuthHeaders(),
-  });
-  return handleResponse<AttendanceRecord[]>(response);
-};
-
-export const getPendingApprovals = async (): Promise<ApiResponse<AttendanceRecord[]>> =>
+export const getPendingApprovals = (): Promise<ApiResponse<AttendanceRecord[]>> =>
   getAttendanceRecords({ status: 'pending' });
 
-export const approveAttendance = async (id: number | string, notes?: string): Promise<ApiResponse<AttendanceRecord>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance/${id}/approve`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify(notes ? { notes } : {}),
-  });
-  return handleResponse<AttendanceRecord>(response);
-};
+export const approveAttendance = (
+  id: number | string,
+  notes?: string
+): Promise<ApiResponse<AttendanceRecord>> =>
+  apiClient.post<AttendanceRecord, '/attendance/{id}/approve'>(
+    '/attendance/{id}/approve',
+    { notes },
+    { params: { id: Number(id) } }
+  );
 
-export const rejectAttendance = async (id: number | string, notes?: string): Promise<ApiResponse<AttendanceRecord>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance/${id}/reject`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify(notes ? { notes } : {}),
-  });
-  return handleResponse<AttendanceRecord>(response);
-};
+export const rejectAttendance = (
+  id: number | string,
+  notes?: string
+): Promise<ApiResponse<AttendanceRecord>> =>
+  apiClient.post<AttendanceRecord, '/attendance/{id}/reject'>(
+    '/attendance/{id}/reject',
+    { notes },
+    { params: { id: Number(id) } }
+  );
 
-export const getCostEstimate = async (params: CostEstimateParams): Promise<ApiResponse<AttendanceCostEstimate>> => {
-  const response = await fetch(`${API_BASE_URL}/attendance/cost-estimate${buildQuery(params)}`, {
-    method: 'GET',
-    ...getAuthHeaders(),
-  });
-  return handleResponse<AttendanceCostEstimate>(response);
-};
+export const getCostEstimate = (
+  params: CostEstimateParams
+): Promise<ApiResponse<AttendanceCostEstimate>> =>
+  apiClient.get<AttendanceCostEstimate, '/attendance/cost-estimate'>(
+    '/attendance/cost-estimate',
+    { query: params }
+  );
