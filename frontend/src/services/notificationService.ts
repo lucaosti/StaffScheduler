@@ -1,11 +1,29 @@
 /**
- * Notifications client — wraps /api/notifications endpoints.
+ * Notifications client — wraps the `/api/notifications` endpoints.
+ *
+ * Routed through the generated client so path, method and query are checked
+ * against the OpenAPI contract at compile time. See `departmentService` for
+ * the full rationale.
+ *
+ * The options type is derived from the contract rather than hand-declared,
+ * which also removes the manual `URLSearchParams` assembly. Note `unreadOnly`
+ * is the string enum `'0' | '1'`, not a boolean — the historical spelling the
+ * endpoint has always parsed. The old code converted a boolean to `'1'` and
+ * omitted the parameter entirely when false, which happened to agree with the
+ * schema; deriving the type makes that agreement structural instead of
+ * coincidental. `limit` here is a genuine documented parameter, unlike the
+ * phantom one the spec used to publish through a reusable `$ref`.
+ *
+ * `AppNotification` stays hand-written: notifications are not among the domain
+ * entities declared in `packages/shared/src/domain.ts`, so there is nothing to
+ * derive the response shape from yet.
  *
  * @author Luca Ostinelli
  */
 
 import { ApiResponse } from '../types';
-import { AUTH_HEADERS, handleResponse, API_BASE_URL } from './apiUtils';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
 export interface AppNotification {
   id: number;
@@ -19,30 +37,25 @@ export interface AppNotification {
   readAt: string | null;
 }
 
-const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: { ...AUTH_HEADERS, ...(init.headers as Record<string, string> ?? {}) },
-  });
-  return handleResponse<T>(res);
-};
+export type NotificationFilters = NonNullable<
+  paths['/notifications']['get']['parameters']['query']
+>;
 
 export const listNotifications = (
-  options: { unreadOnly?: boolean; limit?: number } = {}
-): Promise<ApiResponse<AppNotification[]>> => {
-  const qs = new URLSearchParams();
-  if (options.unreadOnly) qs.set('unreadOnly', '1');
-  if (options.limit !== undefined) qs.set('limit', String(options.limit));
-  const suffix = qs.toString() ? `?${qs}` : '';
-  return request<AppNotification[]>(`/notifications${suffix}`);
-};
+  options: NotificationFilters = {}
+): Promise<ApiResponse<AppNotification[]>> =>
+  apiClient.get<AppNotification[], '/notifications'>('/notifications', { query: options });
 
 export const getUnreadCount = (): Promise<ApiResponse<{ count: number }>> =>
-  request<{ count: number }>('/notifications/unread-count');
+  apiClient.get<{ count: number }, '/notifications/unread-count'>('/notifications/unread-count');
 
 export const markNotificationRead = (id: number): Promise<ApiResponse<void>> =>
-  request<void>(`/notifications/${id}/read`, { method: 'PATCH' });
+  apiClient.patch<void, '/notifications/{id}/read'>('/notifications/{id}/read', undefined, {
+    params: { id },
+  });
 
 export const markAllNotificationsRead = (): Promise<ApiResponse<{ updated: number }>> =>
-  request<{ updated: number }>('/notifications/read-all', { method: 'PATCH' });
+  apiClient.patch<{ updated: number }, '/notifications/read-all'>(
+    '/notifications/read-all',
+    undefined
+  );
