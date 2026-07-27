@@ -193,9 +193,15 @@ class ScheduleOptimizerORTools:
             # what the shift requires. Tracked so the objective can charge for
             # them; see _build_objective_function for why that is necessary
             # once workload fairness enters the model.
-            surplus = self.model.NewIntVar(0, max(0, max_staff - min_staff), f'surplus_s{shift_id}')
+            surplus_cap = max(0, max_staff - min_staff)
+            surplus = self.model.NewIntVar(0, surplus_cap, f'surplus_s{shift_id}')
             self.model.Add(surplus >= sum(assignments_for_shift) - min_staff)
-            self.coverage_surplus[shift_id] = surplus
+            # The cap is kept alongside the variable rather than read back from
+            # the solver's proto: `var.Proto().domain` is an internal detail
+            # whose shape is not part of the OR-Tools public API and differs
+            # between versions. Storing what we already know avoids depending
+            # on it at all.
+            self.coverage_surplus[shift_id] = (surplus, surplus_cap)
     
     def _add_no_double_booking_constraints(self):
         """
@@ -587,9 +593,9 @@ class ScheduleOptimizerORTools:
                 (self._shift_minutes(sh) for sh in self.shifts.values()), default=0
             )
             surplus_scale = longest * fairness_scale + 1
-            for surplus in self.coverage_surplus.values():
+            for surplus, surplus_cap in self.coverage_surplus.values():
                 soft_terms.append(-surplus * surplus_scale)
-                soft_bound += surplus.Proto().domain[-1] * surplus_scale
+                soft_bound += surplus_cap * surplus_scale
 
         # Strictly greater than that bound, so one unit of shortfall always
         # costs more than the ENTIRE soft level can ever be worth. This is what
