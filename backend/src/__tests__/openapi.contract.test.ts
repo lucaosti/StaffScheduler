@@ -46,11 +46,17 @@ const spec = JSON.parse(
       string,
       {
         requestBody?: { content?: { 'application/json'?: { schema?: JsonObject } } };
-        parameters?: Array<{ name: string; in: string; schema?: JsonObject; required?: boolean }>;
+        // `name`/`in` are absent on a `$ref` entry — the shape that made the
+        // `prm.in === 'query'` filters below skip referenced parameters.
+        parameters?: Array<{ name?: string; in?: string; $ref?: string; schema?: JsonObject; required?: boolean }>;
       }
     >
   >;
-  components?: { responses?: Record<string, JsonObject>; schemas?: Record<string, JsonObject> };
+  components?: {
+    responses?: Record<string, JsonObject>;
+    schemas?: Record<string, JsonObject>;
+    parameters?: Record<string, { name?: string; in?: string }>;
+  };
 };
 
 /** Resolves a local `#/components/...` $ref one hop; returns the node itself otherwise. */
@@ -142,7 +148,13 @@ describe('documented query parameters are backed by validateQuery', () => {
   const documented: Array<{ id: string; params: Array<{ name: string; schema?: JsonObject }> }> = [];
   for (const [routePath, methods] of Object.entries(spec.paths)) {
     for (const [method, op] of Object.entries(methods)) {
-      const query = (op.parameters ?? []).filter((prm) => prm.in === 'query');
+      // Inline query parameters only. A `$ref` entry has no `in`, so it cannot
+      // land here — which was the blind spot; the guards further down assert
+      // that no referenced parameter is a query one in the first place.
+      const query = (op.parameters ?? []).filter(
+        (prm): prm is { name: string; in: string; schema?: JsonObject } =>
+          prm.in === 'query' && typeof prm.name === 'string'
+      );
       if (query.length > 0) {
         documented.push({
           id: `${method.toUpperCase()} ${routePath}`,
@@ -212,6 +224,69 @@ describe('documented query parameters are backed by validateQuery', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+
+  /**
+   * The blind spot both guards shared: a `$ref` parameter object carries only
+   * `$ref`, so `prm.in === 'query'` reads `undefined` and classifies it as "not
+   * a query parameter". Every check above — and the generator's own — therefore
+   * skipped exactly the parameters that are NOT derived from Zod.
+   *
+   * That is how `components.parameters.limitQuery` published a `limit` filter on
+   * six operations no schema has ever accepted (queries are schema-validated, so
+   * a client following the contract had it silently stripped) and a duplicate
+   * `page` on four more, through a generator reporting a clean run.
+   *
+   * Asserting the invariant rather than the six symptoms: query parameters are
+   * generated, so a referenced one is by construction hand-written and cannot be
+   * checked against the code. `in: 'path'` refs stay legitimate — `id` is
+   * structural and deliberately hand-written.
+   */
+  it('references no query parameter, since query parameters are generated', () => {
+    const componentParams = (spec.components?.parameters ?? {}) as Record<string, { in?: string }>;
+    const referencedQuery: string[] = [];
+    for (const [routePath, methods] of Object.entries(spec.paths)) {
+      for (const [method, op] of Object.entries(methods)) {
+        for (const prm of op.parameters ?? []) {
+          const ref = prm.$ref;
+          if (!ref) continue;
+          const target = componentParams[ref.replace('#/components/parameters/', '')];
+          expect(target).toBeDefined();
+          if (target?.in === 'query') referencedQuery.push(`${method.toUpperCase()} ${routePath} -> ${ref}`);
+        }
+      }
+    }
+    expect(referencedQuery).toEqual([]);
+  });
+
+  it('declares no reusable parameter that nothing references', () => {
+    // A reusable parameter with no operation behind it is a contract statement
+    // nothing can honour, and an invitation to re-attach it later.
+    const referenced = new Set<string>();
+    for (const methods of Object.values(spec.paths)) {
+      for (const op of Object.values(methods)) {
+        for (const prm of op.parameters ?? []) {
+          if (prm.$ref) referenced.add(prm.$ref.replace('#/components/parameters/', ''));
+        }
+      }
+    }
+    const orphaned = Object.keys(spec.components?.parameters ?? {}).filter((n) => !referenced.has(n));
+    expect(orphaned).toEqual([]);
+  });
+
+  it('documents each query parameter exactly once per operation', () => {
+    // OpenAPI requires (name, in) to be unique per operation. Four operations
+    // published `page` twice — once inline from Zod, once through the `$ref` —
+    // which no validator in the pipeline was looking for.
+    const duplicated: string[] = [];
+    for (const { id, params } of documented) {
+      const seen = new Set<string>();
+      for (const { name } of params) {
+        if (seen.has(name)) duplicated.push(`${id} -> ${name}`);
+        seen.add(name);
+      }
+    }
+    expect(duplicated).toEqual([]);
   });
 
   it('wires validateQuery at least once per endpoint that documents filters', () => {

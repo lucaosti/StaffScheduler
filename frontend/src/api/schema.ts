@@ -1894,7 +1894,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    limit?: components["parameters"]["limitQuery"];
+                    limit?: number;
                 };
                 header?: never;
                 path?: never;
@@ -2748,11 +2748,10 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    page?: number;
-                    limit?: components["parameters"]["limitQuery"];
                     search?: string;
                     department?: string;
                     isActive?: boolean | ("true" | "false");
+                    page?: number;
                     pageSize?: number;
                 };
                 header?: never;
@@ -6017,12 +6016,11 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    page?: number;
-                    limit?: components["parameters"]["limitQuery"];
                     departmentId?: number;
                     status?: "draft" | "published" | "archived";
                     startDate?: string;
                     endDate?: string;
+                    page?: number;
                     pageSize?: number;
                 };
                 header?: never;
@@ -7106,14 +7104,13 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    page?: number;
-                    limit?: components["parameters"]["limitQuery"];
                     scheduleId?: number;
                     departmentId?: number;
                     date?: string;
                     startDate?: string;
                     endDate?: string;
                     status?: "open" | "assigned" | "confirmed" | "cancelled";
+                    page?: number;
                     pageSize?: number;
                 };
                 header?: never;
@@ -7615,8 +7612,6 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    page?: components["parameters"]["pageQuery"];
-                    limit?: components["parameters"]["limitQuery"];
                     status?: string;
                     userId?: number;
                 };
@@ -8193,12 +8188,11 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    page?: number;
-                    limit?: components["parameters"]["limitQuery"];
                     search?: string;
                     department?: string;
                     roleId?: number;
                     isActive?: boolean | ("true" | "false");
+                    page?: number;
                     pageSize?: number;
                 };
                 header?: never;
@@ -9367,8 +9361,6 @@ export interface components {
     };
     parameters: {
         id: number;
-        pageQuery: number;
-        limitQuery: number;
     };
     requestBodies: never;
     headers: never;

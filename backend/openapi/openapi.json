@@ -1198,25 +1198,6 @@
           "type": "integer",
           "minimum": 1
         }
-      },
-      "pageQuery": {
-        "name": "page",
-        "in": "query",
-        "schema": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 1
-        }
-      },
-      "limitQuery": {
-        "name": "limit",
-        "in": "query",
-        "schema": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 200,
-          "default": 20
-        }
       }
     }
   },
@@ -3456,11 +3437,6 @@
           "Dashboard"
         ],
         "summary": "Recent activity feed",
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          }
-        ],
         "responses": {
           "200": {
             "description": "Activity list."
@@ -3475,7 +3451,18 @@
             "description": "Audit module disabled."
           }
         },
-        "description": "Last audit-log entries. Guarded exactly like /audit-logs: requires the `audit` module enabled for the caller's organization and the `audit.read` permission."
+        "description": "Last audit-log entries. Guarded exactly like /audit-logs: requires the `audit` module enabled for the caller's organization and the `audit.read` permission.",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 50
+            }
+          }
+        ]
       }
     },
     "/dashboard/departments": {
@@ -4253,12 +4240,6 @@
         ],
         "summary": "List employees",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/pageQuery"
-          },
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          },
           {
             "name": "search",
             "in": "query",
@@ -8068,12 +8049,6 @@
         "summary": "List schedules",
         "parameters": [
           {
-            "$ref": "#/components/parameters/pageQuery"
-          },
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          },
-          {
             "name": "departmentId",
             "in": "query",
             "schema": {
@@ -9203,12 +9178,6 @@
         "summary": "List shifts",
         "parameters": [
           {
-            "$ref": "#/components/parameters/pageQuery"
-          },
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          },
-          {
             "name": "scheduleId",
             "in": "query",
             "schema": {
@@ -9862,12 +9831,6 @@
         "description": "Employees see their own requests; managers see all requests in their departments.",
         "parameters": [
           {
-            "$ref": "#/components/parameters/pageQuery"
-          },
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          },
-          {
             "name": "status",
             "in": "query",
             "schema": {
@@ -10442,12 +10405,6 @@
         "summary": "List users",
         "description": "Returns the user directory. Callers holding `user.read_all` get the complete, unscoped list; everyone else receives only users in departments they manage.",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/pageQuery"
-          },
-          {
-            "$ref": "#/components/parameters/limitQuery"
-          },
           {
             "name": "search",
             "in": "query",
