@@ -1,51 +1,70 @@
 /**
  * Department Service
  *
- * API client for department CRUD operations against `/api/departments`.
+ * API client for department CRUD against `/api/departments`.
+ *
+ * WHY THE GENERATED CLIENT: this module used to rebuild the fetch call by
+ * hand — a local `request` helper wrapping `fetch` with `AUTH_HEADERS` and
+ * template-literal paths. A wrong path, a wrong method or a body the backend
+ * no longer accepts compiled cleanly and failed at runtime. Going through
+ * `../api/client` checks all three against the OpenAPI contract at compile
+ * time. Public function signatures are unchanged, so call sites and tests are
+ * untouched; the typing lives inside the module.
+ *
+ * WHY THE LOCAL `Department` INTERFACE IS GONE: it declared five fields
+ * (`id`, `name`, `description`, `managerId`, `isActive`) where the contract
+ * has ten — missing `managerName`, `orgUnitId`, `employeeCount`, `createdAt`
+ * and `updatedAt`, and marking `isActive` optional where the schema requires
+ * it. A second hand-written copy of a shared type is the exact shape that made
+ * the audit log's actor column render an em-dash on every row: the data was in
+ * the response and the type said it was not there. The entity is declared once
+ * in `@staff-scheduler/shared` (`departmentSchema`, from which the OpenAPI
+ * component is generated) and re-exported by the type barrel, so importers keep
+ * the same `Department` name and cannot drift from the wire shape again.
  *
  * @author Luca Ostinelli
  */
 
-import { ApiResponse } from '../types';
-import { AUTH_HEADERS, handleResponse, API_BASE_URL } from './apiUtils';
+import type { ApiResponse, Department } from '../types';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
+export type { Department };
 
-export interface Department {
-  id: number;
-  name: string;
-  description?: string | null;
-  managerId?: number | null;
-  isActive?: boolean;
-}
+/**
+ * Request bodies and query filters taken from the generated contract rather
+ * than retyped. Hand-mirrored payload types are what let `CreateEmployeeData`
+ * omit the required `password` — describing a request the server would never
+ * accept, so every employee creation from the UI was rejected — and what let
+ * `EmployeeFilters` send a `limit` the endpoint has never had. Deriving them
+ * removes the copy that drifts rather than adding another test to compare it.
+ */
+export type CreateDepartmentData =
+  paths['/departments']['post']['requestBody']['content']['application/json'];
+export type UpdateDepartmentData =
+  NonNullable<paths['/departments/{id}']['put']['requestBody']>['content']['application/json'];
+export type DepartmentFilters = NonNullable<paths['/departments']['get']['parameters']['query']>;
 
-const request = async <T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> => {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: { ...AUTH_HEADERS, ...(init.headers as Record<string, string> ?? {}) },
-  });
-  return handleResponse<T>(res);
-};
-
-export const getDepartments = () => request<Department[]>('/departments');
+export const getDepartments = (filters: DepartmentFilters = {}) =>
+  apiClient.get<Department[], '/departments'>('/departments', { query: filters });
 
 export const getDepartmentById = (id: number | string) =>
-  request<Department>(`/departments/${id}`);
-
-export const createDepartment = (data: { name: string; description?: string; managerId?: number }) =>
-  request<Department>('/departments', {
-    method: 'POST',
-    body: JSON.stringify(data),
+  apiClient.get<Department, '/departments/{id}'>('/departments/{id}', {
+    params: { id: Number(id) },
   });
+
+export const createDepartment = (data: CreateDepartmentData): Promise<ApiResponse<Department>> =>
+  apiClient.post<Department, '/departments'>('/departments', data);
 
 export const updateDepartment = (
   id: number | string,
-  data: { name?: string; description?: string; managerId?: number }
-) =>
-  request<Department>(`/departments/${id}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
+  data: UpdateDepartmentData
+): Promise<ApiResponse<Department>> =>
+  apiClient.put<Department, '/departments/{id}'>('/departments/{id}', data, {
+    params: { id: Number(id) },
   });
 
 export const deleteDepartment = (id: number | string) =>
-  request<unknown>(`/departments/${id}`, { method: 'DELETE' });
+  apiClient.delete<unknown, '/departments/{id}'>('/departments/{id}', {
+    params: { id: Number(id) },
+  });
