@@ -1,206 +1,80 @@
 /**
  * Employee Service for Staff Scheduler Frontend
- * 
- * Handles all employee-related API calls including CRUD operations,
- * filtering, pagination, and data management.
- * 
- * Features:
- * - Full CRUD operations for employee management
- * - Advanced filtering and search capabilities
- * - Pagination support for large datasets
- * - Error handling with custom ApiError
- * - Type-safe API responses
- * 
+ *
+ * API client for employee CRUD, filtering and pagination against
+ * `/api/employees`.
+ *
+ * WHY THE GENERATED CLIENT: every call was a hand-built `fetch` with a
+ * template-literal path and a manually assembled `URLSearchParams`, so a wrong
+ * path, method or body compiled cleanly and failed at runtime. Routing through
+ * `../api/client` checks all three against the OpenAPI contract at compile
+ * time. Public signatures are unchanged, so call sites and tests are untouched.
+ *
+ * WHY THE TYPES ARE DERIVED RATHER THAN MIRRORED: the hand-written copies here
+ * caused the two worst frontend defects found in this codebase.
+ *
+ *   - `CreateEmployeeData` omitted `password`, which `createUserBody`
+ *     requires, so EVERY employee creation from the UI was rejected with a
+ *     400. The type hid it: it described a request the server would never
+ *     accept. It also declared eight fields the endpoint does not have
+ *     (`address`, `certifications`, `department`, `employeeType`, `hireDate`,
+ *     `maxHoursPerWeek`, `notes`, `skills`), which the server strips — so a
+ *     caller sending them got a 201 and silently lost the data.
+ *   - `EmployeeFilters` declared `position`, `sortBy`, `sortOrder` and
+ *     `limit`, none of which this endpoint accepts, and omitted `pageSize`.
+ *     `useEmployeesQuery` sent `limit: 50` believing it capped the list; the
+ *     endpoint's key is `pageSize`, so the cap did nothing and the request
+ *     fetched every row.
+ *
+ * Both were fixed by re-copying the schema by hand, which only resets the
+ * clock on the next drift. Taking the types from the generated `paths` removes
+ * the copy: they cannot disagree with the contract, because they are the
+ * contract. Note this was only safe once the spec stopped publishing a phantom
+ * `limit` through a reusable `$ref` — deriving from a lying contract would
+ * have re-imported the very parameter the fix above removed.
+ *
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, Employee } from '../types';
-import { handleResponse, getAuthHeaders, API_BASE_URL } from './apiUtils';
+import type { ApiResponse, Employee } from '../types';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
+export type EmployeeFilters = NonNullable<paths['/employees']['get']['parameters']['query']>;
+export type CreateEmployeeData =
+  paths['/employees']['post']['requestBody']['content']['application/json'];
+export type UpdateEmployeeData =
+  NonNullable<paths['/employees/{id}']['put']['requestBody']>['content']['application/json'];
 
 /**
- * Interface for employee filtering and pagination options
- */
-/**
- * Mirrors the server's `employeeListQuery` schema.
+ * Employees matching the filters.
  *
- * It had drifted: `position`, `sortBy` and `sortOrder` were never parameters
- * this endpoint accepts, and the page size is `pageSize`, not `limit`. Since
- * the query contract became schema-validated those keys are stripped outright,
- * so sending them looked like a working sort and a working page cap while
- * neither did anything — `limit: 50` in particular read as a bound on the
- * employees list while the request actually returned every row.
- */
-interface EmployeeFilters {
-  /** Filter by department id or name. */
-  department?: string;
-  /** Search term matched against names, email and employee id. */
-  search?: string;
-  isActive?: boolean;
-  /** Page number (1-based). Supplying page or pageSize returns the envelope. */
-  page?: number;
-  pageSize?: number;
-}
-
-/**
- * Interface for creating new employee records
- */
-/**
- * Mirrors the server's `createUserBody` schema.
+ * Supplying `page` or `pageSize` makes the API return the paginated envelope
+ * (`{ data, meta }`); without them it returns the plain list.
  *
- * It had drifted the same way `EmployeeFilters` did: `address`,
- * `certifications`, `department`, `employeeType`, `hireDate`,
- * `maxHoursPerWeek`, `notes` and `skills` are not fields `POST /employees`
- * accepts. Since request bodies are schema-validated the server strips them,
- * so a caller sending them got a 201 and silently lost the data.
- *
- * `skillIds` and `roleIds` are the real ways to attach skills and roles.
- */
-export interface CreateEmployeeData {
-  /** Login address; also the account's unique identity. */
-  email: string;
-  password: string;
-  firstName: string;
-  lastName: string;
-  /** Human-facing staff number, distinct from the numeric user id. */
-  employeeId?: string;
-  phone?: string;
-  position?: string;
-  hourlyRate?: number;
-  departmentIds?: number[];
-  skillIds?: number[];
-  roleIds?: number[];
-}
-
-export type UpdateEmployeeData = Partial<CreateEmployeeData>;
-
-/**
- * Retrieves a list of employees with optional filtering and pagination
- * @param filters - Optional filtering and pagination parameters
- * @returns Promise resolving to array of employees matching criteria
- * @throws {ApiError} When request fails or user lacks permissions
- * 
  * @example
  * ```typescript
- * // Get all employees
- * const allEmployees = await getEmployees();
- * 
- * // Get filtered employees with pagination
- * const filteredEmployees = await getEmployees({
- *   department: 'IT',
- *   page: 1,
- *   pageSize: 10,
- * });
+ * const all = await getEmployees();
+ * const page = await getEmployees({ department: 'IT', page: 1, pageSize: 10 });
  * ```
  */
-export const getEmployees = async (filters: EmployeeFilters = {}): Promise<ApiResponse<Employee[]>> => {
-  const queryParams = new URLSearchParams();
-  
-  Object.entries(filters).forEach(([key, value]) => {
-    if (value !== undefined && value !== null) {
-      queryParams.append(key, value.toString());
-    }
+export const getEmployees = (filters: EmployeeFilters = {}): Promise<ApiResponse<Employee[]>> =>
+  apiClient.get<Employee[], '/employees'>('/employees', { query: filters });
+
+export const getEmployee = (id: number | string): Promise<ApiResponse<Employee>> =>
+  apiClient.get<Employee, '/employees/{id}'>('/employees/{id}', { params: { id: Number(id) } });
+
+export const createEmployee = (
+  employeeData: CreateEmployeeData
+): Promise<ApiResponse<Employee>> => apiClient.post<Employee, '/employees'>('/employees', employeeData);
+
+export const updateEmployee = (
+  id: number | string,
+  employeeData: UpdateEmployeeData
+): Promise<ApiResponse<Employee>> =>
+  apiClient.put<Employee, '/employees/{id}'>('/employees/{id}', employeeData, {
+    params: { id: Number(id) },
   });
 
-  const response = await fetch(`${API_BASE_URL}/employees?${queryParams}`, {
-    method: 'GET',
-    ...getAuthHeaders(),
-  });
-  
-  return handleResponse<Employee[]>(response);
-};
-
-/**
- * Retrieves a specific employee by their ID
- * @param employeeId - Unique identifier of the employee
- * @returns Promise resolving to employee data
- * @throws {ApiError} When employee not found or access denied
- * 
- * @example
- * ```typescript
- * const employee = await getEmployee('EMP001');
- * console.log(`Employee: ${employee.data.firstName} ${employee.data.lastName}`);
- * ```
- */
-export const getEmployee = async (id: number | string): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'GET',
-    ...getAuthHeaders(),
-  });
-  
-  return handleResponse<Employee>(response);
-};
-
-/**
- * Creates a new employee record
- * @param employeeData - Complete employee information for creation
- * @returns Promise resolving to the newly created employee
- * @throws {ApiError} When validation fails or employee ID conflicts
- * 
- * @example
- * ```typescript
- * const newEmployee = await createEmployee({
- *   employeeId: 'EMP123',
- *   firstName: 'John',
- *   lastName: 'Doe',
- *   email: 'john.doe@company.com',
- *   department: 'IT',
- *   position: 'Developer'
- * });
- * ```
- */
-export const createEmployee = async (employeeData: CreateEmployeeData): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify(employeeData),
-  });
-  
-  return handleResponse<Employee>(response);
-};
-
-/**
- * Updates an existing employee record
- * @param employeeId - ID of the employee to update
- * @param employeeData - Partial employee data with fields to update
- * @returns Promise resolving to the updated employee
- * @throws {ApiError} When employee not found or validation fails
- * 
- * @example
- * ```typescript
- * const updated = await updateEmployee('EMP123', {
- *   position: 'Senior Developer',
- *   hourlyRate: 85.00
- * });
- * ```
- */
-export const updateEmployee = async (id: number | string, employeeData: UpdateEmployeeData): Promise<ApiResponse<Employee>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'PUT',
-    ...getAuthHeaders(),
-    body: JSON.stringify(employeeData),
-  });
-  
-  return handleResponse<Employee>(response);
-};
-
-/**
- * Deletes an employee record
- * @param employeeId - ID of the employee to delete
- * @returns Promise resolving when deletion is complete
- * @throws {ApiError} When employee not found or deletion fails
- * 
- * @example
- * ```typescript
- * await deleteEmployee('EMP123');
- * console.log('Employee deleted successfully');
- * ```
- */
-export const deleteEmployee = async (id: number | string): Promise<ApiResponse<void>> => {
-  const response = await fetch(`${API_BASE_URL}/employees/${id}`, {
-    method: 'DELETE',
-    ...getAuthHeaders(),
-  });
-  
-  return handleResponse<void>(response);
-};
+export const deleteEmployee = (id: number | string): Promise<ApiResponse<void>> =>
+  apiClient.delete<void, '/employees/{id}'>('/employees/{id}', { params: { id: Number(id) } });
