@@ -78,33 +78,41 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
             )}
             <form onSubmit={handleSubmit}>
               <h6 className="mb-3">Schedule Constraints</h6>
+              <div className="alert alert-secondary py-2 small" id="limitsSetByManager" role="note">
+                <i className="bi bi-lock me-2" aria-hidden="true"></i>
+                Your working-time limits are set by your manager. They are shown
+                here because they govern what you can be scheduled for.
+              </div>
               <div className="row">
+                {/*
+                  READ-ONLY BY DESIGN. These two were editable and saved through
+                  the self-service endpoint, so an employee could raise their own
+                  maximum weekly hours and consecutive working days — limits the
+                  optimizer enforces as hard constraints, and legally bounded in
+                  most jurisdictions. They are displayed rather than hidden
+                  because they explain why someone is or is not being scheduled;
+                  changing them requires `preferences.manage`.
+                */}
                 <div className="col-md-4 mb-3">
                   <label htmlFor="maxHoursPerWeek" className="form-label">Max Hours Per Week</label>
                   <input
                     type="number"
-                    min="20"
-                    max="60"
                     className="form-control"
                     id="maxHoursPerWeek"
                     value={settings.maxHoursPerWeek}
-                    onChange={(e) =>
-                      onChange({ ...settings, maxHoursPerWeek: parseInt(e.target.value) })
-                    }
+                    readOnly
+                    aria-describedby="limitsSetByManager"
                   />
                 </div>
                 <div className="col-md-4 mb-3">
                   <label htmlFor="maxConsecutiveDays" className="form-label">Max Consecutive Days</label>
                   <input
                     type="number"
-                    min="1"
-                    max="14"
                     className="form-control"
                     id="maxConsecutiveDays"
                     value={settings.maxConsecutiveDays}
-                    onChange={(e) =>
-                      onChange({ ...settings, maxConsecutiveDays: parseInt(e.target.value) })
-                    }
+                    readOnly
+                    aria-describedby="limitsSetByManager"
                   />
                 </div>
                 <div className="col-md-4 mb-3">

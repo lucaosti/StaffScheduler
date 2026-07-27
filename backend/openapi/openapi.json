@@ -6968,19 +6968,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "maxHoursPerWeek": {
-                    "type": "number",
-                    "exclusiveMinimum": 0
-                  },
-                  "minHoursPerWeek": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "maxConsecutiveDays": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 14
-                  },
                   "preferredShifts": {
                     "type": "array",
                     "items": {
@@ -7077,19 +7064,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "maxHoursPerWeek": {
-                    "type": "number",
-                    "exclusiveMinimum": 0
-                  },
-                  "minHoursPerWeek": {
-                    "type": "number",
-                    "minimum": 0
-                  },
-                  "maxConsecutiveDays": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 14
-                  },
                   "preferredShifts": {
                     "type": "array",
                     "items": {
@@ -7115,6 +7089,19 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "maxHoursPerWeek": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "minHoursPerWeek": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "maxConsecutiveDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 14
                   }
                 }
               }

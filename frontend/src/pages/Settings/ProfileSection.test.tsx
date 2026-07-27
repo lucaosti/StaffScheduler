@@ -34,36 +34,48 @@ describe('<ProfileSection />', () => {
     expect(screen.getByLabelText(/night shift/i)).toBeInTheDocument();
   });
 
-  it('calls onChange when maxHoursPerWeek is changed', () => {
-    const onChange = jest.fn();
+  /**
+   * These two used to assert that changing the field called `onChange` — i.e.
+   * that an employee could edit their own working-time limits. That was the
+   * defect: the values are hard constraints the optimizer enforces, and are
+   * legally bounded in most jurisdictions, yet the self-service endpoint that
+   * saved them is guarded by authentication alone.
+   *
+   * They are displayed rather than hidden because they explain what someone
+   * can be scheduled for; changing them requires `preferences.manage`.
+   */
+  it.each([/max hours per week/i, /max consecutive days/i])(
+    'renders %s as read-only so it cannot be self-edited',
+    (label) => {
+      const onChange = jest.fn();
+      render(
+        <ProfileSection
+          settings={defaultSettings}
+          onChange={onChange}
+          onSave={jest.fn().mockResolvedValue(undefined)}
+        />
+      );
+
+      const field = screen.getByLabelText(label) as HTMLInputElement;
+      expect(field).toHaveAttribute('readOnly');
+
+      // A readOnly input still emits change events if something dispatches
+      // one, so assert the handler is not wired rather than trusting the
+      // attribute alone.
+      fireEvent.change(field, { target: { value: '99' } });
+      expect(onChange).not.toHaveBeenCalled();
+    }
+  );
+
+  it('explains who does set the limits', () => {
     render(
       <ProfileSection
         settings={defaultSettings}
-        onChange={onChange}
+        onChange={jest.fn()}
         onSave={jest.fn().mockResolvedValue(undefined)}
       />
     );
-
-    fireEvent.change(screen.getByLabelText(/max hours per week/i), { target: { value: '45' } });
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ maxHoursPerWeek: 45 })
-    );
-  });
-
-  it('calls onChange when maxConsecutiveDays is changed', () => {
-    const onChange = jest.fn();
-    render(
-      <ProfileSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText(/max consecutive days/i), { target: { value: '6' } });
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ maxConsecutiveDays: 6 })
-    );
+    expect(screen.getByRole('note')).toHaveTextContent(/set by your manager/i);
   });
 
   it('calls onChange when minRestHours is changed', () => {
