@@ -216,3 +216,125 @@ describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
     expect(coverageShortfalls(problem, assignments)).toEqual([]);
   });
 });
+
+/**
+ * Overconstrained planning: not enough staff must produce the best partial
+ * schedule, not nothing.
+ *
+ * WHY THIS IS THE MOST IMPORTANT CASE IN THIS FILE. `min_staff` used to be a
+ * hard constraint, so a single uncoverable shift made CP-SAT prove the whole
+ * model INFEASIBLE and the run degraded to the greedy engine. The consequence
+ * was backwards: the harder the problem, the worse the engine you got — and
+ * understaffing is the normal condition in workforce management, not an
+ * exceptional one.
+ *
+ * It also corrupted the degradation signal. `degraded: true` means "the
+ * optimal engine was unavailable"; there the engine ran fine and correctly
+ * proved the model as stated had no solution. The model was wrong, not the run.
+ *
+ * Verified against the previous implementation: the first fixture below
+ * returned INFEASIBLE with zero assignments.
+ */
+describeOrtools('CP-SAT engine plans under insufficient staff', () => {
+  /** Three shifts needing two people each, with a single employee available. */
+  const understaffed = {
+    shifts: [0, 1, 2].map((i) => ({
+      id: `s${i}`,
+      date: `2033-03-0${i + 1}`,
+      start_time: '09:00',
+      end_time: '17:00',
+      min_staff: 2,
+      max_staff: 3,
+      department_id: 1,
+    })),
+    employees: [
+      {
+        id: 'e1',
+        max_hours_per_week: 40,
+        max_consecutive_days: 6,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+      },
+    ],
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('returns a partial schedule instead of refusing to answer', () => {
+    const assignments = runPython(understaffed);
+    // One person can work all three, so every shift gets its one available
+    // body. Refusing outright discarded exactly this.
+    expect(assignments).toHaveLength(3);
+  });
+
+  it('keeps the partial schedule legal', () => {
+    // Relaxing coverage must not relax anything else: the hard rules still
+    // hold, which is what makes a partial schedule usable rather than merely
+    // non-empty.
+    const assignments = runPython(understaffed);
+    expect(findConstraintViolations(understaffed, assignments)).toEqual([]);
+  });
+
+  it('reports the shortfall rather than letting it look complete', () => {
+    const assignments = runPython(understaffed);
+    const shortfalls = coverageShortfalls(understaffed, assignments);
+    // A partial schedule that looks complete is how a draft gets published.
+    expect(shortfalls).toHaveLength(3);
+  });
+
+  /**
+   * The objective must aim at `min_staff`, not `max_staff`.
+   *
+   * The old objective rewarded EVERY assignment at a flat weight while
+   * coverage was hard-bounded to `[min_staff, max_staff]`, so the solver always
+   * filled to the ceiling: more people was always worth more, and nothing
+   * charged for them. `min_staff` therefore never functioned as a target, and
+   * the greedy engine — which fills only to `min_staff` — produced
+   * systematically different staffing from the same input. Nothing caught it,
+   * because the parity assertions above check hard-constraint validity, never
+   * staffing level.
+   *
+   * Verified against the previous implementation: this fixture produced 9
+   * assignments (3 shifts x max_staff 3).
+   */
+  it('staffs to min_staff rather than filling to max_staff', () => {
+    const plentiful = {
+      ...understaffed,
+      employees: [1, 2, 3, 4].map((i) => ({
+        id: `e${i}`,
+        max_hours_per_week: 40,
+        max_consecutive_days: 6,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+      })),
+    };
+    const assignments = runPython(plentiful);
+    expect(assignments).toHaveLength(6);
+    expect(coverageShortfalls(plentiful, assignments)).toEqual([]);
+  });
+
+  /**
+   * MEDIUM outranks SOFT lexicographically, whatever the magnitudes.
+   *
+   * This is the property the old single weighted sum could not guarantee:
+   * coverage at 100 against preferences at 55 meant two satisfied preferences
+   * outweighed one covered seat, so whether coverage dominated depended on how
+   * many preference terms a dataset happened to produce.
+   *
+   * The fixture makes the two levels pull in opposite directions: the employee
+   * declares every shift as one to AVOID, so satisfying preferences means
+   * working none of them. If soft could outrank medium, the solver would leave
+   * all three shifts empty.
+   */
+  it('never buys a preference with an unstaffed seat', () => {
+    const avoidsEverything = {
+      ...understaffed,
+      preferences: { e1: { avoid_shifts: ['s0', 's1', 's2'] } },
+    };
+    const assignments = runPython(avoidsEverything);
+    expect(assignments).toHaveLength(3);
+  });
+});

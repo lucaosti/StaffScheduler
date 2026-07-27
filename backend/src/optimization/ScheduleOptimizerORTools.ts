@@ -42,77 +42,24 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
+import { coverageShortfalls } from './constraintValidator';
 
-interface ScheduleAssignment {
-  employeeId: string;
-  shiftId: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  hours: number;
-}
-
-interface OptimizationConfig {
-  timeLimitSeconds?: number;
-
-  // Constraint weights (inspired by PoliTO Parameters.py)
-  weights?: {
-    shiftCoverage?: number;       // Default: 100
-    noDoubleBooking?: number;     // Default: 90
-    skillRequirements?: number;   // Default: 85
-    availability?: number;        // Default: 80
-    maxHoursPerWeek?: number;     // Default: 75
-    employeePreferences?: number; // Default: 55 (like teaching_overlaps_penalty)
-    workloadFairness?: number;    // Default: 40
-    consecutiveDays?: number;     // Default: 30
-    restPeriods?: number;         // Default: 25
-    shiftContinuity?: number;     // Default: 20
-  };
-}
-
-interface Employee {
-  id: string;
-  max_hours_per_week: number;
-  min_hours_per_week?: number;
-  skills: string[];
-  unavailable_dates: string[];
-  max_consecutive_days?: number;
-  /**
-   * Shifts this employee already holds on *other* schedules, within reach of
-   * this problem's rolling-window checks. Without these, back-to-back
-   * schedule periods get optimized in total isolation — each can look
-   * individually compliant while an employee assigned late in one period and
-   * early in the next quietly busts max-consecutive-days/max-weekly-hours
-   * across the boundary. Counted toward those checks but never themselves
-   * reassignable (they aren't part of `problem.shifts`).
-   */
-  existing_assignments?: Array<{ date: string; start_time: string; end_time: string }>;
-}
-
-interface Shift {
-  id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-  min_staff: number;
-  max_staff?: number;
-  required_skills?: string[];
-}
-
-interface Preference {
-  employee_id: string;
-  preferred_shifts: string[];
-  avoid_shifts: string[];
-}
-
-export interface OptimizationProblem {
-  shifts: Shift[];
-  employees: Employee[];
-  preferences?: Record<string, Preference>;
-  skills?: Record<string, string[]>;
-  constraints?: Record<string, any>;
-  weights?: Record<string, number>;
-}
+// Re-exported so every existing import site keeps working unchanged; the
+// declarations moved to ./types to break the validator -> optimizer cycle.
+export type {
+  ScheduleAssignment,
+  Employee,
+  Shift,
+  OptimizationConfig,
+  OptimizationProblem,
+} from './types';
+import type {
+  ScheduleAssignment,
+  Shift,
+  Employee,
+  OptimizationConfig,
+  OptimizationProblem,
+} from './types';
 
 interface OptimizationResult {
   status: 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | 'ERROR' | 'GREEDY_FALLBACK';
@@ -128,6 +75,23 @@ interface OptimizationResult {
       totalShifts: number;
       fullyCoveredShifts: number;
       coveragePercentage: number;
+      /**
+       * Shifts left below `min_staff`, and by how many people in total.
+       *
+       * Present because coverage is no longer a hard constraint: the solver
+       * answers under insufficient staff instead of refusing, so the answer
+       * has to say where it fell short. Without this a caller cannot tell a
+       * fully staffed schedule from the best available one, which is how a
+       * draft gets published.
+       */
+      understaffedShifts: Array<{
+        shiftId: string;
+        date?: string;
+        required: number;
+        assigned: number;
+        missing: number;
+      }>;
+      totalMissingStaff: number;
     };
   };
   error?: string;
@@ -151,6 +115,52 @@ export interface CandidateContext {
   /** Minimum rest hours required between two shifts (mirrors ComplianceEngine's policy). */
   minRestHoursBetweenShifts: number;
 }
+
+/**
+ * Translates the Python solver's snake_case JSON into the camelCase shape the
+ * rest of the backend consumes.
+ *
+ * WHY THIS EXISTS RATHER THAN `JSON.parse` STRAIGHT INTO THE TYPE. It used to
+ * be exactly that, and the two spellings never met: Python emits
+ * `statistics.coverage_stats`, the type declares `statistics.coverageStats`,
+ * so the field was ALWAYS undefined. The guard `if (result.statistics
+ * .coverageStats)` silently skipped and the coverage log line never printed
+ * once — while the type asserted a field that could not arrive. A parsed JSON
+ * blob cast to an interface is an unchecked claim; naming the translation
+ * makes the boundary a place where a mismatch is visible.
+ *
+ * Defensive defaults rather than throwing: an older solver build that predates
+ * the shortfall fields should degrade to "nothing reported", not take down a
+ * run that otherwise produced a usable schedule.
+ */
+const mapPythonResult = (raw: Record<string, unknown>): OptimizationResult => {
+  const stats = (raw.statistics ?? {}) as Record<string, unknown>;
+  const coverage = (stats.coverage_stats ?? {}) as Record<string, unknown>;
+  const understaffed = (coverage.understaffed_shifts ?? []) as Array<Record<string, unknown>>;
+
+  return {
+    ...(raw as unknown as OptimizationResult),
+    statistics: {
+      numBranches: stats.num_branches as number | undefined,
+      numConflicts: stats.num_conflicts as number | undefined,
+      isOptimal: Boolean(stats.is_optimal),
+      totalAssignedShifts: (stats.total_assigned_shifts as number) ?? 0,
+      coverageStats: {
+        totalShifts: (coverage.total_shifts as number) ?? 0,
+        fullyCoveredShifts: (coverage.fully_covered_shifts as number) ?? 0,
+        coveragePercentage: (coverage.coverage_percentage as number) ?? 0,
+        understaffedShifts: understaffed.map((u) => ({
+          shiftId: String(u.shift_id),
+          date: u.date as string | undefined,
+          required: (u.required as number) ?? 0,
+          assigned: (u.assigned as number) ?? 0,
+          missing: (u.missing as number) ?? 0,
+        })),
+        totalMissingStaff: (coverage.total_missing_staff as number) ?? 0,
+      },
+    },
+  };
+};
 
 export class ScheduleOptimizer {
   private pythonScriptPath: string;
@@ -222,6 +232,15 @@ export class ScheduleOptimizer {
         const covered = problem.shifts.filter(
           (s) => greedy.filter((a) => a.shiftId === s.id).length >= s.min_staff
         ).length;
+        // Reported through the SAME canonical helper the parity suite uses, so
+        // the two engines cannot disagree about what "understaffed" means. The
+        // greedy is best-effort and leaves shifts short routinely, which makes
+        // this the path where the shortfall matters most: a degraded run that
+        // is ALSO short-staffed must say both things, not just the first.
+        const shortfalls = coverageShortfalls(
+          problem,
+          greedy.map((a) => ({ employeeId: a.employeeId, shiftId: a.shiftId }))
+        );
 
         return {
           status: 'GREEDY_FALLBACK',
@@ -234,6 +253,14 @@ export class ScheduleOptimizer {
               totalShifts,
               fullyCoveredShifts: covered,
               coveragePercentage: totalShifts > 0 ? Math.round((covered / totalShifts) * 100) : 0,
+              understaffedShifts: shortfalls.map((s) => ({
+                shiftId: s.shiftId,
+                date: problem.shifts.find((sh) => sh.id === s.shiftId)?.date,
+                required: s.required,
+                assigned: s.assigned,
+                missing: s.required - s.assigned,
+              })),
+              totalMissingStaff: shortfalls.reduce((sum, s) => sum + (s.required - s.assigned), 0),
             },
           },
           error: reason,
@@ -251,6 +278,17 @@ export class ScheduleOptimizer {
               totalShifts: problem.shifts.length,
               fullyCoveredShifts: 0,
               coveragePercentage: 0,
+              // Nothing was produced, so every shift is short by its full
+              // requirement. Stated rather than left empty: an empty list here
+              // would read as "no shortfalls", the opposite of the truth.
+              understaffedShifts: problem.shifts.map((sh) => ({
+                shiftId: sh.id,
+                date: sh.date,
+                required: sh.min_staff,
+                assigned: 0,
+                missing: sh.min_staff,
+              })),
+              totalMissingStaff: problem.shifts.reduce((sum, sh) => sum + sh.min_staff, 0),
             },
           },
           error: greedyError instanceof Error ? greedyError.message : 'Unknown error',
@@ -333,8 +371,7 @@ export class ScheduleOptimizer {
           if (code === 0 || code === 1) {
             // Success (0) or infeasible (1)
             try {
-              const result = JSON.parse(stdoutData);
-              resolve(result);
+              resolve(mapPythonResult(JSON.parse(stdoutData)));
             } catch (parseError) {
               reject(
                 new Error(
