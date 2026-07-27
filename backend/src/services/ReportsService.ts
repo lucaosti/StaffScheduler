@@ -16,6 +16,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { SHIFT_HOURS_SQL } from '../utils/sql';
 
 interface HoursWorkedRow {
   userId: number;
@@ -36,12 +37,14 @@ interface FairnessReport {
   stats: { count: number; min: number; max: number; mean: number; stddev: number };
 }
 
-const HOURS_EXPR = `
-  CASE
-    WHEN s.end_time > s.start_time THEN TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60
-    ELSE (TIMESTAMPDIFF(MINUTE, s.start_time, '24:00:00') + TIMESTAMPDIFF(MINUTE, '00:00:00', s.end_time)) / 60
-  END
-`;
+/**
+ * Shift duration in hours. Was a local CASE expression that split an overnight
+ * shift into "until midnight" plus "after midnight"; identical in result to
+ * SHIFT_HOURS_SQL, but a second spelling of the same rule. The two dashboard
+ * aggregates had a THIRD spelling which got it wrong — same-date TIMESTAMPDIFF,
+ * yielding negative hours for a night shift — so the definitions are now one.
+ */
+const HOURS_EXPR = SHIFT_HOURS_SQL;
 
 export class ReportsService {
   constructor(private pool: Pool) {}
