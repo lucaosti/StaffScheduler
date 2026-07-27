@@ -1,62 +1,59 @@
 /**
- * Module service — wraps /api/modules endpoints.
+ * Module service — wraps the `/api/modules` endpoints.
+ *
+ * Routed through the generated client so path, method and body are checked
+ * against the OpenAPI contract at compile time. See `departmentService` for
+ * the full rationale.
+ *
+ * WHY THE PATH PARAMETERS ARE NOT COERCED HERE: `code` and `org` are strings
+ * in the contract, unlike the numeric `id` parameters elsewhere, so they pass
+ * through untouched. The client escapes them, which is what the removed
+ * `encodeURIComponent` calls were doing by hand — a module code containing a
+ * slash would otherwise have broken the path.
  *
  * @author Luca Ostinelli
  */
 
 import { ApiResponse, Module, ModuleWithOrgOverride } from '../types';
-import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
-export const listModules = async (): Promise<ApiResponse<Module[]>> => {
-  const res = await fetch(`${API_BASE_URL}/modules`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<Module[]>(res);
-};
+type ModuleToggleBody = paths['/modules/{code}']['put']['requestBody']['content']['application/json'];
+type OrgOverrideBody =
+  paths['/modules/{code}/org/{org}']['put']['requestBody']['content']['application/json'];
 
-export const listModulesForOrg = async (org: string): Promise<ApiResponse<ModuleWithOrgOverride[]>> => {
-  const res = await fetch(`${API_BASE_URL}/modules/org/${encodeURIComponent(org)}`, {
-    method: 'GET',
-    ...getAuthHeaders(),
+export const listModules = (): Promise<ApiResponse<Module[]>> =>
+  apiClient.get<Module[], '/modules'>('/modules');
+
+export const listModulesForOrg = (org: string): Promise<ApiResponse<ModuleWithOrgOverride[]>> =>
+  apiClient.get<ModuleWithOrgOverride[], '/modules/org/{org}'>('/modules/org/{org}', {
+    params: { org },
   });
-  return handleResponse<ModuleWithOrgOverride[]>(res);
-};
 
-export const setModuleEnabled = async (
+export const setModuleEnabled = (
   code: string,
   isEnabled: boolean,
   justification?: string
-): Promise<ApiResponse<Module>> => {
-  const res = await fetch(`${API_BASE_URL}/modules/${encodeURIComponent(code)}`, {
-    method: 'PUT',
-    ...getAuthHeaders(),
-    body: JSON.stringify({ isEnabled, justification: justification || null }),
-  });
-  return handleResponse<Module>(res);
-};
+): Promise<ApiResponse<Module>> =>
+  apiClient.put<Module, '/modules/{code}'>(
+    '/modules/{code}',
+    { isEnabled, justification: justification || null } satisfies ModuleToggleBody,
+    { params: { code } }
+  );
 
-export const setModuleOrgOverride = async (
+export const setModuleOrgOverride = (
   code: string,
   org: string,
   isEnabled: boolean,
   justification?: string
-): Promise<ApiResponse<ModuleWithOrgOverride>> => {
-  const res = await fetch(
-    `${API_BASE_URL}/modules/${encodeURIComponent(code)}/org/${encodeURIComponent(org)}`,
-    {
-      method: 'PUT',
-      ...getAuthHeaders(),
-      body: JSON.stringify({ isEnabled, justification: justification || null }),
-    }
+): Promise<ApiResponse<ModuleWithOrgOverride>> =>
+  apiClient.put<ModuleWithOrgOverride, '/modules/{code}/org/{org}'>(
+    '/modules/{code}/org/{org}',
+    { isEnabled, justification: justification || null } satisfies OrgOverrideBody,
+    { params: { code, org } }
   );
-  return handleResponse<ModuleWithOrgOverride>(res);
-};
 
-export const removeModuleOrgOverride = async (
-  code: string,
-  org: string
-): Promise<ApiResponse<void>> => {
-  const res = await fetch(
-    `${API_BASE_URL}/modules/${encodeURIComponent(code)}/org/${encodeURIComponent(org)}`,
-    { method: 'DELETE', ...getAuthHeaders() }
-  );
-  return handleResponse<void>(res);
-};
+export const removeModuleOrgOverride = (code: string, org: string): Promise<ApiResponse<void>> =>
+  apiClient.delete<void, '/modules/{code}/org/{org}'>('/modules/{code}/org/{org}', {
+    params: { code, org },
+  });
