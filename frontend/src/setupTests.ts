@@ -1,10 +1,18 @@
-// Jest setup. CRA picks this file up automatically.
-//
-// - Pulls in `@testing-library/jest-dom` so `toBeInTheDocument` and
-//   friends are available in every test.
-// - Polyfills `TextEncoder` / `TextDecoder` and `fetch` via `undici`
-//   so MSW v2 (which uses the `Request`/`Response`/`fetch` Web APIs)
-//   works under jsdom.
+/**
+ * Jest setup, picked up automatically for every suite.
+ *
+ * Two jobs, both of which exist because the tests run under jsdom rather than
+ * in a browser or in plain Node:
+ *
+ *  - pulls in `@testing-library/jest-dom` so `toBeInTheDocument` and friends
+ *    are available everywhere without each suite importing it;
+ *  - polyfills `TextEncoder`/`TextDecoder` and `fetch` from `undici`. MSW v2 is
+ *    built on the Web `Request`/`Response`/`fetch` APIs, and jsdom ships none
+ *    of them. Without the polyfill the failure is a confusing `ReferenceError`
+ *    inside MSW rather than anything pointing at the environment.
+ *
+ * @author Luca Ostinelli
+ */
 
 import '@testing-library/jest-dom';
 import { TextDecoder, TextEncoder } from 'util';

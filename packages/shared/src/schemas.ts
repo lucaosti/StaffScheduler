@@ -1,3 +1,44 @@
+/**
+ * Request schemas — the single declaration of what the API accepts.
+ *
+ * WHY THIS FILE IS IN A SHARED WORKSPACE PACKAGE RATHER THAN IN THE BACKEND.
+ * These schemas are consumed three times over, and each consumer would
+ * otherwise hold its own copy: the backend validates with them
+ * (`validateBody` / `validateQuery` / `validateParams`), the OpenAPI generator
+ * emits the spec's request bodies and query parameters FROM them, and the
+ * frontend builds forms against them with `zodResolver` and derives its payload
+ * types from the generated contract. Every copy that has ever existed in this
+ * codebase drifted — a client type omitting a required `password` so that
+ * every employee creation was rejected, filter types sending parameters no
+ * endpoint accepts. One declaration in one place is what makes client
+ * validation the server's by construction rather than by diligence.
+ *
+ * WHY THE PARAM SCHEMAS COERCE. Path and query values arrive as strings,
+ * always: `/shifts/5` gives `"5"`, `?page=2` gives `"2"`. `z.coerce` is
+ * therefore not a convenience but a correctness requirement — a plain
+ * `z.number()` rejects every real request. The corollary is that the coerced
+ * result must be read from `res.locals`, not from `req.params`/`req.query`,
+ * which still hold the raw strings.
+ *
+ * WHY BOOLEAN FLAGS ACCEPT THE STRINGS "true"/"false". Same reason: a query
+ * string has no booleans. `booleanFlag` takes either a real boolean (for
+ * programmatic callers) or the two string spellings, and transforms.
+ *
+ * WHY SOME SCHEMAS CARRY LEGACY ALIASES. `reportRangeQuery` accepts both
+ * `startDate`/`endDate` and `start`/`end` because the spec once documented the
+ * first pair while the handlers read the second, so a caller following the
+ * documentation got a 400. The documented names won; the old ones stay
+ * accepted so existing callers keep working. An alias is a deliberate, dated
+ * decision recorded here — not an invitation to add more.
+ *
+ * ADDING A QUERY CONTRACT IS NOT OPTIONAL. The OpenAPI generator fails the
+ * build in both directions: a documented parameter with no `validateQuery`
+ * behind it, and a handler reading `req.query` with no schema. So a new filter
+ * starts here, or it does not ship.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { z } from 'zod';
 
 // ── Param schemas ─────────────────────────────────────────────────────────────

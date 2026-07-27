@@ -1,3 +1,32 @@
+/**
+ * Assignment routes — `/api/assignments`: who works which shift, and the
+ * status transitions on that relationship.
+ *
+ * WHY THE LIST ENDPOINT REFUSES LARGE UNPAGINATED RESULTS RATHER THAN
+ * TRUNCATING. `shift_assignments` is the fastest-growing table in the schema —
+ * one row per person per shift, indefinitely — and the list query joins four
+ * tables. An unpaginated request matching more than the cap is answered with a
+ * `ValidationError`, not a silently shortened list, because a short list that
+ * looks complete hides missing assignments and the caller has no way to tell.
+ * Same reasoning as the audit export, which refuses rather than truncates.
+ *
+ * This endpoint is also where a real data-scoping defect lived: the handler
+ * took `_req` and called `getAllAssignments()` with no arguments, so all seven
+ * documented filters were discarded and a caller narrowing by `userId` received
+ * everyone's rows. The fix was not to pass the arguments but to make the class
+ * of bug impossible — `validateQuery` now ties the documented contract to the
+ * parsing code, and the spec generator fails if the two disagree.
+ *
+ * WHY CONFIRM/DECLINE ARE NOT GATED ON `assignment.manage`. An employee
+ * confirming or declining their OWN assignment is self-service; requiring the
+ * management permission would mean only managers could respond on an
+ * employee's behalf, which defeats the purpose. The handlers check ownership
+ * in-line instead. `complete` is management-gated because it asserts that work
+ * actually happened.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';

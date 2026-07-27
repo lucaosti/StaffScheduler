@@ -1,3 +1,43 @@
+/**
+ * Assignment service — the public API for putting a person on a shift.
+ *
+ * WHY THIS IS THREE CLASSES AND NOT ONE. `AssignmentService` had grown to hold
+ * conflict checking, status-transition SQL and cross-cutting concerns in the
+ * same file, which made every one of them harder to test in isolation. The
+ * split is drawn along ONE line, and it is worth stating because the file names
+ * alone do not reveal it:
+ *
+ *   - {@link AssignmentValidator} answers read-only questions — does this
+ *     person already work an overlapping shift, are they available that day.
+ *     No writes, no transactions, so it can be exercised against a fixture
+ *     database without setting anything up to tear down.
+ *   - {@link AssignmentOrchestrator} owns the status-lifecycle SQL (confirm,
+ *     cancel, decline, complete) and the read-only aggregates over
+ *     `shift_assignments`. It is deliberately ACTOR-UNAWARE: its methods take
+ *     an id and nothing else.
+ *   - this class is the only layer that knows WHO is acting, and therefore the
+ *     only one that writes audit rows.
+ *
+ * That last point is the actual seam. The actor is a request-level fact, and
+ * pushing it down into the transition SQL would mean every internal caller —
+ * the optimizer, a bulk import, a test — inventing an actor to satisfy a
+ * signature, which is how audit trails come to be full of synthetic entries
+ * that attribute a machine decision to a person. Keeping the orchestrator
+ * actor-free means an audit row exists exactly when a human action caused it.
+ *
+ * The delegating methods at the bottom are therefore not indirection for its
+ * own sake: each wraps a transition with the audit write that transition
+ * deserves, and the pairing is the point.
+ *
+ * WHY `bulkCreateAssignments` SWALLOWS PER-ROW FAILURES. It creates what it can
+ * and logs the rest rather than aborting. Its callers are bulk paths where one
+ * unassignable person must not discard the other forty-nine; the returned array
+ * is the authoritative record of what was actually created, so a caller that
+ * needs the failures compares lengths rather than catching.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment, CreateAssignmentRequest, SqlParam } from '../types';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
