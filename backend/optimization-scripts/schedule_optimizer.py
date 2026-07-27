@@ -39,6 +39,7 @@ class ScheduleOptimizerORTools:
         self.model = cp_model.CpModel()
         self.assignments = {}  # (employee_id, shift_id) -> BoolVar
         self.hours_worked = {}  # employee_id -> IntVar (weekly hours)
+        self.coverage_shortfall = {}  # shift_id -> IntVar (staff missing below min_staff)
         
         # Extract data
         self.shifts = {s['id']: s for s in problem_data['shifts']}
@@ -131,22 +132,61 @@ class ScheduleOptimizerORTools:
     
     def _add_shift_coverage_constraints(self):
         """
-        HARD: Each shift must have required number of staff.
-        Similar to PoliTO's teaching coverage constraints.
+        max_staff is HARD; min_staff is a TARGET whose shortfall is minimised.
+
+        WHY min_staff IS NOT HARD. It used to be, and the consequence was
+        backwards: when the available staff could not cover even one shift,
+        CP-SAT proved the whole model INFEASIBLE and returned nothing, so the
+        run degraded to the greedy engine. The harder the problem, the worse
+        the engine you got — and understaffing is the normal condition in
+        workforce management, not an exceptional one. A single uncoverable
+        shift discarded the optimum for all the others.
+
+        It also made the degradation signal misleading. `degraded: true` is
+        meant to say "the optimal engine was unavailable"; there the engine ran
+        fine and correctly proved the model as stated had no solution. The
+        model was wrong, not the run.
+
+        Shortfall is therefore a variable per shift, minimised at the MEDIUM
+        objective level (see _build_objective_function), so it outranks every
+        soft preference but can never make the problem infeasible. INFEASIBLE
+        now means what it should: a genuine conflict among rest, skill,
+        availability or hours rules.
+
+        WHY max_staff STAYS HARD. It is a real physical ceiling — only so many
+        people fit behind a counter or on a ward round — not a preference.
+
+        WHY NOTHING REWARDS STAFFING BETWEEN min AND max. The objective used to
+        add a flat reward for EVERY assignment, which combined with the hard
+        bounds meant the solver always filled every shift to max_staff: more
+        people was always worth more, and nothing charged for them. So
+        min_staff never functioned as a target at all, and the greedy engine
+        (which fills only to min_staff) produced systematically different
+        staffing from the same input, invisibly — the parity suite asserts
+        hard-constraint validity, never staffing level. Coverage is now
+        expressed solely as shortfall BELOW min_staff, so the two engines aim
+        at the same thing.
         """
         for shift_id, shift in self.shifts.items():
             min_staff = shift.get('min_staff', 1)
             max_staff = shift.get('max_staff', min_staff + 2)
-            
-            # Sum of assignments for this shift
+
             assignments_for_shift = [
                 self.assignments[(emp_id, shift_id)]
                 for emp_id in self.employees.keys()
             ]
-            
-            # Constraint: min_staff <= assigned <= max_staff
-            self.model.Add(sum(assignments_for_shift) >= min_staff)
+
+            # Hard ceiling.
             self.model.Add(sum(assignments_for_shift) <= max_staff)
+
+            # shortfall = max(0, min_staff - assigned), expressed with the
+            # standard CP-SAT idiom: bound it below by both 0 and the deficit,
+            # and let the objective (which minimises it) push it down to the
+            # true maximum. An equality would need an auxiliary boolean per
+            # shift for no benefit, since nothing rewards a LARGER shortfall.
+            shortfall = self.model.NewIntVar(0, min_staff, f'shortfall_s{shift_id}')
+            self.model.Add(shortfall >= min_staff - sum(assignments_for_shift))
+            self.coverage_shortfall[shift_id] = shortfall
     
     def _add_no_double_booking_constraints(self):
         """
@@ -374,31 +414,82 @@ class ScheduleOptimizerORTools:
     
     def _build_objective_function(self):
         """
-        Build weighted objective function to maximize.
-        Inspired by PoliTO's correlation-based objective function.
+        Lexicographic MEDIUM > SOFT objective, emulated on a single scalar.
+
+        WHY LEVELS INSTEAD OF WEIGHTS. The objective used to be one weighted
+        sum: coverage at 100, preferences at 55. Priority expressed only as a
+        ratio between magnitudes is not a guarantee — with those numbers, two
+        satisfied preferences outweigh one covered seat, and whether coverage
+        actually dominates depends on how many preference terms a given dataset
+        happens to produce. The intended precedence was enforced nowhere. Every
+        further objective term (fairness, disruption cost) would have made that
+        worse, because each addition means re-tuning all the weights together,
+        and any tuning is valid only for the dataset it was tuned on.
+
+        CP-SAT optimises one scalar, so true lexicographic ordering has to be
+        emulated. Two ways were available:
+
+          - solve hierarchically: optimise the medium level, freeze it as a
+            constraint, then optimise soft. Exact, but doubles solve time and
+            makes the time limit ambiguous — which half gets the 300 seconds?
+          - scale by a proven bound, used here: multiply the medium term by
+            strictly more than the largest total the soft level can reach, so
+            no amount of soft score can buy a single unit of medium.
+
+        The bound must be PROVEN, not guessed, or this is the same weight
+        problem wearing a disguise. It is computed below from the model's own
+        size, and `test_objective_levels` asserts the property directly: a
+        solution better on soft and worse on medium must lose, whatever the
+        magnitudes.
+
+        MEDIUM: coverage shortfall below min_staff. Outranks every preference —
+        a schedule that leaves a shift unstaffed to satisfy someone's
+        preference is wrong — but cannot make the model infeasible.
+
+        SOFT: employee preferences, +1 / 0 / -1 per assignment.
         """
+        pref_weight = int(self.weights.get('employee_preferences', 55.0))
+
+        # SOFT — nudge toward preferred shifts and away from avoided ones.
+        # Built FIRST so the bound below can be summed from the real
+        # coefficients instead of estimated from them.
+        soft_terms = []
+        soft_bound = 0
+        for (emp_id, shift_id), var in self.assignments.items():
+            coefficient = self._get_preference(emp_id, shift_id) * pref_weight
+            if coefficient:
+                soft_terms.append(var * coefficient)
+                # Every soft variable is boolean, so the largest magnitude this
+                # level can reach is the sum of the absolute coefficients.
+                soft_bound += abs(coefficient)
+
+        # Strictly greater than that bound, so one unit of shortfall always
+        # costs more than the ENTIRE soft level can ever be worth. This is what
+        # makes the ordering lexicographic rather than another weight to tune.
+        #
+        # WHY THE BOUND IS SUMMED AND NOT DERIVED FROM THE WEIGHT. The first
+        # attempt assumed each preference contributed at most `pref_weight`,
+        # reasoning that preferences are +1/0/-1. They are not: _get_preference
+        # returns +/-10, so the real ceiling was ten times the assumed one and
+        # SOFT OUTRANKED MEDIUM — the solver left every shift empty to satisfy
+        # an "avoid" preference. Summing the coefficients that actually enter
+        # the model cannot drift from them, and stays correct if the preference
+        # scale is ever changed.
+        medium_scale = soft_bound + 1
+
         objective_terms = []
 
-        # Coverage first: reward every filled seat so the solver prefers fully
-        # staffing shifts over leaving them empty. Weighted well above
-        # preferences so a covered shift is never sacrificed for a preference.
-        coverage_weight = int(self.weights.get('shift_coverage', 100.0))
-        for var in self.assignments.values():
-            objective_terms.append(var * coverage_weight)
+        # MEDIUM — minimise unstaffed seats, so negate to fit the maximisation.
+        for shortfall in self.coverage_shortfall.values():
+            objective_terms.append(-shortfall * medium_scale)
 
-        # Employee preferences (correlations): nudge toward preferred shifts and
-        # away from avoided ones. +10 / 0 / -10 scaled by the preference weight.
-        pref_weight = int(self.weights.get('employee_preferences', 55.0))
-        for (emp_id, shift_id), var in self.assignments.items():
-            preference = self._get_preference(emp_id, shift_id)
-            objective_terms.append(var * preference * pref_weight)
+        objective_terms.extend(soft_terms)
 
-        # Note: consecutive-days is now a HARD constraint
-        # (_add_max_consecutive_days_constraints), so it is no longer expressed
-        # as a soft objective penalty here — that would be redundant and could
-        # only ever discourage solutions the hard constraint already forbids.
+        # Note: consecutive-days is a HARD constraint
+        # (_add_max_consecutive_days_constraints), so it is not expressed as a
+        # soft penalty here — that would be redundant and could only ever
+        # discourage solutions the hard constraint already forbids.
 
-        # Maximize objective
         self.model.Maximize(sum(objective_terms))
 
     def _get_preference(self, employee_id: str, shift_id: str) -> int:
@@ -505,10 +596,34 @@ class ScheduleOptimizerORTools:
         fully_covered = sum(1 for s_id, shift in self.shifts.items() 
                           if shift_counts.get(s_id, 0) >= shift.get('min_staff', 1))
         
+        # Per-shift shortfall, so a partially staffed schedule is VISIBLY
+        # partial rather than looking complete. This is the reporting half of
+        # making coverage a target instead of a hard constraint: the solver no
+        # longer refuses to answer when the staff are insufficient, so the
+        # answer has to say where it fell short and by how much. Without it a
+        # caller cannot distinguish "fully staffed" from "the best we could
+        # do", which is the failure mode that makes a draft get published.
+        understaffed = []
+        total_missing = 0
+        for shift_id, shift in self.shifts.items():
+            min_staff = shift.get('min_staff', 1)
+            missing = min_staff - shift_counts.get(shift_id, 0)
+            if missing > 0:
+                total_missing += missing
+                understaffed.append({
+                    'shift_id': shift_id,
+                    'date': shift.get('date'),
+                    'required': min_staff,
+                    'assigned': shift_counts.get(shift_id, 0),
+                    'missing': missing,
+                })
+
         return {
             'total_shifts': total_shifts,
             'fully_covered_shifts': fully_covered,
-            'coverage_percentage': (fully_covered / total_shifts * 100) if total_shifts > 0 else 0
+            'coverage_percentage': (fully_covered / total_shifts * 100) if total_shifts > 0 else 0,
+            'understaffed_shifts': understaffed,
+            'total_missing_staff': total_missing,
         }
 
 

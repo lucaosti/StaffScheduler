@@ -42,7 +42,7 @@
  * @author Luca Ostinelli
  */
 
-import type { OptimizationProblem } from './ScheduleOptimizerORTools';
+import type { OptimizationProblem } from './types';
 
 /** A single rule broken by a proposed solution, with enough context to debug. */
 export interface ConstraintViolation {
