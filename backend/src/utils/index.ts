@@ -100,9 +100,21 @@ export class DateUtils {
    * Monday-night shift is a Monday shift, not four hours of Monday and four of
    * Tuesday.
    */
-  static shiftBounds(date: string, startTime: string, endTime: string): [string, string] {
-    const start = new Date(`${date}T${DateUtils.padTime(startTime)}Z`);
-    const end = new Date(`${date}T${DateUtils.padTime(endTime)}Z`);
+  static shiftBounds(
+    date: string | Date,
+    startTime: string,
+    endTime: string
+  ): [string, string] {
+    // Accepts a Date because mysql2 materializes a DATE column as one, and the
+    // caller usually has the row rather than a formatted string. Taking only a
+    // string put the burden on every call site to remember the conversion, and
+    // exactly one of them forgot: the conflict check passed `shift.date`
+    // straight through and produced `Invalid time value` at runtime, while the
+    // audit path two lines away converted it correctly. Normalising here means
+    // the trap cannot be stepped in again.
+    const day = typeof date === 'string' ? date : DateUtils.fromMySQLDate(date);
+    const start = new Date(`${day}T${DateUtils.padTime(startTime)}Z`);
+    const end = new Date(`${day}T${DateUtils.padTime(endTime)}Z`);
     // `<=` and not `<`: equal times mean a zero-length shift, which the request
     // schemas reject, so treating it as a full 24 hours would invent duration
     // for a shape that cannot be stored.
