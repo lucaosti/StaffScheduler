@@ -1,6 +1,57 @@
+/**
+ * Request validation middleware — the boundary every param, query and body
+ * crosses, and the mechanism the published API contract is derived from.
+ *
+ * WHY THESE THREE ARE THE ONLY WAY IN. `generate-openapi.ts` scans route
+ * sources for `validateBody` and `validateQuery` calls and emits the spec's
+ * request bodies and query parameters from the Zod schemas it finds. The check
+ * runs both ways: a documented parameter with no `validateQuery` behind it
+ * fails generation, and so does a handler reading `req.query` or `req.body`
+ * directly. So these helpers are not a convenience over `schema.parse()` —
+ * they are the only construct that makes a route's contract visible to the
+ * generator. Parsing inline is a failing build, not a style preference, and
+ * that rule exists because hand-parsing is precisely what let six endpoints
+ * publish filters their handlers never read.
+ *
+ * WHY THE PARSED VALUE GOES TO `res.locals` RATHER THAN OVERWRITING THE
+ * REQUEST. The obvious implementation assigns the coerced result back
+ * (`req.query = result.data`), so handlers keep reading the familiar property.
+ * It was rejected for two reasons, and the second is the binding one:
+ *
+ *   - `req.query` is a getter in Express 5 and assigning to it throws, so the
+ *     obvious version is a migration landmine (#318 tracks that upgrade);
+ *   - overwriting hides which values were validated. With `res.locals.query`,
+ *     a handler that reaches for `req.query` is visibly bypassing the schema —
+ *     which is exactly what the generator's raw-read guard greps for. Making
+ *     the unvalidated path indistinguishable from the validated one would
+ *     disarm that check.
+ *
+ * WHY THEY RETURN THE ENVELOPE DIRECTLY INSTEAD OF THROWING `ValidationError`.
+ * Services throw typed errors and the central `errorHandler` renders them, and
+ * that is the right shape for anything inside a route handler. Middleware is
+ * not: it runs outside `asyncHandler`, so a throw escapes Express 4's
+ * synchronous error path. `UnauthorizedError` is documented as carrying the
+ * same exception for the same reason.
+ *
+ * COERCION IS THE SCHEMA'S JOB, NOT THIS FILE'S. Path and query values arrive
+ * as strings, always — `?page=2` is `"2"` and `/shifts/5` is `"5"`. The schemas
+ * in `@staff-scheduler/shared` therefore use `z.coerce`, and this middleware
+ * stays a thin, uniform pass so there is one place where a parameter's accepted
+ * shape is declared: the schema.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Request, Response, NextFunction } from 'express';
 import { ZodType, ZodError } from 'zod';
 
+/**
+ * Flattens Zod issues into the `details` array of the error envelope.
+ *
+ * `e.path` is empty when the failure is on the root value (a body that is not
+ * an object at all), which would otherwise produce a nameless entry — hence the
+ * `'value'` fallback rather than an empty string the client has to interpret.
+ */
 const formatErrors = (err: ZodError) =>
   err.issues.map((e) => ({ field: e.path.join('.') || 'value', message: e.message }));
 

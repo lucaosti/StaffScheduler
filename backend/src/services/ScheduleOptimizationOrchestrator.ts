@@ -1,3 +1,29 @@
+/**
+ * Read-only schedule aggregates: coverage statistics, per-shift staffing, and
+ * the schedules a given user appears in.
+ *
+ * Extracted from `ScheduleService` — see that file for why. This class holds
+ * no lifecycle logic and performs no writes; everything here answers "what
+ * does this schedule currently look like", which is what the optimizer needs
+ * before it runs and what the reporting UI needs after.
+ *
+ * WHY THE COVERAGE BUCKETS ARE COMPUTED IN SQL RATHER THAN IN TYPESCRIPT.
+ * `getScheduleStatistics` classifies each shift as fully staffed, understaffed,
+ * overstaffed or empty using conditional aggregation. The alternative — fetch
+ * every shift with its assignment count and bucket them in a loop — transfers
+ * one row per shift to compute four integers, and a schedule period is
+ * thousands of shifts. Aggregating server-side keeps the response size constant
+ * in the size of the schedule.
+ *
+ * Note that these buckets are DESCRIPTIVE, not the constraint model:
+ * `constraintValidator.ts` is the single authority on what makes a schedule
+ * legal, and coverage is deliberately not one of its hard rules (the greedy
+ * engine is best-effort and may legitimately leave a shift short). A schedule
+ * reported as understaffed here is not thereby invalid.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { NotFoundError } from '../errors';
 import { Schedule } from '../types';

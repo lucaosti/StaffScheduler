@@ -1,3 +1,33 @@
+/**
+ * Department routes — CRUD plus membership management for `/api/departments`.
+ *
+ * Follows the standard route shape: validate with a Zod schema from
+ * `@staff-scheduler/shared`, construct the service, call one method, return the
+ * envelope. Errors are never caught here — `asyncHandler` forwards them to the
+ * central `errorHandler`, which is what keeps the error contract in one place
+ * instead of re-derived per route.
+ *
+ * WHY THIS IS A FACTORY (`createDepartmentsRouter(pool)`) RATHER THAN A
+ * MODULE-LEVEL ROUTER. The pool is created once in `index.ts` and injected.
+ * The alternative — a singleton the router imports — makes the router
+ * impossible to mount against a different database, which is exactly what the
+ * real-MySQL integration suite does when it points the app at a throwaway
+ * schema. Every router that touches data follows this shape; the exceptions
+ * take no pool because they need none (`metrics`, `openapi`, `events`) or,
+ * in `health`'s case, deliberately use the shared `database` singleton, since
+ * a liveness probe must report on the connection the application actually
+ * holds rather than one handed to it.
+ *
+ * NOTE ON DEPARTMENTS VS ORG UNITS. Both exist and they are not the same axis:
+ * a department is the SCHEDULING unit that owns schedules and shifts, while an
+ * org unit is the hierarchical node that owns responsibility, approvals and
+ * management chains. A department may reference an org unit (`orgUnitId`) but
+ * neither contains the other. Conflating them is the most common misreading of
+ * this domain, which is why the two have separate routers.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';

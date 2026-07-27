@@ -1,3 +1,26 @@
+/**
+ * Shift routes — `/api/shifts`, covering both shift templates and the concrete
+ * shifts generated from them.
+ *
+ * ROUTE ORDER IS LOAD-BEARING HERE, NOT COSMETIC. `/templates` and
+ * `/templates/:id` are registered BEFORE `/:id`. Express matches in
+ * registration order, so with the reverse ordering a request for
+ * `GET /api/shifts/templates` would match `/:id` with `id = "templates"`,
+ * fail `idParam` validation (`positiveInt`) and return a 400 that names a path
+ * parameter the caller never supplied. Any new literal-prefixed route must go
+ * above the `/:id` block for the same reason.
+ *
+ * WHY TEMPLATES AND SHIFTS SHARE A ROUTER. A template is the recurring pattern
+ * ("weekday early shift, 2-4 people, needs a first-aider") and a shift is one
+ * dated instance of it. They are separate tables, but the permissions, the
+ * consumers and the vocabulary are the same, and splitting them would mean two
+ * routers whose endpoints are only ever used together. The `shift.manage`
+ * permission covers writes to both; reads sit under `schedule.read`, because
+ * seeing the shifts is inseparable from seeing the schedule.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';

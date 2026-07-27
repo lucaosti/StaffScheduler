@@ -1,3 +1,25 @@
+/**
+ * User routes — `/api/users`, the administrative account surface.
+ *
+ * WHY THIS EXISTS ALONGSIDE `/api/employees`, WHICH RETURNS THE SAME ROWS. The
+ * two are the same data behind different authority. `/api/employees` is the
+ * workforce view a scheduling manager reaches with `employee.read`, and it
+ * cannot create accounts or change roles. This router is the administrative
+ * view: account lifecycle, activation, role assignment. Merging them would mean
+ * one permission gate for two genuinely different capabilities, and the
+ * narrower one would have to become the wider one.
+ *
+ * WHY THE PASSWORD COLUMN IS NEVER SELECTED INTO A RESPONSE. The column is
+ * `password_hash` (never `password`), and the shared `User` type deliberately
+ * declares no credential fields at all. It used to declare `passwordHash`,
+ * `salt`, `resetToken`, `resetTokenExpiry` and `notificationToken` on a type
+ * the browser consumes — inert only because nothing read them, which is not a
+ * safety property. Removing them from the type is what makes an accidental
+ * `SELECT *` reaching the client a compile error rather than a leak.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
