@@ -1,25 +1,41 @@
-import { AUTH_HEADERS, handleResponse, API_BASE_URL } from './apiUtils';
+/**
+ * Calendar service — personal iCalendar feed token.
+ *
+ * `getOrCreateCalendarToken` and `rotateCalendarToken` go through the
+ * generated client so path and method are checked against the OpenAPI
+ * contract at compile time. See `departmentService` for the full rationale.
+ *
+ * `buildFeedUrl` deliberately does NOT: the feed URL is handed to an external
+ * calendar client (Google Calendar, Outlook, Apple Calendar) to poll on its
+ * own, so it is a string this app produces, not a request it issues. The token
+ * is the credential, which is why it is query-borne here and why the endpoint
+ * answers a missing one with a `401 text/plain` rather than the JSON envelope
+ * — iCal clients expect auth semantics, not an API error body. That is also
+ * why the token is optional to the query schema.
+ *
+ * @author Luca Ostinelli
+ */
+
+import { API_BASE_URL } from './apiUtils';
+import { apiClient } from '../api/client';
 
 export interface CalendarTokenResponse {
   token: string;
 }
 
-const request = async <T>(path: string, init: RequestInit = {}) => {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: 'include',
-    ...init,
-    headers: { ...AUTH_HEADERS, ...(init.headers as Record<string, string> ?? {}) },
-  });
-  return handleResponse<T>(res);
-};
-
 export async function getOrCreateCalendarToken(): Promise<CalendarTokenResponse> {
-  const res = await request<CalendarTokenResponse>('/calendar/token', { method: 'POST' });
+  const res = await apiClient.post<CalendarTokenResponse, '/calendar/token'>(
+    '/calendar/token',
+    undefined
+  );
   return res.data as CalendarTokenResponse;
 }
 
 export async function rotateCalendarToken(): Promise<CalendarTokenResponse> {
-  const res = await request<CalendarTokenResponse>('/calendar/token/rotate', { method: 'POST' });
+  const res = await apiClient.post<CalendarTokenResponse, '/calendar/token/rotate'>(
+    '/calendar/token/rotate',
+    undefined
+  );
   return res.data as CalendarTokenResponse;
 }
 
