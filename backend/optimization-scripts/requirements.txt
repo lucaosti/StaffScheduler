@@ -1,6 +1,26 @@
-# Python dependencies for schedule optimization
-# Google OR-Tools for constraint programming
-ortools>=9.8.0
+# Python dependencies for schedule optimization.
+#
+# WHY THESE ARE PINNED EXACTLY. `ortools>=9.8.0` meant CI installed whatever
+# was current when the job ran while a developer kept whatever they installed
+# once, so the two never provably ran the same solver. That cost a debugging
+# cycle: the fairness objective (PR #468) passed the full parity suite locally
+# on 9.14.6206 and was KILLED in CI — no exit code — on fixtures of four
+# variables. The cause was a call into a variable's internal proto, but the
+# diagnosis was guesswork because the failure could not be reproduced.
+#
+# This matters more here than for a typical dependency. The optimizer's
+# correctness is defined by a third-party solver's behaviour, and the parity
+# suite — mandatory in CI via REQUIRE_ORTOOLS=1 — is a statement about a
+# SPECIFIC version. With an open bound nobody could say which. It also cuts the
+# other way: a solver regression would have surfaced as a mysterious failure on
+# an unrelated PR, with nothing indicating the dependency had moved.
+#
+# Upgrading is now a deliberate act with the parity suite as its gate, which is
+# the point. Bump the pin, run the suite, and record the new version here.
 
-# Data processing
-python-dateutil>=2.8.2
+# Google OR-Tools for constraint programming (CP-SAT).
+# Parity suite verified green against this exact version.
+ortools==9.14.6206
+
+# Data processing.
+python-dateutil==2.9.0.post0
