@@ -49,8 +49,9 @@ export class AssignmentValidator {
   /**
    * Returns the user's assignments that overlap the given shift window.
    *
-   * `date` is the shift's START date; an `endTime` at or before `startTime`
-   * means the shift runs into the following day.
+   * `date` is the shift's START date, accepted as a string or as the `Date`
+   * mysql2 hands back for a DATE column; an `endTime` at or before
+   * `startTime` means the shift runs into the following day.
    *
    * Pass the transaction `connection` as `executor` when the check must see
    * (and be serialized with) uncommitted rows of the surrounding transaction —
@@ -58,7 +59,7 @@ export class AssignmentValidator {
    */
   async checkConflicts(
     userId: number,
-    date: string,
+    date: string | Date,
     startTime: string,
     endTime: string,
     executor: SqlExecutor = this.pool

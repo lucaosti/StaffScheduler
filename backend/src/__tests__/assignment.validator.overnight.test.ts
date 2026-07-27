@@ -62,6 +62,27 @@ describe('DateUtils.shiftBounds', () => {
     ]);
   });
 
+  /**
+   * REGRESSION, caught by the real-MySQL integration job and not by any mocked
+   * test: mysql2 materializes a DATE column as a `Date`, and `AssignmentService`
+   * passed `shift.date` straight through. Interpolating a `Date` into
+   * `${day}T${time}Z` yields a string `new Date()` cannot parse, so every
+   * assignment creation failed with `INTERNAL_ERROR: Invalid time value`.
+   *
+   * The audit path two lines away in the same method already converted with
+   * `fromMySQLDate`, which is what makes this the right fix: normalising inside
+   * the helper removes the obligation from every call site rather than fixing
+   * the one that forgot.
+   */
+  it('accepts the Date that mysql2 returns for a DATE column', () => {
+    // Local midnight, which is how mysql2 materializes `2026-03-01`.
+    const fromDb = new Date(2026, 2, 1);
+    expect(DateUtils.shiftBounds(fromDb, '22:00:00', '06:00:00')).toEqual([
+      '2026-03-01 22:00:00',
+      '2026-03-02 06:00:00',
+    ]);
+  });
+
   it('does not shift the date across a UTC offset', () => {
     // Regression guard for the class of bug DateUtils.fromMySQLDate documents:
     // a local-vs-UTC mix-up silently moves a date by one day in any positive
