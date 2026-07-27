@@ -1,3 +1,36 @@
+/**
+ * Application shell: providers, routing, and the code-splitting boundary.
+ *
+ * PROVIDER ORDER IS DELIBERATE. `QueryClientProvider` wraps `AuthProvider`
+ * because auth state is itself fetched, and `ErrorBoundary` sits outside the
+ * routed tree so a render failure inside a page produces a recoverable screen
+ * rather than a blank document.
+ *
+ * WHY ONE SHARED `queryClient` FROM `lib/queryClient` RATHER THAN ONE CREATED
+ * HERE. Creating it inline is the common React Query example, but it makes the
+ * cache unreachable outside the component tree and re-creates it on any
+ * remount. A single exported instance gives one cache for the app and lets
+ * non-component code invalidate a key. Tests take the opposite side of the same
+ * decision on purpose: `test-utils/renderWithClient` builds a FRESH client per
+ * test, because a cache shared across tests leaks state between them.
+ *
+ * WHY EVERY PAGE IS LAZY EXCEPT `Login`. Route-level `React.lazy` splits each
+ * page into its own chunk, so the initial load does not carry the admin
+ * screens. Login is exempt because it is the first thing an unauthenticated
+ * visitor renders — lazy-loading it would add a round trip to the one path
+ * where nothing is cached yet.
+ *
+ * WHY AUTHORIZATION IS TWO COMPONENTS. `ProtectedRoute` answers "is anyone
+ * logged in", `PermissionRoute` answers "does this user hold the permission
+ * code". They are separate because the failure modes differ — the first
+ * redirects to login, the second must not, since re-authenticating will not
+ * grant a permission the user does not have. Both are client-side conveniences
+ * for navigation only: the server re-checks every request with
+ * `requirePermission`, and it is the authority.
+ *
+ * @author Luca Ostinelli
+ */
+
 import React, { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';

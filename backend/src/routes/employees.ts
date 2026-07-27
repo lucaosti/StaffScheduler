@@ -1,3 +1,30 @@
+/**
+ * Employee routes — `/api/employees`, plus per-employee skill management.
+ *
+ * WHY THERE IS NO EMPLOYEE ENTITY. `EmployeeService` delegates to
+ * `UserService`, and these endpoints return `users` rows. There is no
+ * `employees` table and never has been. The distinction is one of PERMISSION
+ * and INTENT rather than of storage: `/api/users` is the administrative surface
+ * gated on user management, while `/api/employees` is the workforce surface
+ * gated on `employee.read` / `employee.manage`, which a scheduling manager
+ * holds without being able to administer accounts.
+ *
+ * This mattered concretely: the OpenAPI spec once published an `Employee`
+ * component with an `employeeNumber` field for an entity that does not exist.
+ * It was deleted and `/employees` now `$ref`s `User`, which is what the
+ * endpoint actually returns.
+ *
+ * WHY CREATION TAKES `createUserBody`. Creating an employee creates an account,
+ * password included — there is no lighter-weight "employee without a login".
+ * A UI form that omitted the password field therefore had every submission
+ * rejected with a 400, invisibly, because the client-side type omitted it too.
+ * The shared schema is the single declaration of what this endpoint accepts,
+ * and the frontend now derives its payload type from it rather than mirroring
+ * it by hand.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';

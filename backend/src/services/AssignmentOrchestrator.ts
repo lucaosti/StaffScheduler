@@ -1,3 +1,32 @@
+/**
+ * Assignment lifecycle SQL and read-only aggregates over `shift_assignments`.
+ *
+ * Extracted from `AssignmentService` — see that file for why the seam is drawn
+ * here. The short version: this class owns the status transitions and the
+ * reporting queries, and is deliberately ACTOR-UNAWARE. Its methods take an id;
+ * nothing here knows or asks who is acting, and nothing here writes an audit
+ * row. `AssignmentService` supplies both.
+ *
+ * WHY EACH TRANSITION GUARDS ON THE CURRENT STATUS IN THE `WHERE` CLAUSE
+ * (`... WHERE id = ? AND status = 'pending'`) RATHER THAN READING THEN
+ * WRITING. Read-check-write is racy: two concurrent confirmations both read
+ * `pending` and both write, and the second silently succeeds. Folding the
+ * precondition into the UPDATE makes the check and the write one atomic
+ * statement, so `affectedRows === 0` is an unambiguous "the assignment was not
+ * in a state this transition applies to" — reported as `NotFoundError` rather
+ * than a false success. The same reasoning is why `pending_approvals` keeps its
+ * raw `WHERE status = 'pending'` guard alongside the ApprovalStateMachine.
+ *
+ * `declineAssignment` deliberately delegates to `cancelAssignment`: declining
+ * and cancelling reach the same terminal state and the same row shape. They are
+ * kept as separate entry points because the CALLER's intent differs (the
+ * employee refused vs a manager withdrew it), and that distinction is preserved
+ * where it matters — in the audit action the service records — rather than by
+ * duplicating identical SQL here.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment } from '../types';
 import { ConflictError, NotFoundError } from '../errors';

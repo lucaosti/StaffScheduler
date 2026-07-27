@@ -1,3 +1,36 @@
+/**
+ * Schedule routes — CRUD, the publish/archive lifecycle, and optimization.
+ *
+ * WHY `/:id/generate` DOES NOT RETURN THE SCHEDULE. Optimization can run for
+ * minutes, so when Redis is available the route enqueues a BullMQ job and
+ * answers `202 { jobId }`; the client then polls `GET /:id/optimization` or
+ * listens on the SSE stream. Holding the request open for the duration was the
+ * obvious alternative and was rejected: it ties up a connection, dies on any
+ * proxy timeout, and gives the caller no way to cancel. Without Redis the route
+ * falls back to running the solve inline and returning `200` with the result,
+ * so a local install with no infrastructure still works — the response shape
+ * differs, and callers branch on the presence of `jobId`.
+ *
+ * The job id is deterministic per schedule (`schedule:{id}`), so a second
+ * generate while one is in flight joins the existing job rather than starting a
+ * competing solve over the same rows.
+ *
+ * WHY THE RESULT ALWAYS CARRIES `engine` AND `degraded`. The optimum comes from
+ * the Python CP-SAT solver; if it is unavailable the run degrades to the greedy
+ * TypeScript engine. That fallback must never be silent — a draft schedule that
+ * looks like an optimum gets published. Every generation result therefore
+ * states which engine produced it and whether the optimum was requested but not
+ * achieved, and the UI surfaces it prominently.
+ *
+ * ROUTE ORDER MATTERS HERE: `/department/:departmentId` and `/user/:userId` are
+ * registered after `/:id`, so they are unambiguous only because their prefixes
+ * are literal segments. Adding a route whose first segment could be an id
+ * requires registering it BEFORE `/:id` — see `shifts.ts`, where `/templates`
+ * has to come first for that reason.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ScheduleService } from '../services/ScheduleService';

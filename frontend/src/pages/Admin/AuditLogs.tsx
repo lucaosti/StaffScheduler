@@ -1,3 +1,31 @@
+/**
+ * Audit log viewer — the read surface over `audit_logs`.
+ *
+ * WHY THE FILTER STATE IS ALL STRINGS. The form binds directly to `<input>`
+ * values, and an empty text field is `''`, not `undefined`. Keeping the local
+ * state as strings and converting only at query time means one place performs
+ * the "empty means no filter" decision, rather than every field handler having
+ * to decide whether a cleared box should send an empty value or omit the
+ * parameter. `userId` in particular must be omitted rather than sent as `0`,
+ * which would filter to a user that does not exist and show nothing.
+ *
+ * WHY EXPORT IS A LINK AND NOT A FETCH. `buildExportUrl` produces an href the
+ * browser follows, so the download is handled natively — with the file name,
+ * progress and cancellation the browser provides — instead of being buffered
+ * into memory here. The export endpoint refuses rather than truncates when the
+ * result would be too large, on the grounds that a partial audit export which
+ * looks complete is worse than an error.
+ *
+ * THE ACTOR COLUMN IS THE POINT OF THIS SCREEN, AND IT WAS BROKEN. The type
+ * used to declare `actorId`/`actorEmail` while the API has always returned
+ * `userId`, so the "who did this" column rendered an em-dash on every row while
+ * the data sat in the response. Tests could not catch it: the fixtures used the
+ * correct field, but nothing asserted the column. There is now an assertion on
+ * the rendered value, not merely on the shape of the data.
+ *
+ * @author Luca Ostinelli
+ */
+
 import React, { useState, useCallback } from 'react';
 import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
 import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
