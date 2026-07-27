@@ -40,6 +40,7 @@ class ScheduleOptimizerORTools:
         self.assignments = {}  # (employee_id, shift_id) -> BoolVar
         self.hours_worked = {}  # employee_id -> IntVar (weekly hours)
         self.coverage_shortfall = {}  # shift_id -> IntVar (staff missing below min_staff)
+        self.coverage_surplus = {}  # shift_id -> IntVar (staff scheduled beyond min_staff)
         
         # Extract data
         self.shifts = {s['id']: s for s in problem_data['shifts']}
@@ -187,6 +188,14 @@ class ScheduleOptimizerORTools:
             shortfall = self.model.NewIntVar(0, min_staff, f'shortfall_s{shift_id}')
             self.model.Add(shortfall >= min_staff - sum(assignments_for_shift))
             self.coverage_shortfall[shift_id] = shortfall
+
+            # surplus = max(0, assigned - min_staff): people scheduled beyond
+            # what the shift requires. Tracked so the objective can charge for
+            # them; see _build_objective_function for why that is necessary
+            # once workload fairness enters the model.
+            surplus = self.model.NewIntVar(0, max(0, max_staff - min_staff), f'surplus_s{shift_id}')
+            self.model.Add(surplus >= sum(assignments_for_shift) - min_staff)
+            self.coverage_surplus[shift_id] = surplus
     
     def _add_no_double_booking_constraints(self):
         """
@@ -412,6 +421,85 @@ class ScheduleOptimizerORTools:
         
         return (end - start) // 60  # Convert minutes to hours
     
+    def _shift_minutes(self, shift: Dict) -> int:
+        """
+        Shift duration in MINUTES, overnight-aware.
+
+        Fairness balances on minutes rather than the integer hours used by the
+        cap constraints, because `_calculate_shift_hours` truncates: a 7.5-hour
+        shift counts as 7. For a cap that under-counts is merely conservative,
+        but for BALANCING it introduces a systematic bias — half-hour shifts
+        become invisible, so someone holding many of them looks under-loaded
+        and keeps being given more.
+        """
+        start = self._parse_time(shift['start_time'])
+        end = self._parse_time(shift['end_time'])
+        if end <= start:
+            end += 24 * 60
+        return end - start
+
+    def _add_fairness_terms(self, objective_terms: List, scale: int) -> int:
+        """
+        SOFT: balance total workload across employees.
+
+        WHY THIS DID NOT EXIST. The objective maximised coverage and
+        preferences and nothing else, so nothing preferred giving eight shifts
+        each to two people over twelve to one and four to the other — both
+        scored identically, and which came out was an artefact of CP-SAT's
+        search order. Meanwhile `/api/reports/fairness` computed and displayed
+        a fairness figure, so the system MEASURED and REPORTED an equilibrium
+        the solver had never been asked to produce. A planner reading a poor
+        number had no lever: re-running changed nothing systematically.
+
+        WHY SPREAD (max - min) AND NOT SQUARED DEVIATION. The textbook fairness
+        term penalises squared deviation from the mean, which makes one person
+        4 hours over cost more than two people 2 hours over — the shape most
+        people mean by "fair". CP-SAT is a linear/integer solver, so squaring
+        is not available directly; it would need piecewise-linear
+        approximation, which adds variables and a modelling choice (how many
+        pieces, where) that is harder to justify than the thing it approximates.
+        Minimising `max_load - min_load` is exactly expressible, needs two
+        auxiliary variables total, and targets the complaint that actually gets
+        raised: the gap between the busiest and least-busy person. Its known
+        weakness is indifference to the middle of the distribution — recorded
+        here rather than discovered later.
+
+        Employees with no assignments sit at load 0 and pull `min` down, which
+        is intended: someone left entirely unused IS an unequal distribution.
+        Where there is simply more staff than work the spread is unavoidable
+        and this term cannot improve it, so it does no harm either.
+        """
+        if len(self.employees) < 2:
+            return 0  # Nothing to balance.
+
+        loads = []
+        for emp_id in self.employees:
+            terms = [
+                self.assignments[(emp_id, shift_id)] * self._shift_minutes(shift)
+                for shift_id, shift in self.shifts.items()
+            ]
+            if not terms:
+                return 0
+            upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+            load = self.model.NewIntVar(0, upper, f'load_e{emp_id}')
+            self.model.Add(load == sum(terms))
+            loads.append(load)
+
+        upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+        max_load = self.model.NewIntVar(0, upper, 'max_load')
+        min_load = self.model.NewIntVar(0, upper, 'min_load')
+        self.model.AddMaxEquality(max_load, loads)
+        self.model.AddMinEquality(min_load, loads)
+
+        spread = self.model.NewIntVar(0, upper, 'load_spread')
+        self.model.Add(spread == max_load - min_load)
+        objective_terms.append(-spread * scale)
+
+        # The largest magnitude this term can contribute. Returned rather than
+        # assumed by the caller: the whole point of the lexicographic bound is
+        # that it is summed from what actually enters the model.
+        return upper * scale
+
     def _build_objective_function(self):
         """
         Lexicographic MEDIUM > SOFT objective, emulated on a single scalar.
@@ -463,18 +551,58 @@ class ScheduleOptimizerORTools:
                 # level can reach is the sum of the absolute coefficients.
                 soft_bound += abs(coefficient)
 
+        # SOFT — workload balance. Weighted below preferences by default
+        # (40 vs 55) because an unbalanced schedule someone consented to is a
+        # milder problem than one that ignores what they asked for; the weight
+        # is configurable precisely because that trade-off is a business
+        # decision rather than a constant.
+        #
+        # Collected into the SAME list as the preference terms, and its bound
+        # added to the same total, BEFORE medium is scaled. Adding it
+        # afterwards would have re-created the exact bug described below with a
+        # far larger magnitude — the spread is measured in minutes, so a single
+        # unbalanced schedule can outweigh several unstaffed shifts.
+        fairness_scale = max(1, int(self.weights.get('workload_fairness', 40.0)))
+        soft_bound += self._add_fairness_terms(soft_terms, fairness_scale)
+
+        # SOFT — charge for staffing beyond what a shift requires.
+        #
+        # WHY THIS IS NEEDED THE MOMENT FAIRNESS EXISTS. Nothing rewards
+        # staffing between min_staff and max_staff, deliberately: max_staff is
+        # a ceiling, not a target. But fairness rewards it INDIRECTLY, because
+        # adding people flattens the load distribution — observed directly, a
+        # 3-shift / 4-employee fixture went from 6 assignments to 8, buying a
+        # perfectly even split with two extra shifts of wages. An optimizer
+        # that inflates payroll to make its own fairness metric look good is
+        # precisely the "measured but not meaningful" failure this term was
+        # added to fix.
+        #
+        # The weight is DERIVED, not tuned: one extra assignment can improve
+        # the spread by at most the longest shift's duration, so charging
+        # strictly more than that per surplus person makes over-staffing never
+        # worth a fairness gain — while leaving it available when coverage
+        # genuinely needs it, since shortfall lives at MEDIUM and outranks both.
+        if self.coverage_surplus:
+            longest = max(
+                (self._shift_minutes(sh) for sh in self.shifts.values()), default=0
+            )
+            surplus_scale = longest * fairness_scale + 1
+            for surplus in self.coverage_surplus.values():
+                soft_terms.append(-surplus * surplus_scale)
+                soft_bound += surplus.Proto().domain[-1] * surplus_scale
+
         # Strictly greater than that bound, so one unit of shortfall always
         # costs more than the ENTIRE soft level can ever be worth. This is what
         # makes the ordering lexicographic rather than another weight to tune.
         #
-        # WHY THE BOUND IS SUMMED AND NOT DERIVED FROM THE WEIGHT. The first
+        # WHY THE BOUND IS SUMMED AND NOT DERIVED FROM THE WEIGHTS. The first
         # attempt assumed each preference contributed at most `pref_weight`,
         # reasoning that preferences are +1/0/-1. They are not: _get_preference
         # returns +/-10, so the real ceiling was ten times the assumed one and
         # SOFT OUTRANKED MEDIUM — the solver left every shift empty to satisfy
-        # an "avoid" preference. Summing the coefficients that actually enter
-        # the model cannot drift from them, and stays correct if the preference
-        # scale is ever changed.
+        # an "avoid" preference. Every soft contributor must therefore report
+        # its own maximum magnitude here, which is why _add_fairness_terms
+        # returns one instead of the caller estimating it.
         medium_scale = soft_bound + 1
 
         objective_terms = []
