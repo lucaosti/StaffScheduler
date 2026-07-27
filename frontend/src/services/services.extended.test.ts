@@ -70,9 +70,21 @@ describe('employeeService', () => {
       expect(lastInit().method ?? 'GET').toBe('GET');
     });
 
-    it('accepts a string id', async () => {
-      await employeeService.getEmployee('EMP001');
-      expect(lastUrl()).toMatch(/\/employees\/EMP001$/);
+    // React Router hands route params over as strings, so a numeric string is
+    // the real call shape and must resolve to the same URL as the number.
+    it('accepts a numeric string id, as route params arrive', async () => {
+      await employeeService.getEmployee('42');
+      expect(lastUrl()).toMatch(/\/employees\/42$/);
+    });
+
+    // This used to assert `getEmployee('EMP001')` produced /employees/EMP001.
+    // It never could have worked: the endpoint validates its path parameter
+    // with `idParam` (`positiveInt`), so the server answers a non-numeric id
+    // with a 400 — the test asserted a request the API rejects, and passed,
+    // which is the same class of defect as `CreateEmployeeData` omitting the
+    // required `password`. The client now refuses to build such a URL.
+    it('refuses a non-numeric id instead of requesting /employees/NaN', async () => {
+      await expect(employeeService.getEmployee('EMP001')).rejects.toThrow(/NaN/);
     });
   });
 
@@ -174,9 +186,18 @@ describe('shiftService', () => {
       expect(lastUrl()).toMatch(/\/shifts\/5$/);
     });
 
-    it('accepts a string id', async () => {
-      await shiftService.updateShift('shift-uuid', { status: 'confirmed' });
-      expect(lastUrl()).toMatch(/\/shifts\/shift-uuid$/);
+    it('accepts a numeric string id, as route params arrive', async () => {
+      await shiftService.updateShift('5', { status: 'confirmed' });
+      expect(lastUrl()).toMatch(/\/shifts\/5$/);
+    });
+
+    // See the employeeService counterpart: `shift-uuid` is not a shape this
+    // endpoint accepts (`idParam` is `positiveInt`), so building the URL at all
+    // only produced a confusing server-side 400.
+    it('refuses a non-numeric id instead of requesting /shifts/NaN', async () => {
+      await expect(shiftService.updateShift('shift-uuid', { status: 'confirmed' })).rejects.toThrow(
+        /NaN/
+      );
     });
   });
 
