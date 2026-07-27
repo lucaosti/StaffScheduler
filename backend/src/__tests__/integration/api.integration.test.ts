@@ -1273,3 +1273,70 @@ describe('overnight shifts run against the real schema', () => {
     expect(conflicts).toEqual([]);
   });
 });
+
+/**
+ * Working-time limits must not be self-settable, verified against real MySQL.
+ *
+ * The unit suite asserts the router never passes the limit fields to the
+ * service. That proves the contract, but not that the stored row is unchanged
+ * — a schema strips unknown keys, so the request returns 200 either way, and a
+ * test asserting "the call succeeded" passes against the defect. Reading the
+ * row back afterwards is the only assertion that distinguishes them.
+ */
+describe('self-service preferences run against the real schema', () => {
+  const readLimits = async (): Promise<{ max_hours_per_week: number; max_consecutive_days: number }> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      'SELECT max_hours_per_week, max_consecutive_days FROM user_preferences WHERE user_id = ?',
+      [userId]
+    );
+    return rows[0] as { max_hours_per_week: number; max_consecutive_days: number };
+  };
+
+  beforeAll(async () => {
+    await admin.query(
+      `INSERT INTO user_preferences (user_id, max_hours_per_week, min_hours_per_week, max_consecutive_days)
+       VALUES (?, 32, 0, 4)
+       ON DUPLICATE KEY UPDATE max_hours_per_week = 32, max_consecutive_days = 4`,
+      [userId]
+    );
+  });
+
+  it('stores the genuine preferences sent to /me', async () => {
+    const cookie = await authCookie();
+    const res = await request(app)
+      .put('/api/preferences/me')
+      .set('Cookie', cookie)
+      .send({ notes: 'prefers mornings' });
+    expect(res.status).toBeLessThan(400);
+  });
+
+  it('leaves the working-time limits untouched when /me tries to set them', async () => {
+    const cookie = await authCookie();
+    const before = await readLimits();
+
+    const res = await request(app)
+      .put('/api/preferences/me')
+      .set('Cookie', cookie)
+      .send({ maxHoursPerWeek: 80, maxConsecutiveDays: 14, notes: 'nice try' });
+
+    // Accepted — the unknown keys are stripped, not rejected — so the status
+    // says nothing. The stored row is what matters.
+    expect(res.status).toBeLessThan(400);
+    expect(await readLimits()).toEqual(before);
+  });
+
+  it('still lets a manager set them through /:userId', async () => {
+    // The admin fixture holds preferences.manage, so narrowing the
+    // self-service body must not have removed the capability itself.
+    const cookie = await authCookie();
+    const res = await request(app)
+      .put(`/api/preferences/${userId}`)
+      .set('Cookie', cookie)
+      .send({ maxHoursPerWeek: 36, maxConsecutiveDays: 5 });
+
+    expect(res.status).toBeLessThan(400);
+    const after = await readLimits();
+    expect(Number(after.max_hours_per_week)).toBe(36);
+    expect(Number(after.max_consecutive_days)).toBe(5);
+  });
+});
