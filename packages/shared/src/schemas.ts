@@ -683,13 +683,47 @@ export const twoFactorCodeBody = z.object({
   code: z.string().min(1, 'code is required'),
 });
 
-export const upsertPreferencesBody = z.object({
-  maxHoursPerWeek: z.number().positive().optional(),
-  minHoursPerWeek: z.number().nonnegative().optional(),
-  maxConsecutiveDays: z.number().int().min(1).max(14).optional(),
+/**
+ * What an employee may set about their OWN scheduling.
+ *
+ * WHY THE WORKING-TIME LIMITS ARE NOT HERE. `maxHoursPerWeek`,
+ * `minHoursPerWeek` and `maxConsecutiveDays` used to be part of this body, on
+ * an endpoint (`PUT /preferences/me`) deliberately guarded by `authenticate`
+ * alone because it is self-service. But those three are not preferences: they
+ * are the working-time limits the optimizer enforces as HARD constraints, so
+ * any employee could raise their own maximum weekly hours and consecutive
+ * working days and the scheduler would then legitimately assign them more
+ * work. In most jurisdictions those are legally bounded, which made it a
+ * compliance exposure and not only an authorization one. The reverse was
+ * quieter and just as wrong: lowering one's own limits silently removes
+ * oneself from the schedulable pool.
+ *
+ * The mistake was structural rather than careless. The limits live in the
+ * `user_preferences` table alongside `preferred_shifts`, and the table name
+ * asserts that everything in it is a preference — so one endpoint, one schema
+ * and one service method covered both, and the guard was chosen for the table
+ * rather than for the fields.
+ */
+export const upsertOwnPreferencesBody = z.object({
   preferredShifts: z.array(z.number().int().positive()).optional(),
   avoidShifts: z.array(z.number().int().positive()).optional(),
   notes: z.string().nullable().optional(),
+});
+
+/**
+ * What a manager may set about someone else's scheduling: the preferences
+ * above plus the working-time limits. Used only by `PUT /preferences/:userId`,
+ * which is gated on `preferences.manage`.
+ *
+ * These limits remain here rather than in a properly effective-dated
+ * employment contract, which is the durable fix — a person moving from
+ * full-time to part-time still overwrites the old value, so the schedule
+ * generated last month appears to violate a limit that did not apply then.
+ */
+export const upsertPreferencesBody = upsertOwnPreferencesBody.extend({
+  maxHoursPerWeek: z.number().positive().optional(),
+  minHoursPerWeek: z.number().nonnegative().optional(),
+  maxConsecutiveDays: z.number().int().min(1).max(14).optional(),
 });
 
 export const moduleEnabledBody = z.object({
