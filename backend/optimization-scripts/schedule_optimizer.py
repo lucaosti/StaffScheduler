@@ -19,6 +19,7 @@ Usage:
     python schedule_optimizer.py --stdin --stdout < input.json > output.json
 """
 
+import os
 import sys
 import json
 import argparse
@@ -100,8 +101,6 @@ class ScheduleOptimizerORTools:
         self._add_shift_coverage_constraints()
         self._add_no_double_booking_constraints()
         self._add_min_rest_constraints()
-        self._add_skill_requirements_constraints()
-        self._add_availability_constraints()
         self._add_daily_hours_constraints()
         self._add_max_hours_constraints()
         self._add_max_consecutive_days_constraints()
@@ -122,14 +121,59 @@ class ScheduleOptimizerORTools:
             end += 1440
         return start, end
     
+    def _is_eligible(self, employee: Dict, shift: Dict) -> bool:
+        """
+        Whether this pairing is possible at all, from facts known before search.
+
+        Skills and declared unavailability are STATIC: nothing the solver
+        decides can change whether someone holds a qualification or booked that
+        day off. So a pairing failing either can be excluded from the model
+        rather than represented and then forbidden.
+        """
+        required_skills = set(shift.get('required_skills', []))
+        if required_skills and not required_skills.issubset(set(employee.get('skills', []))):
+            return False
+        if shift['date'] in set(employee.get('unavailable_dates', [])):
+            return False
+        return True
+
+    def _var(self, employee_id: str, shift_id: str):
+        """The decision variable for a pairing, or None when it was excluded."""
+        return self.assignments.get((employee_id, shift_id))
+
     def _create_assignment_variables(self):
-        """Create boolean variables for each (employee, shift) pair."""
-        # Only the ids matter here: the variable is created for every pair, and
-        # the entities themselves are read by the constraint builders.
-        for shift_id in self.shifts:
-            for employee_id in self.employees:
+        """
+        One boolean per FEASIBLE (employee, shift) pairing.
+
+        WHY NOT EVERY PAIR. It used to be every pair unconditionally, and the
+        skill and availability builders then pinned the impossible ones to 0 —
+        so the model carried a variable, a constraint and the propagation cost
+        for pairings that could never be anything but zero. With 2,000 shifts
+        and 100 employees that is 200,000 variables before any structural
+        filtering, and the excluded fraction is large in exactly the cases that
+        matter: specialised skills and heavy leave periods.
+
+        The model is not made smaller in meaning, only in size: the solution
+        space is identical, because the omitted variables were fixed at 0.
+
+        Everything downstream reads pairings through `_var`, which returns None
+        for an excluded pairing. Sums simply skip it — omitting a term that was
+        pinned to 0 changes nothing — and pairwise constraints skip when either
+        side is absent, since a constraint on an impossible assignment is
+        vacuous.
+        """
+        for shift_id, shift in self.shifts.items():
+            for employee_id, employee in self.employees.items():
+                if not self._is_eligible(employee, shift):
+                    continue
                 var_name = f'assign_e{employee_id}_s{shift_id}'
                 self.assignments[(employee_id, shift_id)] = self.model.NewBoolVar(var_name)
+
+        print(
+            f'Eligible pairings: {len(self.assignments)} of '
+            f'{len(self.shifts) * len(self.employees)}',
+            file=sys.stderr,
+        )
     
     def _add_shift_coverage_constraints(self):
         """
@@ -173,8 +217,8 @@ class ScheduleOptimizerORTools:
             max_staff = shift.get('max_staff', min_staff + 2)
 
             assignments_for_shift = [
-                self.assignments[(emp_id, shift_id)]
-                for emp_id in self.employees.keys()
+                var for emp_id in self.employees
+                if (var := self._var(emp_id, shift_id)) is not None
             ]
 
             # Hard ceiling.
@@ -218,13 +262,17 @@ class ScheduleOptimizerORTools:
                 # Decision shift vs the employee's fixed external shifts.
                 for ext in externals:
                     if self._shifts_overlap_abs(s1, ext):
-                        self.model.Add(self.assignments[(employee_id, sid1)] == 0)
+                        if (v := self._var(employee_id, sid1)) is not None:
+                            self.model.Add(v == 0)
                 # Decision shift vs decision shift.
                 for sid2, s2 in shift_items[i + 1:]:
                     if self._shifts_overlap_abs(s1, s2):
+                        v1 = self._var(employee_id, sid1)
+                        v2 = self._var(employee_id, sid2)
+                        if v1 is None or v2 is None:
+                            continue
                         self.model.Add(
-                            self.assignments[(employee_id, sid1)]
-                            + self.assignments[(employee_id, sid2)] <= 1
+                            v1 + v2 <= 1
                         )
 
     def _add_min_rest_constraints(self):
@@ -242,13 +290,17 @@ class ScheduleOptimizerORTools:
                 for ext in externals:
                     if not self._shifts_overlap_abs(s1, ext) and \
                             self._rest_conflict(s1, ext, min_rest_minutes):
-                        self.model.Add(self.assignments[(employee_id, sid1)] == 0)
+                        if (v := self._var(employee_id, sid1)) is not None:
+                            self.model.Add(v == 0)
                 for sid2, s2 in shift_items[i + 1:]:
                     if not self._shifts_overlap_abs(s1, s2) and \
                             self._rest_conflict(s1, s2, min_rest_minutes):
+                        v1 = self._var(employee_id, sid1)
+                        v2 = self._var(employee_id, sid2)
+                        if v1 is None or v2 is None:
+                            continue
                         self.model.Add(
-                            self.assignments[(employee_id, sid1)]
-                            + self.assignments[(employee_id, sid2)] <= 1
+                            v1 + v2 <= 1
                         )
 
     def _shifts_overlap_abs(self, shift1: Dict, shift2: Dict) -> bool:
@@ -269,39 +321,12 @@ class ScheduleOptimizerORTools:
         parts = time_str.split(':')
         return int(parts[0]) * 60 + int(parts[1])
     
-    def _add_skill_requirements_constraints(self):
-        """
-        HARD: Assigned employees must have required skills.
-        Similar to PoliTO's teaching competency constraints.
-        """
-        for shift_id, shift in self.shifts.items():
-            required_skills = set(shift.get('required_skills', []))
-            
-            if not required_skills:
-                continue
-            
-            for employee_id, employee in self.employees.items():
-                employee_skills = set(employee.get('skills', []))
-                
-                # If employee doesn't have required skills, cannot be assigned
-                if not required_skills.issubset(employee_skills):
-                    self.model.Add(self.assignments[(employee_id, shift_id)] == 0)
-    
-    def _add_availability_constraints(self):
-        """
-        HARD: Employees can only be assigned when available.
-        Similar to PoliTO's teacher availability constraints.
-        """
-        for employee_id, employee in self.employees.items():
-            unavailable_dates = set(employee.get('unavailable_dates', []))
-            
-            for shift_id, shift in self.shifts.items():
-                shift_date = shift['date']
-                
-                # If employee unavailable on this date, cannot be assigned
-                if shift_date in unavailable_dates:
-                    self.model.Add(self.assignments[(employee_id, shift_id)] == 0)
-    
+    # Skill requirements and declared availability are enforced by
+    # _create_assignment_variables: a pairing failing either is never given a
+    # variable, so there is nothing left to constrain. The builders that used
+    # to pin those variables to 0 are gone rather than kept as no-ops —
+    # a constraint that can never bind is a claim the reader has to verify.
+
     def _add_daily_hours_constraints(self):
         """
         HARD: an employee's assigned hours on any single date must stay within a
@@ -327,8 +352,9 @@ class ScheduleOptimizerORTools:
             dates = set(shifts_by_date) | set(external_hours_by_date)
             for date in dates:
                 terms = [
-                    self.assignments[(employee_id, sid)] * self._calculate_shift_hours(self.shifts[sid])
+                    v * self._calculate_shift_hours(self.shifts[sid])
                     for sid in shifts_by_date.get(date, [])
+                    if (v := self._var(employee_id, sid)) is not None
                 ]
                 self.model.Add(
                     sum(terms) + external_hours_by_date.get(date, 0) <= daily_budget
@@ -363,8 +389,9 @@ class ScheduleOptimizerORTools:
             for anchor in anchor_days:
                 window = range(anchor, anchor + 7)
                 terms = [
-                    self.assignments[(employee_id, sid)] * self._calculate_shift_hours(self.shifts[sid])
-                    for o, sid in decision_ord if o in window
+                    v * self._calculate_shift_hours(self.shifts[sid])
+                    for o, sid in decision_ord
+                    if o in window and (v := self._var(employee_id, sid)) is not None
                 ]
                 fixed = sum(h for o, h in external_ord if o in window)
                 self.model.Add(sum(terms) + fixed <= max_hours)
@@ -402,14 +429,25 @@ class ScheduleOptimizerORTools:
             for o in range(min(all_ords), max(all_ords) + 1):
                 if o in external_ords:
                     day_worked[o] = 1  # fixed external work
-                elif o in shifts_by_ord:
+                elif o in shifts_by_ord and (
+                    day_vars := [
+                        v for sid in shifts_by_ord[o]
+                        if (v := self._var(employee_id, sid)) is not None
+                    ]
+                ):
                     var = self.model.NewBoolVar(f'worked_e{employee_id}_o{o}')
-                    self.model.AddMaxEquality(
-                        var, [self.assignments[(employee_id, sid)] for sid in shifts_by_ord[o]]
-                    )
+                    self.model.AddMaxEquality(var, day_vars)
                     day_worked[o] = var
                 else:
-                    day_worked[o] = 0  # no shift, no external → not worked
+                    # No shift that day, no external work, OR every shift that
+                    # day is one this employee cannot take (lacks the skill, or
+                    # booked off). All three mean the same thing here: not
+                    # worked. The `day_vars` guard is load-bearing —
+                    # `AddMaxEquality` over an EMPTY list is unsatisfiable, so
+                    # without it an employee ineligible for every shift on one
+                    # day made the whole model INFEASIBLE. That could not
+                    # happen while a variable existed for every pairing.
+                    day_worked[o] = 0
 
             span_start, span_end = min(all_ords), max(all_ords)
             for start in range(span_start, span_end - max_consec + 1):
@@ -481,8 +519,9 @@ class ScheduleOptimizerORTools:
         loads = []
         for emp_id in self.employees:
             terms = [
-                self.assignments[(emp_id, shift_id)] * self._shift_minutes(shift)
+                v * self._shift_minutes(shift)
                 for shift_id, shift in self.shifts.items()
+                if (v := self._var(emp_id, shift_id)) is not None
             ]
             if not terms:
                 return 0
@@ -665,6 +704,30 @@ class ScheduleOptimizerORTools:
         # and break the caller's JSON.parse (both the Node wrapper and the
         # parity suite). Diagnostic prints in this script all target stderr.
         solver.parameters.log_search_progress = False
+
+        # CP-SAT runs its parallel portfolio only when asked. Unset, the solve
+        # is effectively single-threaded and leaves every other core idle for
+        # up to the full time limit.
+        #
+        # WHY BOUNDED RATHER THAN os.cpu_count(). This runs as a child process
+        # under a BullMQ worker, itself alongside the API in a container that
+        # usually has a CPU quota. Grabbing every visible core would have the
+        # solver compete with the request path it is supposed to stay out of,
+        # and `os.cpu_count()` reports the HOST's cores inside a container, not
+        # the quota — so "all cores" can be a large overcommit. Eight is enough
+        # for the portfolio's diversity to pay off while leaving headroom.
+        #
+        # Worth stating what this costs: the portfolio is NON-DETERMINISTIC
+        # across runs, so the same input can yield different equally-optimal
+        # schedules. The parity suite is unaffected because it asserts the
+        # VALIDITY of the output against the canonical constraints, never a
+        # specific assignment set — a property that was already required for
+        # the two engines to be compared at all.
+        workers = int(os.environ.get('OPTIMIZATION_SEARCH_WORKERS', '0'))
+        if workers <= 0:
+            workers = min(8, os.cpu_count() or 1)
+        solver.parameters.num_search_workers = workers
+        print(f'Search workers: {workers}', file=sys.stderr)
         
         status = solver.Solve(self.model)
         
