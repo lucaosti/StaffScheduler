@@ -73,9 +73,14 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
 
 /**
  * Base headers for authenticated API requests.
- * Used internally by getAuthHeaders.
+ *
+ * No longer exported: it was public so that services building their own
+ * `fetch` could spread it, and there are none left — every service now goes
+ * through the typed client, which calls `getAuthHeaders` itself. An export
+ * with no consumer is an invitation to rebuild a request by hand and bypass
+ * the contract checking, which is precisely what this migration removed.
  */
-export const AUTH_HEADERS: Record<string, string> = {
+const AUTH_HEADERS: Record<string, string> = {
   'Content-Type': 'application/json',
 };
 

@@ -1,13 +1,30 @@
 /**
- * Pending approval service — wraps /api/pending-approvals endpoints.
+ * Pending approval service — wraps the `/api/pending-approvals` endpoints.
+ *
+ * Routed through the generated client so path, method, body and query are all
+ * checked against the OpenAPI contract at compile time; filters and request
+ * bodies are derived from it rather than retyped. See `departmentService` for
+ * the full rationale.
+ *
+ * WHY THIS MODULE IS WORTH THE CARE: these calls are decisions. Approve,
+ * reject, keep, delegate and open-to-structure each move an item through the
+ * ApprovalStateMachine, which is the single authority on legal transitions and
+ * throws on an illegal one. A wrong path or a dropped body field here does not
+ * produce a cosmetic bug — it produces a decision attributed to the wrong
+ * person, or a note that never reached the audit row explaining why.
+ *
+ * The response types stay hand-written: pending approvals are not among the
+ * entities declared in `packages/shared/src/domain.ts`, so there is nothing to
+ * derive them from yet. `PendingApprovalItem` in particular carries joined
+ * context fields (`changeType`, `proposedPayload`, `proposerUserId`) that are
+ * a projection rather than a table.
  *
  * @author Luca Ostinelli
  */
 
 import { ApiResponse } from '../types';
-import { getAuthHeaders, handleResponse, API_BASE_URL } from './apiUtils';
-
-const BASE = `${API_BASE_URL}/pending-approvals`;
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
 
 type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated';
 
@@ -65,63 +82,76 @@ export interface DecisionChain {
   decidedByName: string | null;
 }
 
-export const listPendingApprovals = async (
-  status = 'pending'
-): Promise<ApiResponse<PendingApprovalListResponse>> => {
-  const qs = new URLSearchParams({ status });
-  const res = await fetch(`${BASE}?${qs}`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<PendingApprovalListResponse>(res);
-};
+export type PendingApprovalFilters = NonNullable<
+  paths['/pending-approvals']['get']['parameters']['query']
+>;
 
-export const approvePendingItem = async (
+type NoteBody = NonNullable<
+  paths['/pending-approvals/{id}/approve']['post']['requestBody']
+>['content']['application/json'];
+type DelegateBody = NonNullable<
+  paths['/pending-approvals/{id}/delegate']['post']['requestBody']
+>['content']['application/json'];
+
+export const listPendingApprovals = (
+  status: PendingApprovalFilters['status'] = 'pending'
+): Promise<ApiResponse<PendingApprovalListResponse>> =>
+  apiClient.get<PendingApprovalListResponse, '/pending-approvals'>('/pending-approvals', {
+    query: { status },
+  });
+
+export const approvePendingItem = (
   id: number,
   note?: string
-): Promise<ApiResponse<PendingApprovalItem>> => {
-  const res = await fetch(`${BASE}/${id}/approve`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify({ note: note ?? null }),
-  });
-  return handleResponse<PendingApprovalItem>(res);
-};
+): Promise<ApiResponse<PendingApprovalItem>> =>
+  apiClient.post<PendingApprovalItem, '/pending-approvals/{id}/approve'>(
+    '/pending-approvals/{id}/approve',
+    { note: note ?? null } satisfies NoteBody,
+    { params: { id } }
+  );
 
-export const rejectPendingItem = async (
+export const rejectPendingItem = (
   id: number,
   note?: string
-): Promise<ApiResponse<PendingApprovalItem>> => {
-  const res = await fetch(`${BASE}/${id}/reject`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify({ note: note ?? null }),
-  });
-  return handleResponse<PendingApprovalItem>(res);
-};
+): Promise<ApiResponse<PendingApprovalItem>> =>
+  apiClient.post<PendingApprovalItem, '/pending-approvals/{id}/reject'>(
+    '/pending-approvals/{id}/reject',
+    { note: note ?? null },
+    { params: { id } }
+  );
 
 // -------- Structure delegation (entity-agnostic) --------
+// Three ways to answer "this decision is not mine to make alone": keep it,
+// hand it to a named person, or open it to everyone in the structure. Each is
+// recorded as a reassignment so the chain stays reconstructable.
 
-export const keepPendingItem = async (id: number): Promise<ApiResponse<PendingApprovalItem>> => {
-  const res = await fetch(`${BASE}/${id}/keep`, { method: 'POST', ...getAuthHeaders() });
-  return handleResponse<PendingApprovalItem>(res);
-};
+export const keepPendingItem = (id: number): Promise<ApiResponse<PendingApprovalItem>> =>
+  apiClient.post<PendingApprovalItem, '/pending-approvals/{id}/keep'>(
+    '/pending-approvals/{id}/keep',
+    undefined,
+    { params: { id } }
+  );
 
-export const delegatePendingItem = async (
+export const delegatePendingItem = (
   id: number,
   targetUserId: number
-): Promise<ApiResponse<PendingApprovalItem>> => {
-  const res = await fetch(`${BASE}/${id}/delegate`, {
-    method: 'POST',
-    ...getAuthHeaders(),
-    body: JSON.stringify({ targetUserId }),
+): Promise<ApiResponse<PendingApprovalItem>> =>
+  apiClient.post<PendingApprovalItem, '/pending-approvals/{id}/delegate'>(
+    '/pending-approvals/{id}/delegate',
+    { targetUserId } satisfies DelegateBody,
+    { params: { id } }
+  );
+
+export const openPendingItemToStructure = (
+  id: number
+): Promise<ApiResponse<PendingApprovalItem>> =>
+  apiClient.post<PendingApprovalItem, '/pending-approvals/{id}/open-to-structure'>(
+    '/pending-approvals/{id}/open-to-structure',
+    undefined,
+    { params: { id } }
+  );
+
+export const getDecisionChain = (id: number): Promise<ApiResponse<DecisionChain>> =>
+  apiClient.get<DecisionChain, '/pending-approvals/{id}/chain'>('/pending-approvals/{id}/chain', {
+    params: { id },
   });
-  return handleResponse<PendingApprovalItem>(res);
-};
-
-export const openPendingItemToStructure = async (id: number): Promise<ApiResponse<PendingApprovalItem>> => {
-  const res = await fetch(`${BASE}/${id}/open-to-structure`, { method: 'POST', ...getAuthHeaders() });
-  return handleResponse<PendingApprovalItem>(res);
-};
-
-export const getDecisionChain = async (id: number): Promise<ApiResponse<DecisionChain>> => {
-  const res = await fetch(`${BASE}/${id}/chain`, { method: 'GET', ...getAuthHeaders() });
-  return handleResponse<DecisionChain>(res);
-};

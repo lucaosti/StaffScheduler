@@ -28,6 +28,7 @@ import type {
   User,
   AuditLogEntry,
   Department,
+  OrgUnit,
   Timestamp,
 } from '@staff-scheduler/shared';
 export type {
@@ -39,6 +40,7 @@ export type {
   User,
   AuditLogEntry,
   Department,
+  OrgUnit,
   Timestamp,
 };
 
