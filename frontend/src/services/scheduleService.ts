@@ -42,12 +42,27 @@ interface CreateScheduleParams {
   notes?: string;
 }
 
+/**
+ * The synchronous generate result.
+ *
+ * Aligned with what `AutoScheduleResult` actually sends. It previously
+ * declared `totalAssignments`, `coverage`, `fairnessScore` and `message`,
+ * none of which the backend has ever produced, and typed `scheduleId` as a
+ * string where it is a number. Nothing read them, which is the only reason it
+ * was harmless — the same shape that made the audit log's actor column render
+ * an em-dash on every row once something did.
+ *
+ * `fairnessScore` is the pointed one: the schedule engine now genuinely
+ * optimises workload balance, but it reports the achieved distribution through
+ * `/api/reports/fairness`, not through this response. Declaring a field here
+ * suggested a number that was never computed anywhere.
+ */
 interface GenerateScheduleResponse {
-  scheduleId: string;
-  totalAssignments: number;
-  coverage: string;
-  fairnessScore: string;
-  message: string;
+  scheduleId: number;
+  assignmentsCreated: number;
+  totalShifts: number;
+  coveragePercentage: number;
+  status: string;
   /** Engine that produced the schedule: 'or-tools' (optimal) or 'greedy' (draft/fallback). */
   engine?: 'or-tools' | 'greedy';
   /** True when the optimum was requested but the run fell back to greedy — the result is a draft. */

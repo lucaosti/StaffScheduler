@@ -338,3 +338,127 @@ describeOrtools('CP-SAT engine plans under insufficient staff', () => {
     expect(assignments).toHaveLength(3);
   });
 });
+
+/**
+ * Workload fairness: the solver must balance, not merely be measured.
+ *
+ * WHY THIS MATTERS BEYOND THE NUMBER. The objective maximised coverage and
+ * preferences and nothing else, so nothing preferred an even split — both
+ * distributions scored identically and which one appeared was an artefact of
+ * CP-SAT's search order. Meanwhile `/api/reports/fairness` computed and
+ * displayed a fairness figure, so the system measured and reported an
+ * equilibrium it had never been asked to produce, and a planner reading a poor
+ * number had no lever.
+ *
+ * Verified against the previous implementation: the fixture below gave ALL
+ * FOUR shifts to one employee and none to the other.
+ */
+describeOrtools('CP-SAT engine balances workload', () => {
+  const twoEmployees = [1, 2].map((i) => ({
+    id: `e${i}`,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: [],
+    unavailable_dates: [],
+  }));
+
+  /** Four single-person shifts on separate days: an even split is 2/2. */
+  const splittable = {
+    shifts: [0, 1, 2, 3].map((i) => ({
+      id: `s${i}`,
+      date: `2033-05-0${i + 1}`,
+      start_time: '09:00',
+      end_time: '17:00',
+      min_staff: 1,
+      max_staff: 1,
+      department_id: 1,
+    })),
+    employees: twoEmployees,
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('splits divisible work evenly rather than loading one person', () => {
+    const assignments = runPython(splittable);
+    const perEmployee = new Map<string, number>();
+    for (const a of assignments) {
+      perEmployee.set(a.employeeId, (perEmployee.get(a.employeeId) ?? 0) + 1);
+    }
+    expect(assignments).toHaveLength(4);
+    expect([...perEmployee.values()].sort()).toEqual([2, 2]);
+  });
+
+  it('keeps the balanced schedule legal', () => {
+    expect(findConstraintViolations(splittable, runPython(splittable))).toEqual([]);
+  });
+
+  /**
+   * Fairness sits at SOFT, so it must never buy an unstaffed seat — and the
+   * temptation is real: with one employee and three shifts, working none of
+   * them gives a spread of zero, which is perfectly "fair".
+   *
+   * This is the same lexicographic property the preference test asserts, but
+   * it needs its own case because fairness is measured in MINUTES: a single
+   * unbalanced schedule carries a far larger magnitude than any preference
+   * term, so a bound that happened to cover preferences would not cover this.
+   * Adding the fairness term without folding its magnitude into that bound
+   * re-creates the defect at a larger scale.
+   */
+  it('never buys balance with an unstaffed seat', () => {
+    const oneEmployee = {
+      ...splittable,
+      shifts: splittable.shifts.slice(0, 3).map((s) => ({ ...s, max_staff: 2 })),
+      employees: [twoEmployees[0]],
+    };
+    expect(runPython(oneEmployee)).toHaveLength(3);
+  });
+});
+
+/**
+ * Fairness must not manufacture work to look balanced.
+ *
+ * Nothing rewards staffing between `min_staff` and `max_staff` — `max_staff` is
+ * a ceiling, not a target. But fairness rewards it INDIRECTLY, because adding
+ * people flattens the load distribution. Observed directly when the fairness
+ * term first landed: this fixture went from 6 assignments to 8, buying a
+ * perfectly even split with two extra shifts of wages.
+ *
+ * An optimizer that inflates payroll to improve its own fairness metric is
+ * exactly the "measured but not meaningful" failure fairness was added to fix,
+ * so surplus staffing is charged at a DERIVED weight: one extra assignment can
+ * improve the spread by at most the longest shift's duration, so charging
+ * strictly more than that makes over-staffing never worth a fairness gain.
+ */
+describeOrtools('CP-SAT engine does not over-staff to look fair', () => {
+  it('staffs to min_staff even when spare capacity would flatten the load', () => {
+    const problem = {
+      shifts: [0, 1, 2].map((i) => ({
+        id: `s${i}`,
+        date: `2033-03-0${i + 1}`,
+        start_time: '09:00',
+        end_time: '17:00',
+        min_staff: 2,
+        max_staff: 3,
+        department_id: 1,
+      })),
+      // Four employees over three shifts: 6 assignments splits 2/2/1/1
+      // (spread of one shift), 8 splits 2/2/2/2 (spread of zero).
+      employees: [1, 2, 3, 4].map((i) => ({
+        id: `e${i}`,
+        max_hours_per_week: 40,
+        max_consecutive_days: 7,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+      })),
+      skills: {},
+      preferences: {},
+      constraints: {},
+    };
+    const assignments = runPython(problem);
+    expect(assignments).toHaveLength(6);
+    expect(coverageShortfalls(problem, assignments)).toEqual([]);
+  });
+});
