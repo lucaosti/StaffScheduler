@@ -14,5 +14,24 @@
     "backend",
     "frontend",
     "packages/*"
-  ]
+  ],
+  "//overrides": [
+    "gaxios: reached only through @opentelemetry/auto-instrumentations-node ->",
+    "resource-detector-gcp -> gcp-metadata. Versions below 7.3.0 depend on",
+    "rimraf 5, which drags in glob -> minimatch -> brace-expansion <=5.0.7 and",
+    "its high-severity DoS advisory (GHSA-mh99-v99m-4gvg) into the PRODUCTION",
+    "tree, failing the CI gate on every PR. 7.3.0 dropped the rimraf dependency",
+    "outright, so this pins forward within the same major rather than patching",
+    "the leaf. Overriding brace-expansion itself was rejected: the only fixed",
+    "release is 5.0.8, and forcing it beneath minimatch 9 (written against 2.x)",
+    "crosses a major boundary to reach code that would no longer be installed",
+    "at all. Plain `npm audit fix` does not resolve this — gaxios 7.1.3 is a",
+    "hard pin from gcp-metadata. Remove once the OpenTelemetry packages",
+    "themselves depend on gaxios >= 7.3.0."
+  ],
+  "overrides": {
+    "gcp-metadata": {
+      "gaxios": "^7.3.0"
+    }
+  }
 }
