@@ -28,6 +28,7 @@ import {
 } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateQuery } from '../middleware/validation';
+import { SHIFT_HOURS_SQL } from '../utils/sql';
 import { dashboardActivitiesQuery } from '../schemas';
 
 /** Feed size when the caller does not ask for one. Unchanged from the hardcoded value. */
@@ -81,10 +82,7 @@ export const createDashboardRouter = (pool: Pool) => {
       `;
 
       const monthlyHoursQuery = `
-        SELECT COALESCE(SUM(TIMESTAMPDIFF(HOUR,
-          CONCAT(s.date, ' ', s.start_time),
-          CONCAT(s.date, ' ', s.end_time)
-        )), 0) as total_hours
+        SELECT COALESCE(SUM(${SHIFT_HOURS_SQL}), 0) as total_hours
         FROM shift_assignments sa
         JOIN shifts s ON sa.shift_id = s.id
         WHERE ${MONTH_WINDOW}
@@ -94,12 +92,7 @@ export const createDashboardRouter = (pool: Pool) => {
       // Labor cost derives from hourly rates: restricted to report readers.
       const canSeeCost = userHasPermission(req.user, 'report.read');
       const monthlyCostQuery = `
-        SELECT COALESCE(SUM(
-          TIMESTAMPDIFF(HOUR,
-            CONCAT(s.date, ' ', s.start_time),
-            CONCAT(s.date, ' ', s.end_time)
-          ) * u.hourly_rate
-        ), 0) as total_cost
+        SELECT COALESCE(SUM(${SHIFT_HOURS_SQL} * u.hourly_rate), 0) as total_cost
         FROM shift_assignments sa
         JOIN shifts s ON sa.shift_id = s.id
         JOIN users u ON sa.user_id = u.id

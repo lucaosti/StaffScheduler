@@ -80,6 +80,52 @@ export class DateUtils {
     result.setHours(23, 59, 59, 999);
     return result;
   }
+
+  /**
+   * Absolute `[start, end]` MySQL DATETIME strings for a shift, rolling an
+   * overnight shift's end into the following day.
+   *
+   * WHY THIS IS NEEDED AT ALL: a shift is stored as a DATE plus two TIME
+   * columns, so a 22:00–06:00 block has `end_time < start_time` and any
+   * wall-clock comparison reads it as ending before it begins. Every consumer
+   * that reasons about when a shift actually runs has to reconstruct the
+   * absolute interval first — the constraint validator, both optimizer
+   * engines, the calendar feed, and conflict detection.
+   *
+   * The shift's DATE is its START date by definition, which also settles where
+   * an overnight shift's hours are counted: entirely against the day it starts.
+   * That is what `constraintValidator`'s daily-hours rule already does (it
+   * buckets on `shift.date` using the overnight-aware duration), and stating it
+   * here makes the convention explicit rather than emergent — a night worker's
+   * Monday-night shift is a Monday shift, not four hours of Monday and four of
+   * Tuesday.
+   */
+  static shiftBounds(
+    date: string | Date,
+    startTime: string,
+    endTime: string
+  ): [string, string] {
+    // Accepts a Date because mysql2 materializes a DATE column as one, and the
+    // caller usually has the row rather than a formatted string. Taking only a
+    // string put the burden on every call site to remember the conversion, and
+    // exactly one of them forgot: the conflict check passed `shift.date`
+    // straight through and produced `Invalid time value` at runtime, while the
+    // audit path two lines away converted it correctly. Normalising here means
+    // the trap cannot be stepped in again.
+    const day = typeof date === 'string' ? date : DateUtils.fromMySQLDate(date);
+    const start = new Date(`${day}T${DateUtils.padTime(startTime)}Z`);
+    const end = new Date(`${day}T${DateUtils.padTime(endTime)}Z`);
+    // `<=` and not `<`: equal times mean a zero-length shift, which the request
+    // schemas reject, so treating it as a full 24 hours would invent duration
+    // for a shape that cannot be stored.
+    if (end.getTime() <= start.getTime()) end.setUTCDate(end.getUTCDate() + 1);
+    return [DateUtils.toMySQLDateTime(start), DateUtils.toMySQLDateTime(end)];
+  }
+
+  /** Normalises "HH:MM" to "HH:MM:SS"; MySQL TIME columns read back either way. */
+  private static padTime(time: string): string {
+    return time.length === 5 ? `${time}:00` : time;
+  }
 }
 
 export class ValidationUtils {
