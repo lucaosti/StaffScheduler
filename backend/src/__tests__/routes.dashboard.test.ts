@@ -159,6 +159,43 @@ describe('GET /api/dashboard/activities', () => {
     const res = await request(mountApp()).get('/api/dashboard/activities');
     expect(res.status).toBe(500);
   });
+
+  /**
+   * `limit` was published in the spec through a reusable `$ref` while the
+   * handler took `_req` and hardcoded `LIMIT 10`, so the documented knob did
+   * nothing. These assert it is now honoured, bounded, and — critically —
+   * inlined rather than bound.
+   */
+  it('defaults to ten rows when no limit is given', async () => {
+    execute.mockResolvedValueOnce([[], null]);
+    await request(mountApp()).get('/api/dashboard/activities');
+    expect(execute.mock.calls[0][0]).toContain('LIMIT 10');
+  });
+
+  it('honours a caller-supplied limit', async () => {
+    execute.mockResolvedValueOnce([[], null]);
+    await request(mountApp()).get('/api/dashboard/activities?limit=3');
+    expect(execute.mock.calls[0][0]).toContain('LIMIT 3');
+  });
+
+  it('inlines the limit instead of binding it', async () => {
+    // MySQL's binary prepared-statement protocol rejects a placeholder in
+    // LIMIT with ER_WRONG_ARGUMENTS — the defect that made the audit-log,
+    // change-request and notification lists return 500 in every deployment.
+    // The clamping lives in the Zod schema, so inlining stays safe.
+    execute.mockResolvedValueOnce([[], null]);
+    await request(mountApp()).get('/api/dashboard/activities?limit=7');
+    expect(execute.mock.calls[0][0]).not.toContain('LIMIT ?');
+    expect(execute.mock.calls[0][1] ?? []).toEqual([]);
+  });
+
+  it('rejects a limit outside the documented bounds', async () => {
+    for (const bad of ['0', '-1', '51', 'abc']) {
+      const res = await request(mountApp()).get(`/api/dashboard/activities?limit=${bad}`);
+      expect(res.status).toBe(400);
+      expect(res.body.error.code).toBe('VALIDATION_ERROR');
+    }
+  });
 });
 
 describe('GET /api/dashboard/upcoming-shifts', () => {
