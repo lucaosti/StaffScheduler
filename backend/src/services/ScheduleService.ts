@@ -1,3 +1,24 @@
+/**
+ * Schedule service — CRUD and the draft -> published -> archived lifecycle.
+ *
+ * WHY THE OPTIMIZATION-ADJACENT READS LIVE ELSEWHERE. The statistics, per-shift
+ * breakdowns and by-user queries were split into
+ * {@link ScheduleOptimizationOrchestrator}. They are read-only aggregates whose
+ * consumers are the optimizer and the reporting UI, not the schedule lifecycle,
+ * and they change for different reasons: a new coverage metric touches the
+ * orchestrator, a new lifecycle state touches this file. Keeping them together
+ * meant every change to either risked the other.
+ *
+ * WHY PUBLISHING IS MORE THAN A STATUS COLUMN. `publishSchedule` is the point
+ * where a schedule stops being a proposal and becomes something people arrange
+ * their lives around, which is why it is audited and why the transition is
+ * guarded rather than a bare UPDATE. #449 is the follow-on: once published,
+ * the assignments should be pinned so a later re-solve plans AROUND them
+ * instead of reshuffling commitments people have already acted on.
+ *
+ * @author Luca Ostinelli
+ */
+
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
 import {
