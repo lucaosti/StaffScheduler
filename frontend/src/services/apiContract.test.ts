@@ -26,13 +26,32 @@ import * as path from 'path';
 const spec = JSON.parse(
   fs.readFileSync(path.join(__dirname, '..', '..', '..', 'backend', 'openapi', 'openapi.json'), 'utf8')
 ) as {
-  paths: Record<string, Record<string, { parameters?: Array<{ name: string; in: string }> }>>;
+  paths: Record<string, Record<string, { parameters?: Array<{ name?: string; in?: string; $ref?: string }> }>>;
+  components?: { parameters?: Record<string, { name?: string; in?: string }> };
 };
 
+/**
+ * The set of query parameters an endpoint documents, following `$ref`s.
+ *
+ * Resolving the reference matters: a `$ref` entry carries only `$ref`, so the
+ * plain `p.in === 'query'` test read `undefined` and skipped it. This test is
+ * the client-side half of a guard whose server-side half had the identical
+ * blind spot, and it is what let `limitQuery` publish a `limit` filter on six
+ * endpoints that accept no such parameter. Reading the spec the way a client
+ * generator does — refs resolved — is the only way this check means anything.
+ */
 const documentedQuery = (endpoint: string): Set<string> => {
   const op = spec.paths[endpoint]?.get;
   if (!op) throw new Error(`spec has no GET ${endpoint}`);
-  return new Set((op.parameters ?? []).filter((p) => p.in === 'query').map((p) => p.name));
+  const names = new Set<string>();
+  for (const p of op.parameters ?? []) {
+    const target = p.$ref
+      ? spec.components?.parameters?.[p.$ref.replace('#/components/parameters/', '')]
+      : p;
+    if (!target) throw new Error(`spec references ${p.$ref}, which components.parameters does not define`);
+    if (target.in === 'query' && target.name) names.add(target.name);
+  }
+  return names;
 };
 
 /**

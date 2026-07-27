@@ -27,6 +27,15 @@
  * Together they make the query contract complete: nothing documented is
  * unparsed, and nothing parsed is undocumented.
  *
+ * Both directions resolve `$ref` parameters before classifying them. A `$ref`
+ * object has no `in` key, so testing `prm.in === 'query'` treats a referenced
+ * query parameter as though it were not one — and referenced parameters are
+ * the only ones NOT derived from Zod, so they are exactly the ones that need
+ * checking. That blind spot let `components.parameters.limitQuery` publish a
+ * `limit` filter on six operations no schema accepts, and a duplicate `page`
+ * on four, through a generator that reported success. A reusable parameter no
+ * operation references now fails too, so the pattern cannot come back.
+ *
  * `components.schemas` for the shared domain entities are generated too. They
  * were hand-written and nothing compared them against the types, so they had
  * drifted into describing an older model — `User.role`, a field the API has
@@ -224,6 +233,31 @@ const main = (): void => {
 
   const generatedQueryFor = new Set<string>();
 
+  /**
+   * The `in` of a parameter, following a `$ref` into `components.parameters`.
+   *
+   * Why this indirection matters: a `$ref` object carries only `$ref`, so the
+   * obvious `prm.in === 'query'` test reads `undefined` and silently classifies
+   * a referenced query parameter as "not a query parameter". Both checks below
+   * used to do exactly that, which is how `pageQuery`/`limitQuery` published a
+   * `limit` filter on six operations that no Zod schema has ever accepted — and
+   * a second, duplicate `page` on four of them — while the generator reported a
+   * clean run. Referenced parameters are the only ones not derived from Zod, so
+   * they are precisely the ones that must be resolved rather than skipped.
+   */
+  const parameterIn = (prm: Record<string, unknown>): string | undefined => {
+    const ref = prm.$ref;
+    if (typeof ref !== 'string') return prm.in as string | undefined;
+    const name = ref.replace('#/components/parameters/', '');
+    const target = ((spec.components as Record<string, Record<string, Record<string, unknown>>>)
+      ?.parameters ?? {})[name];
+    if (!target) {
+      errors.push(`spec references '${ref}', which components.parameters does not define`);
+      return undefined;
+    }
+    return target.in as string | undefined;
+  };
+
   const resolveSchema = (name: string, kind: string, op: FoundOp): z.ZodType | null => {
     const schema = (sharedSchemas as Record<string, unknown>)[name];
     if (!(schema instanceof z.ZodType)) {
@@ -276,7 +310,7 @@ const main = (): void => {
             .map((prm) => [prm.name as string, prm.description as string])
         );
         const nonQuery = ((operation.parameters ?? []) as Array<Record<string, unknown>>)
-          .filter((prm) => prm.in !== 'query');
+          .filter((prm) => parameterIn(prm) !== 'query');
         const required = new Set(jsonSchema.required ?? []);
         const queryParams = Object.entries(jsonSchema.properties ?? {}).map(([name, propSchema]) => {
           const { description, ...rest } = propSchema as { description?: string };
@@ -301,7 +335,7 @@ const main = (): void => {
     );
   }
 
-  type SpecOperation = { requestBody?: unknown; parameters?: Array<{ in?: string }> };
+  type SpecOperation = { requestBody?: unknown; parameters?: Array<Record<string, unknown>> };
   for (const [specPath, methods] of Object.entries(spec.paths as Record<string, Record<string, SpecOperation>>)) {
     for (const [method, operation] of Object.entries(methods)) {
       if (operation?.requestBody && !generatedFor.has(`${method} ${specPath}`)) {
@@ -312,10 +346,35 @@ const main = (): void => {
       // The check that would have caught the original defect: a documented
       // query parameter with no validateQuery behind it means the spec
       // promises a filter nothing parses.
-      const hasQueryParams = (operation?.parameters ?? []).some((prm) => prm?.in === 'query');
+      const hasQueryParams = (operation?.parameters ?? []).some((prm) => parameterIn(prm) === 'query');
       if (hasQueryParams && !generatedQueryFor.has(`${method} ${specPath}`)) {
         errors.push(
           `spec documents query parameters for '${method} ${specPath}' but no route validates them — remove them from the spec or add validateQuery`
+        );
+      }
+    }
+  }
+
+  // A reusable parameter nothing references is a contract statement with no
+  // operation behind it. `pageQuery`/`limitQuery` outlived the hand-written
+  // parameters they were factored out of; keeping them around would let the
+  // same phantom filter be re-attached to a future operation.
+  {
+    const referenced = new Set<string>();
+    for (const methods of Object.values(spec.paths as Record<string, Record<string, SpecOperation>>)) {
+      for (const operation of Object.values(methods)) {
+        for (const prm of operation?.parameters ?? []) {
+          if (typeof prm.$ref === 'string') referenced.add(prm.$ref.replace('#/components/parameters/', ''));
+        }
+      }
+    }
+    const declared = Object.keys(
+      ((spec.components as Record<string, Record<string, unknown>>)?.parameters ?? {}) as Record<string, unknown>
+    );
+    for (const name of declared) {
+      if (!referenced.has(name)) {
+        errors.push(
+          `components.parameters.${name} is referenced by no operation — remove it rather than leaving a reusable phantom`
         );
       }
     }
