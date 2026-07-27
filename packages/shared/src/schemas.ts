@@ -80,13 +80,27 @@ const dateString = z
  * both fields are present, so the same helpers work for create (required
  * fields) and update (optional fields) schemas.
  *
- * Overnight shifts (endTime <= startTime) are rejected: conflict detection
- * and hour accounting assume a shift starts and ends on the same calendar day.
+ * OVERNIGHT SHIFTS ARE ACCEPTED. This rule used to require
+ * `startTime < endTime` on the grounds that "conflict detection and hour
+ * accounting assume a shift starts and ends on the same calendar day". That was
+ * false of everything downstream: the constraint validator, both optimizer
+ * engines, the calendar feed and the compliance engine all roll an overnight
+ * end into the following day, deliberately and with tests. Only the front door
+ * refused, so a substantial amount of careful logic existed to handle a shape
+ * the API would not accept — and a night shift is an ordinary requirement in
+ * every sector this system targets.
+ *
+ * What remains rejected is the degenerate case: `startTime === endTime` is a
+ * zero-length shift, which is meaningless rather than nocturnal, and would
+ * otherwise have to be read as a full 24-hour block.
+ *
+ * The shift's `date` is its START date, so an overnight shift's hours count
+ * entirely against the day it begins — see `DateUtils.shiftBounds`.
  */
 const timeOrder = (data: { startTime?: string; endTime?: string }): boolean =>
-  data.startTime === undefined || data.endTime === undefined || data.startTime < data.endTime;
+  data.startTime === undefined || data.endTime === undefined || data.startTime !== data.endTime;
 const TIME_ORDER_MESSAGE = {
-  message: 'endTime must be after startTime (overnight shifts are not supported)',
+  message: 'endTime must differ from startTime (a shift cannot have zero length)',
   path: ['endTime'],
 };
 

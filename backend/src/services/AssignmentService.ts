@@ -491,7 +491,7 @@ export class AssignmentService {
 
   // ── Delegated to AssignmentValidator ──────────────────────────────────────
 
-  async checkConflicts(userId: number, date: string, startTime: string, endTime: string): Promise<any[]> {
+  async checkConflicts(userId: number, date: string | Date, startTime: string, endTime: string): Promise<any[]> {
     return this.validator.checkConflicts(userId, date, startTime, endTime);
   }
 
