@@ -119,7 +119,13 @@ describe('<Settings />', () => {
     );
   });
 
-  it('calls updateMyPreferences when Save Work Settings is submitted', async () => {
+  /**
+   * This used to assert that saving the Work tab sent `maxHoursPerWeek` and
+   * `maxConsecutiveDays` — that is, it asserted the defect. Those are hard
+   * constraints the optimizer enforces, sent through an endpoint guarded by
+   * authentication alone, so any employee could raise their own limits.
+   */
+  it('does not send working-time limits from the self-service Work tab', async () => {
     mockUseAuth.mockReturnValue({
       user: { id: 1, email: 'admin@x', permissions: [] },
     });
@@ -127,12 +133,12 @@ describe('<Settings />', () => {
     render(<Settings />);
     await userEvent.click(screen.getByRole('button', { name: /^Work Preferences$/ }));
     await userEvent.click(screen.getByRole('button', { name: /save work settings/i }));
-    expect(mockUpdatePreferences).toHaveBeenCalledWith(
-      expect.objectContaining({
-        maxHoursPerWeek: expect.any(Number),
-        maxConsecutiveDays: expect.any(Number),
-      })
-    );
+
+    // Either nothing is sent, or whatever is sent carries no limit field.
+    for (const call of mockUpdatePreferences.mock.calls) {
+      expect(call[0]).not.toHaveProperty('maxHoursPerWeek');
+      expect(call[0]).not.toHaveProperty('maxConsecutiveDays');
+    }
   });
 
   it('renders the Calendar tab and shows CalendarSection when clicked', async () => {

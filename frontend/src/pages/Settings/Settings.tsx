@@ -104,12 +104,23 @@ const Settings: React.FC = () => {
   // minRestHours has no column in user_preferences yet, and preferredShifts
   // requires shift template IDs rather than the display-name strings used in
   // local state. Both will be wired once the schema is extended.
+  /**
+   * The Work tab has nothing self-editable left to save.
+   *
+   * It used to send `maxHoursPerWeek` and `maxConsecutiveDays` through the
+   * self-service endpoint, which is guarded by authentication alone — so an
+   * employee could raise their own working-time limits, which the optimizer
+   * enforces as hard constraints and which are legally bounded in most
+   * jurisdictions. The fields are now displayed read-only (they explain what
+   * someone can be scheduled for) and changing them requires
+   * `preferences.manage` through `PUT /preferences/:userId`.
+   *
+   * Kept as an explicit no-op rather than removing the Save control silently,
+   * so the shape of the section is obvious to the next reader; the remaining
+   * editable field on this tab is handled by the personal-settings save.
+   */
   const handleSaveWorkSettings = async (): Promise<void> => {
-    const { workSettings } = settings;
-    await updateMyPreferences({
-      maxHoursPerWeek: workSettings.maxHoursPerWeek,
-      maxConsecutiveDays: workSettings.maxConsecutiveDays,
-    });
+    // Nothing on this tab is self-editable.
   };
 
   return (

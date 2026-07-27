@@ -5253,9 +5253,6 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        maxHoursPerWeek?: number;
-                        minHoursPerWeek?: number;
-                        maxConsecutiveDays?: number;
                         preferredShifts?: number[];
                         avoidShifts?: number[];
                         notes?: string | null;
@@ -5324,12 +5321,12 @@ export interface paths {
             requestBody?: {
                 content: {
                     "application/json": {
-                        maxHoursPerWeek?: number;
-                        minHoursPerWeek?: number;
-                        maxConsecutiveDays?: number;
                         preferredShifts?: number[];
                         avoidShifts?: number[];
                         notes?: string | null;
+                        maxHoursPerWeek?: number;
+                        minHoursPerWeek?: number;
+                        maxConsecutiveDays?: number;
                     };
                 };
             };
