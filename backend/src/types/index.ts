@@ -7,18 +7,22 @@
 // Permission, Role and UserRoleAssignment are declared once in
 // @staff-scheduler/shared and re-exported here, so both sides cannot drift.
 // Importing them from this barrel keeps every existing call site unchanged.
+// `Timestamp` is deliberately NOT re-exported here: no backend module imports
+// it from this barrel, so the re-export was a dead statement rather than a
+// convenience. The frontend barrel does re-export it, because `formatDate`
+// there takes one. Import it from @staff-scheduler/shared directly if a
+// backend module ever needs it.
 import type {
   Permission,
   Role,
   UserRoleAssignment,
-  Timestamp,
   Shift as SharedShift,
   Schedule as SharedSchedule,
   User as SharedUser,
   Department as SharedDepartment,
   ShiftAssignment as SharedShiftAssignment,
 } from '@staff-scheduler/shared';
-export type { Permission, Role, UserRoleAssignment, Timestamp };
+export type { Permission, Role, UserRoleAssignment };
 
 
 // ============================================================================
