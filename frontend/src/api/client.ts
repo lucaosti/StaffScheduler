@@ -163,6 +163,22 @@ export const apiClient = {
     options?: RequestOptions<P, 'patch'>
   ) => request<T>('patch', path as string, { ...(options as object), body } as never),
 
-  delete: <T, P extends PathsWithMethod<'delete'>>(path: P, options?: RequestOptions<P, 'delete'>) =>
-    request<T>('delete', path as string, options as never),
+  /**
+   * DELETE, optionally with a body.
+   *
+   * A body on DELETE is unusual, but two endpoints in this contract declare
+   * one: revoking a delegation and removing a scoped role both carry an audit
+   * `justification`. That belongs in the body rather than a query string,
+   * which would put a free-text reason into access logs — so the client has to
+   * support it, and omitting support would have meant either a hand-built
+   * fetch surviving here or the justification being silently dropped.
+   *
+   * The body is typed from the contract like the other verbs, and stays
+   * optional: most DELETE operations declare none, and `RequestBody` resolves
+   * to `undefined` for those, so passing anything is a compile error there.
+   */
+  delete: <T, P extends PathsWithMethod<'delete'>>(
+    path: P,
+    options?: RequestOptions<P, 'delete'> & { body?: RequestBody<P, 'delete'> }
+  ) => request<T>('delete', path as string, options as never),
 };

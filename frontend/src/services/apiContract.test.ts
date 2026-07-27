@@ -55,27 +55,30 @@ const documentedQuery = (endpoint: string): Set<string> => {
 };
 
 /**
- * Each service's filter interface and the endpoint it queries. Adding a
- * service with a `*Filters` type means adding it here; the coverage assertion
- * below fails if one is forgotten.
+ * Services whose filter interface is still hand-written and must therefore be
+ * compared against the spec.
+ *
+ * **This list is now empty, and that is the intended end state, not an
+ * oversight.** All four entries — shiftService, employeeService,
+ * attendanceService, auditLogService — were converted to derive their filters
+ * from `paths` (#367). A derived type cannot drift from the document it is
+ * projected from, so comparing it here would assert only that TypeScript
+ * indexes objects correctly.
+ *
+ * The list is kept rather than deleted because the machinery below is the
+ * right check for the next hand-written filter type, and the coverage
+ * assertion is what routes a new one into it.
  */
-const SERVICES: Array<{ file: string; interfaceName: string; endpoint: string }> = [
-  { file: 'attendanceService.ts', interfaceName: 'AttendanceFilters', endpoint: '/attendance' },
-  { file: 'auditLogService.ts', interfaceName: 'AuditLogFilters', endpoint: '/audit-logs' },
-];
+const SERVICES: Array<{ file: string; interfaceName: string; endpoint: string }> = [];
 
 /**
- * A type written as `type X = paths[...]` is the contract by construction, so
- * there is nothing left for this test to compare — it cannot drift from a
- * document it is projected from. Comparing a derived type against its own
- * source would assert only that TypeScript indexes objects correctly.
+ * Whether a service takes its types from the generated contract.
  *
- * `shiftService` and `employeeService` moved here when they were routed through
- * the generated client; both had drifted twice before, and each fix re-copied
- * the schema by hand, which resets the clock rather than stopping it.
- * Derivation is therefore the *stronger* guarantee, and the coverage assertion
- * below accepts either: a service must derive its types from `paths` OR appear
- * in SERVICES. A new service can do neither only by failing the suite.
+ * Derivation is the STRONGER guarantee, which is why the coverage rule accepts
+ * either it or membership of SERVICES. All four services that used to be
+ * compared here had drifted — twice, in two cases — and every earlier fix
+ * re-copied the schema by hand, which resets the drift clock instead of
+ * stopping it. What a service must not be is both hand-written and unchecked.
  */
 const derivesFromContract = (source: string): boolean => /=\s*(?:NonNullable<)?\s*paths\[/.test(source);
 
@@ -175,17 +178,28 @@ describe('frontend service filters match the published query contract', () => {
     expect(unchecked).toEqual([]);
   });
 
-  it('still checks the services that have not been converted yet', () => {
-    // Sanity floor: if SERVICES empties out because every service was
-    // converted, say so deliberately rather than letting the suite pass
-    // vacuously with nothing left to compare.
-    expect(SERVICES.length).toBeGreaterThan(0);
+  /**
+   * The counterpart of the rule above, and the reason it is not vacuous now
+   * that SERVICES is empty: at least one service must actually derive. If a
+   * refactor reverted every service to hand-written filters, the coverage rule
+   * would still pass for any it also added to SERVICES — this asserts the
+   * project did not quietly abandon derivation altogether.
+   */
+  it('has services deriving their types from the contract', () => {
+    const deriving = fs
+      .readdirSync(__dirname)
+      .filter((f) => f.endsWith('Service.ts'))
+      .filter((f) => derivesFromContract(fs.readFileSync(path.join(__dirname, f), 'utf8')));
+    expect(deriving.length).toBeGreaterThanOrEqual(8);
   });
 
-  it.each(SERVICES)('$file sends only parameters $endpoint documents', ({ file, interfaceName, endpoint }) => {
-    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    const documented = documentedQuery(endpoint);
-    const phantom = declaredKeys(source, interfaceName).filter((key) => !documented.has(key));
-    expect(phantom).toEqual([]);
+  const describeUnconverted = SERVICES.length > 0 ? describe : describe.skip;
+  describeUnconverted('hand-written filters still under comparison', () => {
+    it.each(SERVICES)('$file sends only parameters $endpoint documents', ({ file, interfaceName, endpoint }) => {
+      const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+      const documented = documentedQuery(endpoint);
+      const phantom = declaredKeys(source, interfaceName).filter((key) => !documented.has(key));
+      expect(phantom).toEqual([]);
+    });
   });
 });
