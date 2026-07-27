@@ -18,8 +18,9 @@ import type { PaginationMeta } from '@staff-scheduler/shared';
 
 // Declared once in the shared package, from which the OpenAPI component is
 // generated: the hand-written component had drifted to `limit`/`totalPages`
-// while this shape has always been `pageSize`/`pages`.
-export type { PaginationMeta };
+// while this shape has always been `pageSize`/`pages`. Consumed below by
+// `sendPaginated` and not re-exported — nothing imports it from this module,
+// and @staff-scheduler/shared is the one place to get it from.
 
 export interface PaginationParams {
   page: number;
