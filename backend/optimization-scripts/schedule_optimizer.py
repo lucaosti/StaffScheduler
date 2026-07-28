@@ -157,8 +157,20 @@ class ScheduleOptimizerORTools:
         rather than represented and then forbidden.
         """
         required_skills = set(shift.get('required_skills', []))
-        if required_skills and not required_skills.issubset(set(employee.get('skills', []))):
+        held = set(employee.get('skills', []))
+        if required_skills and not required_skills.issubset(held):
             return False
+
+        # Proficiency. An absent requirement means any level will do, and an
+        # absent level on the employee means "unknown" rather than "novice", so
+        # a problem carrying no levels behaves exactly as before. Kept in
+        # lock-step with constraintValidator, which is the authority.
+        required_levels = shift.get('required_skill_levels') or {}
+        emp_levels = employee.get('skill_levels') or {}
+        for skill, needed in required_levels.items():
+            level = emp_levels.get(skill)
+            if level is not None and level < needed:
+                return False
         if shift['date'] in set(employee.get('unavailable_dates', [])):
             return False
         return True

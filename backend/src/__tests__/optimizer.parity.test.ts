@@ -1031,3 +1031,83 @@ describeOrtools('CP-SAT engine shares night work', () => {
     expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(1);
   });
 });
+
+/**
+ * Skill proficiency: the level the system already stored and the scheduler
+ * ignored.
+ *
+ * `user_skills.proficiency_level` has existed since the initial schema and is
+ * settable through the API, but the optimizer received skills as bare names —
+ * so someone at level 1 and someone at level 5 were interchangeable to it. The
+ * data was captured, displayed, and then discarded at exactly the point it
+ * would matter.
+ *
+ * THE DISCRIMINATING FIXTURE IS THE ONE WHERE THE UNDER-QUALIFIED PERSON WOULD
+ * OTHERWISE BE CHOSEN. A first attempt offered a qualified and an
+ * under-qualified candidate for one slot; the solver picked the qualified one
+ * both before and after, proving nothing. Only when the under-qualified person
+ * is the ONLY candidate does the behaviour diverge — before: assigned, level
+ * ignored; after: left unstaffed and reported as a shortfall.
+ */
+describeOrtools('CP-SAT engine respects skill proficiency', () => {
+  const nightShift = {
+    id: 's0',
+    date: '2033-09-01',
+    start_time: '22:00',
+    end_time: '06:00',
+    min_staff: 1,
+    max_staff: 1,
+    department_id: 1,
+    required_skills: ['nurse'],
+    required_skill_levels: { nurse: 4 },
+  };
+
+  const nurse = (id: string, level: number) => ({
+    id,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: ['nurse'],
+    skill_levels: { nurse: level },
+    unavailable_dates: [],
+  });
+
+  it('leaves a shift unstaffed rather than assign someone under-qualified', () => {
+    // Refusing is right here: a shift that says it needs level 4 is saying
+    // level 2 will not do, and quietly filling it would make the schedule look
+    // covered while it is not.
+    const problem = { shifts: [nightShift], employees: [nurse('e1', 2)], skills: {}, preferences: {}, constraints: {} };
+    expect(runPython(problem)).toEqual([]);
+    expect(coverageShortfalls(problem, [])).toHaveLength(1);
+  });
+
+  it('assigns the qualified person when one exists', () => {
+    const problem = {
+      shifts: [nightShift],
+      employees: [nurse('e1', 2), nurse('e2', 5)],
+      skills: {}, preferences: {}, constraints: {},
+    };
+    const assignments = runPython(problem);
+    expect(assignments.map((a) => a.employeeId)).toEqual(['e2']);
+  });
+
+  it('flags an under-qualified assignment as a skill violation', () => {
+    const problem = { shifts: [nightShift], employees: [nurse('e1', 2)], skills: {}, preferences: {}, constraints: {} };
+    const violations = findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }]);
+    expect(violations).toHaveLength(1);
+    // The message names the gap, not just the rule: a planner needs to know
+    // which level was short of which requirement.
+    expect(violations[0].detail).toMatch(/level 2, below the level 4/);
+  });
+
+  it('treats an absent requirement as any level, and an absent level as unknown', () => {
+    // Both defaults exist so a problem that carries no levels behaves exactly
+    // as it did before proficiency reached the scheduler. Without this, adding
+    // the field would have silently re-qualified every existing employee.
+    const noRequirement = { ...nightShift, required_skill_levels: {} };
+    const noLevel = { ...nurse('e1', 1), skill_levels: {} };
+    const problem = { shifts: [noRequirement], employees: [noLevel], skills: {}, preferences: {}, constraints: {} };
+    expect(findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }])).toEqual([]);
+    expect(runPython(problem)).toHaveLength(1);
+  });
+});
