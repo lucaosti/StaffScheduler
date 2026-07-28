@@ -1344,6 +1344,104 @@ describe('self-service preferences run against the real schema', () => {
 });
 
 /**
+ * Publishing turns assignments into commitments.
+ *
+ * `is_pinned` is what the optimizer reads to know an assignment must be
+ * planned around rather than reconsidered, and for a while nothing wrote it:
+ * the migration backfilled schedules already published, so the machinery
+ * worked exactly once, for rows that predated it. Every schedule published
+ * afterwards handed the optimizer an empty pinned set.
+ *
+ * Asserting on the column alone would not have caught that — the column was
+ * always correct. Only going through the endpoint shows it.
+ */
+describe('publishing commits the schedule', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const draftWithAssignment = async (status = 'pending') => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE(), CURDATE() + INTERVAL 7 DAY, ?, 'draft', ?)`,
+      [`pin-${tag()}`, departmentId, userId]
+    );
+    const [sh] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL 2 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+      [sc.insertId, departmentId]
+    );
+    const [sa] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, ?)`,
+      [sh.insertId, userId, status]
+    );
+    return { scheduleId: sc.insertId, shiftId: sh.insertId, assignmentId: sa.insertId };
+  };
+
+  const isPinned = async (assignmentId: number): Promise<boolean> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      'SELECT is_pinned FROM shift_assignments WHERE id = ?',
+      [assignmentId]
+    );
+    return Boolean(rows[0].is_pinned);
+  };
+
+  it('pins the live assignments of a schedule it publishes', async () => {
+    const cookie = await authCookie();
+    const { scheduleId, assignmentId } = await draftWithAssignment();
+    expect(await isPinned(assignmentId)).toBe(false);
+
+    const published = await request(app)
+      .patch(`/api/schedules/${scheduleId}/publish`)
+      .set('Cookie', cookie);
+    expect(published.status).toBe(200);
+
+    expect(await isPinned(assignmentId)).toBe(true);
+  });
+
+  it('leaves a cancelled assignment unpinned', async () => {
+    const cookie = await authCookie();
+    const { scheduleId, assignmentId } = await draftWithAssignment('cancelled');
+
+    await request(app).patch(`/api/schedules/${scheduleId}/publish`).set('Cookie', cookie);
+
+    // Nobody is relying on work they are not doing, and pinning it would ask
+    // the optimizer to preserve it.
+    expect(await isPinned(assignmentId)).toBe(false);
+  });
+
+  it('pins an assignment added to an already published schedule', async () => {
+    const cookie = await authCookie();
+    const { scheduleId, shiftId } = await draftWithAssignment();
+    await request(app).patch(`/api/schedules/${scheduleId}/publish`).set('Cookie', cookie);
+
+    const added = await request(app)
+      .post('/api/assignments')
+      .set('Cookie', cookie)
+      .send({ shiftId, userId: delegateeId });
+    expect(added.status).toBe(201);
+
+    // Adding someone to a live schedule tells them, which is the whole meaning
+    // of the pin. The status is read in the INSERT itself, so this proves
+    // MySQL evaluates the correlated comparison the way the code assumes.
+    expect(await isPinned(added.body.data.id)).toBe(true);
+  });
+
+  it('leaves an assignment on a draft schedule unpinned', async () => {
+    const cookie = await authCookie();
+    const { shiftId } = await draftWithAssignment();
+
+    const added = await request(app)
+      .post('/api/assignments')
+      .set('Cookie', cookie)
+      .send({ shiftId, userId: delegateeId });
+    expect(added.status).toBe(201);
+
+    // A draft is a proposal; nobody has been told, so the optimizer stays free
+    // to move it.
+    expect(await isPinned(added.body.data.id)).toBe(false);
+  });
+});
+
+/**
  * Pairing rules against real MySQL.
  *
  * Every rejection this service performs is a statement about rows that already
