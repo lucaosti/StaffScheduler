@@ -30,6 +30,7 @@ const contractRow = (over: Record<string, unknown> = {}) => ({
   max_hours_per_day: 8,
   max_consecutive_days: 5,
   min_hours_between_shifts: 11,
+  min_consecutive_days_off: 2,
   ...over,
 });
 
@@ -50,6 +51,7 @@ describe('resolveLimitsForPeriod', () => {
       maxHoursPerDay: 8,
       maxConsecutiveDays: 5,
       minHoursBetweenShifts: 11,
+      minConsecutiveDaysOff: 2,
     });
   });
 
@@ -248,7 +250,7 @@ describe('contract CRUD', () => {
     const [, params] = execute.mock.calls[0];
     // `null` is "this contract does not constrain it" — distinct from zero, so
     // an unstated limit must not become one.
-    expect(params).toEqual(['Casual', null, null, null, null, null, null]);
+    expect(params).toEqual(['Casual', null, null, null, null, null, null, null]);
   });
 
   it('keeps current values for fields an update omits', async () => {
@@ -261,8 +263,9 @@ describe('contract CRUD', () => {
     await new EmploymentContractService(pool).update(1, { maxHoursPerWeek: 24 });
 
     const [, params] = execute.mock.calls[1];
-    // name, description, isActive, weekly, minWeekly, daily, consecutive, rest, id
-    expect(params).toEqual(['Full time', null, true, 24, 0, 8, 5, 11, 1]);
+    // name, description, isActive, weekly, minWeekly, daily, consecutive,
+    // rest-between-shifts, consecutive-days-off, id
+    expect(params).toEqual(['Full time', null, true, 24, 0, 8, 5, 11, 2, 1]);
   });
 
   it('distinguishes clearing a limit from omitting it', async () => {
