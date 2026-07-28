@@ -29,6 +29,8 @@ import {
   coverageShortfalls,
   findOverCommitments,
   restShortfalls,
+  weekendLoads,
+  weekendSpread,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
@@ -793,6 +795,30 @@ describeOrtools('CP-SAT engine gives rest in blocks, not scattered days', () => 
     expect(restShortfalls(problem(), assignments)).toEqual([]);
   });
 
+
+  it('counts external work as occupying the day for rest purposes', () => {
+    // A rest block is only rest if nothing else claims the day — work on
+    // another schedule breaks it exactly as work on this one does.
+    const withExternal = {
+      ...problem(2),
+      employees: [
+        {
+          ...employee('e1', 2),
+          existing_assignments: fortnight.map((s) => ({
+            date: s.date,
+            start_time: '09:00',
+            end_time: '17:00',
+          })),
+        },
+        employee('e2', 2),
+      ],
+    };
+    // Every day is taken by other schedules, so no window can hold a block.
+    const shortfalls = restShortfalls(withExternal, []);
+    expect(shortfalls.length).toBeGreaterThan(0);
+    expect(shortfalls[0]).toMatchObject({ employeeId: 'e1', longestRest: 0 });
+  });
+
   /**
    * Rest and fairness pull against each other: concentrating someone's shifts
    * creates longer free runs but a less even split. Both sit at SOFT, so
@@ -805,5 +831,118 @@ describeOrtools('CP-SAT engine gives rest in blocks, not scattered days', () => 
     const assignments = runPython(withRest);
     expect(coverageShortfalls(withRest, assignments)).toEqual([]);
     expect(findConstraintViolations(withRest, assignments)).toEqual([]);
+  });
+});
+
+/**
+ * Weekend equity: balancing WHICH hours, not just how many.
+ *
+ * The hours fairness term (#450) cannot see this. A schedule can be perfectly
+ * even by total load while one person works every Saturday and Sunday and
+ * another works only weekdays — both carry the same hours, and only one of
+ * them has no weekends. To an hours-only measure a Sunday hour and a Tuesday
+ * hour are the same hour.
+ *
+ * THE FIXTURE IS THE POINT, and it took three attempts to build honestly. With
+ * shifts of equal length, one per day, balancing hours ALREADY balances
+ * weekends as a side effect — the first two fixtures showed 4/4 both before
+ * and after the change, demonstrating nothing. The distributions only diverge
+ * when equal hours can be reached by more than one weekend split: 16 identical
+ * shifts, half of them at weekends, over four employees. Four shifts each is
+ * reachable as weekends 4/4/0/0 or 2/2/2/2, and hours fairness cannot tell
+ * those apart.
+ *
+ * Verified against the previous implementation: that fixture produced a spread
+ * of 2 (1/2/2/3) and now produces 0.
+ */
+describeOrtools('CP-SAT engine balances weekend work', () => {
+  // Eight weekend days and eight weekdays, all shifts identical.
+  const weekendDates = ['2033-06-04', '2033-06-05', '2033-06-11', '2033-06-12',
+    '2033-06-18', '2033-06-19', '2033-06-25', '2033-06-26'];
+  const weekdayDates = ['2033-06-01', '2033-06-02', '2033-06-03', '2033-06-06',
+    '2033-06-07', '2033-06-08', '2033-06-09', '2033-06-10'];
+
+  const problem = {
+    shifts: [...weekendDates, ...weekdayDates].map((date, i) => ({
+      id: `s${i}`,
+      date,
+      start_time: '09:00',
+      end_time: '17:00',
+      min_staff: 1,
+      max_staff: 1,
+      department_id: 1,
+    })),
+    employees: [1, 2, 3, 4].map((i) => ({
+      id: `e${i}`,
+      max_hours_per_week: 200,
+      max_consecutive_days: 30,
+      min_hours_between_shifts: 8,
+      skills: [],
+      unavailable_dates: [],
+    })),
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('spreads weekend days evenly when hours alone cannot decide', () => {
+    expect(weekendSpread(problem, runPython(problem))).toBe(0);
+  });
+
+  it('does not trade coverage for weekend equity', () => {
+    // The term sits at SOFT; coverage is MEDIUM. It may only choose BETWEEN
+    // fully-staffed answers.
+    const assignments = runPython(problem);
+    expect(assignments).toHaveLength(problem.shifts.length);
+    expect(coverageShortfalls(problem, assignments)).toEqual([]);
+  });
+
+  it('counts a day once however many shifts it holds', () => {
+    // Two shifts on one Saturday cost one weekend, not two — the unit is the
+    // day someone loses, not the hours they work in it.
+    const doubled = {
+      ...problem,
+      shifts: [
+        ...problem.shifts,
+        { id: 'extra', date: '2033-06-04', start_time: '18:00', end_time: '20:00',
+          min_staff: 1, max_staff: 1, department_id: 1 },
+      ],
+    };
+    const loads = weekendLoads(doubled, [
+      { employeeId: 'e1', shiftId: 's0' },
+      { employeeId: 'e1', shiftId: 'extra' },
+    ]);
+    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(1);
+  });
+
+
+  it('counts weekend work held on other schedules', () => {
+    // The person's weekend is gone regardless of which schedule took it, so a
+    // measure that ignored external work would report someone as free while
+    // they are already committed.
+    const withExternal = {
+      ...problem,
+      employees: [
+        {
+          ...problem.employees[0],
+          existing_assignments: [
+            { date: '2033-06-04', start_time: '09:00', end_time: '17:00' },
+            { date: '2033-06-05', start_time: '09:00', end_time: '17:00' },
+          ],
+        },
+        ...problem.employees.slice(1),
+      ],
+    };
+    const loads = weekendLoads(withExternal, []);
+    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(2);
+  });
+
+  it('honours a configured weekend that is not Saturday and Sunday', () => {
+    // Saturday/Sunday is a default, not a truth: several sectors run rotas
+    // where the unsocial days differ.
+    const fridayWeekend = { ...problem, constraints: { weekend_days: [5] } };
+    const loads = weekendLoads(fridayWeekend, [{ employeeId: 'e1', shiftId: 's8' }]);
+    // s8 is 2033-06-01, a Wednesday — not a weekend under either definition.
+    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(0);
   });
 });
