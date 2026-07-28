@@ -118,6 +118,16 @@ export interface Shift {
    * separately.
    */
   required_skill_levels?: Record<string, number>;
+  /**
+   * Per skill, how many assignees must reach a given proficiency: "at least
+   * one senior on this night shift".
+   *
+   * Distinct from `required_skill_levels`, which filters WHO may be assigned.
+   * This is a COUNT over the shift and cannot be expressed by narrowing
+   * eligibility — one senior per shift does not mean everyone must be senior,
+   * and requiring that would make most rotas unstaffable.
+   */
+  qualified_staff?: Record<string, { level: number; count: number }>;
 }
 
 export interface Preference {
