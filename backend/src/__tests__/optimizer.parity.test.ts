@@ -33,6 +33,7 @@ import {
   weekendSpread,
   nightLoads,
   nightSpread,
+  qualifiedStaffShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
@@ -1109,5 +1110,97 @@ describeOrtools('CP-SAT engine respects skill proficiency', () => {
     const problem = { shifts: [noRequirement], employees: [noLevel], skills: {}, preferences: {}, constraints: {} };
     expect(findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }])).toEqual([]);
     expect(runPython(problem)).toHaveLength(1);
+  });
+});
+
+/**
+ * "At least one senior on this shift."
+ *
+ * The rule regulated settings actually run on, and NOT the same as the
+ * proficiency filter. `required_skill_levels` says everyone assigned must be
+ * at least this good; this is a COUNT over the shift. One senior per night
+ * shift does not mean everyone must be senior, and requiring that would make
+ * most rotas unstaffable.
+ *
+ * THE FIXTURE HAD TO MAKE THE SENIOR UNATTRACTIVE. A first attempt simply
+ * offered two juniors and a senior for two slots — the solver picked the
+ * senior anyway, before and after, proving nothing. That is now the fourth
+ * constraint in this catalogue whose first fixture demonstrated nothing, so
+ * the senior here declares the shift as one to AVOID: without the rule the
+ * soft preference pushes the solver to the two juniors, and with it the senior
+ * must be present regardless.
+ *
+ * That doubles as a demonstration of the level ordering — the requirement sits
+ * at MEDIUM and the preference at SOFT, so no accumulation of preference can
+ * buy away a qualified person.
+ */
+describeOrtools('CP-SAT engine staffs a shift with the qualified people it needs', () => {
+  const nurse = (id: string, level: number) => ({
+    id,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: ['nurse'],
+    skill_levels: { nurse: level },
+    unavailable_dates: [],
+  });
+
+  const shift = {
+    id: 's0',
+    date: '2033-10-01',
+    start_time: '22:00',
+    end_time: '06:00',
+    min_staff: 2,
+    max_staff: 2,
+    department_id: 1,
+    required_skills: ['nurse'],
+    qualified_staff: { nurse: { level: 5, count: 1 } },
+  };
+
+  const problem = {
+    shifts: [shift],
+    employees: [nurse('e1', 2), nurse('e2', 2), nurse('e3', 5)],
+    skills: {},
+    // The senior would rather not be here. Verified against the previous
+    // implementation: without the rule this produced e1 + e2.
+    preferences: { e3: { employee_id: 'e3', preferred_shifts: [], avoid_shifts: ['s0'] } },
+    constraints: {},
+  };
+
+  it('includes a qualified person even when they would rather not be there', () => {
+    const assignments = runPython(problem);
+    expect(assignments.map((a) => a.employeeId)).toContain('e3');
+    expect(qualifiedStaffShortfalls(problem, assignments)).toEqual([]);
+  });
+
+  it('still fills the shift to min_staff', () => {
+    // The requirement is about composition, not size: it must not be satisfied
+    // by assigning only the senior.
+    expect(runPython(problem)).toHaveLength(2);
+  });
+
+  it('reports a shortfall rather than refusing when nobody qualifies', () => {
+    // Made hard, a period with no available senior would produce no schedule
+    // at all — the failure that made coverage a target rather than a
+    // constraint. The shift is still staffed; the gap is reported.
+    const noSenior = { ...problem, employees: [nurse('e1', 2), nurse('e2', 2)], preferences: {} };
+    const assignments = runPython(noSenior);
+    expect(assignments).toHaveLength(2);
+    expect(qualifiedStaffShortfalls(noSenior, assignments)).toEqual([
+      { shiftId: 's0', skill: 'nurse', level: 5, required: 1, assigned: 0 },
+    ]);
+  });
+
+  it('does not count an unrecorded proficiency as qualified', () => {
+    // The reverse of the eligibility filter, where an unknown level means "no
+    // reason to exclude". Here it would assert a competence nobody recorded,
+    // on the one rule that exists to guarantee it.
+    const unknown = { ...nurse('e4', 5), skill_levels: {} };
+    const shortfalls = qualifiedStaffShortfalls(
+      { ...problem, employees: [unknown] },
+      [{ employeeId: 'e4', shiftId: 's0' }]
+    );
+    expect(shortfalls).toHaveLength(1);
+    expect(shortfalls[0].assigned).toBe(0);
   });
 });

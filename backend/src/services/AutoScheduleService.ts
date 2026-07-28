@@ -54,6 +54,26 @@ const parseSkillLevels = (raw: string | null): Record<string, number> => {
   return levels;
 };
 
+/**
+ * Parses `name:level:count` triples into the qualified-staff requirement.
+ *
+ * Rows where either column is NULL arrive with an empty segment and are
+ * skipped: a shift that does not state the rule is not subject to it, matching
+ * how every other absent limit behaves.
+ */
+const parseQualifiedStaff = (
+  raw: string | null
+): Record<string, { level: number; count: number }> => {
+  const out: Record<string, { level: number; count: number }> = {};
+  for (const triple of (raw ?? '').split(',')) {
+    const [name, level, count] = triple.split(':');
+    if (name && Number.isFinite(Number(level)) && Number.isFinite(Number(count))) {
+      out[name] = { level: Number(level), count: Number(count) };
+    }
+  }
+  return out;
+};
+
 interface AutoScheduleResult {
   scheduleId: number;
   assignmentsCreated: number;
@@ -113,7 +133,15 @@ export class AutoScheduleService {
               GROUP_CONCAT(
                 DISTINCT CONCAT(sk.name, ':', ss.min_proficiency)
                 ORDER BY sk.name
-              ) AS skill_levels
+              ) AS skill_levels,
+              -- name:level:count triples for the "at least N at level L" rule.
+              -- A separate list from skill_levels because the two are
+              -- independent requirements: one filters who may be assigned, the
+              -- other counts who must be present.
+              GROUP_CONCAT(
+                DISTINCT CONCAT(sk.name, ':', ss.min_qualified_level, ':', ss.min_qualified_staff)
+                ORDER BY sk.name
+              ) AS qualified_staff
          FROM shifts s
          LEFT JOIN shift_skills ss ON s.id = ss.shift_id
          LEFT JOIN skills sk ON ss.skill_id = sk.id
@@ -244,6 +272,7 @@ export class AutoScheduleService {
         max_staff: s.max_staff as number,
         required_skills: (s.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         required_skill_levels: parseSkillLevels(s.skill_levels as string | null),
+        qualified_staff: parseQualifiedStaff(s.qualified_staff as string | null),
         priority: 1,
       })),
       employees: empRows.map((e) => {
