@@ -74,6 +74,17 @@ export interface Employee {
    */
   min_consecutive_days_off?: number;
   skills: string[];
+  /**
+   * Proficiency per skill, 1–5, for the skills in `skills`.
+   *
+   * Additive rather than replacing `skills` with objects: an absent entry
+   * means "level unknown", which is treated as meeting any requirement, so a
+   * caller that does not supply levels behaves exactly as before. The column
+   * has existed on `user_skills` since the initial schema and was settable
+   * through the API — it simply never reached the scheduler, which made
+   * someone at level 1 and someone at level 5 interchangeable to it.
+   */
+  skill_levels?: Record<string, number>;
   unavailable_dates: string[];
   max_consecutive_days?: number;
   /**
@@ -96,6 +107,17 @@ export interface Shift {
   min_staff: number;
   max_staff?: number;
   required_skills?: string[];
+  /**
+   * Minimum proficiency per required skill. Absent means any level will do,
+   * which is what every shift meant before this existed.
+   *
+   * This is a predicate over EACH assignee ("everyone here must be at least
+   * this good"), not a count over the shift ("at least one senior"). The
+   * latter is a different shape — a counting constraint that can make a shift
+   * unstaffable in a way `min_staff` cannot express — and is tracked
+   * separately.
+   */
+  required_skill_levels?: Record<string, number>;
 }
 
 export interface Preference {

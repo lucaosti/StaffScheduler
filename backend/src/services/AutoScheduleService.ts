@@ -36,6 +36,24 @@ import { DateUtils } from '../utils';
 import { config } from '../config';
 import { EmploymentContractService } from './EmploymentContractService';
 
+/**
+ * Parses a `name:level` list into a lookup.
+ *
+ * Rows whose level is NULL arrive as "name:" or are absent entirely, and are
+ * skipped: an absent entry means "unconstrained" for a shift and "level
+ * unknown" for an employee, which is what every row meant before proficiency
+ * reached the scheduler.
+ */
+const parseSkillLevels = (raw: string | null): Record<string, number> => {
+  const levels: Record<string, number> = {};
+  for (const pair of (raw ?? '').split(',')) {
+    const [name, value] = pair.split(':');
+    const level = Number(value);
+    if (name && Number.isFinite(level)) levels[name] = level;
+  }
+  return levels;
+};
+
 interface AutoScheduleResult {
   scheduleId: number;
   assignmentsCreated: number;
@@ -87,7 +105,15 @@ export class AutoScheduleService {
     const [shiftRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT s.id, s.date, s.start_time, s.end_time, s.min_staff, s.max_staff,
               s.department_id,
-              GROUP_CONCAT(DISTINCT sk.name) AS skill_names
+              GROUP_CONCAT(DISTINCT sk.name) AS skill_names,
+              -- name:level pairs, so the required proficiency travels with the
+              -- skill it belongs to. Rows with no requirement are skipped
+              -- rather than emitted as ":null", keeping "absent means any
+              -- level" the default.
+              GROUP_CONCAT(
+                DISTINCT CONCAT(sk.name, ':', ss.min_proficiency)
+                ORDER BY sk.name
+              ) AS skill_levels
          FROM shifts s
          LEFT JOIN shift_skills ss ON s.id = ss.shift_id
          LEFT JOIN skills sk ON ss.skill_id = sk.id
@@ -114,6 +140,10 @@ export class AutoScheduleService {
     const [empRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT u.id,
               GROUP_CONCAT(DISTINCT sk.name) AS skill_names,
+              GROUP_CONCAT(
+                DISTINCT CONCAT(sk.name, ':', us.proficiency_level)
+                ORDER BY sk.name
+              ) AS skill_levels,
               COALESCE(up.max_hours_per_week, 40) AS max_hours_per_week,
               COALESCE(up.min_hours_per_week, 0)  AS min_hours_per_week,
               COALESCE(up.max_consecutive_days, 5) AS max_consecutive_days
@@ -213,6 +243,7 @@ export class AutoScheduleService {
         min_staff: s.min_staff as number,
         max_staff: s.max_staff as number,
         required_skills: (s.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
+        required_skill_levels: parseSkillLevels(s.skill_levels as string | null),
         priority: 1,
       })),
       employees: empRows.map((e) => {
@@ -227,6 +258,7 @@ export class AutoScheduleService {
         max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
         min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
+        skill_levels: parseSkillLevels(e.skill_levels as string | null),
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
         };
