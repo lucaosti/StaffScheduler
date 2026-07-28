@@ -43,6 +43,10 @@ import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
 import { coverageShortfalls, findOverCommitments } from './constraintValidator';
+// The overnight-aware time arithmetic these engines share. It used to be four
+// private helpers here and equivalent copies in constraintValidator, kept in
+// step by a comment — see ./shiftTime for why that was not good enough.
+import { dateToMs, shiftBoundsMs, shiftHours, timeToMinutes } from './shiftTime';
 import type { OverCommitment } from './constraintValidator';
 
 // Re-exported so every existing import site keeps working unchanged; the
@@ -510,10 +514,10 @@ export class ScheduleOptimizer {
     // Contract cap when present; otherwise the historical derived formula.
     // Kept in lock-step with constraintValidator, which is the authority.
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const shiftHours = this._calculateShiftHours(shift);
+    const hours = shiftHours(shift);
     const dailyKey = `${emp.id}|${shift.date}`;
     const hoursAlreadyToday = dailyHoursMap.get(dailyKey) ?? 0;
-    if (hoursAlreadyToday + shiftHours > dailyBudget) {
+    if (hoursAlreadyToday + hours > dailyBudget) {
       return false;
     }
 
@@ -570,15 +574,15 @@ export class ScheduleOptimizer {
       .filter((s): s is Shift => s !== undefined);
 
     const withinWeek = (a: Shift, b: Shift): boolean =>
-      Math.abs(this._dateToMs(a.date) - this._dateToMs(b.date)) / 86_400_000 < 7;
+      Math.abs(dateToMs(a.date) - dateToMs(b.date)) / 86_400_000 < 7;
 
     const anchors = [shift, ...assigned.filter((s) => withinWeek(s, shift))];
     for (const anchor of anchors) {
-      let total = this._calculateShiftHours(anchor);
+      let total = shiftHours(anchor);
       for (const other of assigned) {
-        if (other !== anchor && withinWeek(anchor, other)) total += this._calculateShiftHours(other);
+        if (other !== anchor && withinWeek(anchor, other)) total += shiftHours(other);
       }
-      if (anchor !== shift && withinWeek(anchor, shift)) total += this._calculateShiftHours(shift);
+      if (anchor !== shift && withinWeek(anchor, shift)) total += shiftHours(shift);
       if (total > emp.max_hours_per_week) return true;
     }
     return false;
@@ -592,7 +596,7 @@ export class ScheduleOptimizer {
       const assigned = shiftsById.get(shiftId);
       if (assigned) workedDates.add(assigned.date);
     }
-    const sortedMs = [...workedDates].map((d) => this._dateToMs(d)).sort((a, b) => a - b);
+    const sortedMs = [...workedDates].map((d) => dateToMs(d)).sort((a, b) => a - b);
 
     let longestRun = 1;
     let currentRun = 1;
@@ -604,26 +608,15 @@ export class ScheduleOptimizer {
     return longestRun > emp.max_consecutive_days;
   }
 
-  private _dateToMs(date: string): number {
-    return new Date(`${date}T00:00:00Z`).getTime();
-  }
 
-  /** [start, end] as absolute timestamps, rolling an overnight shift's end into the next day. */
-  private _shiftBoundsMs(shift: Shift): [number, number] {
-    const dayMs = this._dateToMs(shift.date);
-    const start = dayMs + this._timeToMinutes(shift.start_time) * 60_000;
-    let end = dayMs + this._timeToMinutes(shift.end_time) * 60_000;
-    if (end <= start) end += 24 * 60 * 60_000;
-    return [start, end];
-  }
 
   private _wouldViolateMinRest(shift: Shift, ctx: CandidateContext): boolean {
-    const [candStart, candEnd] = this._shiftBoundsMs(shift);
+    const [candStart, candEnd] = shiftBoundsMs(shift);
     const shiftsById = this._getShiftsById(ctx.allShifts);
     for (const shiftId of ctx.assignedShiftIds) {
       const other = shiftsById.get(shiftId);
       if (!other) continue;
-      const [otherStart, otherEnd] = this._shiftBoundsMs(other);
+      const [otherStart, otherEnd] = shiftBoundsMs(other);
       let restMs: number;
       if (candEnd <= otherStart) restMs = otherStart - candEnd;
       else if (otherEnd <= candStart) restMs = candStart - otherEnd;
@@ -695,7 +688,7 @@ export class ScheduleOptimizer {
     for (const emp of problem.employees) {
       for (const stub of externalShiftsByEmployee.get(emp.id) ?? []) {
         const key = `${emp.id}|${stub.date}`;
-        dailyHoursMap.set(key, (dailyHoursMap.get(key) ?? 0) + this._calculateShiftHours(stub));
+        dailyHoursMap.set(key, (dailyHoursMap.get(key) ?? 0) + shiftHours(stub));
       }
     }
 
@@ -727,7 +720,7 @@ export class ScheduleOptimizer {
       const toAssign = Math.min(candidates.length, shift.min_staff, staffCap);
       for (let i = 0; i < toAssign; i++) {
         const emp = candidates[i];
-        const shiftHours = this._calculateShiftHours(shift);
+        const hours = shiftHours(shift);
 
         assignments.push({
           employeeId: emp.id,
@@ -735,13 +728,13 @@ export class ScheduleOptimizer {
           date: shift.date,
           startTime: shift.start_time,
           endTime: shift.end_time,
-          hours: shiftHours,
+          hours,
         });
 
         // Update tracking state
         employeeAssignments.get(emp.id)!.add(shift.id);
         const dailyKey = `${emp.id}|${shift.date}`;
-        dailyHoursMap.set(dailyKey, (dailyHoursMap.get(dailyKey) ?? 0) + shiftHours);
+        dailyHoursMap.set(dailyKey, (dailyHoursMap.get(dailyKey) ?? 0) + hours);
       }
     }
 
@@ -775,10 +768,10 @@ export class ScheduleOptimizer {
   }
 
   private _timesOverlap(start1: string, end1: string, start2: string, end2: string): boolean {
-    const s1 = this._timeToMinutes(start1);
-    let e1 = this._timeToMinutes(end1);
-    const s2 = this._timeToMinutes(start2);
-    let e2 = this._timeToMinutes(end2);
+    const s1 = timeToMinutes(start1);
+    let e1 = timeToMinutes(end1);
+    const s2 = timeToMinutes(start2);
+    let e2 = timeToMinutes(end2);
 
     // Normalize overnight ranges (e.g. 22:00–06:00) so a shift crossing
     // midnight is still detected as overlapping same-date shifts.
@@ -788,18 +781,5 @@ export class ScheduleOptimizer {
     return !(e1 <= s2 || e2 <= s1);
   }
 
-  private _timeToMinutes(time: string): number {
-    const [hours, minutes] = time.split(':').map(Number);
-    return hours * 60 + minutes;
-  }
 
-  private _calculateShiftHours(shift: Shift): number {
-    const start = this._timeToMinutes(shift.start_time);
-    let end = this._timeToMinutes(shift.end_time);
-
-    // Handle overnight shifts
-    if (end < start) end += 24 * 60;
-
-    return Math.round(((end - start) / 60) * 10) / 10; // Round to 1 decimal
-  }
 }
