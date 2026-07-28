@@ -42,7 +42,8 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
-import { coverageShortfalls } from './constraintValidator';
+import { coverageShortfalls, findOverCommitments } from './constraintValidator';
+import type { OverCommitment } from './constraintValidator';
 
 // Re-exported so every existing import site keeps working unchanged; the
 // declarations moved to ./types to break the validator -> optimizer cycle.
@@ -94,6 +95,13 @@ interface OptimizationResult {
       totalMissingStaff: number;
     };
   };
+  /**
+   * Employees left out because their work on OTHER schedules already breaches
+   * a limit before this one starts. Reported on every run, not only failures:
+   * an employee excluded for that reason is something the planner must see,
+   * not a detail of how the solve went.
+   */
+  overCommittedEmployees: OverCommitment[];
   error?: string;
 }
 
@@ -140,6 +148,13 @@ const mapPythonResult = (raw: Record<string, unknown>): OptimizationResult => {
 
   return {
     ...(raw as unknown as OptimizationResult),
+    overCommittedEmployees: ((raw.over_committed_employees ?? []) as Array<Record<string, unknown>>).map(
+      (o) => ({
+        employeeId: String(o.employee_id),
+        rule: o.rule as OverCommitment['rule'],
+        detail: String(o.detail),
+      })
+    ),
     statistics: {
       numBranches: stats.num_branches as number | undefined,
       numConflicts: stats.num_conflicts as number | undefined,
@@ -246,6 +261,7 @@ export class ScheduleOptimizer {
           status: 'GREEDY_FALLBACK',
           solveTimeSeconds: elapsedTime,
           assignments: greedy,
+          overCommittedEmployees: findOverCommitments(problem),
           statistics: {
             isOptimal: false,
             totalAssignedShifts: greedy.length,
@@ -271,6 +287,7 @@ export class ScheduleOptimizer {
           status: 'ERROR',
           solveTimeSeconds: (Date.now() - startTime) / 1000,
           assignments: [],
+          overCommittedEmployees: findOverCommitments(problem),
           statistics: {
             isOptimal: false,
             totalAssignedShifts: 0,

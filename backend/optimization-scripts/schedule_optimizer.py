@@ -42,6 +42,7 @@ class ScheduleOptimizerORTools:
         self.hours_worked = {}  # employee_id -> IntVar (weekly hours)
         self.coverage_shortfall = {}  # shift_id -> IntVar (staff missing below min_staff)
         self.coverage_surplus = {}  # shift_id -> IntVar (staff scheduled beyond min_staff)
+        self.over_committed = []  # employees whose fixed external work already breaches a cap
         
         # Extract data
         self.shifts = {s['id']: s for s in problem_data['shifts']}
@@ -94,6 +95,23 @@ class ScheduleOptimizerORTools:
             for emp_id, emp in self.employees.items()
         }
 
+        # An employee whose fixed external work ALREADY breaches a cap makes the
+        # model infeasible on its own — no decision here can repair a fact from
+        # another schedule. They are diagnosed and excluded rather than allowed
+        # to fail the whole run: they cannot legally take more work in any case,
+        # so removing them changes no legal outcome, and the engine keeps
+        # answering for everyone else. Same principle that made coverage a
+        # target rather than a hard constraint.
+        self.over_committed = self._diagnose_over_commitment()
+        excluded = {f['employee_id'] for f in self.over_committed}
+        if excluded:
+            for emp_id in excluded:
+                self.employees.pop(emp_id, None)
+            print(
+                f'Excluded {len(excluded)} over-committed employee(s) from assignment',
+                file=sys.stderr,
+            )
+
         # 1. Create assignment variables
         self._create_assignment_variables()
 
@@ -140,6 +158,109 @@ class ScheduleOptimizerORTools:
     def _var(self, employee_id: str, shift_id: str):
         """The decision variable for a pairing, or None when it was excluded."""
         return self.assignments.get((employee_id, shift_id))
+
+    def _diagnose_over_commitment(self) -> List[Dict]:
+        """
+        Employees whose FIXED external work already breaches a cap.
+
+        WHY THIS IS THE ONLY DIAGNOSIS THE MODEL STILL NEEDS. Before coverage
+        became a minimised shortfall (rather than a hard constraint), INFEASIBLE
+        could mean almost anything, and the issue asking for explainability
+        assumed a general unsat-core mechanism was required. Measuring after the
+        change showed otherwise: assigning NOTHING now satisfies every remaining
+        hard constraint — max_staff, double-booking, minimum rest, the hours
+        caps and consecutive days are all upper bounds that an empty schedule
+        meets — and skills and availability no longer produce constraints at
+        all, since ineligible pairings simply get no variable.
+
+        So exactly one thing can still make the model infeasible: an employee's
+        `existing_assignments` — shifts they already hold on OTHER schedules,
+        which are fixed facts here — already exceeding a daily, weekly or
+        consecutive-day limit on their own. No decision this solver makes can
+        repair that.
+
+        That makes an unsat core the wrong tool. The condition is checkable
+        deterministically before solving, in one pass over data we already
+        have, and yields the employee, the rule and the numbers rather than a
+        set of opaque literals. It is also cheaper: assumption literals disable
+        parts of CP-SAT's presolve for every run, to explain a case that should
+        be rare.
+
+        The over-committed employee is then EXCLUDED from assignment rather
+        than making the whole run fail. They cannot legally take more work in
+        any case, so removing them changes no legal outcome — and it keeps the
+        engine answering for everyone else, which is the same principle that
+        made coverage a target instead of a constraint.
+        """
+        findings: List[Dict] = []
+        for employee_id, employee in self.employees.items():
+            external = self.external_by_employee.get(employee_id, [])
+            if not external:
+                continue
+
+            # Daily.
+            daily_budget = employee.get('max_hours_per_day') or max(
+                8, employee.get('max_hours_per_week', 40) // 5
+            )
+            hours_by_date: Dict[str, int] = {}
+            for ext in external:
+                hours_by_date[ext['date']] = (
+                    hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                )
+            for date, hours in sorted(hours_by_date.items()):
+                if hours > daily_budget:
+                    findings.append({
+                        'employee_id': employee_id,
+                        'rule': 'daily-hours',
+                        'detail': (
+                            f'already holds {hours}h on {date} from other schedules, '
+                            f'exceeding the {daily_budget}h daily limit'
+                        ),
+                    })
+
+            # Rolling weekly.
+            weekly_cap = employee.get('max_hours_per_week')
+            if weekly_cap:
+                ords = [
+                    (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
+                     self._calculate_shift_hours(ext))
+                    for ext in external
+                ]
+                for anchor, _ in ords:
+                    window = sum(h for o, h in ords if anchor <= o < anchor + 7)
+                    if window > weekly_cap:
+                        findings.append({
+                            'employee_id': employee_id,
+                            'rule': 'weekly-hours',
+                            'detail': (
+                                f'already holds {window}h in the 7 days from '
+                                f'{datetime.fromordinal(anchor).date()} on other schedules, '
+                                f'exceeding the {weekly_cap}h weekly limit'
+                            ),
+                        })
+                        break
+
+            # Consecutive days.
+            max_consec = employee.get('max_consecutive_days')
+            if max_consec:
+                days = sorted({
+                    datetime.strptime(ext['date'], '%Y-%m-%d').toordinal() for ext in external
+                })
+                run = 1
+                for prev, cur in zip(days, days[1:]):
+                    run = run + 1 if cur == prev + 1 else 1
+                    if run > max_consec:
+                        findings.append({
+                            'employee_id': employee_id,
+                            'rule': 'consecutive-days',
+                            'detail': (
+                                f'already works {run} consecutive days on other schedules, '
+                                f'exceeding the limit of {max_consec}'
+                            ),
+                        })
+                        break
+
+        return findings
 
     def _create_assignment_variables(self):
         """
@@ -740,6 +861,10 @@ class ScheduleOptimizerORTools:
             'objective_value': solver.ObjectiveValue() if status in [cp_model.OPTIMAL, cp_model.FEASIBLE] else None,
             'solve_time_seconds': solver.WallTime(),
             'assignments': [],
+            # Always reported, including on a successful run: an employee left
+            # out because they are already over their limit is something the
+            # planner must see, not a detail of how the solve went.
+            'over_committed_employees': self.over_committed,
             'statistics': {
                 'num_branches': solver.NumBranches(),
                 'num_conflicts': solver.NumConflicts(),
