@@ -85,6 +85,7 @@ describe('AutoScheduleService.generate', () => {
         null,
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
     conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]);
@@ -113,6 +114,7 @@ describe('AutoScheduleService.generate', () => {
         null,
       ])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
     // INSERT IGNORE skipped one row (a duplicate assignment already existed).
@@ -162,6 +164,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[
         { id: 7, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 },
       ], null])
+      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[
         { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
       ], null])
@@ -188,6 +191,7 @@ describe('AutoScheduleService.generate', () => {
         null,
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([
         [
@@ -224,6 +228,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
         { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
       ], null])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
   };

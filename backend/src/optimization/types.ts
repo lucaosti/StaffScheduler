@@ -52,6 +52,17 @@ export interface Employee {
   id: string;
   max_hours_per_week: number;
   min_hours_per_week?: number;
+  /**
+   * Daily hours cap, from the employee's contract.
+   *
+   * Optional only for the transition: every engine used to DERIVE this as
+   * `max(8, max_hours_per_week / 5)` — a formula that appeared in no contract,
+   * no policy table and no documentation as a decision, yet was enforced as a
+   * hard constraint against real people. When absent the old formula is still
+   * applied, so a caller that has not been migrated behaves exactly as before;
+   * when present the contract's stored value wins.
+   */
+  max_hours_per_day?: number;
   skills: string[];
   unavailable_dates: string[];
   max_consecutive_days?: number;

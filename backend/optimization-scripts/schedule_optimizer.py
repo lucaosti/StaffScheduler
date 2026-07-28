@@ -335,7 +335,11 @@ class ScheduleOptimizerORTools:
         are pre-charged against the budget.
         """
         for employee_id, employee in self.employees.items():
-            daily_budget = max(8, employee.get('max_hours_per_week', 40) // 5)
+            # Contract cap when present; otherwise the historical derived
+            # formula. Mirrors constraintValidator, which is the authority.
+            daily_budget = employee.get('max_hours_per_day') or max(
+                8, employee.get('max_hours_per_week', 40) // 5
+            )
 
             # Pre-existing external hours per date.
             external_hours_by_date: Dict[str, int] = {}

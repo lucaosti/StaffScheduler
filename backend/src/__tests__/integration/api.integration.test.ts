@@ -334,6 +334,7 @@ describe('every fixture-free GET runs against the real schema', () => {
     '/departments',
     '/directory/me',
     '/employees',
+    '/employment-contracts',
     '/modules',
     '/notifications',
     '/notifications/unread-count',
@@ -1338,5 +1339,93 @@ describe('self-service preferences run against the real schema', () => {
     const after = await readLimits();
     expect(Number(after.max_hours_per_week)).toBe(36);
     expect(Number(after.max_consecutive_days)).toBe(5);
+  });
+});
+
+/**
+ * Employment contracts against real MySQL.
+ *
+ * The effective-dated resolution is the reason this entity exists, and it is
+ * expressed in SQL (a date-range overlap with `COALESCE(effective_to,
+ * '9999-12-31')`). A mocked pool can only show the string was composed;
+ * whether MySQL agrees about which rows overlap is exactly what has to be
+ * proven here.
+ */
+describe('employment contracts run against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  it('creates, assigns and reads back a contract history', async () => {
+    const cookie = await authCookie();
+
+    const created = await request(app)
+      .post('/api/employment-contracts')
+      .set('Cookie', cookie)
+      .send({
+        name: `Part time ${tag()}`,
+        maxHoursPerWeek: 20,
+        maxHoursPerDay: 6,
+        maxConsecutiveDays: 3,
+        minHoursBetweenShifts: 11,
+      });
+    expect(created.status).toBe(201);
+    const contractId = created.body.data.id;
+
+    const assigned = await request(app)
+      .post(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie)
+      .send({ contractId, effectiveFrom: '2040-01-01', effectiveTo: '2040-06-30' });
+    expect(assigned.status).toBe(201);
+
+    const history = await request(app)
+      .get(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie);
+    expect(history.status).toBe(200);
+    expect(history.body.data.some((a: { contractId: number }) => a.contractId === contractId)).toBe(true);
+  });
+
+  it('rejects an overlapping period rather than storing two contracts at once', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/employment-contracts')
+      .set('Cookie', cookie)
+      .send({ name: `Overlap ${tag()}`, maxHoursPerWeek: 30 });
+    const contractId = created.body.data.id;
+
+    const first = await request(app)
+      .post(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie)
+      .send({ contractId, effectiveFrom: '2041-01-01', effectiveTo: '2041-12-31' });
+    expect(first.status).toBe(201);
+
+    // Half-overlapping: starts inside the first period. MySQL has no exclusion
+    // constraint, so this is the service's own check running against real rows.
+    const clash = await request(app)
+      .post(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie)
+      .send({ contractId, effectiveFrom: '2041-06-01', effectiveTo: '2042-01-31' });
+    expect(clash.status).toBe(400);
+  });
+
+  it('treats an open-ended assignment as covering everything after it', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/employment-contracts')
+      .set('Cookie', cookie)
+      .send({ name: `Open ended ${tag()}`, maxHoursPerWeek: 35 });
+    const contractId = created.body.data.id;
+
+    const open = await request(app)
+      .post(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie)
+      .send({ contractId, effectiveFrom: '2045-01-01' });
+    expect(open.status).toBe(201);
+
+    // `effective_to IS NULL` means still in force, so a later period overlaps
+    // it. Getting this wrong in SQL would silently allow two live contracts.
+    const later = await request(app)
+      .post(`/api/employment-contracts/users/${userId}`)
+      .set('Cookie', cookie)
+      .send({ contractId, effectiveFrom: '2046-01-01' });
+    expect(later.status).toBe(400);
   });
 });
