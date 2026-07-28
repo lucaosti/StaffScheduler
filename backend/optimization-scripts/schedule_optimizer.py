@@ -902,7 +902,7 @@ class ScheduleOptimizerORTools:
 
         upper = len(by_date)
         loads = []
-        for emp_id, employee in self.employees.items():
+        for emp_id in self.employees:
             day_flags = []
             for date, shift_ids in by_date.items():
                 day_vars = [
