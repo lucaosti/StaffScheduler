@@ -27,6 +27,7 @@ import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import {
   findConstraintViolations,
   coverageShortfalls,
+  findOverCommitments,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
@@ -460,5 +461,135 @@ describeOrtools('CP-SAT engine does not over-staff to look fair', () => {
     const assignments = runPython(problem);
     expect(assignments).toHaveLength(6);
     expect(coverageShortfalls(problem, assignments)).toEqual([]);
+  });
+});
+
+/**
+ * Over-commitment: the one thing that can still make the problem unsolvable.
+ *
+ * Measured rather than assumed. Once coverage became a minimised shortfall,
+ * assigning NOTHING satisfies every remaining hard rule, and skills and
+ * availability produce no constraints at all (ineligible pairings get no
+ * variable). Running the four candidate causes confirmed it: only an
+ * employee's `existing_assignments` — work on OTHER schedules, fixed facts
+ * here — can still make the model INFEASIBLE.
+ *
+ * This is why the explainability work is a deterministic pre-check and not an
+ * unsat core: the condition is decidable in one pass over data already in
+ * hand, and names the employee, the rule and the numbers instead of returning
+ * opaque literals. Assumption literals would disable parts of CP-SAT's
+ * presolve on every run to explain a case that should be rare.
+ *
+ * Verified against the previous implementation: this fixture returned
+ * INFEASIBLE with zero assignments and no explanation at all.
+ */
+describeOrtools('CP-SAT engine explains an over-committed employee', () => {
+  const overCommitted = {
+    shifts: [
+      {
+        id: 's0',
+        date: '2033-03-01',
+        start_time: '09:00',
+        end_time: '17:00',
+        min_staff: 1,
+        max_staff: 2,
+        department_id: 1,
+      },
+    ],
+    employees: [
+      {
+        id: 'e1',
+        max_hours_per_week: 8,
+        max_consecutive_days: 5,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+        // Already working 23h a day elsewhere: no decision here can repair it.
+        existing_assignments: [1, 2, 3, 4, 5].map((d) => ({
+          date: `2033-03-0${d}`,
+          start_time: '00:00',
+          end_time: '23:00',
+        })),
+      },
+      {
+        id: 'e2',
+        max_hours_per_week: 40,
+        max_consecutive_days: 5,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+      },
+    ],
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('still schedules everyone else instead of refusing outright', () => {
+    const assignments = runPython(overCommitted);
+    // The shift is covered by the employee who legally can take it.
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].employeeId).toBe('e2');
+  });
+
+  it('never assigns work to the over-committed employee', () => {
+    const assignments = runPython(overCommitted);
+    expect(assignments.some((a) => a.employeeId === 'e1')).toBe(false);
+  });
+
+  it('names the employee, the rule and the numbers', () => {
+    const findings = findOverCommitments(overCommitted);
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings[0]).toMatchObject({ employeeId: 'e1', rule: 'daily-hours' });
+    // A bare "INFEASIBLE" gave the planner nothing to act on; the detail has
+    // to carry what is wrong and by how much.
+    expect(findings[0].detail).toMatch(/23h on 2033-03-01/);
+    expect(findings[0].detail).toMatch(/8h daily limit/);
+  });
+
+  it('reports nothing for an employee within their limits', () => {
+    expect(
+      findOverCommitments({ ...overCommitted, employees: [overCommitted.employees[1]] })
+    ).toEqual([]);
+  });
+
+  it('detects a breached weekly cap from external work alone', () => {
+    const findings = findOverCommitments({
+      ...overCommitted,
+      employees: [
+        {
+          ...overCommitted.employees[0],
+          // Within the daily cap, but seven of them bust the week.
+          max_hours_per_week: 20,
+          max_hours_per_day: 24,
+          existing_assignments: [1, 2, 3, 4, 5].map((d) => ({
+            date: `2033-03-0${d}`,
+            start_time: '09:00',
+            end_time: '17:00',
+          })),
+        },
+      ],
+    });
+    expect(findings.map((f) => f.rule)).toContain('weekly-hours');
+  });
+
+  it('detects a breached consecutive-days limit from external work alone', () => {
+    const findings = findOverCommitments({
+      ...overCommitted,
+      employees: [
+        {
+          ...overCommitted.employees[0],
+          max_hours_per_week: 200,
+          max_hours_per_day: 24,
+          max_consecutive_days: 3,
+          existing_assignments: [1, 2, 3, 4, 5].map((d) => ({
+            date: `2033-03-0${d}`,
+            start_time: '09:00',
+            end_time: '17:00',
+          })),
+        },
+      ],
+    });
+    expect(findings.map((f) => f.rule)).toContain('consecutive-days');
   });
 });
