@@ -81,6 +81,38 @@ beforeEach(() => {
   }));
 });
 
+/**
+ * An assignment added to an ALREADY PUBLISHED schedule is a commitment the
+ * moment it exists: publishing is what tells people, and adding someone to a
+ * live schedule tells them too. Leaving it unpinned would let the next
+ * re-solve move them freely — the same hole publishing itself had, where the
+ * pin column existed and nothing ever wrote it.
+ */
+describe('AssignmentService.createAssignment pinning', () => {
+  it('derives is_pinned from the schedule status inside the INSERT', async () => {
+    const { pool, execute, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[shiftRow({ schedule_id: 9 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 7 }], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple) // checkConflicts
+      .mockResolvedValueOnce([[], null] as Tuple) // availability
+      .mockResolvedValueOnce([[], null] as Tuple) // required skills
+      .mockResolvedValueOnce([{ insertId: 55 }, null] as Tuple);
+    execute.mockResolvedValueOnce([[assignmentRow({ id: 55 })], null] as Tuple);
+
+    await new AssignmentService(pool).createAssignment({ shiftId: 10, userId: 7 });
+
+    const [sql, params] = conn.execute.mock.calls[6];
+    // Computed in SQL rather than read first and passed in: an extra
+    // round-trip inside an open transaction buys nothing, and a schedule
+    // published between the read and the write would produce an unpinned
+    // commitment.
+    expect(sql).toContain("sc.status = 'published'");
+    expect(params).toEqual([10, 7, null, 10]);
+  });
+});
+
 describe('AssignmentService.createAssignment guards', () => {
   it('throws when shift not found', async () => {
     const { pool, conn } = makePool();

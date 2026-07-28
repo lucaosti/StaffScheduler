@@ -365,6 +365,33 @@ export class ScheduleService {
         [id]
       );
 
+      // Publishing is what turns an assignment into a COMMITMENT: it is the
+      // moment people are told, and from here a re-solve must plan around it
+      // rather than reconsider it.
+      //
+      // This is the write the pin column was added for and never got — the
+      // migration backfilled schedules that were already published, so the
+      // machinery worked exactly once, for rows that existed before it. Every
+      // schedule published afterwards handed the optimizer an empty pinned set,
+      // leaving the disruption objective nothing to charge and the re-solve
+      // diff permanently empty.
+      //
+      // In the same transaction as the status change, because "published" and
+      // "committed" are one fact; a crash between them would leave a live
+      // schedule the optimizer is free to reshuffle.
+      //
+      // Only `pending` and `confirmed`: a declined or cancelled assignment is
+      // not something anyone is relying on, and pinning it would ask the
+      // optimizer to preserve work nobody is doing.
+      await connection.execute(
+        `UPDATE shift_assignments sa
+           JOIN shifts s ON s.id = sa.shift_id
+            SET sa.is_pinned = TRUE
+          WHERE s.schedule_id = ?
+            AND sa.status IN ('pending', 'confirmed')`,
+        [id]
+      );
+
       await connection.commit();
       logger.info(`Schedule published successfully: ${id}`);
 
