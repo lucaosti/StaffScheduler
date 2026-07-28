@@ -593,3 +593,139 @@ describeOrtools('CP-SAT engine explains an over-committed employee', () => {
     expect(findings.map((f) => f.rule)).toContain('consecutive-days');
   });
 });
+
+/**
+ * Continuous replanning: a published assignment is a COMMITMENT.
+ *
+ * `generate` always solved from scratch, so re-running it on a published
+ * schedule could legally reshuffle everyone. That is wrong in a way no
+ * scheduling metric can see: once published, an assignment is something a
+ * person has arranged their life around. A re-solve that improves the schedule
+ * by 3% while moving a third of the staff has made things WORSE — and the model
+ * could not express that at all, because disruption had no cost, so the solver
+ * was free to cause any amount of it.
+ *
+ * Pinned assignments now sit at their OWN objective level, between coverage and
+ * the soft terms. That placement is the whole design:
+ *
+ *   - above preferences and fairness, because a commitment must never be broken
+ *     to satisfy a preference, however many of them accumulate — a lexicographic
+ *     statement no weight can make;
+ *   - below coverage, because leaving a shift unstaffed to avoid moving someone
+ *     is worse than moving them.
+ */
+describeOrtools('CP-SAT engine treats a published assignment as a commitment', () => {
+  const twoEmployees = [1, 2].map((i) => ({
+    id: `e${i}`,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: [],
+    unavailable_dates: [],
+  }));
+
+  const fourShifts = [0, 1, 2, 3].map((i) => ({
+    id: `s${i}`,
+    date: `2033-05-0${i + 1}`,
+    start_time: '09:00',
+    end_time: '17:00',
+    min_staff: 1,
+    max_staff: 1,
+    department_id: 1,
+  }));
+
+  const base = {
+    shifts: fourShifts,
+    employees: twoEmployees,
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  /**
+   * THE ACCEPTANCE TEST FROM THE ISSUE: re-solving with unchanged inputs must
+   * return zero changes. The previous implementation could not pass it —
+   * nothing preserved a prior decision, so the answer depended on search order.
+   */
+  it('re-solving unchanged inputs preserves every commitment', () => {
+    const first = runPython(base);
+    const pins = first.map((a) => ({ employee_id: a.employeeId, shift_id: a.shiftId }));
+
+    const second = runPython({ ...base, pinned_assignments: pins });
+
+    const key = (a: { employeeId: string; shiftId: string }) => `${a.employeeId}:${a.shiftId}`;
+    expect(new Set(second.map(key))).toEqual(new Set(first.map(key)));
+  });
+
+  /**
+   * The sharp case: commitments that are maximally UNFAIR. Without pinning the
+   * fairness term splits this 2/2; with everything committed to one person,
+   * keeping the commitments must win — otherwise "improving fairness" is a
+   * licence to reshuffle people who were already told.
+   */
+  it('does not break commitments to improve fairness', () => {
+    const pins = fourShifts.map((s) => ({ employee_id: 'e1', shift_id: s.id }));
+    const assignments = runPython({ ...base, pinned_assignments: pins });
+
+    expect(assignments.filter((a) => a.employeeId === 'e1')).toHaveLength(4);
+  });
+
+  it('does not break commitments to satisfy a preference', () => {
+    const pins = fourShifts.map((s) => ({ employee_id: 'e1', shift_id: s.id }));
+    const assignments = runPython({
+      ...base,
+      pinned_assignments: pins,
+      // e1 declares every committed shift as one to avoid. Preferences sit
+      // below commitments, so this must change nothing.
+      preferences: { e1: { avoid_shifts: fourShifts.map((s) => s.id) } },
+    });
+
+    expect(assignments.filter((a) => a.employeeId === 'e1')).toHaveLength(4);
+  });
+
+  /**
+   * Commitments are NOT inviolable. Coverage outranks them, so a commitment
+   * that stands between a shift and being staffed gets broken — the direction
+   * the ordering deliberately allows.
+   */
+  it('breaks a commitment rather than leave a shift unstaffed', () => {
+    // One employee, two same-day shifts they cannot both work, both committed.
+    const clashing = {
+      ...base,
+      shifts: [
+        { ...fourShifts[0], id: 'a', date: '2033-05-01', min_staff: 1, max_staff: 1 },
+        {
+          ...fourShifts[0],
+          id: 'b',
+          date: '2033-05-01',
+          start_time: '10:00',
+          end_time: '18:00',
+          min_staff: 1,
+          max_staff: 1,
+        },
+      ],
+      employees: [twoEmployees[0]],
+      pinned_assignments: [
+        { employee_id: 'e1', shift_id: 'a' },
+        { employee_id: 'e1', shift_id: 'b' },
+      ],
+    };
+    const assignments = runPython(clashing);
+
+    // Double-booking is hard, so one commitment cannot survive. The engine
+    // still answers rather than refusing.
+    expect(assignments).toHaveLength(1);
+  });
+
+  it('ignores a commitment whose pairing is no longer possible', () => {
+    // The person lost the skill or booked the day off, so the pairing has no
+    // variable at all. Rewarding it would be meaningless; the diff reports it
+    // as broken, which is the honest answer.
+    const assignments = runPython({
+      ...base,
+      shifts: fourShifts.map((s) => ({ ...s, required_skills: ['nurse'] })),
+      pinned_assignments: [{ employee_id: 'e1', shift_id: 's0' }],
+    });
+    expect(assignments).toEqual([]);
+  });
+});

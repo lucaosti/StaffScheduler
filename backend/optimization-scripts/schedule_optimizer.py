@@ -50,6 +50,13 @@ class ScheduleOptimizerORTools:
         self.skills = problem_data.get('skills', {})
         self.preferences = problem_data.get('preferences', {})
         self.constraints_config = problem_data.get('constraints', {})
+        # Commitments on THIS schedule: pairings a previous run published and
+        # people have been told about. Distinct from existing_assignments,
+        # which are other schedules' shifts and merely consume capacity.
+        self.pinned = {
+            (str(p['employee_id']), str(p['shift_id']))
+            for p in problem_data.get('pinned_assignments', []) or []
+        }
         self.weights = problem_data.get('weights', self._default_weights())
         
     def _default_weights(self) -> Dict[str, float]:
@@ -777,7 +784,31 @@ class ScheduleOptimizerORTools:
         # an "avoid" preference. Every soft contributor must therefore report
         # its own maximum magnitude here, which is why _add_fairness_terms
         # returns one instead of the caller estimating it.
-        medium_scale = soft_bound + 1
+        # DISRUPTION — a level of its own, between MEDIUM and SOFT.
+        #
+        # WHY NOT JUST A HEAVY SOFT WEIGHT. A published assignment is a
+        # commitment someone arranged their life around, so breaking one must
+        # never be bought with a preference or a fairness gain, however many of
+        # them accumulate. That is a lexicographic statement, and a weight
+        # cannot make it — the whole reason the MEDIUM/SOFT split exists.
+        #
+        # WHY BELOW COVERAGE. Leaving a shift unstaffed to avoid moving someone
+        # is worse than moving them: the ordering says break a commitment to
+        # staff an empty shift, never to satisfy a preference.
+        keep_scale = soft_bound + 1
+        disruption_terms = []
+        disruption_bound = 0
+        for (emp_id, shift_id) in self.pinned:
+            var = self._var(emp_id, shift_id)
+            if var is None:
+                # The pairing is no longer even possible — the person lost the
+                # skill or booked the day off. Nothing to reward; the diff will
+                # show the commitment as broken, which is the honest report.
+                continue
+            disruption_terms.append(var * keep_scale)
+            disruption_bound += keep_scale
+
+        medium_scale = soft_bound + disruption_bound + 1
 
         objective_terms = []
 
@@ -785,6 +816,7 @@ class ScheduleOptimizerORTools:
         for shortfall in self.coverage_shortfall.values():
             objective_terms.append(-shortfall * medium_scale)
 
+        objective_terms.extend(disruption_terms)
         objective_terms.extend(soft_terms)
 
         # Note: consecutive-days is a HARD constraint
