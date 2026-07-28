@@ -214,10 +214,30 @@ export class AssignmentService {
         throw err;
       }
 
+      // Pinned when, and only when, the schedule is already published.
+      //
+      // `is_pinned` means "someone has been told about this", and adding a
+      // person to a live schedule is telling them. Leaving it false would let
+      // the next re-solve move them freely, which is the same hole publishing
+      // itself had — the column existed and nothing ever wrote it.
+      //
+      // Derived in the INSERT rather than read first and passed in: an extra
+      // round-trip inside an open transaction buys nothing, and a schedule
+      // published between the read and the write would produce an unpinned
+      // commitment. `shifts.schedule_id` is NOT NULL, so the join always
+      // matches and the row is always inserted.
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO shift_assignments (shift_id, user_id, status, notes)
-        VALUES (?, ?, 'pending', ?)`,
-        [assignmentData.shiftId, assignmentData.userId, assignmentData.notes || null]
+        `INSERT INTO shift_assignments (shift_id, user_id, status, notes, is_pinned)
+         SELECT ?, ?, 'pending', ?, sc.status = 'published'
+           FROM shifts s
+           JOIN schedules sc ON sc.id = s.schedule_id
+          WHERE s.id = ?`,
+        [
+          assignmentData.shiftId,
+          assignmentData.userId,
+          assignmentData.notes || null,
+          assignmentData.shiftId,
+        ]
       );
 
       const assignmentId = result.insertId;
