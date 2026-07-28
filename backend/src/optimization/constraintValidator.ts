@@ -419,3 +419,91 @@ export function findOverCommitments(problem: OptimizationProblem): OverCommitmen
 
   return findings;
 }
+
+/** A 7-day window in which an employee never got a long enough rest block. */
+export interface RestShortfall {
+  employeeId: string;
+  /** First day of the window, "YYYY-MM-DD". */
+  windowStart: string;
+  /** Consecutive days off the contract asks for. */
+  required: number;
+  /** Longest run of consecutive days off actually available in the window. */
+  longestRest: number;
+}
+
+/**
+ * Windows where an employee never gets `min_consecutive_days_off` in a row.
+ *
+ * WHY THIS IS SEPARATE FROM THE CONSECUTIVE-DAYS CAP. `max_consecutive_days`
+ * bounds how long someone works without a break; it says nothing about the
+ * break. A schedule of five-on, one-off, five-on, one-off satisfies it
+ * completely while the person never gets two days together — which is the
+ * difference between "not overworked" and "rested", and only the first was
+ * modelled. Two separate single days is not a weekend.
+ *
+ * WHY A ROLLING 7-DAY WINDOW, AND WHY "AT LEAST ONE BLOCK". Two weaker
+ * quantifiers were considered. Requiring EVERY rest run to reach the length
+ * forbids a single day off outright, which is often fine and sometimes
+ * requested. Requiring one block per schedule PERIOD is meaningless over a
+ * month. One block per rolling week is the formulation working-time
+ * regulations use, and it is the one that matches what people mean by a
+ * weekend.
+ *
+ * WHY REPORTED RATHER THAN A VIOLATION. This is a SOFT goal. Made hard, an
+ * understaffed period becomes unsolvable — and #448 settled that refusing to
+ * answer is the wrong response to insufficient staff. Both engines are
+ * measured by this; neither is required to reach zero.
+ *
+ * Days outside the schedule's own span are not counted as rest: a window
+ * running past the end of the period would otherwise show a free block that
+ * is really just absence of data.
+ */
+export function restShortfalls(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): RestShortfall[] {
+  const shortfalls: RestShortfall[] = [];
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+
+  const allDays = [...new Set(problem.shifts.map((s) => s.date))].sort();
+  if (allDays.length === 0) return shortfalls;
+  const firstDay = dateToMs(allDays[0]) / DAY_MS;
+  const lastDay = dateToMs(allDays[allDays.length - 1]) / DAY_MS;
+
+  for (const emp of problem.employees) {
+    const required = emp.min_consecutive_days_off;
+    if (!required) continue;
+
+    const workedDays = new Set<number>();
+    for (const a of assignments) {
+      if (a.employeeId !== emp.id) continue;
+      const shift = shiftsById.get(a.shiftId);
+      if (shift) workedDays.add(dateToMs(shift.date) / DAY_MS);
+    }
+    // Work on other schedules occupies the day just as much.
+    for (const ext of emp.existing_assignments ?? []) {
+      workedDays.add(dateToMs(ext.date) / DAY_MS);
+    }
+
+    // Only windows that fit entirely inside the period are judged.
+    for (let start = firstDay; start + 6 <= lastDay; start += 1) {
+      let longest = 0;
+      let run = 0;
+      for (let d = start; d <= start + 6; d += 1) {
+        run = workedDays.has(d) ? 0 : run + 1;
+        if (run > longest) longest = run;
+      }
+      if (longest < required) {
+        shortfalls.push({
+          employeeId: emp.id,
+          windowStart: new Date(start * DAY_MS).toISOString().slice(0, 10),
+          required,
+          longestRest: longest,
+        });
+      }
+    }
+  }
+
+  return shortfalls;
+}
+

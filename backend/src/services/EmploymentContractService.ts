@@ -46,6 +46,8 @@ export interface ContractLimits {
   maxHoursPerDay: number | null;
   maxConsecutiveDays: number | null;
   minHoursBetweenShifts: number | null;
+  /** Consecutive days off guaranteed at least once per rolling 7-day window. */
+  minConsecutiveDaysOff: number | null;
 }
 
 export interface EmploymentContract extends ContractLimits {
@@ -78,6 +80,7 @@ const mapContract = (row: RowDataPacket): EmploymentContract => ({
   maxHoursPerDay: (row.max_hours_per_day as number | null) ?? null,
   maxConsecutiveDays: (row.max_consecutive_days as number | null) ?? null,
   minHoursBetweenShifts: (row.min_hours_between_shifts as number | null) ?? null,
+  minConsecutiveDaysOff: (row.min_consecutive_days_off as number | null) ?? null,
 });
 
 /**
@@ -122,8 +125,9 @@ export class EmploymentContractService {
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO employment_contracts
          (name, description, max_hours_per_week, min_hours_per_week,
-          max_hours_per_day, max_consecutive_days, min_hours_between_shifts)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          max_hours_per_day, max_consecutive_days, min_hours_between_shifts,
+          min_consecutive_days_off)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.name,
         input.description ?? null,
@@ -132,6 +136,7 @@ export class EmploymentContractService {
         input.maxHoursPerDay ?? null,
         input.maxConsecutiveDays ?? null,
         input.minHoursBetweenShifts ?? null,
+        input.minConsecutiveDaysOff ?? null,
       ]
     );
     logger.info(`Employment contract created: ${input.name}`);
@@ -144,7 +149,8 @@ export class EmploymentContractService {
       `UPDATE employment_contracts
           SET name = ?, description = ?, is_active = ?,
               max_hours_per_week = ?, min_hours_per_week = ?, max_hours_per_day = ?,
-              max_consecutive_days = ?, min_hours_between_shifts = ?
+              max_consecutive_days = ?, min_hours_between_shifts = ?,
+              min_consecutive_days_off = ?
         WHERE id = ?`,
       [
         patch.name ?? current.name,
@@ -155,6 +161,7 @@ export class EmploymentContractService {
         patch.maxHoursPerDay !== undefined ? patch.maxHoursPerDay : current.maxHoursPerDay,
         patch.maxConsecutiveDays !== undefined ? patch.maxConsecutiveDays : current.maxConsecutiveDays,
         patch.minHoursBetweenShifts !== undefined ? patch.minHoursBetweenShifts : current.minHoursBetweenShifts,
+        patch.minConsecutiveDaysOff !== undefined ? patch.minConsecutiveDaysOff : current.minConsecutiveDaysOff,
         id,
       ]
     );
@@ -281,6 +288,7 @@ export class EmploymentContractService {
               maxHoursPerDay: contract.maxHoursPerDay,
               maxConsecutiveDays: contract.maxConsecutiveDays,
               minHoursBetweenShifts: contract.minHoursBetweenShifts,
+              minConsecutiveDaysOff: contract.minConsecutiveDaysOff,
             }
           : {
               maxHoursPerWeek: tighter(current.maxHoursPerWeek, contract.maxHoursPerWeek),
@@ -292,6 +300,11 @@ export class EmploymentContractService {
               minHoursBetweenShifts: tighterLowerBound(
                 current.minHoursBetweenShifts,
                 contract.minHoursBetweenShifts
+              ),
+              // Also a lower bound: more required rest is the tighter contract.
+              minConsecutiveDaysOff: tighterLowerBound(
+                current.minConsecutiveDaysOff,
+                contract.minConsecutiveDaysOff
               ),
             }
       );

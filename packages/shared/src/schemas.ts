@@ -897,6 +897,12 @@ const contractLimitFields = {
   maxHoursPerDay: z.number().int().positive().max(24).nullable().optional(),
   maxConsecutiveDays: z.number().int().positive().max(31).nullable().optional(),
   minHoursBetweenShifts: z.number().int().nonnegative().max(24).nullable().optional(),
+  /**
+   * Consecutive days off guaranteed at least once per rolling 7-day window.
+   * Bounded at 7 because a longer block cannot fit in the window it is
+   * measured over — asking for 8 would be unsatisfiable by construction.
+   */
+  minConsecutiveDaysOff: z.number().int().positive().max(7).nullable().optional(),
 };
 
 export const createEmploymentContractBody = z.object({

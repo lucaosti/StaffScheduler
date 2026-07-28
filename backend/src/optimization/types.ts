@@ -63,6 +63,16 @@ export interface Employee {
    * when present the contract's stored value wins.
    */
   max_hours_per_day?: number;
+  /**
+   * Consecutive days off the contract asks for, at least once per rolling
+   * 7-day window.
+   *
+   * Distinct from `max_consecutive_days`, which bounds how long someone works
+   * without a break and says nothing about the break itself: five-on/one-off
+   * repeated satisfies that cap completely while never giving two days
+   * together. Optional because a contract need not constrain it.
+   */
+  min_consecutive_days_off?: number;
   skills: string[];
   unavailable_dates: string[];
   max_consecutive_days?: number;
