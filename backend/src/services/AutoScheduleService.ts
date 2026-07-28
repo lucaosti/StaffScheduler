@@ -48,8 +48,15 @@ const parseSkillLevels = (raw: string | null): Record<string, number> => {
   const levels: Record<string, number> = {};
   for (const pair of (raw ?? '').split(',')) {
     const [name, value] = pair.split(':');
+    // `value` must be tested for emptiness BEFORE conversion: GROUP_CONCAT
+    // emits "name:" when the column is NULL, and `Number('')` is 0 — a finite
+    // number, so a naive check accepts it and an absent level becomes level 0,
+    // which is below every requirement. That would silently disqualify
+    // everyone whose proficiency was never recorded, the exact failure the
+    // "absent means unknown" default exists to prevent.
+    if (!name || value === undefined || value === '') continue;
     const level = Number(value);
-    if (name && Number.isFinite(level)) levels[name] = level;
+    if (Number.isFinite(level)) levels[name] = level;
   }
   return levels;
 };
@@ -67,7 +74,9 @@ const parseQualifiedStaff = (
   const out: Record<string, { level: number; count: number }> = {};
   for (const triple of (raw ?? '').split(',')) {
     const [name, level, count] = triple.split(':');
-    if (name && Number.isFinite(Number(level)) && Number.isFinite(Number(count))) {
+    // Same trap as above, twice over: "name::" would parse as level 0 count 0.
+    if (!name || !level || !count) continue;
+    if (Number.isFinite(Number(level)) && Number.isFinite(Number(count))) {
       out[name] = { level: Number(level), count: Number(count) };
     }
   }
@@ -209,6 +218,26 @@ export class AutoScheduleService {
       shift_id: String(r.shift_id),
     }));
 
+    // Pairing rules constraining who may share a shift. Read for the whole
+    // department's staff rather than per shift: the rules are about people,
+    // and the engine applies them to every shift it considers.
+    const [pairingRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT p.user_id, p.other_user_id, p.kind
+         FROM employee_pairings p
+        WHERE p.user_id IN (
+                SELECT user_id FROM user_departments WHERE department_id = ?
+              )
+           OR p.other_user_id IN (
+                SELECT user_id FROM user_departments WHERE department_id = ?
+              )`,
+      [schedule.department_id, schedule.department_id]
+    );
+    const pairings = pairingRows.map((r) => ({
+      employee_id: String(r.user_id),
+      other_id: String(r.other_user_id),
+      kind: r.kind as 'apart' | 'requires',
+    }));
+
     const contracts = new EmploymentContractService(this.pool);
     const contractLimits = await contracts.resolveLimitsForPeriod(
       empRows.map((e) => e.id as number),
@@ -293,6 +322,7 @@ export class AutoScheduleService {
         };
       }),
       pinned_assignments: pinned,
+      pairings,
       preferences: [],
       constraints: {
         max_hours_per_week: 40,

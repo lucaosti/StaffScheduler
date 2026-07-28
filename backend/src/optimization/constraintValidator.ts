@@ -68,7 +68,8 @@ export interface ConstraintViolation {
     | 'skill'
     | 'daily-hours'
     | 'weekly-hours'
-    | 'consecutive-days';
+    | 'consecutive-days'
+    | 'pairing';
   employeeId: string;
   /** Shift(s) implicated. One id for single-shift rules, two for pairwise ones. */
   shiftIds: string[];
@@ -300,6 +301,40 @@ export function findConstraintViolations(
           employeeId: emp.id,
           shiftIds: worked.map((s) => s.id),
           detail: `employee ${emp.id} works ${longest} consecutive days, exceeds ${maxConsec}`,
+        });
+      }
+    }
+  }
+
+  // Pairing rules — about who shares a shift, so checked per shift rather than
+  // per employee. Unlike skills or availability these cannot be resolved into
+  // eligibility, because whether a pairing is legal depends on who ELSE was
+  // assigned; they are genuine constraints, not a filter.
+  const assigneesByShift = new Map<string, Set<string>>();
+  for (const a of assignments) {
+    if (!assigneesByShift.has(a.shiftId)) assigneesByShift.set(a.shiftId, new Set());
+    assigneesByShift.get(a.shiftId)!.add(a.employeeId);
+  }
+
+  for (const rule of problem.pairings ?? []) {
+    for (const [shiftId, assignees] of assigneesByShift) {
+      if (rule.kind === 'apart') {
+        if (assignees.has(rule.employee_id) && assignees.has(rule.other_id)) {
+          violations.push({
+            rule: 'pairing',
+            employeeId: rule.employee_id,
+            shiftIds: [shiftId],
+            detail: `employees ${rule.employee_id} and ${rule.other_id} must not share shift ${shiftId}`,
+          });
+        }
+      } else if (assignees.has(rule.employee_id) && !assignees.has(rule.other_id)) {
+        // Directional: the dependent may not work without the other, but the
+        // other is free to work alone.
+        violations.push({
+          rule: 'pairing',
+          employeeId: rule.employee_id,
+          shiftIds: [shiftId],
+          detail: `employee ${rule.employee_id} may only work shift ${shiftId} alongside ${rule.other_id}`,
         });
       }
     }

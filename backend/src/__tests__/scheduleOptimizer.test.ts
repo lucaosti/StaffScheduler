@@ -241,6 +241,7 @@ describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
     allShifts: [],
     dailyHoursMap: new Map<string, number>(),
     currentShiftAssignmentCount: 0,
+    currentShiftAssignees: new Set<string>(),
     minRestHoursBetweenShifts: 8,
     ...overrides,
   });
@@ -345,6 +346,7 @@ describe('Pure TS greedy fallback — specified scenarios', () => {
     allShifts: [],
     dailyHoursMap: new Map<string, number>(),
     currentShiftAssignmentCount: 0,
+    currentShiftAssignees: new Set<string>(),
     minRestHoursBetweenShifts: 8,
     ...overrides,
   });
