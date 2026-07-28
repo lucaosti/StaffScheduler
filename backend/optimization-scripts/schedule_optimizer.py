@@ -739,10 +739,14 @@ class ScheduleOptimizerORTools:
         start = self._parse_time(shift['start_time'])
         end = self._parse_time(shift['end_time'])
         
-        # Handle overnight shifts
-        if end < start:
+        # `<=` and not `<`: a shift whose end equals its start spans a full
+        # day, matching _abs_bounds and the TypeScript shiftHours. The two
+        # disagreed until this was reconciled, and this is the safe direction —
+        # for a cap, over-counting refuses work that might have been allowed,
+        # while a zero-hour shift is invisible to every limit.
+        if end <= start:
             end += 24 * 60
-        
+
         return (end - start) // 60  # Convert minutes to hours
     
     def _shift_minutes(self, shift: Dict) -> int:
