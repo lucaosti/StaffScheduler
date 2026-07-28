@@ -55,6 +55,7 @@ class ScheduleOptimizerORTools:
         # Commitments on THIS schedule: pairings a previous run published and
         # people have been told about. Distinct from existing_assignments,
         # which are other schedules' shifts and merely consume capacity.
+        self.pairings = problem_data.get('pairings', []) or []
         self.pinned = {
             (str(p['employee_id']), str(p['shift_id']))
             for p in problem_data.get('pinned_assignments', []) or []
@@ -127,6 +128,7 @@ class ScheduleOptimizerORTools:
         # 2. Add hard constraints (order mirrors evaluateCandidate)
         self._add_shift_coverage_constraints()
         self._add_qualified_staff_constraints()
+        self._add_pairing_constraints()
         self._add_no_double_booking_constraints()
         self._add_min_rest_constraints()
         self._add_daily_hours_constraints()
@@ -439,6 +441,50 @@ class ScheduleOptimizerORTools:
                 # below by the deficit and let the objective push it down.
                 self.model.Add(shortfall >= needed - sum(qualifying))
                 self.qualified_shortfall[(shift_id, skill)] = shortfall
+
+    def _add_pairing_constraints(self):
+        """
+        Who may share a shift.
+
+        `apart`: the two must not both be on a shift — `a + b <= 1`.
+        `requires`: the dependent may only work a shift the other also works —
+        `a <= b`. DIRECTIONAL on purpose: a trainee must not work
+        unsupervised, but the supervisor works fine alone, and a symmetric rule
+        would forbid the supervisor from taking any shift the trainee is not
+        on.
+
+        WHY THESE CAN BE HARD, WHICH THEY COULD NOT HAVE BEEN BEFORE. While
+        coverage was a hard constraint, "the trainee may only work with their
+        supervisor" could make a period INFEASIBLE — no supervisor available,
+        no schedule at all. Now that coverage is a minimised shortfall an
+        unsatisfiable pairing simply leaves that person unassigned and the
+        shift short, which is reported. So the rule is enforced exactly rather
+        than approximated, and its cost surfaces in a number the planner
+        already reads.
+
+        Unlike skills and availability these cannot be folded into variable
+        existence: whether a pairing is legal depends on who ELSE is assigned,
+        so they are genuine constraints rather than an eligibility filter.
+        """
+        for rule in self.pairings:
+            emp = str(rule.get('employee_id'))
+            other = str(rule.get('other_id'))
+            kind = rule.get('kind')
+            for shift_id in self.shifts:
+                a = self._var(emp, shift_id)
+                b = self._var(other, shift_id)
+                if a is None:
+                    continue  # This person cannot take the shift anyway.
+                if kind == 'apart':
+                    if b is not None:
+                        self.model.Add(a + b <= 1)
+                elif kind == 'requires':
+                    if b is None:
+                        # The other person cannot work this shift at all, so
+                        # the dependent must not either.
+                        self.model.Add(a == 0)
+                    else:
+                        self.model.Add(a <= b)
 
     def _add_no_double_booking_constraints(self):
         """

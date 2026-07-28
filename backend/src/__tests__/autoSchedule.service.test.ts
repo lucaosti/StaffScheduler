@@ -87,6 +87,7 @@ describe('AutoScheduleService.generate', () => {
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
+      .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
@@ -117,6 +118,7 @@ describe('AutoScheduleService.generate', () => {
       ])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
+      .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
@@ -146,8 +148,9 @@ describe('AutoScheduleService.generate', () => {
         ],
         null,
       ])
-      // Query order: schedule, shifts, pinned commitments, employees,
-      // employment contracts, unavailability, external assignments.
+      // Query order: schedule, shifts, employees, pinned commitments, pairing
+      // rules, employment contracts, unavailability, external assignments.
+      .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
@@ -172,6 +175,7 @@ describe('AutoScheduleService.generate', () => {
         { id: 7, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 },
       ], null])
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
+      .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[
         { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
@@ -199,7 +203,8 @@ describe('AutoScheduleService.generate', () => {
         null,
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none) // employees
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
+      .mockResolvedValueOnce([[], null]) // pairing rules (none) // employees
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([
@@ -238,6 +243,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       ], null])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
+      .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
@@ -326,6 +332,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
       // Two published commitments; the optimizer below returns only the first.
       .mockResolvedValueOnce([[{ user_id: 1, shift_id: 10 }, { user_id: 1, shift_id: 11 }], null])
+      .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments
@@ -354,5 +361,68 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     // Named in the log, not merely counted: the affected person is the point.
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('affected users: 1'));
     warn.mockRestore();
+  });
+
+  it('ignores malformed skill and qualification lists from the database', () => {
+    // GROUP_CONCAT emits an empty segment when a nullable column is NULL, so
+    // rows that state no requirement arrive as "name:" or "name::". Those must
+    // be skipped rather than parsed as level 0, which would silently
+    // disqualify everyone.
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
+      .mockResolvedValueOnce([[
+        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5,
+          department_id: 3, skill_names: 'Triage', skill_levels: 'Triage:', qualified_staff: 'Triage::' },
+      ], null])
+      .mockResolvedValueOnce([[
+        { id: 1, skill_names: 'Triage', skill_levels: 'Triage:', max_hours_per_week: 40,
+          min_hours_per_week: 0, max_consecutive_days: 5 },
+      ], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments
+      .mockResolvedValueOnce([[], null]) // pairing rules
+      .mockResolvedValueOnce([[], null]) // employment contracts
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]); // external assignments
+
+    return new AutoScheduleService(pool).generate(1, 1).then(() => {
+      const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results.at(-1)!.value;
+      const problem = optimizerInstance.generateGreedySchedule.mock.calls.at(-1)![0];
+      expect(problem.shifts[0].required_skill_levels).toEqual({});
+      expect(problem.shifts[0].qualified_staff).toEqual({});
+      expect(problem.employees[0].skill_levels).toEqual({});
+    });
+  });
+
+  it('carries well-formed skill levels and qualification requirements through', () => {
+    // The counterpart of the malformed case: the parsers must still populate
+    // when the columns ARE set, or the previous test would pass against a
+    // parser that simply returned nothing.
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
+      .mockResolvedValueOnce([[
+        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5,
+          department_id: 3, skill_names: 'Triage', skill_levels: 'Triage:3', qualified_staff: 'Triage:5:1' },
+      ], null])
+      .mockResolvedValueOnce([[
+        { id: 1, skill_names: 'Triage', skill_levels: 'Triage:4', max_hours_per_week: 40,
+          min_hours_per_week: 0, max_consecutive_days: 5 },
+      ], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments
+      .mockResolvedValueOnce([[], null]) // pairing rules
+      .mockResolvedValueOnce([[], null]) // employment contracts
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]); // external assignments
+
+    return new AutoScheduleService(pool).generate(1, 1).then(() => {
+      const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results.at(-1)!.value;
+      const problem = optimizerInstance.generateGreedySchedule.mock.calls.at(-1)![0];
+      expect(problem.shifts[0].required_skill_levels).toEqual({ Triage: 3 });
+      expect(problem.shifts[0].qualified_staff).toEqual({ Triage: { level: 5, count: 1 } });
+      expect(problem.employees[0].skill_levels).toEqual({ Triage: 4 });
+    });
   });
 });

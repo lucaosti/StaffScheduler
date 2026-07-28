@@ -151,6 +151,20 @@ export interface OptimizationProblem {
    * shift and not to satisfy someone's preference.
    */
   pinned_assignments?: Array<{ employee_id: string; shift_id: string }>;
+  /**
+   * Relationships between people that constrain who may share a shift.
+   *
+   * `apart` — these two must not be on the same shift (conflict separation, or
+   * a control requirement such as no two relatives on the same till).
+   *
+   * `requires` — `employee_id` may only work a shift that `other_id` also
+   * works. DIRECTIONAL on purpose: a trainee must not work unsupervised, but
+   * the supervisor works perfectly well alone. Modelling it symmetrically
+   * would forbid the supervisor from taking any shift the trainee is not on,
+   * which is the opposite of what anyone wants. Symmetric pairing, where
+   * genuinely needed, is two directional rules.
+   */
+  pairings?: Array<{ employee_id: string; other_id: string; kind: 'apart' | 'requires' }>;
   preferences?: Record<string, Preference>;
   skills?: Record<string, string[]>;
   constraints?: Record<string, any> & {
