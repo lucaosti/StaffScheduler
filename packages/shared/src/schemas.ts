@@ -919,6 +919,42 @@ export const updateEmploymentContractBody = z.object({
 });
 
 /**
+ * Pairing rules: relationships between two named people that constrain who may
+ * share a shift.
+ *
+ * `kind` is not optional and has no default on purpose. `apart` and `requires`
+ * are opposites, and the cost of getting one silently is a schedule that keeps
+ * two people together who must be separated — a request that does not say
+ * which it means should be rejected rather than guessed.
+ *
+ * `reason` is free text and stays optional: some rules are a matter of record
+ * ("cannot operate the till unsupervised") and some are a matter nobody should
+ * be required to write down. Who may READ it is decided by the router, not
+ * here — see `employeePairings.ts`.
+ */
+export const createEmployeePairingBody = z.object({
+  userId: positiveInt,
+  otherUserId: positiveInt,
+  kind: z.enum(['apart', 'requires']),
+  reason: z.string().max(2000).nullable().optional(),
+});
+
+/**
+ * Only the reason is editable. Changing who a rule is about, or which way it
+ * runs, is a different rule — expressing that as an update would let an `apart`
+ * become a `requires` in place, keeping the row's history and audit trail while
+ * inverting what it means.
+ */
+export const updateEmployeePairingBody = z.object({
+  reason: z.string().max(2000).nullable(),
+});
+
+/** Narrow the list to the rules involving one person, in either direction. */
+export const employeePairingListQuery = z.object({
+  userId: positiveInt.optional(),
+});
+
+/**
  * Assigning a contract to a person for a period. `effectiveTo` omitted or null
  * means open-ended — the contract in force until something replaces it.
  */
