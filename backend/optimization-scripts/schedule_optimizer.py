@@ -618,7 +618,7 @@ class ScheduleOptimizerORTools:
             end += 24 * 60
         return end - start
 
-    def _add_fairness_terms(self, objective_terms: List, scale: int) -> int:
+    def _fairness_terms(self, scale: int) -> Tuple[List, int]:
         """
         SOFT: balance total workload across employees.
 
@@ -650,7 +650,7 @@ class ScheduleOptimizerORTools:
         and this term cannot improve it, so it does no harm either.
         """
         if len(self.employees) < 2:
-            return 0  # Nothing to balance.
+            return [], 0  # Nothing to balance.
 
         loads = []
         for emp_id in self.employees:
@@ -660,7 +660,7 @@ class ScheduleOptimizerORTools:
                 if (v := self._var(emp_id, shift_id)) is not None
             ]
             if not terms:
-                return 0
+                return [], 0
             upper = sum(self._shift_minutes(s) for s in self.shifts.values())
             load = self.model.NewIntVar(0, upper, f'load_e{emp_id}')
             self.model.Add(load == sum(terms))
@@ -674,148 +674,140 @@ class ScheduleOptimizerORTools:
 
         spread = self.model.NewIntVar(0, upper, 'load_spread')
         self.model.Add(spread == max_load - min_load)
-        objective_terms.append(-spread * scale)
 
-        # The largest magnitude this term can contribute. Returned rather than
-        # assumed by the caller: the whole point of the lexicographic bound is
-        # that it is summed from what actually enters the model.
-        return upper * scale
+        # Terms AND their largest possible magnitude, returned together: the
+        # caller cannot take one without the other, which is what makes the
+        # lexicographic bound impossible to forget.
+        return [-spread * scale], upper * scale
 
-    def _build_objective_function(self):
-        """
-        Lexicographic MEDIUM > SOFT objective, emulated on a single scalar.
-
-        WHY LEVELS INSTEAD OF WEIGHTS. The objective used to be one weighted
-        sum: coverage at 100, preferences at 55. Priority expressed only as a
-        ratio between magnitudes is not a guarantee — with those numbers, two
-        satisfied preferences outweigh one covered seat, and whether coverage
-        actually dominates depends on how many preference terms a given dataset
-        happens to produce. The intended precedence was enforced nowhere. Every
-        further objective term (fairness, disruption cost) would have made that
-        worse, because each addition means re-tuning all the weights together,
-        and any tuning is valid only for the dataset it was tuned on.
-
-        CP-SAT optimises one scalar, so true lexicographic ordering has to be
-        emulated. Two ways were available:
-
-          - solve hierarchically: optimise the medium level, freeze it as a
-            constraint, then optimise soft. Exact, but doubles solve time and
-            makes the time limit ambiguous — which half gets the 300 seconds?
-          - scale by a proven bound, used here: multiply the medium term by
-            strictly more than the largest total the soft level can reach, so
-            no amount of soft score can buy a single unit of medium.
-
-        The bound must be PROVEN, not guessed, or this is the same weight
-        problem wearing a disguise. It is computed below from the model's own
-        size, and `test_objective_levels` asserts the property directly: a
-        solution better on soft and worse on medium must lose, whatever the
-        magnitudes.
-
-        MEDIUM: coverage shortfall below min_staff. Outranks every preference —
-        a schedule that leaves a shift unstaffed to satisfy someone's
-        preference is wrong — but cannot make the model infeasible.
-
-        SOFT: employee preferences, +1 / 0 / -1 per assignment.
-        """
-        pref_weight = int(self.weights.get('employee_preferences', 55.0))
-
-        # SOFT — nudge toward preferred shifts and away from avoided ones.
-        # Built FIRST so the bound below can be summed from the real
-        # coefficients instead of estimated from them.
-        soft_terms = []
-        soft_bound = 0
+    def _preference_terms(self) -> Tuple[List, int]:
+        """SOFT: nudge toward preferred shifts and away from avoided ones."""
+        weight = int(self.weights.get('employee_preferences', 55.0))
+        terms, bound = [], 0
         for (emp_id, shift_id), var in self.assignments.items():
-            coefficient = self._get_preference(emp_id, shift_id) * pref_weight
+            coefficient = self._get_preference(emp_id, shift_id) * weight
             if coefficient:
-                soft_terms.append(var * coefficient)
+                terms.append(var * coefficient)
                 # Every soft variable is boolean, so the largest magnitude this
-                # level can reach is the sum of the absolute coefficients.
-                soft_bound += abs(coefficient)
+                # contributor can reach is the sum of its absolute coefficients.
+                bound += abs(coefficient)
+        return terms, bound
 
-        # SOFT — workload balance. Weighted below preferences by default
-        # (40 vs 55) because an unbalanced schedule someone consented to is a
-        # milder problem than one that ignores what they asked for; the weight
-        # is configurable precisely because that trade-off is a business
-        # decision rather than a constant.
-        #
-        # Collected into the SAME list as the preference terms, and its bound
-        # added to the same total, BEFORE medium is scaled. Adding it
-        # afterwards would have re-created the exact bug described below with a
-        # far larger magnitude — the spread is measured in minutes, so a single
-        # unbalanced schedule can outweigh several unstaffed shifts.
-        fairness_scale = max(1, int(self.weights.get('workload_fairness', 40.0)))
-        soft_bound += self._add_fairness_terms(soft_terms, fairness_scale)
+    def _surplus_terms(self, fairness_scale: int) -> Tuple[List, int]:
+        """
+        SOFT: charge for staffing beyond what a shift requires.
 
-        # SOFT — charge for staffing beyond what a shift requires.
-        #
-        # WHY THIS IS NEEDED THE MOMENT FAIRNESS EXISTS. Nothing rewards
-        # staffing between min_staff and max_staff, deliberately: max_staff is
-        # a ceiling, not a target. But fairness rewards it INDIRECTLY, because
-        # adding people flattens the load distribution — observed directly, a
-        # 3-shift / 4-employee fixture went from 6 assignments to 8, buying a
-        # perfectly even split with two extra shifts of wages. An optimizer
-        # that inflates payroll to make its own fairness metric look good is
-        # precisely the "measured but not meaningful" failure this term was
-        # added to fix.
-        #
-        # The weight is DERIVED, not tuned: one extra assignment can improve
-        # the spread by at most the longest shift's duration, so charging
-        # strictly more than that per surplus person makes over-staffing never
-        # worth a fairness gain — while leaving it available when coverage
-        # genuinely needs it, since shortfall lives at MEDIUM and outranks both.
-        if self.coverage_surplus:
-            longest = max(
-                (self._shift_minutes(sh) for sh in self.shifts.values()), default=0
-            )
-            surplus_scale = longest * fairness_scale + 1
-            for surplus, surplus_cap in self.coverage_surplus.values():
-                soft_terms.append(-surplus * surplus_scale)
-                soft_bound += surplus_cap * surplus_scale
+        Needed the moment fairness exists. Nothing rewards staffing between
+        min_staff and max_staff deliberately — max_staff is a ceiling, not a
+        target — but fairness rewards it INDIRECTLY, because adding people
+        flattens the load distribution. Observed directly: a 3-shift /
+        4-employee fixture went from 6 assignments to 8, buying a perfectly
+        even split with two extra shifts of wages. An optimizer that inflates
+        payroll to make its own fairness metric look good is exactly the
+        "measured but not meaningful" failure fairness was added to fix.
 
-        # Strictly greater than that bound, so one unit of shortfall always
-        # costs more than the ENTIRE soft level can ever be worth. This is what
-        # makes the ordering lexicographic rather than another weight to tune.
-        #
-        # WHY THE BOUND IS SUMMED AND NOT DERIVED FROM THE WEIGHTS. The first
-        # attempt assumed each preference contributed at most `pref_weight`,
-        # reasoning that preferences are +1/0/-1. They are not: _get_preference
-        # returns +/-10, so the real ceiling was ten times the assumed one and
-        # SOFT OUTRANKED MEDIUM — the solver left every shift empty to satisfy
-        # an "avoid" preference. Every soft contributor must therefore report
-        # its own maximum magnitude here, which is why _add_fairness_terms
-        # returns one instead of the caller estimating it.
-        # DISRUPTION — a level of its own, between MEDIUM and SOFT.
-        #
-        # WHY NOT JUST A HEAVY SOFT WEIGHT. A published assignment is a
-        # commitment someone arranged their life around, so breaking one must
-        # never be bought with a preference or a fairness gain, however many of
-        # them accumulate. That is a lexicographic statement, and a weight
-        # cannot make it — the whole reason the MEDIUM/SOFT split exists.
-        #
-        # WHY BELOW COVERAGE. Leaving a shift unstaffed to avoid moving someone
-        # is worse than moving them: the ordering says break a commitment to
-        # staff an empty shift, never to satisfy a preference.
-        keep_scale = soft_bound + 1
-        disruption_terms = []
-        disruption_bound = 0
+        The weight is DERIVED, not tuned: one extra assignment can improve the
+        spread by at most the longest shift's duration, so charging strictly
+        more than that per surplus person makes over-staffing never worth a
+        fairness gain — while leaving it available when coverage genuinely
+        needs it, since shortfall sits at MEDIUM and outranks both.
+        """
+        if not self.coverage_surplus:
+            return [], 0
+        longest = max((self._shift_minutes(sh) for sh in self.shifts.values()), default=0)
+        scale = longest * fairness_scale + 1
+        terms, bound = [], 0
+        for surplus, surplus_cap in self.coverage_surplus.values():
+            terms.append(-surplus * scale)
+            bound += surplus_cap * scale
+        return terms, bound
+
+    def _commitment_terms(self, scale: int) -> Tuple[List, int]:
+        """
+        Reward keeping a published assignment.
+
+        A commitment is something a person arranged their life around, so
+        breaking one must never be bought with a preference or a fairness gain
+        however many accumulate — which is why this is its own level rather
+        than a heavy soft weight. A weight cannot make a lexicographic
+        statement.
+        """
+        terms, bound = [], 0
         for (emp_id, shift_id) in self.pinned:
             var = self._var(emp_id, shift_id)
             if var is None:
-                # The pairing is no longer even possible — the person lost the
-                # skill or booked the day off. Nothing to reward; the diff will
-                # show the commitment as broken, which is the honest report.
+                # The pairing is no longer possible — the person lost the skill
+                # or booked the day off. Nothing to reward; the diff reports the
+                # commitment as broken, which is the honest answer.
                 continue
-            disruption_terms.append(var * keep_scale)
-            disruption_bound += keep_scale
+            terms.append(var * scale)
+            bound += scale
+        return terms, bound
 
+    def _build_objective_function(self):
+        """
+        Three lexicographic levels — MEDIUM > DISRUPTION > SOFT — emulated on
+        the single scalar CP-SAT optimises.
+
+        WHY LEVELS INSTEAD OF WEIGHTS. Priority expressed as a ratio between
+        magnitudes is not a guarantee: at the original coverage-100 /
+        preferences-55, two satisfied preferences outweighed one covered seat,
+        and whether coverage dominated depended on how many preference terms a
+        dataset happened to produce. Every added term made that worse, since
+        each addition means re-tuning all the weights together and any tuning
+        is valid only for the dataset it was tuned on.
+
+        MEDIUM      coverage shortfall below min_staff.
+        DISRUPTION  keeping published assignments.
+        SOFT        preferences, workload fairness, surplus-staffing charge.
+
+        HOW THE ORDERING IS ENFORCED, AND WHY IT IS BUILT THIS WAY. Each level
+        is scaled strictly above the total magnitude every lower level can
+        reach, so no accumulation of lower-level score can buy a single unit of
+        a higher one.
+
+        That bound must be PROVEN, not guessed — and getting it wrong is
+        silent: the solver returns a schedule with inverted priorities that
+        still looks valid. It went wrong twice while this was being built.
+        First by deriving the bound from a weight, assuming preferences are
+        +1/0/-1 when `_get_preference` returns +/-10, so the ceiling was ten
+        times too low and SOFT outranked MEDIUM — the solver left every shift
+        empty to satisfy an "avoid" preference. Then by adding the fairness
+        term AFTER the bound had been computed, so its magnitude was not
+        counted at all, at a far larger scale since a spread in minutes dwarfs
+        any preference.
+
+        Both failures had the same cause: the bound was a running total that a
+        contributor had to remember to update, in the right order. So the
+        invariant is now structural rather than remembered — a contributor is a
+        function returning `(terms, bound)`, and `_stack_levels` derives every
+        scale from what it is given. Adding a term without its magnitude is not
+        something you can forget to do; it is something you cannot express.
+        """
+        fairness_scale = max(1, int(self.weights.get('workload_fairness', 40.0)))
+
+        # Lowest level first. Each entry is (terms, bound) for one contributor;
+        # contributors within a level share it and are simply concatenated.
+        soft_terms, soft_bound = [], 0
+        for terms, bound in (
+            self._preference_terms(),
+            self._fairness_terms(fairness_scale),
+            self._surplus_terms(fairness_scale),
+        ):
+            soft_terms.extend(terms)
+            soft_bound += bound
+
+        # DISRUPTION sits above SOFT: its unit scale must exceed everything
+        # SOFT can total.
+        disruption_terms, disruption_bound = self._commitment_terms(soft_bound + 1)
+
+        # MEDIUM sits above both.
         medium_scale = soft_bound + disruption_bound + 1
 
         objective_terms = []
-
-        # MEDIUM — minimise unstaffed seats, so negate to fit the maximisation.
+        # Minimise unstaffed seats, so negate to fit the maximisation.
         for shortfall in self.coverage_shortfall.values():
             objective_terms.append(-shortfall * medium_scale)
-
         objective_terms.extend(disruption_terms)
         objective_terms.extend(soft_terms)
 

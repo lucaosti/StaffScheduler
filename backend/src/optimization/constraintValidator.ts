@@ -43,6 +43,19 @@
  */
 
 import type { OptimizationProblem } from './types';
+import { DAY_MS, dateToMs, shiftBoundsMs, shiftHours } from './shiftTime';
+import type { ShiftTimes } from './shiftTime';
+
+/**
+ * A shift the validator can name in a violation.
+ *
+ * `ShiftTimes` deliberately carries only what the arithmetic needs, because it
+ * is also applied to an employee's `existing_assignments`, which have no id.
+ * Those get a synthetic one here so a violation can point at them.
+ */
+interface IdentifiedShift extends ShiftTimes {
+  id: string;
+}
 
 /** A single rule broken by a proposed solution, with enough context to debug. */
 export interface ConstraintViolation {
@@ -69,45 +82,14 @@ export interface ValidatedAssignment {
   shiftId: string;
 }
 
-const DAY_MS = 86_400_000;
 const DEFAULT_MIN_REST_HOURS = 8;
 
-/** Minutes since midnight for "HH:MM" (or "HH:MM:SS"). */
-const timeToMinutes = (time: string): number => {
-  const [h, m] = time.split(':').map(Number);
-  return h * 60 + m;
-};
-
-/** UTC midnight of a "YYYY-MM-DD" date, in ms. */
-const dateToMs = (date: string): number => new Date(`${date}T00:00:00Z`).getTime();
-
-interface TimeShift {
-  id: string;
-  date: string;
-  start_time: string;
-  end_time: string;
-}
-
 /**
- * Absolute [start, end] timestamps for a shift, rolling an overnight shift's
- * end into the following day so a 22:00–06:00 block is a single contiguous
- * interval rather than two fragments. Matches ScheduleOptimizer._shiftBoundsMs.
+ * Shift time arithmetic comes from ./shiftTime, which both engines share.
+ * These used to be private copies here and in ScheduleOptimizerORTools, kept
+ * in step by a comment — and a comment is not a mechanism for a rule this
+ * file is supposed to be the single source of truth about.
  */
-const shiftBoundsMs = (shift: TimeShift): [number, number] => {
-  const day = dateToMs(shift.date);
-  const start = day + timeToMinutes(shift.start_time) * 60_000;
-  let end = day + timeToMinutes(shift.end_time) * 60_000;
-  if (end <= start) end += DAY_MS;
-  return [start, end];
-};
-
-/** Shift duration in hours, overnight-aware, rounded to 1 decimal (as the greedy). */
-const shiftHours = (shift: TimeShift): number => {
-  const start = timeToMinutes(shift.start_time);
-  let end = timeToMinutes(shift.end_time);
-  if (end < start) end += 24 * 60;
-  return Math.round(((end - start) / 60) * 10) / 10;
-};
 
 /**
  * Report every hard-constraint violation in a proposed solution.
@@ -139,7 +121,7 @@ export function findConstraintViolations(
       : DEFAULT_MIN_REST_HOURS;
 
   // Group the decision assignments by employee, resolving each to its shift.
-  const shiftsByEmployee = new Map<string, TimeShift[]>();
+  const shiftsByEmployee = new Map<string, IdentifiedShift[]>();
   for (const emp of problem.employees) shiftsByEmployee.set(emp.id, []);
 
   for (const a of assignments) {
@@ -178,7 +160,7 @@ export function findConstraintViolations(
   // load is checked exactly as the engines are expected to check it.
   for (const emp of problem.employees) {
     const decisionShifts = shiftsByEmployee.get(emp.id) ?? [];
-    const externalShifts: TimeShift[] = (emp.existing_assignments ?? []).map((e, i) => ({
+    const externalShifts: IdentifiedShift[] = (emp.existing_assignments ?? []).map((e, i) => ({
       id: `ext:${emp.id}:${i}`,
       date: e.date,
       start_time: e.start_time,
@@ -384,7 +366,7 @@ export function findOverCommitments(problem: OptimizationProblem): OverCommitmen
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
     const hoursByDate = new Map<string, number>();
     for (const ext of external) {
-      hoursByDate.set(ext.date, (hoursByDate.get(ext.date) ?? 0) + shiftHours({ id: '', ...ext }));
+      hoursByDate.set(ext.date, (hoursByDate.get(ext.date) ?? 0) + shiftHours(ext));
     }
     for (const [date, hours] of [...hoursByDate].sort()) {
       if (hours > dailyBudget + 1e-9) {
@@ -399,7 +381,7 @@ export function findOverCommitments(problem: OptimizationProblem): OverCommitmen
     if (emp.max_hours_per_week) {
       const dated = external.map((ext) => ({
         day: dateToMs(ext.date) / DAY_MS,
-        hours: shiftHours({ id: '', ...ext }),
+        hours: shiftHours(ext),
       }));
       for (const { day } of dated) {
         const window = dated
