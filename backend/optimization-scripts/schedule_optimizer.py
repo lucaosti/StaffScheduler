@@ -857,51 +857,85 @@ class ScheduleOptimizerORTools:
 
         return terms, bound
 
-    def _weekend_terms(self, scale: int) -> Tuple[List, int]:
+    def _is_weekend(self, date: str) -> bool:
         """
-        SOFT: balance weekend days across employees.
+        Whether a date falls on a configured weekend day.
 
-        WHY THE HOURS FAIRNESS DOES NOT COVER THIS. That balances how MANY
-        hours people work; this balances WHICH hours. A schedule can be
-        perfectly even by total load while one person works every Saturday and
-        Sunday and another works only weekdays — both carry forty hours, and
-        only one of them has no weekends. To an hours-only measure a Sunday
-        hour and a Tuesday hour are the same hour.
+        `weekend_days` uses 0 = Sunday, matching JavaScript's `getUTCDay` so the
+        validator and this model agree on the same numbers; Python's `weekday()`
+        is 0 = Monday, hence the conversion.
+        """
+        weekend_days = set(self.constraints_config.get('weekend_days', [0, 6]))
+        return datetime.strptime(date, '%Y-%m-%d').weekday() in {(d - 1) % 7 for d in weekend_days}
 
-        WHY DAYS AND NOT HOURS. Weekend DAYS is the fairer unit for "who loses
-        their weekend": a four-hour Sunday shift costs the day either way.
-        Counting hours would let someone take every Sunday morning and still
-        look lightly loaded.
+    def _is_night(self, shift: Dict) -> bool:
+        """
+        Whether a shift overlaps the configured night window.
 
-        WHICH DAYS COUNT is configurable. Saturday/Sunday is a DEFAULT, not a
-        truth — several sectors this system targets run rotas where the
-        unsocial days differ, and hard-coding them would embed one region's
-        working week in the engine.
+        OVERLAP, NOT START TIME. A start-time threshold is simpler and wrong at
+        the edges: a 22:00-06:00 and a 02:00-10:00 shift are both night work,
+        but only the first starts "late". Overlap catches both, and it is the
+        definition someone working the shift would recognise.
 
-        Modelled as the spread between the most and least weekend-loaded
-        person, the same shape as the hours fairness, for the same reason: it
-        is exactly expressible on a linear solver and targets the complaint
-        that gets raised.
+        Configurable for the same reason as the weekend: what counts as
+        unsocial is sector-specific, and hard-coding it would embed one
+        workplace's norms in the engine.
+        """
+        window = self.constraints_config.get('night_window', {'start': '22:00', 'end': '06:00'})
+        night_start = self._parse_time(window.get('start', '22:00'))
+        night_end = self._parse_time(window.get('end', '06:00'))
+        start = self._parse_time(shift['start_time'])
+        end = self._parse_time(shift['end_time'])
+        if end <= start:
+            end += 24 * 60
+
+        # The window usually wraps midnight, so the occurrence that catches an
+        # early-morning shift is the one that STARTED THE PREVIOUS DAY — 22:00
+        # yesterday through 06:00 today. Forward offsets alone missed
+        # 02:00-10:00 entirely, which is the case overlap exists to catch.
+        for offset in (-24 * 60, 0, 24 * 60):
+            w_start = night_start + offset
+            w_end = night_end + offset + (24 * 60 if night_end <= night_start else 0)
+            if start < w_end and end > w_start:
+                return True
+        return False
+
+    def _category_balance_terms(
+        self, label: str, matches, scale: int
+    ) -> Tuple[List, int]:
+        """
+        SOFT: spread the DAYS on which a category of shift is worked evenly
+        across employees.
+
+        WHY ONE PARAMETERISED CONTRIBUTOR AND NOT ONE PER CATEGORY. Weekend
+        equity and night equity are the same function with a different
+        predicate: group the matching shifts by date, build a per-employee
+        load, minimise the spread. Two such terms would be a coincidence;
+        three would be a pattern, and copying it a third time would mean three
+        places to fix when the mechanism is wrong — which has already happened
+        twice in this objective, both times on the lexicographic bound.
+
+        WHY DAYS AND NOT HOURS. The unit is what the person loses. A four-hour
+        Sunday shift costs the day either way, and counting hours would let
+        someone take every Sunday morning and still look lightly loaded. Two
+        matching shifts on one date therefore cost one day, not two.
+
+        Work held on OTHER schedules counts: the evening is gone regardless of
+        which schedule took it.
         """
         if len(self.employees) < 2:
             return [], 0  # Nothing to balance.
 
-        weekend_days = set(self.constraints_config.get('weekend_days', [0, 6]))
-        weekend_shift_ids = [
-            shift_id for shift_id, shift in self.shifts.items()
-            if datetime.strptime(shift['date'], '%Y-%m-%d').weekday() in
-            {(d - 1) % 7 for d in weekend_days}
-        ]
-        if not weekend_shift_ids:
-            return [], 0
-
-        # Group by date so two shifts on one Saturday cost a single weekend day.
         by_date: Dict[str, List[str]] = {}
-        for shift_id in weekend_shift_ids:
-            by_date.setdefault(self.shifts[shift_id]['date'], []).append(shift_id)
+        for shift_id, shift in self.shifts.items():
+            if matches(shift):
+                by_date.setdefault(shift['date'], []).append(shift_id)
+        if not by_date:
+            return [], 0
 
         upper = len(by_date)
         loads = []
+        max_fixed = 0
         for emp_id in self.employees:
             day_flags = []
             for date, shift_ids in by_date.items():
@@ -910,32 +944,28 @@ class ScheduleOptimizerORTools:
                 ]
                 if not day_vars:
                     continue
-                flag = self.model.NewBoolVar(f'wknd_e{emp_id}_{date}')
+                flag = self.model.NewBoolVar(f'{label}_e{emp_id}_{date}')
                 self.model.AddMaxEquality(flag, day_vars)
                 day_flags.append(flag)
 
             fixed = len({
                 ext['date'] for ext in self.external_by_employee.get(emp_id, [])
-                if datetime.strptime(ext['date'], '%Y-%m-%d').weekday() in
-                {(d - 1) % 7 for d in weekend_days}
+                if matches(ext)
             })
-            load = self.model.NewIntVar(0, upper + fixed, f'wknd_load_e{emp_id}')
-            # Work on other schedules counts: the weekend is gone regardless of
-            # which schedule took it.
+            max_fixed = max(max_fixed, fixed)
+            load = self.model.NewIntVar(0, upper + fixed, f'{label}_load_e{emp_id}')
             self.model.Add(load == sum(day_flags) + fixed)
             loads.append(load)
 
         if len(loads) < 2:
             return [], 0
 
-        cap = upper + max(
-            (len(self.external_by_employee.get(e, [])) for e in self.employees), default=0
-        )
-        most = self.model.NewIntVar(0, cap, 'wknd_max')
-        least = self.model.NewIntVar(0, cap, 'wknd_min')
+        cap = upper + max_fixed
+        most = self.model.NewIntVar(0, cap, f'{label}_max')
+        least = self.model.NewIntVar(0, cap, f'{label}_min')
         self.model.AddMaxEquality(most, loads)
         self.model.AddMinEquality(least, loads)
-        spread = self.model.NewIntVar(0, cap, 'wknd_spread')
+        spread = self.model.NewIntVar(0, cap, f'{label}_spread')
         self.model.Add(spread == most - least)
 
         return [-spread * scale], cap * scale
@@ -994,7 +1024,13 @@ class ScheduleOptimizerORTools:
             self._rest_block_terms(fairness_scale),
             # Same weight as the hours fairness: both are equity goals, and
             # neither is obviously more important than the other.
-            self._weekend_terms(fairness_scale),
+            # Two instances of one mechanism: which hours someone loses, not
+            # how many they work. Same weight as the hours fairness — all three
+            # are equity goals and none obviously outranks the others.
+            self._category_balance_terms(
+                'wknd', lambda sh: self._is_weekend(sh['date']), fairness_scale
+            ),
+            self._category_balance_terms('night', self._is_night, fairness_scale),
         ):
             soft_terms.extend(terms)
             soft_bound += bound
