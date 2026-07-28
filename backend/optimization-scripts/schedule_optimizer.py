@@ -247,8 +247,12 @@ class ScheduleOptimizerORTools:
                     datetime.strptime(ext['date'], '%Y-%m-%d').toordinal() for ext in external
                 })
                 run = 1
-                for prev, cur in zip(days, days[1:]):
-                    run = run + 1 if cur == prev + 1 else 1
+                # Indexed rather than `zip(days, days[1:])`: ruff requires an
+                # explicit `strict=` on zip (B905), and that keyword is Python
+                # 3.10+ while requirements.txt supports 3.8+. Indexing sidesteps
+                # both without a version guard.
+                for i in range(1, len(days)):
+                    run = run + 1 if days[i] == days[i - 1] + 1 else 1
                     if run > max_consec:
                         findings.append({
                             'employee_id': employee_id,
