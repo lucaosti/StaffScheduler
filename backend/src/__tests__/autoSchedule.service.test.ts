@@ -330,9 +330,20 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments
 
-    const optimizerInstance = { generateGreedySchedule: jest.fn().mockResolvedValue([
+    // Both engine paths return the same single assignment, so this test does
+    // not depend on which one the ambient OPTIMIZATION_ENGINE selects — the
+    // subject is the diff, not engine selection.
+    const kept = [
       { employeeId: '1', shiftId: '10', date: '2026-05-01', startTime: '08:00', endTime: '16:00', hours: 8 },
-    ]), optimize: jest.fn() };
+    ];
+    const optimizerInstance = {
+      generateGreedySchedule: jest.fn().mockResolvedValue(kept),
+      optimize: jest.fn().mockResolvedValue({
+        status: 'OPTIMAL',
+        assignments: kept,
+        statistics: { isOptimal: true },
+      }),
+    };
     (ScheduleOptimizer as jest.Mock).mockImplementation(() => optimizerInstance);
 
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
