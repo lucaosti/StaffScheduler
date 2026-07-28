@@ -29,6 +29,25 @@ const makePool = () => {
   };
 };
 
+
+/**
+ * The problem the optimizer was handed, whichever engine ran.
+ *
+ * Tests placed inside the "engine selection" describe inherit its
+ * OPTIMIZATION_ENGINE, so asserting against `generateGreedySchedule` alone
+ * passes locally and fails in CI when or-tools is selected and the greedy is
+ * never called. Reading from whichever path received the call makes the
+ * assertion about the PROBLEM, which is the subject, rather than about engine
+ * selection, which is not.
+ */
+const lastProblemGiven = (): any => {
+  const instance = (ScheduleOptimizer as jest.Mock).mock.results.at(-1)!.value;
+  const call =
+    instance.generateGreedySchedule.mock.calls.at(-1) ?? instance.optimize.mock.calls.at(-1);
+  if (!call) throw new Error('the optimizer was never called');
+  return call[0];
+};
+
 describe('AutoScheduleService.generate', () => {
   const originalEngine = config.optimization.engine;
 
@@ -387,8 +406,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]); // external assignments
 
     return new AutoScheduleService(pool).generate(1, 1).then(() => {
-      const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results.at(-1)!.value;
-      const problem = optimizerInstance.generateGreedySchedule.mock.calls.at(-1)![0];
+      const problem = lastProblemGiven();
       expect(problem.shifts[0].required_skill_levels).toEqual({});
       expect(problem.shifts[0].qualified_staff).toEqual({});
       expect(problem.employees[0].skill_levels).toEqual({});
@@ -418,8 +436,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]); // external assignments
 
     return new AutoScheduleService(pool).generate(1, 1).then(() => {
-      const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results.at(-1)!.value;
-      const problem = optimizerInstance.generateGreedySchedule.mock.calls.at(-1)![0];
+      const problem = lastProblemGiven();
       expect(problem.shifts[0].required_skill_levels).toEqual({ Triage: 3 });
       expect(problem.shifts[0].qualified_staff).toEqual({ Triage: { level: 5, count: 1 } });
       expect(problem.employees[0].skill_levels).toEqual({ Triage: 4 });
