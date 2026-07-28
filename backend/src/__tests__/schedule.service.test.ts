@@ -120,6 +120,54 @@ describe('ScheduleService.publishSchedule', () => {
     expect(out.status).toBe('published');
     expect(conn.commit).toHaveBeenCalled();
   });
+
+  /**
+   * Publishing is what makes an assignment a COMMITMENT. The pin column was
+   * added for this write and never got it: the migration backfilled schedules
+   * already published, so every schedule published afterwards handed the
+   * optimizer an empty pinned set — the disruption objective had nothing to
+   * charge and the re-solve diff was permanently empty. Nothing failed; the
+   * machinery was simply never given input.
+   */
+  it('pins the schedule\'s live assignments in the same transaction', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ shift_count: 5 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // status
+      .mockResolvedValueOnce([{ affectedRows: 3 }, null]); // pin
+    execute
+      .mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    await new ScheduleService(pool).publishSchedule(1);
+
+    const [sql, params] = conn.execute.mock.calls[2];
+    expect(sql).toContain('is_pinned = TRUE');
+    expect(params).toEqual([1]);
+    // On the transaction's connection, not the pool: a crash between the
+    // status change and the pin would leave a live schedule the optimizer is
+    // free to reshuffle.
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('does not pin declined or cancelled assignments', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ shift_count: 1 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    execute
+      .mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    await new ScheduleService(pool).publishSchedule(1);
+
+    // Nobody is relying on an assignment they declined, and pinning it would
+    // ask the optimizer to preserve work nobody is doing.
+    expect(conn.execute.mock.calls[2][0]).toContain("sa.status IN ('pending', 'confirmed')");
+  });
 });
 
 describe('ScheduleService.archiveSchedule', () => {
