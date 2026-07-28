@@ -237,8 +237,16 @@ export function findConstraintViolations(
       }
     }
 
-    // Daily-hours cap: max(8, max_hours_per_week / 5) per calendar date.
-    const dailyBudget = Math.max(8, emp.max_hours_per_week / 5);
+    // Daily-hours cap per calendar date.
+    //
+    // Prefers the contract's stored value. The fallback — max(8, weekly / 5) —
+    // is what every engine used to compute unconditionally, and it was never a
+    // rule anyone agreed to: it appears in no contract, no policy table and no
+    // documentation as a decision, while being enforced as a hard constraint
+    // against real people. It stays only so an un-migrated caller keeps its
+    // existing behaviour, and should be removed once every problem carries a
+    // contract-derived cap.
+    const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
     const hoursByDate = new Map<string, number>();
     for (const shift of worked) {
       hoursByDate.set(shift.date, (hoursByDate.get(shift.date) ?? 0) + shiftHours(shift));

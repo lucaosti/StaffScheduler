@@ -102,6 +102,7 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'attendance.ts', variable: 'router', prefix: '/attendance' },
   { file: 'shiftSwap.ts', variable: 'router', prefix: '/shift-swap' },
   { file: 'preferences.ts', variable: 'router', prefix: '/preferences' },
+  { file: 'employmentContracts.ts', variable: 'router', prefix: '/employment-contracts' },
   { file: 'auditLogs.ts', variable: 'router', prefix: '/audit-logs' },
   { file: 'calendar.ts', variable: 'router', prefix: '/calendar' },
   { file: 'onCall.ts', variable: 'router', prefix: '/on-call' },

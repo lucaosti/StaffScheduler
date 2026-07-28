@@ -34,6 +34,7 @@ import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import { config } from '../config';
+import { EmploymentContractService } from './EmploymentContractService';
 
 interface AutoScheduleResult {
   scheduleId: number;
@@ -109,6 +110,20 @@ export class AutoScheduleService {
       [schedule.department_id]
     );
 
+    // Working-time limits come from the employee's CONTRACT, effective over
+    // the schedule's period — not from user_preferences, where they used to
+    // live beside genuine preferences with no validity period at all. A person
+    // moving to part-time overwrote the old value, so a schedule generated
+    // before the change appeared to violate a limit that did not apply when it
+    // ran. Users with no contract keep the historical defaults, so an
+    // installation that has not set contracts up behaves exactly as before.
+    const contracts = new EmploymentContractService(this.pool);
+    const contractLimits = await contracts.resolveLimitsForPeriod(
+      empRows.map((e) => e.id as number),
+      String(schedule.start_date).slice(0, 10),
+      String(schedule.end_date).slice(0, 10)
+    );
+
     const [unavailRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT user_id, start_date, end_date FROM user_unavailability WHERE user_id IN (
          SELECT user_id FROM user_departments WHERE department_id = ?
@@ -166,15 +181,21 @@ export class AutoScheduleService {
         required_skills: (s.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         priority: 1,
       })),
-      employees: empRows.map((e) => ({
+      employees: empRows.map((e) => {
+        const limits = contractLimits.get(e.id as number);
+        return {
         id: String(e.id),
-        max_hours_per_week: e.max_hours_per_week as number,
-        min_hours_per_week: e.min_hours_per_week as number,
-        max_consecutive_days: e.max_consecutive_days as number,
+        max_hours_per_week: limits?.maxHoursPerWeek ?? (e.max_hours_per_week as number),
+        min_hours_per_week: limits?.minHoursPerWeek ?? (e.min_hours_per_week as number),
+        max_consecutive_days: limits?.maxConsecutiveDays ?? (e.max_consecutive_days as number),
+        // Absent when no contract sets one; the engines then fall back to the
+        // historical derived formula rather than leaving the day uncapped.
+        max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
-      })),
+        };
+      }),
       preferences: [],
       constraints: {
         max_hours_per_week: 40,
