@@ -42,6 +42,7 @@ class ScheduleOptimizerORTools:
         self.hours_worked = {}  # employee_id -> IntVar (weekly hours)
         self.coverage_shortfall = {}  # shift_id -> IntVar (staff missing below min_staff)
         self.coverage_surplus = {}  # shift_id -> IntVar (staff scheduled beyond min_staff)
+        self.qualified_shortfall = {}  # (shift_id, skill) -> IntVar (qualified people missing)
         self.over_committed = []  # employees whose fixed external work already breaches a cap
         self._day_worked_cache: Dict[str, Dict[int, object]] = {}
         
@@ -125,6 +126,7 @@ class ScheduleOptimizerORTools:
 
         # 2. Add hard constraints (order mirrors evaluateCandidate)
         self._add_shift_coverage_constraints()
+        self._add_qualified_staff_constraints()
         self._add_no_double_booking_constraints()
         self._add_min_rest_constraints()
         self._add_daily_hours_constraints()
@@ -392,6 +394,52 @@ class ScheduleOptimizerORTools:
             # on it at all.
             self.coverage_surplus[shift_id] = (surplus, surplus_cap)
     
+    def _add_qualified_staff_constraints(self):
+        """
+        "At least N people on this shift at proficiency L or above."
+
+        WHY THIS IS NOT THE PROFICIENCY FILTER. `required_skill_levels` says
+        EVERYONE assigned must be at least this good, and is enforced by
+        excluding under-qualified pairings from the model entirely. This is a
+        COUNT over the shift: one senior per night shift does not mean everyone
+        must be senior, and requiring that would make most rotas unstaffable.
+        The two are independent requirements over the same shift.
+
+        WHY A MINIMISED SHORTFALL RATHER THAN A HARD CONSTRAINT. Exactly the
+        reasoning that made coverage a target: made hard, a period with no
+        available senior yields no schedule at all, and the harder the problem
+        the worse the answer. The deficit joins the coverage shortfall at
+        MEDIUM, so it outranks every preference but can never make the model
+        infeasible.
+
+        An unknown proficiency does NOT count toward the requirement — the
+        reverse of the eligibility filter, where unknown means "no reason to
+        exclude". Here it would mean asserting a competence nobody recorded, on
+        the one rule that exists to guarantee it.
+        """
+        for shift_id, shift in self.shifts.items():
+            requirements = shift.get('qualified_staff') or {}
+            for skill, spec in requirements.items():
+                level = spec.get('level')
+                needed = spec.get('count')
+                if not level or not needed:
+                    continue
+
+                qualifying = [
+                    var for emp_id, employee in self.employees.items()
+                    if skill in set(employee.get('skills', []))
+                    and (employee.get('skill_levels') or {}).get(skill, 0) >= level
+                    and (var := self._var(emp_id, shift_id)) is not None
+                ]
+
+                shortfall = self.model.NewIntVar(
+                    0, needed, f'qual_short_s{shift_id}_{skill}'
+                )
+                # max(0, needed - qualified), the same idiom as coverage: bound
+                # below by the deficit and let the objective push it down.
+                self.model.Add(shortfall >= needed - sum(qualifying))
+                self.qualified_shortfall[(shift_id, skill)] = shortfall
+
     def _add_no_double_booking_constraints(self):
         """
         HARD: an employee cannot hold two time-overlapping shifts. Uses absolute
@@ -1057,6 +1105,10 @@ class ScheduleOptimizerORTools:
         objective_terms = []
         # Minimise unstaffed seats, so negate to fit the maximisation.
         for shortfall in self.coverage_shortfall.values():
+            objective_terms.append(-shortfall * medium_scale)
+        # A shift can be fully staffed and still have nobody qualified: a
+        # different problem with a different fix, at the same level of concern.
+        for shortfall in self.qualified_shortfall.values():
             objective_terms.append(-shortfall * medium_scale)
         objective_terms.extend(disruption_terms)
         objective_terms.extend(soft_terms)
