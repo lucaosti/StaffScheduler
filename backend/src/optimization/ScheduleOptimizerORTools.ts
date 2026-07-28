@@ -500,13 +500,18 @@ export class ScheduleOptimizer {
       return false;
     }
 
-    // 4. Skill requirements
+    // 4. Skill requirements, including proficiency.
+    //    An absent requirement means any level will do, and an absent level on
+    //    the employee means "unknown" rather than "novice", so a problem that
+    //    carries no levels behaves exactly as before. Kept in lock-step with
+    //    constraintValidator, which is the authority.
     const requiredSkills = shift.required_skills || [];
     const empSkills = new Set(emp.skills);
     for (const skill of requiredSkills) {
-      if (!empSkills.has(skill)) {
-        return false;
-      }
+      if (!empSkills.has(skill)) return false;
+      const required = shift.required_skill_levels?.[skill];
+      const held = emp.skill_levels?.[skill];
+      if (required !== undefined && held !== undefined && held < required) return false;
     }
 
     // 5. Daily hours cap — guard against assigning more hours than a single
