@@ -36,6 +36,7 @@ import {
   qualifiedStaffShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
+import { shiftBoundsMs, shiftHours } from '../optimization/shiftTime';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
 
 const toValidated = (
@@ -1325,5 +1326,59 @@ describeOrtools('CP-SAT engine respects pairing rules', () => {
     const violations = findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }]);
     expect(violations).toHaveLength(1);
     expect(violations[0].rule).toBe('pairing');
+  });
+});
+
+/**
+ * A zero-length shift means the same thing everywhere.
+ *
+ * `shiftBoundsMs` treated `end === start` as a full day while `shiftHours`
+ * treated it as zero, and the SQL fragments agreed with the former — so one
+ * row was a 24-hour commitment to conflict detection and the dashboard, and a
+ * zero-hour non-event to the hours caps. The two lived in the same module.
+ *
+ * Reconciled toward 24 hours because that is the safe direction: for a cap,
+ * over-counting refuses work that might have been allowed, while a zero-hour
+ * shift is invisible to every limit, so someone could hold an unbounded number
+ * of them.
+ *
+ * The request schemas reject `startTime === endTime`, so the shape can only
+ * arrive by direct insert or a seed — which the seeds do, bypassing
+ * validation. That is why the readers had to agree rather than the case being
+ * dismissed as impossible.
+ */
+describe('zero-length shifts are read consistently', () => {
+  const zeroLength = { date: '2033-12-01', start_time: '08:00', end_time: '08:00' };
+
+  it('spans a full day in both the interval and the hours reading', () => {
+    const [start, end] = shiftBoundsMs(zeroLength);
+    expect((end - start) / 3_600_000).toBe(24);
+    expect(shiftHours(zeroLength)).toBe(24);
+  });
+
+  it('still measures an ordinary shift normally', () => {
+    // The guard that stops the fix from making every shift a day long.
+    expect(shiftHours({ date: '2033-12-01', start_time: '09:00', end_time: '17:00' })).toBe(8);
+    expect(shiftHours({ date: '2033-12-01', start_time: '22:00', end_time: '06:00' })).toBe(8);
+  });
+
+  it('consumes a daily cap rather than slipping past it', () => {
+    // The consequence that matters: at zero hours this shift was invisible to
+    // every limit, so an employee could hold any number of them.
+    const problem = {
+      shifts: [{ id: 's0', ...zeroLength, min_staff: 1, max_staff: 1, department_id: 1 }],
+      employees: [{
+        id: 'e1',
+        max_hours_per_week: 40,
+        max_hours_per_day: 8,
+        max_consecutive_days: 7,
+        min_hours_between_shifts: 8,
+        skills: [],
+        unavailable_dates: [],
+      }],
+      skills: {}, preferences: {}, constraints: {},
+    };
+    const violations = findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }]);
+    expect(violations.map((v) => v.rule)).toContain('daily-hours');
   });
 });

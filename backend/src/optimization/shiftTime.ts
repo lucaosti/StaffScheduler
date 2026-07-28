@@ -24,13 +24,17 @@
  * engines against the canonical validator, so a divergence in overnight
  * handling is a red test rather than a silent difference.
  *
- * KNOWN INCONSISTENCY, PRESERVED DELIBERATELY. `shiftBoundsMs` treats
- * `end === start` as a full day (`<=`), while `shiftHours` treats it as zero
- * (`<`). Both behaviours are carried over unchanged from the copies this
- * module replaces, because consolidating and changing semantics in one step
- * would hide a behavioural change inside a refactor. The shape is rejected by
- * the request schemas, so it can only arrive by direct insert or a seed — see
- * the issue tracking the reconciliation.
+ * ZERO-LENGTH SHIFTS SPAN A FULL DAY, in both readings. They disagreed when
+ * this module was first extracted — bounds said 24 hours, hours said zero — a
+ * discrepancy inherited from the copies it replaced and left in place then,
+ * because changing semantics inside a consolidation would have hidden a
+ * behavioural change. Reconciled since, toward 24 hours: for a cap,
+ * over-counting refuses work that might have been allowed, while a zero-hour
+ * shift is invisible to every limit, so someone could hold an unbounded number
+ * of them. The request schemas reject `start === end`, so the shape can only
+ * arrive by direct insert or a seed — which the seeds do, bypassing
+ * validation, which is why the readers had to agree rather than the case being
+ * dismissed as impossible.
  *
  * @author Luca Ostinelli
  */
@@ -91,6 +95,20 @@ export const shiftBoundsMs = (shift: ShiftTimes): [number, number] => {
 export const shiftHours = (shift: ShiftTimes): number => {
   const start = timeToMinutes(shift.start_time);
   let end = timeToMinutes(shift.end_time);
-  if (end < start) end += 24 * 60;
+  // `<=` and not `<`: a shift whose end equals its start spans a full day, the
+  // same reading `shiftBoundsMs` and the SQL fragments already had.
+  //
+  // The two disagreed until now — bounds said 24 hours, hours said zero — and
+  // this direction is the safe one. For a CAP, over-counting refuses work that
+  // might have been allowed; under-counting permits work that should not be,
+  // and a zero-hour shift is invisible to every limit, so someone could hold
+  // an unbounded number of them.
+  //
+  // The request schemas reject `startTime === endTime`, so the shape can only
+  // arrive by direct insert or a seed. Rejecting such a row outright on read
+  // was considered — a shift that cannot be worked is arguably corrupt data
+  // rather than a shift of some length — and not taken: it would change every
+  // read path to guard against a case the write path already prevents.
+  if (end <= start) end += 24 * 60;
   return Math.round(((end - start) / 60) * 10) / 10;
 };
