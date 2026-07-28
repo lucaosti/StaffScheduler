@@ -9,6 +9,7 @@
 import { AutoScheduleService } from '../services/AutoScheduleService';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { config } from '../config';
+import { logger } from '../config/logger';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
 
@@ -85,6 +86,7 @@ describe('AutoScheduleService.generate', () => {
         null,
       ]) // shifts
       .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
@@ -114,6 +116,7 @@ describe('AutoScheduleService.generate', () => {
         null,
       ])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
@@ -143,6 +146,10 @@ describe('AutoScheduleService.generate', () => {
         ],
         null,
       ])
+      // Query order: schedule, shifts, pinned commitments, employees,
+      // employment contracts, unavailability, external assignments.
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
@@ -164,6 +171,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[
         { id: 7, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 },
       ], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[
         { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
@@ -190,7 +198,8 @@ describe('AutoScheduleService.generate', () => {
         ],
         null,
       ]) // shifts
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none) // employees
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
       .mockResolvedValueOnce([
@@ -228,6 +237,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
         { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
       ], null])
       .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null]);
@@ -296,5 +306,42 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(optimize).not.toHaveBeenCalled();
     expect(out.engine).toBe('greedy');
     expect(out.degraded).toBe(false);
+  });
+
+  /**
+   * The diff is the deliverable, so both halves of it need covering — and the
+   * broken half is the one that matters. A published assignment that
+   * disappears is someone who was told they were working and now is not; a
+   * re-solve must never do that silently.
+   */
+  it('reports commitments kept and broken, and warns about the broken ones', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null]) // schedule
+      .mockResolvedValueOnce([[
+        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+        { id: 11, date: '2026-05-02', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+      ], null]) // shifts
+      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+      // Two published commitments; the optimizer below returns only the first.
+      .mockResolvedValueOnce([[{ user_id: 1, shift_id: 10 }, { user_id: 1, shift_id: 11 }], null])
+      .mockResolvedValueOnce([[], null]) // employment contracts
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]); // external assignments
+
+    const optimizerInstance = { generateGreedySchedule: jest.fn().mockResolvedValue([
+      { employeeId: '1', shiftId: '10', date: '2026-05-01', startTime: '08:00', endTime: '16:00', hours: 8 },
+    ]), optimize: jest.fn() };
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => optimizerInstance);
+
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+    const result = await new AutoScheduleService(pool).generate(1, 1);
+
+    expect(result.keptCommitments).toBe(1);
+    expect(result.brokenCommitments).toEqual([{ userId: 1, shiftId: 11 }]);
+    // Named in the log, not merely counted: the affected person is the point.
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('affected users: 1'));
+    warn.mockRestore();
   });
 });

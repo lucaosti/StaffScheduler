@@ -97,6 +97,18 @@ export interface Preference {
 export interface OptimizationProblem {
   shifts: Shift[];
   employees: Employee[];
+  /**
+   * Assignments already published on THIS schedule, which the solver should
+   * plan around rather than reconsider.
+   *
+   * Distinct from `Employee.existing_assignments`, which are shifts held on
+   * OTHER schedules: those are immovable facts that only consume capacity,
+   * while these are decisions this run OWNS and could change — and mostly
+   * should not. Keeping them is rewarded above preferences and fairness but
+   * below coverage, so the solver will break a commitment to staff an empty
+   * shift and not to satisfy someone's preference.
+   */
+  pinned_assignments?: Array<{ employee_id: string; shift_id: string }>;
   preferences?: Record<string, Preference>;
   skills?: Record<string, string[]>;
   constraints?: Record<string, any>;
