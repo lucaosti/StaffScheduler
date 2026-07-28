@@ -857,6 +857,89 @@ class ScheduleOptimizerORTools:
 
         return terms, bound
 
+    def _weekend_terms(self, scale: int) -> Tuple[List, int]:
+        """
+        SOFT: balance weekend days across employees.
+
+        WHY THE HOURS FAIRNESS DOES NOT COVER THIS. That balances how MANY
+        hours people work; this balances WHICH hours. A schedule can be
+        perfectly even by total load while one person works every Saturday and
+        Sunday and another works only weekdays — both carry forty hours, and
+        only one of them has no weekends. To an hours-only measure a Sunday
+        hour and a Tuesday hour are the same hour.
+
+        WHY DAYS AND NOT HOURS. Weekend DAYS is the fairer unit for "who loses
+        their weekend": a four-hour Sunday shift costs the day either way.
+        Counting hours would let someone take every Sunday morning and still
+        look lightly loaded.
+
+        WHICH DAYS COUNT is configurable. Saturday/Sunday is a DEFAULT, not a
+        truth — several sectors this system targets run rotas where the
+        unsocial days differ, and hard-coding them would embed one region's
+        working week in the engine.
+
+        Modelled as the spread between the most and least weekend-loaded
+        person, the same shape as the hours fairness, for the same reason: it
+        is exactly expressible on a linear solver and targets the complaint
+        that gets raised.
+        """
+        if len(self.employees) < 2:
+            return [], 0  # Nothing to balance.
+
+        weekend_days = set(self.constraints_config.get('weekend_days', [0, 6]))
+        weekend_shift_ids = [
+            shift_id for shift_id, shift in self.shifts.items()
+            if datetime.strptime(shift['date'], '%Y-%m-%d').weekday() in
+            {(d - 1) % 7 for d in weekend_days}
+        ]
+        if not weekend_shift_ids:
+            return [], 0
+
+        # Group by date so two shifts on one Saturday cost a single weekend day.
+        by_date: Dict[str, List[str]] = {}
+        for shift_id in weekend_shift_ids:
+            by_date.setdefault(self.shifts[shift_id]['date'], []).append(shift_id)
+
+        upper = len(by_date)
+        loads = []
+        for emp_id in self.employees:
+            day_flags = []
+            for date, shift_ids in by_date.items():
+                day_vars = [
+                    v for sid in shift_ids if (v := self._var(emp_id, sid)) is not None
+                ]
+                if not day_vars:
+                    continue
+                flag = self.model.NewBoolVar(f'wknd_e{emp_id}_{date}')
+                self.model.AddMaxEquality(flag, day_vars)
+                day_flags.append(flag)
+
+            fixed = len({
+                ext['date'] for ext in self.external_by_employee.get(emp_id, [])
+                if datetime.strptime(ext['date'], '%Y-%m-%d').weekday() in
+                {(d - 1) % 7 for d in weekend_days}
+            })
+            load = self.model.NewIntVar(0, upper + fixed, f'wknd_load_e{emp_id}')
+            # Work on other schedules counts: the weekend is gone regardless of
+            # which schedule took it.
+            self.model.Add(load == sum(day_flags) + fixed)
+            loads.append(load)
+
+        if len(loads) < 2:
+            return [], 0
+
+        cap = upper + max(
+            (len(self.external_by_employee.get(e, [])) for e in self.employees), default=0
+        )
+        most = self.model.NewIntVar(0, cap, 'wknd_max')
+        least = self.model.NewIntVar(0, cap, 'wknd_min')
+        self.model.AddMaxEquality(most, loads)
+        self.model.AddMinEquality(least, loads)
+        spread = self.model.NewIntVar(0, cap, 'wknd_spread')
+        self.model.Add(spread == most - least)
+
+        return [-spread * scale], cap * scale
+
     def _build_objective_function(self):
         """
         Three lexicographic levels — MEDIUM > DISRUPTION > SOFT — emulated on
@@ -909,6 +992,9 @@ class ScheduleOptimizerORTools:
             # Weighted like fairness: both are quality-of-life goals that must
             # never outrank coverage or a published commitment.
             self._rest_block_terms(fairness_scale),
+            # Same weight as the hours fairness: both are equity goals, and
+            # neither is obviously more important than the other.
+            self._weekend_terms(fairness_scale),
         ):
             soft_terms.extend(terms)
             soft_bound += bound

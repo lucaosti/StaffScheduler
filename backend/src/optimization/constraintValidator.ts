@@ -507,3 +507,74 @@ export function restShortfalls(
   return shortfalls;
 }
 
+/** Default weekend, applied when the problem does not say otherwise. */
+export const DEFAULT_WEEKEND_DAYS = [0, 6];
+
+/** How many weekend days each employee ends up working. */
+export interface WeekendLoad {
+  employeeId: string;
+  weekendDays: number;
+}
+
+/**
+ * Weekend days worked per employee, and the spread between them.
+ *
+ * WHY THIS IS NOT COVERED BY THE HOURS FAIRNESS. That balances how MANY hours
+ * people work; this balances WHICH hours. A schedule can be perfectly even by
+ * total load while one person works every Saturday and Sunday and another
+ * works only weekdays — both carry forty hours, and only one of them has no
+ * weekends. To an hours-only measure a Sunday hour and a Tuesday hour are the
+ * same hour.
+ *
+ * It is also the complaint that actually gets raised, and it is usually raised
+ * by whoever is most available — because "most available" is exactly who a
+ * scheduler with no weekend term keeps assigning.
+ *
+ * WHY DAYS AND NOT HOURS. Weekend DAYS is the fairer unit for "who loses their
+ * weekend": a four-hour Sunday shift costs the day either way. Counting hours
+ * would let someone take every Sunday morning and still look lightly loaded.
+ *
+ * Work on other schedules counts, for the same reason it counts everywhere
+ * else: the person's weekend is gone regardless of which schedule took it.
+ */
+export function weekendLoads(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): WeekendLoad[] {
+  const weekendDays = new Set(problem.constraints?.weekend_days ?? DEFAULT_WEEKEND_DAYS);
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+
+  const isWeekend = (date: string): boolean =>
+    weekendDays.has(new Date(`${date}T00:00:00Z`).getUTCDay());
+
+  return problem.employees.map((emp) => {
+    // A set, not a count: two shifts on the same Saturday cost one weekend day.
+    const days = new Set<string>();
+    for (const a of assignments) {
+      if (a.employeeId !== emp.id) continue;
+      const shift = shiftsById.get(a.shiftId);
+      if (shift && isWeekend(shift.date)) days.add(shift.date);
+    }
+    for (const ext of emp.existing_assignments ?? []) {
+      if (isWeekend(ext.date)) days.add(ext.date);
+    }
+    return { employeeId: emp.id, weekendDays: days.size };
+  });
+}
+
+/**
+ * Gap between the most and least weekend-loaded employee.
+ *
+ * Reported rather than judged: like coverage and rest blocks, this is a
+ * quality signal and not a legality question, and neither engine is required
+ * to drive it to zero — the greedy cannot, having no global view.
+ */
+export function weekendSpread(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): number {
+  const loads = weekendLoads(problem, assignments).map((l) => l.weekendDays);
+  if (loads.length === 0) return 0;
+  return Math.max(...loads) - Math.min(...loads);
+}
+
