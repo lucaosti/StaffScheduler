@@ -225,6 +225,7 @@ export class AutoScheduleService {
         // Absent when no contract sets one; the engines then fall back to the
         // historical derived formula rather than leaving the day uncapped.
         max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
+        min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
