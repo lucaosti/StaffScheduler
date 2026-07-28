@@ -43,6 +43,7 @@ class ScheduleOptimizerORTools:
         self.coverage_shortfall = {}  # shift_id -> IntVar (staff missing below min_staff)
         self.coverage_surplus = {}  # shift_id -> IntVar (staff scheduled beyond min_staff)
         self.over_committed = []  # employees whose fixed external work already breaches a cap
+        self._day_worked_cache: Dict[str, Dict[int, object]] = {}
         
         # Extract data
         self.shifts = {s['id']: s for s in problem_data['shifts']}
@@ -532,6 +533,68 @@ class ScheduleOptimizerORTools:
                 fixed = sum(h for o, h in external_ord if o in window)
                 self.model.Add(sum(terms) + fixed <= max_hours)
 
+    def _day_worked_indicators(self, employee_id: str) -> Dict[int, object]:
+        """
+        Per-day "is this person working" indicator, over the whole span.
+
+        Built over every ordinal in the span rather than only days that have
+        shifts, because a gap day is meaningful: it breaks a run of worked days
+        and contributes to a rest block. A `1` is fixed external work, a `0` is
+        a day this employee cannot be working, and a BoolVar is a day the
+        solver decides.
+
+        Cached per employee: the consecutive-days cap and the rest-block goal
+        both need exactly this, and building it twice would create two
+        independent sets of variables describing the same fact — which CP-SAT
+        would then have to reconcile through the assignment variables rather
+        than knowing they are the same thing.
+        """
+        cached = self._day_worked_cache.get(employee_id)
+        if cached is not None:
+            return cached
+
+        shifts_by_ord: Dict[int, List[str]] = {}
+        for shift_id, shift in self.shifts.items():
+            o = datetime.strptime(shift['date'], '%Y-%m-%d').toordinal()
+            shifts_by_ord.setdefault(o, []).append(shift_id)
+
+        external_ords = {
+            datetime.strptime(ext['date'], '%Y-%m-%d').toordinal()
+            for ext in self.external_by_employee.get(employee_id, [])
+        }
+
+        all_ords = set(shifts_by_ord) | external_ords
+        if not all_ords:
+            self._day_worked_cache[employee_id] = {}
+            return {}
+
+        day_worked: Dict[int, object] = {}
+        for o in range(min(all_ords), max(all_ords) + 1):
+            if o in external_ords:
+                day_worked[o] = 1  # fixed external work
+            elif o in shifts_by_ord and (
+                day_vars := [
+                    v for sid in shifts_by_ord[o]
+                    if (v := self._var(employee_id, sid)) is not None
+                ]
+            ):
+                var = self.model.NewBoolVar(f'worked_e{employee_id}_o{o}')
+                self.model.AddMaxEquality(var, day_vars)
+                day_worked[o] = var
+            else:
+                # No shift that day, no external work, OR every shift that day
+                # is one this employee cannot take (lacks the skill, or booked
+                # off). All three mean the same thing here: not worked. The
+                # `day_vars` guard is load-bearing — `AddMaxEquality` over an
+                # EMPTY list is unsatisfiable, so without it an employee
+                # ineligible for every shift on one day made the whole model
+                # INFEASIBLE. That could not happen while a variable existed
+                # for every pairing.
+                day_worked[o] = 0
+
+        self._day_worked_cache[employee_id] = day_worked
+        return day_worked
+
     def _add_max_consecutive_days_constraints(self):
         """
         HARD: cap the longest run of consecutive worked calendar days at
@@ -559,32 +622,7 @@ class ScheduleOptimizerORTools:
             if not all_ords:
                 continue
 
-            # Per-day "worked" indicator over the full span so windows can span
-            # dates that have no shifts (a gap day breaks the run → worked=0).
-            day_worked: Dict[int, object] = {}
-            for o in range(min(all_ords), max(all_ords) + 1):
-                if o in external_ords:
-                    day_worked[o] = 1  # fixed external work
-                elif o in shifts_by_ord and (
-                    day_vars := [
-                        v for sid in shifts_by_ord[o]
-                        if (v := self._var(employee_id, sid)) is not None
-                    ]
-                ):
-                    var = self.model.NewBoolVar(f'worked_e{employee_id}_o{o}')
-                    self.model.AddMaxEquality(var, day_vars)
-                    day_worked[o] = var
-                else:
-                    # No shift that day, no external work, OR every shift that
-                    # day is one this employee cannot take (lacks the skill, or
-                    # booked off). All three mean the same thing here: not
-                    # worked. The `day_vars` guard is load-bearing —
-                    # `AddMaxEquality` over an EMPTY list is unsatisfiable, so
-                    # without it an employee ineligible for every shift on one
-                    # day made the whole model INFEASIBLE. That could not
-                    # happen while a variable existed for every pairing.
-                    day_worked[o] = 0
-
+            day_worked = self._day_worked_indicators(employee_id)
             span_start, span_end = min(all_ords), max(all_ords)
             for start in range(span_start, span_end - max_consec + 1):
                 window = [day_worked[o] for o in range(start, start + max_consec + 1)]
@@ -744,6 +782,81 @@ class ScheduleOptimizerORTools:
             bound += scale
         return terms, bound
 
+    def _rest_block_terms(self, scale: int) -> Tuple[List, int]:
+        """
+        SOFT: at least one run of `min_consecutive_days_off` free days per
+        rolling 7-day window.
+
+        WHY THIS IS NOT THE CONSECUTIVE-DAYS CAP INVERTED. `max_consecutive_days`
+        bounds how long someone works without a break and says nothing about the
+        break. Five-on, one-off, five-on, one-off satisfies it completely while
+        the person never gets two days together — the difference between "not
+        overworked" and "rested", and only the first was modelled.
+
+        WHY A ROLLING 7-DAY WINDOW AND "AT LEAST ONE BLOCK". Requiring EVERY
+        rest run to reach the length would forbid a single day off outright,
+        which is often fine and sometimes requested. Requiring one block per
+        schedule PERIOD is meaningless over a month. One per rolling week is the
+        formulation working-time regulations use and what people mean by a
+        weekend.
+
+        WHY SOFT. Made hard, an understaffed period becomes unsolvable — and
+        refusing to answer is exactly what making coverage a target instead of a
+        constraint was meant to stop.
+
+        MODELLING. For each window, a boolean per candidate position of an
+        N-day block, true only when every day in it is free; the window is
+        satisfied if any position holds. Penalising the unsatisfied windows
+        rather than rewarding the satisfied ones keeps the sign consistent with
+        the other soft terms, which are all costs.
+        """
+        terms, bound = [], 0
+        for employee_id, employee in self.employees.items():
+            required = employee.get('min_consecutive_days_off')
+            if not required:
+                continue
+
+            day_worked = self._day_worked_indicators(employee_id)
+            if not day_worked:
+                continue
+            ordinals = sorted(day_worked)
+            span_start, span_end = ordinals[0], ordinals[-1]
+
+            # Only windows that fit entirely inside the span are judged: one
+            # running past the end would show free days that are really just
+            # absence of data.
+            for start in range(span_start, span_end - 6 + 1):
+                positions = []
+                for offset in range(0, 7 - required + 1):
+                    block = [day_worked[start + offset + d] for d in range(required)]
+                    # `day_worked` holds either a plain int (a day already
+                    # decided: 1 = fixed external work, 0 = cannot be working)
+                    # or a BoolVar. They must be told apart by TYPE, not by
+                    # comparison: `var == 1` on a CP-SAT variable builds a
+                    # linear expression, and evaluating that as a boolean
+                    # raises rather than answering.
+                    if any(isinstance(d, int) and d == 1 for d in block):
+                        continue  # fixed external work — this position cannot be free
+                    free = self.model.NewBoolVar(f'rest_e{employee_id}_w{start}_p{offset}')
+                    # free == 1 implies every decidable day in the block is off.
+                    for d in block:
+                        if isinstance(d, int):
+                            continue  # constant free day, nothing to constrain
+                        self.model.Add(d == 0).OnlyEnforceIf(free)
+                    positions.append(free)
+
+                if not positions:
+                    continue  # no position can ever be free; nothing to optimise
+
+                satisfied = self.model.NewBoolVar(f'rested_e{employee_id}_w{start}')
+                self.model.AddMaxEquality(satisfied, positions)
+                # Cost the UNsatisfied window, so the term is a penalty like the
+                # others rather than a reward that inflates the objective floor.
+                terms.append(-(1 - satisfied) * scale)
+                bound += scale
+
+        return terms, bound
+
     def _build_objective_function(self):
         """
         Three lexicographic levels — MEDIUM > DISRUPTION > SOFT — emulated on
@@ -793,6 +906,9 @@ class ScheduleOptimizerORTools:
             self._preference_terms(),
             self._fairness_terms(fairness_scale),
             self._surplus_terms(fairness_scale),
+            # Weighted like fairness: both are quality-of-life goals that must
+            # never outrank coverage or a published commitment.
+            self._rest_block_terms(fairness_scale),
         ):
             soft_terms.extend(terms)
             soft_bound += bound

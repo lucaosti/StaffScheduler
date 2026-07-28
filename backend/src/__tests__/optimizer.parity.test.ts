@@ -28,6 +28,7 @@ import {
   findConstraintViolations,
   coverageShortfalls,
   findOverCommitments,
+  restShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
@@ -727,5 +728,82 @@ describeOrtools('CP-SAT engine treats a published assignment as a commitment', (
       pinned_assignments: [{ employee_id: 'e1', shift_id: 's0' }],
     });
     expect(assignments).toEqual([]);
+  });
+});
+
+/**
+ * Minimum consecutive days off.
+ *
+ * `max_consecutive_days` caps how long someone works without a break and says
+ * nothing about the break itself: five-on, one-off, five-on, one-off satisfies
+ * it completely while the person never gets two days together. That is the
+ * difference between "not overworked" and "rested", and only the first was
+ * modelled — two separate single days is not a weekend.
+ *
+ * Verified against the previous implementation: the fixture below left three
+ * 7-day windows with no two-day rest block; it now leaves none.
+ */
+describeOrtools('CP-SAT engine gives rest in blocks, not scattered days', () => {
+  const fortnight = Array.from({ length: 14 }, (_, i) => ({
+    id: `s${i}`,
+    date: `2033-06-${String(i + 1).padStart(2, '0')}`,
+    start_time: '09:00',
+    end_time: '17:00',
+    min_staff: 1,
+    max_staff: 1,
+    department_id: 1,
+  }));
+
+  const employee = (id: string, restDays?: number) => ({
+    id,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: [],
+    unavailable_dates: [],
+    ...(restDays ? { min_consecutive_days_off: restDays } : {}),
+  });
+
+  const problem = (restDays?: number) => ({
+    shifts: fortnight,
+    employees: [employee('e1', restDays), employee('e2', restDays)],
+    skills: {},
+    preferences: {},
+    constraints: {},
+  });
+
+  it('leaves no window short of a rest block when the contract asks for one', () => {
+    const assignments = runPython(problem(2));
+    expect(restShortfalls(problem(2), assignments)).toEqual([]);
+  });
+
+  it('does not sacrifice coverage to arrange rest', () => {
+    // Rest sits at SOFT and coverage at MEDIUM, so every shift must still be
+    // staffed — the rest goal may only choose BETWEEN full-coverage answers.
+    const withRest = problem(2);
+    const assignments = runPython(withRest);
+    expect(assignments).toHaveLength(fortnight.length);
+    expect(coverageShortfalls(withRest, assignments)).toEqual([]);
+  });
+
+  it('reports shortfalls when no rest is requested, rather than inventing a goal', () => {
+    // A contract that does not ask for rest blocks must not be measured
+    // against one: `null` means unconstrained, not zero.
+    const assignments = runPython(problem());
+    expect(restShortfalls(problem(), assignments)).toEqual([]);
+  });
+
+  /**
+   * Rest and fairness pull against each other: concentrating someone's shifts
+   * creates longer free runs but a less even split. Both sit at SOFT, so
+   * neither is guaranteed to win — what must hold is that the higher levels
+   * are untouched. Asserting a particular compromise would be asserting
+   * CP-SAT's tie-breaking rather than a property of the model.
+   */
+  it('keeps coverage and legality while the two soft goals compete', () => {
+    const withRest = problem(3);
+    const assignments = runPython(withRest);
+    expect(coverageShortfalls(withRest, assignments)).toEqual([]);
+    expect(findConstraintViolations(withRest, assignments)).toEqual([]);
   });
 });

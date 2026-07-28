@@ -9133,6 +9133,7 @@ export interface paths {
                         maxHoursPerDay?: number | null;
                         maxConsecutiveDays?: number | null;
                         minHoursBetweenShifts?: number | null;
+                        minConsecutiveDaysOff?: number | null;
                     };
                 };
             };
@@ -9210,6 +9211,7 @@ export interface paths {
                         maxHoursPerDay?: number | null;
                         maxConsecutiveDays?: number | null;
                         minHoursBetweenShifts?: number | null;
+                        minConsecutiveDaysOff?: number | null;
                     };
                 };
             };
