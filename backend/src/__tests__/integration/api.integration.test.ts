@@ -1358,6 +1358,25 @@ describe('self-service preferences run against the real schema', () => {
 describe('publishing commits the schedule', () => {
   const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
 
+  /**
+   * A fresh person per case. Reusing a fixture user makes these tests fail
+   * each other: every shift here is the same slot, so a second assignment of
+   * the same person is a legitimate 409 from conflict detection and says
+   * nothing about pinning.
+   */
+  const freshUser = async (): Promise<number> => {
+    const [r] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Pin', 'Target', 1)`,
+      [`pin-${tag()}@example.com`]
+    );
+    await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [
+      r.insertId,
+      departmentId,
+    ]);
+    return r.insertId;
+  };
+
   const draftWithAssignment = async (status = 'pending') => {
     const [sc] = await admin.query<mysql.ResultSetHeader>(
       `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
@@ -1371,7 +1390,7 @@ describe('publishing commits the schedule', () => {
     );
     const [sa] = await admin.query<mysql.ResultSetHeader>(
       `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, ?)`,
-      [sh.insertId, userId, status]
+      [sh.insertId, await freshUser(), status]
     );
     return { scheduleId: sc.insertId, shiftId: sh.insertId, assignmentId: sa.insertId };
   };
@@ -1416,7 +1435,7 @@ describe('publishing commits the schedule', () => {
     const added = await request(app)
       .post('/api/assignments')
       .set('Cookie', cookie)
-      .send({ shiftId, userId: delegateeId });
+      .send({ shiftId, userId: await freshUser() });
     expect(added.status).toBe(201);
 
     // Adding someone to a live schedule tells them, which is the whole meaning
@@ -1432,7 +1451,7 @@ describe('publishing commits the schedule', () => {
     const added = await request(app)
       .post('/api/assignments')
       .set('Cookie', cookie)
-      .send({ shiftId, userId: delegateeId });
+      .send({ shiftId, userId: await freshUser() });
     expect(added.status).toBe(201);
 
     // A draft is a proposal; nobody has been told, so the optimizer stays free
