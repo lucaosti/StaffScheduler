@@ -335,6 +335,7 @@ describe('every fixture-free GET runs against the real schema', () => {
     '/directory/me',
     '/employees',
     '/employment-contracts',
+    '/employee-pairings',
     '/modules',
     '/notifications',
     '/notifications/unread-count',
@@ -1339,6 +1340,140 @@ describe('self-service preferences run against the real schema', () => {
     const after = await readLimits();
     expect(Number(after.max_hours_per_week)).toBe(36);
     expect(Number(after.max_consecutive_days)).toBe(5);
+  });
+});
+
+/**
+ * Pairing rules against real MySQL.
+ *
+ * Every rejection this service performs is a statement about rows that already
+ * exist, decided by a two-directional lookup. A mocked pool can only show the
+ * lookup was issued with the right parameters; whether MySQL returns the
+ * reverse row — which is what makes `apart` symmetric and what makes the
+ * contradiction check work at all — can only be proven here.
+ */
+describe('pairing rules run against the real schema', () => {
+  const cleanup = async () => {
+    await admin.query('DELETE FROM employee_pairings');
+  };
+
+  beforeEach(cleanup);
+
+  it('creates a rule and returns it with both people named', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'requires', reason: 'Supervision' });
+
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({
+      userId,
+      otherUserId: delegateeId,
+      kind: 'requires',
+      reason: 'Supervision',
+    });
+    // The join is the point: a rule is unreadable as two bare ids.
+    expect(created.body.data.otherUserName).toContain('Delegatee');
+  });
+
+  it('finds a rule from either side of it', async () => {
+    const cookie = await authCookie();
+    await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'apart' });
+
+    // Filtering on `user_id` alone would make this rule invisible to the
+    // person named second, whose constraint it equally is.
+    const seen = await request(app)
+      .get(`/api/employee-pairings?userId=${delegateeId}`)
+      .set('Cookie', cookie);
+    expect(seen.status).toBe(200);
+    expect(seen.body.data).toHaveLength(1);
+  });
+
+  it('rejects the same `apart` rule recorded in reverse', async () => {
+    const cookie = await authCookie();
+    const first = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'apart' });
+    expect(first.status).toBe(201);
+
+    // The unique key is on the ORDERED pair, so the database would happily
+    // store this. `apart` means the same thing read either way, and two rows
+    // saying it is a duplicate the schema cannot express.
+    const reversed = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId: delegateeId, otherUserId: userId, kind: 'apart' });
+    expect(reversed.status).toBe(409);
+  });
+
+  it('allows a mutual `requires`, which is how a symmetric pairing is expressed', async () => {
+    const cookie = await authCookie();
+    const first = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'requires' });
+    expect(first.status).toBe(201);
+
+    // Reads like a deadlock and is not one: `a <= b` and `b <= a` means
+    // `a == b`, so both work the shift or neither. The migration documents two
+    // rows as the way to say "these two always work together".
+    const back = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId: delegateeId, otherUserId: userId, kind: 'requires' });
+    expect(back.status).toBe(201);
+  });
+
+  it('rejects the opposite rule between the same two people', async () => {
+    const cookie = await authCookie();
+    await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'requires' });
+
+    // Together these say one person may only work shifts the other works and
+    // may never share a shift with them: unschedulable, permanently.
+    const contradiction = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId: delegateeId, otherUserId: userId, kind: 'apart' });
+    expect(contradiction.status).toBe(409);
+  });
+
+  it('rejects a rule naming someone who does not exist', async () => {
+    const cookie = await authCookie();
+    // The foreign key would catch this too, as an unclassified 500.
+    const res = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: 999999, kind: 'apart' });
+    expect(res.status).toBe(400);
+  });
+
+  it('edits the reason and deletes the rule', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/employee-pairings')
+      .set('Cookie', cookie)
+      .send({ userId, otherUserId: delegateeId, kind: 'apart', reason: 'Initial' });
+    const id = created.body.data.id;
+
+    const edited = await request(app)
+      .put(`/api/employee-pairings/${id}`)
+      .set('Cookie', cookie)
+      .send({ reason: null });
+    expect(edited.status).toBe(200);
+    expect(edited.body.data.reason).toBeNull();
+
+    const removed = await request(app).delete(`/api/employee-pairings/${id}`).set('Cookie', cookie);
+    expect(removed.status).toBe(200);
+    const gone = await request(app).get(`/api/employee-pairings/${id}`).set('Cookie', cookie);
+    expect(gone.status).toBe(404);
   });
 });
 
