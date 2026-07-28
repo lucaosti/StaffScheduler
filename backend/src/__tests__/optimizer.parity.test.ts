@@ -31,6 +31,8 @@ import {
   restShortfalls,
   weekendLoads,
   weekendSpread,
+  nightLoads,
+  nightSpread,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
@@ -912,7 +914,7 @@ describeOrtools('CP-SAT engine balances weekend work', () => {
       { employeeId: 'e1', shiftId: 's0' },
       { employeeId: 'e1', shiftId: 'extra' },
     ]);
-    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(1);
+    expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(1);
   });
 
 
@@ -934,7 +936,7 @@ describeOrtools('CP-SAT engine balances weekend work', () => {
       ],
     };
     const loads = weekendLoads(withExternal, []);
-    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(2);
+    expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(2);
   });
 
   it('honours a configured weekend that is not Saturday and Sunday', () => {
@@ -943,6 +945,89 @@ describeOrtools('CP-SAT engine balances weekend work', () => {
     const fridayWeekend = { ...problem, constraints: { weekend_days: [5] } };
     const loads = weekendLoads(fridayWeekend, [{ employeeId: 'e1', shiftId: 's8' }]);
     // s8 is 2033-06-01, a Wednesday — not a weekend under either definition.
-    expect(loads.find((l) => l.employeeId === 'e1')?.weekendDays).toBe(0);
+    expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(0);
+  });
+});
+
+/**
+ * Night-shift equity, and the mechanism it shares with weekend equity.
+ *
+ * Nothing balanced night work. Hours fairness balances how many hours; weekend
+ * equity balances weekend days. A night shift on a Tuesday is invisible to
+ * both, so one person could work every night in the period while the totals
+ * looked perfectly even — and it lands on the same person as always, whoever
+ * is most available, because nothing charged for concentrating it.
+ *
+ * Verified against the previous implementation: the fixture below produced
+ * nights of 0/1/3/4 and now produces 2/2/2/2.
+ *
+ * All shifts fall on WEEKDAYS on purpose, so weekend equity is inert and the
+ * night term is the only one that can be responsible.
+ */
+describeOrtools('CP-SAT engine shares night work', () => {
+  const weekdays = ['2033-08-01', '2033-08-02', '2033-08-03', '2033-08-04',
+    '2033-08-05', '2033-08-08', '2033-08-09', '2033-08-10'];
+
+  const problem = {
+    shifts: weekdays.flatMap((date, i) => [
+      { id: `n${i}`, date, start_time: '22:00', end_time: '06:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+      { id: `d${i}`, date, start_time: '09:00', end_time: '17:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+    ]),
+    employees: [1, 2, 3, 4].map((i) => ({
+      id: `e${i}`,
+      max_hours_per_week: 200,
+      max_consecutive_days: 30,
+      min_hours_between_shifts: 1,
+      skills: [],
+      unavailable_dates: [],
+    })),
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('spreads night work evenly when hours alone cannot decide', () => {
+    expect(nightSpread(problem, runPython(problem))).toBe(0);
+  });
+
+  it('does not trade coverage for night equity', () => {
+    const assignments = runPython(problem);
+    expect(assignments).toHaveLength(problem.shifts.length);
+    expect(coverageShortfalls(problem, assignments)).toEqual([]);
+  });
+
+  it('classifies by OVERLAP with the window, not by start time', () => {
+    // A start-time threshold is wrong at the edges: 02:00–10:00 never starts
+    // "late" but is unmistakably night work. Both of these must count.
+    const shifts = [
+      { id: 'late', date: '2033-08-01', start_time: '22:00', end_time: '06:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+      { id: 'early', date: '2033-08-02', start_time: '02:00', end_time: '10:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+      { id: 'day', date: '2033-08-03', start_time: '09:00', end_time: '17:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+    ];
+    const loads = nightLoads({ ...problem, shifts }, [
+      { employeeId: 'e1', shiftId: 'late' },
+      { employeeId: 'e1', shiftId: 'early' },
+      { employeeId: 'e1', shiftId: 'day' },
+    ]);
+    expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(2);
+  });
+
+  it('honours a configured night window', () => {
+    // What counts as unsocial is sector-specific; the default is a default.
+    const evening = {
+      ...problem,
+      constraints: { night_window: { start: '18:00', end: '23:00' } },
+      shifts: [
+        { id: 'evening', date: '2033-08-01', start_time: '19:00', end_time: '22:00',
+          min_staff: 1, max_staff: 1, department_id: 1 },
+      ],
+    };
+    const loads = nightLoads(evening, [{ employeeId: 'e1', shiftId: 'evening' }]);
+    expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(1);
   });
 });

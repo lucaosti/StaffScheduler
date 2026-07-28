@@ -43,7 +43,7 @@
  */
 
 import type { OptimizationProblem } from './types';
-import { DAY_MS, dateToMs, shiftBoundsMs, shiftHours } from './shiftTime';
+import { DAY_MS, dateToMs, shiftBoundsMs, shiftHours, timeToMinutes } from './shiftTime';
 import type { ShiftTimes } from './shiftTime';
 
 /**
@@ -510,57 +510,107 @@ export function restShortfalls(
 /** Default weekend, applied when the problem does not say otherwise. */
 export const DEFAULT_WEEKEND_DAYS = [0, 6];
 
-/** How many weekend days each employee ends up working. */
-export interface WeekendLoad {
+/** Default night window, applied when the problem does not say otherwise. */
+export const DEFAULT_NIGHT_WINDOW = { start: '22:00', end: '06:00' };
+
+/** How many days of some shift category each employee ends up working. */
+export interface CategoryLoad {
   employeeId: string;
-  weekendDays: number;
+  days: number;
 }
 
+/** Whether a date falls on a configured weekend day (`0` = Sunday). */
+const isWeekendDate = (problem: OptimizationProblem, date: string): boolean => {
+  const days = new Set(problem.constraints?.weekend_days ?? DEFAULT_WEEKEND_DAYS);
+  return days.has(new Date(`${date}T00:00:00Z`).getUTCDay());
+};
+
 /**
- * Weekend days worked per employee, and the spread between them.
+ * Whether a shift overlaps the configured night window.
  *
- * WHY THIS IS NOT COVERED BY THE HOURS FAIRNESS. That balances how MANY hours
- * people work; this balances WHICH hours. A schedule can be perfectly even by
- * total load while one person works every Saturday and Sunday and another
- * works only weekdays — both carry forty hours, and only one of them has no
- * weekends. To an hours-only measure a Sunday hour and a Tuesday hour are the
- * same hour.
- *
- * It is also the complaint that actually gets raised, and it is usually raised
- * by whoever is most available — because "most available" is exactly who a
- * scheduler with no weekend term keeps assigning.
- *
- * WHY DAYS AND NOT HOURS. Weekend DAYS is the fairer unit for "who loses their
- * weekend": a four-hour Sunday shift costs the day either way. Counting hours
- * would let someone take every Sunday morning and still look lightly loaded.
- *
- * Work on other schedules counts, for the same reason it counts everywhere
- * else: the person's weekend is gone regardless of which schedule took it.
+ * OVERLAP, NOT START TIME. A start-time threshold is simpler and wrong at the
+ * edges: 22:00–06:00 and 02:00–10:00 are both night work, but only the first
+ * starts "late". Overlap catches both, and it is the definition someone
+ * working the shift would recognise.
  */
-export function weekendLoads(
+const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean => {
+  const window = problem.constraints?.night_window ?? DEFAULT_NIGHT_WINDOW;
+  const nightStart = timeToMinutes(window.start);
+  const nightEnd = timeToMinutes(window.end);
+  const start = timeToMinutes(shift.start_time);
+  let end = timeToMinutes(shift.end_time);
+  if (end <= start) end += 24 * 60;
+
+  // The window usually wraps midnight, so the occurrence that catches an
+  // early-morning shift is the one that STARTED THE PREVIOUS DAY — 22:00
+  // yesterday through 06:00 today. Testing only forward offsets missed
+  // 02:00–10:00 entirely, which is the case the overlap definition exists for.
+  for (const offset of [-24 * 60, 0, 24 * 60]) {
+    const wStart = nightStart + offset;
+    const wEnd = nightEnd + offset + (nightEnd <= nightStart ? 24 * 60 : 0);
+    if (start < wEnd && end > wStart) return true;
+  }
+  return false;
+};
+
+/**
+ * Days of a given shift category worked per employee.
+ *
+ * WHY A CATEGORY AND NOT ONE FUNCTION PER KIND. Weekend equity and night
+ * equity ask the same question of different shifts: who loses which days. Two
+ * such measures would be a coincidence; a third copy would be a pattern, and
+ * this mechanism has already been got wrong twice in the objective it feeds.
+ *
+ * WHY THE HOURS FAIRNESS DOES NOT COVER EITHER. That balances how MANY hours
+ * people work; this balances WHICH hours. A schedule can be perfectly even by
+ * total load while one person works every weekend, or every night, and another
+ * works none — to an hours-only measure a Sunday hour and a Tuesday hour are
+ * the same hour. It is also the complaint that actually gets raised, and
+ * usually by whoever is most available, because that is exactly who a
+ * scheduler with no such term keeps assigning.
+ *
+ * WHY DAYS AND NOT HOURS. The unit is what the person loses: a four-hour
+ * Sunday shift costs the day either way. Two matching shifts on one date cost
+ * one day, not two. Work held on other schedules counts, because the day is
+ * gone regardless of which schedule took it.
+ */
+export function categoryLoads(
   problem: OptimizationProblem,
-  assignments: ValidatedAssignment[]
-): WeekendLoad[] {
-  const weekendDays = new Set(problem.constraints?.weekend_days ?? DEFAULT_WEEKEND_DAYS);
+  assignments: ValidatedAssignment[],
+  matches: (shift: ShiftTimes) => boolean
+): CategoryLoad[] {
   const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
 
-  const isWeekend = (date: string): boolean =>
-    weekendDays.has(new Date(`${date}T00:00:00Z`).getUTCDay());
-
   return problem.employees.map((emp) => {
-    // A set, not a count: two shifts on the same Saturday cost one weekend day.
     const days = new Set<string>();
     for (const a of assignments) {
       if (a.employeeId !== emp.id) continue;
       const shift = shiftsById.get(a.shiftId);
-      if (shift && isWeekend(shift.date)) days.add(shift.date);
+      if (shift && matches(shift)) days.add(shift.date);
     }
     for (const ext of emp.existing_assignments ?? []) {
-      if (isWeekend(ext.date)) days.add(ext.date);
+      if (matches(ext)) days.add(ext.date);
     }
-    return { employeeId: emp.id, weekendDays: days.size };
+    return { employeeId: emp.id, days: days.size };
   });
 }
+
+/** Gap between the most and least loaded employee for a category. */
+const spreadOf = (loads: CategoryLoad[]): number =>
+  loads.length === 0 ? 0 : Math.max(...loads.map((l) => l.days)) - Math.min(...loads.map((l) => l.days));
+
+/** Weekend days worked per employee. */
+export const weekendLoads = (
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): CategoryLoad[] =>
+  categoryLoads(problem, assignments, (s) => isWeekendDate(problem, s.date));
+
+/** Night days worked per employee. */
+export const nightLoads = (
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): CategoryLoad[] => categoryLoads(problem, assignments, (s) => isNightShift(problem, s));
 
 /**
  * Gap between the most and least weekend-loaded employee.
@@ -569,12 +619,13 @@ export function weekendLoads(
  * quality signal and not a legality question, and neither engine is required
  * to drive it to zero — the greedy cannot, having no global view.
  */
-export function weekendSpread(
+export const weekendSpread = (
   problem: OptimizationProblem,
   assignments: ValidatedAssignment[]
-): number {
-  const loads = weekendLoads(problem, assignments).map((l) => l.weekendDays);
-  if (loads.length === 0) return 0;
-  return Math.max(...loads) - Math.min(...loads);
-}
+): number => spreadOf(weekendLoads(problem, assignments));
 
+/** Gap between the most and least night-loaded employee. */
+export const nightSpread = (
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): number => spreadOf(nightLoads(problem, assignments));

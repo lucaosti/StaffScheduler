@@ -132,6 +132,11 @@ export interface OptimizationProblem {
      * scheduling engine.
      */
     weekend_days?: number[];
+    /**
+     * The window that makes a shift "night" work. Configurable for the same
+     * reason as the weekend: what counts as unsocial is sector-specific.
+     */
+    night_window?: { start: string; end: string };
   };
   weights?: Record<string, number>;
 }
