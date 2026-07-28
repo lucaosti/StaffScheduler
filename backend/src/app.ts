@@ -39,6 +39,7 @@ import { createTimeOffRouter } from './routes/timeOff';
 import { createAttendanceRouter } from './routes/attendance';
 import { createShiftSwapRouter } from './routes/shiftSwap';
 import { createPreferencesRouter } from './routes/preferences';
+import { createEmploymentContractsRouter } from './routes/employmentContracts';
 import { createAuditLogsRouter } from './routes/auditLogs';
 import { createCalendarRouter } from './routes/calendar';
 import { createTwoFactorRouter } from './routes/twoFactor';
@@ -201,6 +202,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/attendance`, createAttendanceRouter(pool));
     app.use(`${prefix}/shift-swap`, createShiftSwapRouter(pool));
     app.use(`${prefix}/preferences`, createPreferencesRouter(pool));
+    app.use(`${prefix}/employment-contracts`, createEmploymentContractsRouter(pool));
     app.use(`${prefix}/audit-logs`, createAuditLogsRouter(pool));
     app.use(`${prefix}/calendar`, createCalendarRouter(pool));
     app.use(`${prefix}/on-call`, createOnCallRouter(pool));
