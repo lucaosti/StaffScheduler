@@ -121,6 +121,17 @@ export interface OptimizationProblem {
   pinned_assignments?: Array<{ employee_id: string; shift_id: string }>;
   preferences?: Record<string, Preference>;
   skills?: Record<string, string[]>;
-  constraints?: Record<string, any>;
+  constraints?: Record<string, any> & {
+    /**
+     * Which weekday numbers count as the weekend, `0` = Sunday.
+     *
+     * Configurable because Saturday/Sunday is a DEFAULT, not a truth: several
+     * sectors this system targets run rotas where the unsocial days are
+     * different, and a non-Western calendar may place them elsewhere entirely.
+     * Hard-coding 6 and 0 would embed one region's working week in the
+     * scheduling engine.
+     */
+    weekend_days?: number[];
+  };
   weights?: Record<string, number>;
 }
