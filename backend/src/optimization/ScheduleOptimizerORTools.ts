@@ -490,7 +490,9 @@ export class ScheduleOptimizer {
 
     // 5. Daily hours cap — guard against assigning more hours than a single
     //    workday budget (max_hours_per_week / 5, floored at 8h).
-    const dailyBudget = Math.max(8, emp.max_hours_per_week / 5);
+    // Contract cap when present; otherwise the historical derived formula.
+    // Kept in lock-step with constraintValidator, which is the authority.
+    const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
     const shiftHours = this._calculateShiftHours(shift);
     const dailyKey = `${emp.id}|${shift.date}`;
     const hoursAlreadyToday = dailyHoursMap.get(dailyKey) ?? 0;

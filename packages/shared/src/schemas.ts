@@ -885,3 +885,39 @@ export const pendingApprovalDelegateBody = z.object({
 export const pendingApprovalDecisionBody = z.object({
   note: z.string().max(2000).nullable().optional(),
 });
+
+/**
+ * Employment contracts. Every limit is optional and nullable because `null`
+ * means "this contract does not constrain it" — distinct from zero, and from
+ * omitting the field on an update.
+ */
+const contractLimitFields = {
+  maxHoursPerWeek: z.number().int().positive().nullable().optional(),
+  minHoursPerWeek: z.number().int().nonnegative().nullable().optional(),
+  maxHoursPerDay: z.number().int().positive().max(24).nullable().optional(),
+  maxConsecutiveDays: z.number().int().positive().max(31).nullable().optional(),
+  minHoursBetweenShifts: z.number().int().nonnegative().max(24).nullable().optional(),
+};
+
+export const createEmploymentContractBody = z.object({
+  name: shortString,
+  description: z.string().max(2000).nullable().optional(),
+  ...contractLimitFields,
+});
+
+export const updateEmploymentContractBody = z.object({
+  name: shortString.optional(),
+  description: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+  ...contractLimitFields,
+});
+
+/**
+ * Assigning a contract to a person for a period. `effectiveTo` omitted or null
+ * means open-ended — the contract in force until something replaces it.
+ */
+export const assignEmploymentContractBody = z.object({
+  contractId: positiveInt,
+  effectiveFrom: dateString,
+  effectiveTo: dateString.nullable().optional(),
+});
