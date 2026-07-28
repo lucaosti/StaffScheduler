@@ -11975,6 +11975,199 @@
           }
         }
       }
+    },
+    "/employee-pairings": {
+      "get": {
+        "summary": "List pairing rules",
+        "description": "Relationships that constrain who may share a shift. Requires `employee.manage`, not `employee.read`: the list of who must be kept apart from whom is an inference about named people, and `employee.read` is held by ordinary staff.",
+        "responses": {
+          "200": {
+            "description": "Pairing rules."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          }
+        ]
+      },
+      "post": {
+        "summary": "Create a pairing rule",
+        "description": "`apart` — these two must not share a shift. `requires` — the first person may only work a shift the second also works, directional on purpose (a trainee must not work unsupervised; the supervisor works alone perfectly well). Rejected: a rule between someone and themself, a duplicate, and the opposite rule between the same two people, which together would leave them unschedulable. Requires `employee.manage`.",
+        "responses": {
+          "201": {
+            "description": "Pairing rule created."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "description": "The rule, or its contradiction, already exists."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "otherUserId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "apart",
+                      "requires"
+                    ]
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "userId",
+                  "otherUserId",
+                  "kind"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/employee-pairings/{id}": {
+      "get": {
+        "summary": "Get a pairing rule",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pairing rule."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update a pairing rule's reason",
+        "description": "Only the reason is editable. Changing who a rule is about, or which way it runs, is a different rule — an update would let an `apart` become a `requires` in place, keeping the row's identity while inverting its meaning. Requires `employee.manage`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pairing rule updated."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a pairing rule",
+        "description": "Requires `employee.manage`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pairing rule deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
     }
   }
 }
