@@ -180,13 +180,22 @@ export function findConstraintViolations(
         });
       }
       const empSkills = new Set(emp.skills);
-      for (const skill of shiftsById.get(shift.id)?.required_skills ?? []) {
-        if (!empSkills.has(skill)) {
+      const shiftDef = shiftsById.get(shift.id);
+      for (const skill of shiftDef?.required_skills ?? []) {
+        // An absent requirement means any level will do, and an absent level
+        // on the employee means "unknown" rather than "novice" — so a caller
+        // that supplies no levels behaves exactly as before this existed.
+        const required = shiftDef?.required_skill_levels?.[skill];
+        const held = emp.skill_levels?.[skill];
+        const underQualified = required !== undefined && held !== undefined && held < required;
+        if (!empSkills.has(skill) || underQualified) {
           violations.push({
             rule: 'skill',
             employeeId: emp.id,
             shiftIds: [shift.id],
-            detail: `employee ${emp.id} lacks required skill "${skill}" for shift ${shift.id}`,
+            detail: underQualified
+              ? `employee ${emp.id} holds "${skill}" at level ${held}, below the level ${required} shift ${shift.id} requires`
+              : `employee ${emp.id} lacks required skill "${skill}" for shift ${shift.id}`,
           });
         }
       }
