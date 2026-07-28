@@ -1204,3 +1204,126 @@ describeOrtools('CP-SAT engine staffs a shift with the qualified people it needs
     expect(shortfalls[0].assigned).toBe(0);
   });
 });
+
+/**
+ * Pairing: who may share a shift.
+ *
+ * Two rules that are commonly conflated. `apart` — these two must not be on
+ * the same shift (conflict separation). `requires` — one may only work a shift
+ * the other also works (a trainee who must not work unsupervised).
+ *
+ * `requires` IS DIRECTIONAL ON PURPOSE. "They must work together" reads as
+ * symmetric and almost never is: a trainee must not work without their
+ * supervisor, but the supervisor works perfectly well alone. A symmetric rule
+ * would forbid the supervisor from taking any shift the trainee is not on —
+ * the opposite of what anyone wants. Symmetric pairing is two directional
+ * rules.
+ *
+ * BOTH CAN BE HARD ONLY BECAUSE OF #448. While coverage was a hard constraint,
+ * "the trainee may only work with their supervisor" could make a period
+ * INFEASIBLE. Now that coverage is a minimised shortfall, an unsatisfiable
+ * pairing leaves that person unassigned and the shift short — reported, not
+ * refused. Asserted below rather than assumed.
+ */
+describeOrtools('CP-SAT engine respects pairing rules', () => {
+  const employee = (id: string, unavailable: string[] = []) => ({
+    id,
+    max_hours_per_week: 60,
+    max_consecutive_days: 7,
+    min_hours_between_shifts: 8,
+    skills: [],
+    unavailable_dates: unavailable,
+  });
+
+  const twoSeats = {
+    id: 's0',
+    date: '2033-11-01',
+    start_time: '09:00',
+    end_time: '17:00',
+    min_staff: 2,
+    max_staff: 2,
+    department_id: 1,
+  };
+
+  it('keeps two people apart who must not share a shift', () => {
+    // e3 avoids the shift, so without the rule the solver pairs e1 + e2 —
+    // verified against the previous implementation, which did exactly that
+    // even with the rule present, since it ignored pairings entirely.
+    const problem = {
+      shifts: [twoSeats],
+      employees: [employee('e1'), employee('e2'), employee('e3')],
+      skills: {},
+      preferences: { e3: { employee_id: 'e3', preferred_shifts: [], avoid_shifts: ['s0'] } },
+      constraints: {},
+      pairings: [{ employee_id: 'e1', other_id: 'e2', kind: 'apart' as const }],
+    };
+    const assigned = runPython(problem).map((a) => a.employeeId);
+    expect(assigned).toHaveLength(2);
+    expect(assigned.includes('e1') && assigned.includes('e2')).toBe(false);
+    expect(findConstraintViolations(problem, runPython(problem))).toEqual([]);
+  });
+
+  it('leaves a shift short rather than place a dependent unsupervised', () => {
+    // The claim that makes these rules safe to enforce exactly. Before
+    // coverage became a shortfall this fixture would have been INFEASIBLE.
+    const problem = {
+      shifts: [{ ...twoSeats, min_staff: 1 }],
+      employees: [employee('e1'), employee('e2', ['2033-11-01'])],
+      skills: {},
+      preferences: {},
+      constraints: {},
+      pairings: [{ employee_id: 'e1', other_id: 'e2', kind: 'requires' as const }],
+    };
+    const assignments = runPython(problem);
+    expect(assignments).toEqual([]);
+    expect(coverageShortfalls(problem, assignments)).toHaveLength(1);
+  });
+
+  it('lets the depended-upon person work alone', () => {
+    // The directional half. A symmetric rule would have forbidden this.
+    const problem = {
+      shifts: [{ ...twoSeats, min_staff: 1, max_staff: 1 }],
+      employees: [employee('e1'), employee('e2')],
+      skills: {},
+      preferences: {},
+      constraints: {},
+      pairings: [{ employee_id: 'e1', other_id: 'e2', kind: 'requires' as const }],
+    };
+    expect(runPython(problem).map((a) => a.employeeId)).toEqual(['e2']);
+  });
+
+
+  it('flags two people who must stay apart sharing a shift', () => {
+    // The `apart` half of the violation check. The engine prevents it, so this
+    // asserts the validator would catch a schedule produced some other way —
+    // a hand edit, an import, or a future engine.
+    const problem = {
+      shifts: [twoSeats],
+      employees: [employee('e1'), employee('e2')],
+      skills: {},
+      preferences: {},
+      constraints: {},
+      pairings: [{ employee_id: 'e1', other_id: 'e2', kind: 'apart' as const }],
+    };
+    const violations = findConstraintViolations(problem, [
+      { employeeId: 'e1', shiftId: 's0' },
+      { employeeId: 'e2', shiftId: 's0' },
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].detail).toMatch(/must not share/);
+  });
+
+  it('flags an unsupervised dependent as a violation', () => {
+    const problem = {
+      shifts: [twoSeats],
+      employees: [employee('e1'), employee('e2')],
+      skills: {},
+      preferences: {},
+      constraints: {},
+      pairings: [{ employee_id: 'e1', other_id: 'e2', kind: 'requires' as const }],
+    };
+    const violations = findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0].rule).toBe('pairing');
+  });
+});
