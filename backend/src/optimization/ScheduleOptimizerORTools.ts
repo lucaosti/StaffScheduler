@@ -124,6 +124,16 @@ export interface CandidateContext {
   dailyHoursMap: Map<string, number>;
   /** Assignments already committed to this shift (for max_staff check). */
   currentShiftAssignmentCount: number;
+  /**
+   * WHO is already on this shift.
+   *
+   * Pairing rules need identities, not a count: whether a candidate may join
+   * depends on who else is there. This is the first constraint that cannot be
+   * decided from the candidate alone.
+   */
+  currentShiftAssignees: Set<string>;
+  /** Pairing rules in force, if any. */
+  pairings?: OptimizationProblem['pairings'];
   /** Minimum rest hours required between two shifts (mirrors ComplianceEngine's policy). */
   minRestHoursBetweenShifts: number;
 }
@@ -593,6 +603,37 @@ export class ScheduleOptimizer {
     return false;
   }
 
+  /**
+   * Whether pairing rules permit this employee to join a shift.
+   *
+   * `apart` is checkable incrementally: if the other person is already on the
+   * shift, refuse.
+   *
+   * `requires` has a LIMITATION WORTH STATING. The greedy assigns in order and
+   * cannot look ahead, so a dependent is only placed if the person they depend
+   * on is ALREADY on the shift. Where CP-SAT would pair them by choosing both
+   * together, the greedy may leave the dependent unassigned and the shift
+   * short. That is conservative — it never produces an illegal schedule — and
+   * it is the same class of limitation as the greedy's inability to balance
+   * workload: a consequence of having no global view, which is why a greedy
+   * result is always signalled as such.
+   */
+  private _pairingAllows(
+    employeeId: string,
+    onThisShift: Set<string>,
+    pairings: OptimizationProblem['pairings']
+  ): boolean {
+    for (const rule of pairings ?? []) {
+      if (rule.kind === 'apart') {
+        if (rule.employee_id === employeeId && onThisShift.has(rule.other_id)) return false;
+        if (rule.other_id === employeeId && onThisShift.has(rule.employee_id)) return false;
+      } else if (rule.employee_id === employeeId && !onThisShift.has(rule.other_id)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   private _wouldExceedConsecutiveDays(emp: Employee, shift: Shift, ctx: CandidateContext): boolean {
     if (!emp.max_consecutive_days) return false;
     const shiftsById = this._getShiftsById(ctx.allShifts);
@@ -717,14 +758,25 @@ export class ScheduleOptimizer {
           // Pass 0 here — max_staff is re-enforced in the assignment loop below
           // so we collect all eligible candidates first.
           currentShiftAssignmentCount: 0,
+          // Empty for the same reason: this pass only decides eligibility that
+          // is independent of who else is chosen. Pairing is not, so it is
+          // checked in the assignment loop instead.
+          currentShiftAssignees: new Set<string>(),
         })
       );
 
       // Assign up to min_staff employees, never exceeding max_staff
       const staffCap = shift.max_staff !== undefined ? shift.max_staff : shift.min_staff;
       const toAssign = Math.min(candidates.length, shift.min_staff, staffCap);
-      for (let i = 0; i < toAssign; i++) {
+      // Who is on this shift so far. Pairing is the first rule that depends on
+      // it, so it cannot be decided in the eligibility pass above.
+      const onThisShift = new Set<string>();
+      let placed = 0;
+      for (let i = 0; i < candidates.length && placed < toAssign; i++) {
         const emp = candidates[i];
+        if (!this._pairingAllows(emp.id, onThisShift, problem.pairings)) continue;
+        onThisShift.add(emp.id);
+        placed += 1;
         const hours = shiftHours(shift);
 
         assignments.push({
