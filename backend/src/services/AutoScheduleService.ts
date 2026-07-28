@@ -45,6 +45,20 @@ interface AutoScheduleResult {
   /** The engine that actually produced this schedule. */
   engine: 'or-tools' | 'greedy';
   /**
+   * Published assignments this run preserved.
+   *
+   * Reported alongside the broken ones because "nothing moved" is exactly the
+   * answer a re-run on unchanged inputs should give, and an empty broken list
+   * on its own is indistinguishable from a diff that was never computed.
+   */
+  keptCommitments: number;
+  /**
+   * Published assignments this run had to break — someone was told they were
+   * working and now is not. The one outcome a re-solve must never produce
+   * silently.
+   */
+  brokenCommitments: Array<{ userId: number; shiftId: number }>;
+  /**
    * True when the optimal engine (or-tools) was requested but the run fell back
    * to greedy (Python unavailable/timed out, or the solver errored). Always
    * false for an intentionally-selected greedy draft. Lets the UI flag "this is
@@ -86,6 +100,9 @@ export class AutoScheduleService {
         scheduleId,
         assignmentsCreated: 0,
         totalShifts: 0,
+        // A schedule with no shifts has no commitments to keep or break.
+        keptCommitments: 0,
+        brokenCommitments: [],
         coveragePercentage: 0,
         status: 'EMPTY',
         engine: config.optimization.engine === 'or-tools' ? 'or-tools' : 'greedy',
@@ -117,6 +134,23 @@ export class AutoScheduleService {
     // before the change appeared to violate a limit that did not apply when it
     // ran. Users with no contract keep the historical defaults, so an
     // installation that has not set contracts up behaves exactly as before.
+    // Commitments on THIS schedule: assignments a previous run published and
+    // people have been told about. The optimizer plans AROUND them rather than
+    // reconsidering them, and the diff below reports any it had to break.
+    const [pinnedRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT sa.user_id, sa.shift_id
+         FROM shift_assignments sa
+         JOIN shifts s ON s.id = sa.shift_id
+        WHERE s.schedule_id = ?
+          AND sa.is_pinned = 1
+          AND sa.status IN ('pending', 'confirmed')`,
+      [scheduleId]
+    );
+    const pinned = pinnedRows.map((r) => ({
+      employee_id: String(r.user_id),
+      shift_id: String(r.shift_id),
+    }));
+
     const contracts = new EmploymentContractService(this.pool);
     const contractLimits = await contracts.resolveLimitsForPeriod(
       empRows.map((e) => e.id as number),
@@ -196,6 +230,7 @@ export class AutoScheduleService {
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
         };
       }),
+      pinned_assignments: pinned,
       preferences: [],
       constraints: {
         max_hours_per_week: 40,
@@ -249,6 +284,26 @@ export class AutoScheduleService {
     // so counting attempts overstated the result whenever the optimizer
     // re-proposed an assignment that already existed — the reported coverage was
     // wrong in exactly the case where it mattered (a re-run).
+    // The DIFF is the deliverable, not the schedule.
+    //
+    // A planner approving a re-solve needs to know what CHANGED for whom, not
+    // to re-read a whole month. And every broken commitment is someone who was
+    // told they were working and now is not — the one thing a re-solve must
+    // never do silently. `kept` is reported too, because "nothing moved" is
+    // exactly the answer a re-run on unchanged inputs should give, and an empty
+    // diff is indistinguishable from a diff that was never computed.
+    const proposed = new Set(assignments.map((a) => `${a.employeeId}:${a.shiftId}`));
+    const brokenCommitments = pinned
+      .filter((p) => !proposed.has(`${p.employee_id}:${p.shift_id}`))
+      .map((p) => ({ userId: Number(p.employee_id), shiftId: Number(p.shift_id) }));
+    const keptCommitments = pinned.length - brokenCommitments.length;
+    if (brokenCommitments.length > 0) {
+      logger.warn(
+        `Optimization for schedule=${scheduleId} broke ${brokenCommitments.length} published ` +
+          `commitment(s); affected users: ${[...new Set(brokenCommitments.map((b) => b.userId))].join(', ')}`
+      );
+    }
+
     const INSERT_CHUNK_SIZE = 500;
     const conn = await this.pool.getConnection();
     let inserted = 0;
@@ -293,6 +348,8 @@ export class AutoScheduleService {
       engine,
       degraded,
       degradedReason,
+      keptCommitments,
+      brokenCommitments,
     };
   }
 }
