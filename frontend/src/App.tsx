@@ -78,6 +78,7 @@ const Timeline = lazy(() => import('./pages/Timeline/Timeline'));
 const Skills = lazy(() => import('./pages/Admin/Skills'));
 const MyAssignments = lazy(() => import('./pages/Assignments/MyAssignments'));
 const TimeOff = lazy(() => import('./pages/TimeOff/TimeOff'));
+const ShiftSwaps = lazy(() => import('./pages/ShiftSwaps/ShiftSwaps'));
 
 /**
  * Main Application Component
@@ -184,6 +185,7 @@ const App: React.FC = () => {
           } />
           <Route path="my-shifts" element={<MyAssignments />} />
           <Route path="time-off" element={<TimeOff />} />
+          <Route path="shift-swaps" element={<ShiftSwaps />} />
           <Route path="admin/skills" element={
             <PermissionRoute permission="employee.read">
               <Skills />
