@@ -19,11 +19,16 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useMyAssignmentsQuery, useAssignmentMutations } from '../../hooks/useAssignments';
 import type { Assignment } from '../../types';
+import { formatTime } from '../../utils/format';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
+
+/** The shared formatter, with the dash these tables use for an absent time. */
+const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -41,11 +46,10 @@ const formatDate = (value?: string | Date | null): string => {
   }
 };
 
-const time = (value?: string): string => (value ? value.slice(0, 5) : '—');
 
 const MyAssignments: React.FC = () => {
   const { user } = useAuth();
-  const [message, setMessage] = useState<string | null>(null);
+  const { message, run: act } = useActionFeedback();
 
   // The self-service endpoint, not the planner's listing with a filter: the
   // latter is gated on `assignment.manage` and would 403 for everyone this
@@ -53,17 +57,6 @@ const MyAssignments: React.FC = () => {
   const assignments = useMyAssignmentsQuery(user?.id ? Number(user.id) : null);
   const { confirm, decline } = useAssignmentMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      // The server explains WHY an assignment cannot change state — a
-      // cancelled one cannot be confirmed, a past one cannot be declined —
-      // and that explanation is more use than "failed".
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   return (
     <div className="container-fluid py-3">
@@ -99,7 +92,7 @@ const MyAssignments: React.FC = () => {
               <tr key={String(assignment.id)}>
                 <td>{formatDate(assignment.shiftDate)}</td>
                 <td>
-                  {time(assignment.startTime)}–{time(assignment.endTime)}
+                  {shiftTime(assignment.startTime)}–{shiftTime(assignment.endTime)}
                 </td>
                 <td>{assignment.departmentName ?? '—'}</td>
                 <td>

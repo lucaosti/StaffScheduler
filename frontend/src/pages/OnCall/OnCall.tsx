@@ -26,8 +26,12 @@ import {
 } from '../../hooks/useOnCall';
 import { useEmployeesQuery } from '../../hooks/useEmployees';
 import type { OnCallPeriod } from '../../services/onCallService';
+import { formatTime } from '../../utils/format';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
-const time = (value?: string): string => (value ? value.slice(0, 5) : '—');
+/** The shared formatter, with the dash these tables use for an absent time. */
+const shiftTime = (value?: string): string => formatTime(value) || '—';
+
 
 const isoDay = (offset = 0): string => {
   const d = new Date();
@@ -37,6 +41,7 @@ const isoDay = (offset = 0): string => {
 
 const OnCall: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const permissions = user?.permissions ?? [];
   const canRead = permissions.includes('schedule.read');
   const canManage = permissions.includes('oncall.manage');
@@ -45,7 +50,6 @@ const OnCall: React.FC = () => {
   const [to, setTo] = useState(isoDay(30));
   const [openPeriod, setOpenPeriod] = useState<OnCallPeriod | null>(null);
   const [assignUserId, setAssignUserId] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
 
   const mine = useMyOnCallQuery({ start: from, end: to });
   // Gated on the permission rather than fetched and hidden: the rota is a
@@ -59,14 +63,6 @@ const OnCall: React.FC = () => {
   const employees = useEmployeesQuery('', '', canManage && openPeriod !== null);
   const { remove, assign, unassign } = useOnCallMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const coverage = (p: OnCallPeriod) => {
     const short = p.assignedCount < p.minStaff;
@@ -124,7 +120,7 @@ const OnCall: React.FC = () => {
         <ul className="list-group mb-4">
           {(mine.data ?? []).map((p) => (
             <li key={p.id} className="list-group-item">
-              {p.date} {time(p.startTime)}–{time(p.endTime)}
+              {p.date} {shiftTime(p.startTime)}–{shiftTime(p.endTime)}
               {p.departmentName ? ` — ${p.departmentName}` : ''}
             </li>
           ))}
@@ -159,7 +155,7 @@ const OnCall: React.FC = () => {
                   <tr key={p.id}>
                     <td>{p.date}</td>
                     <td>
-                      {time(p.startTime)}–{time(p.endTime)}
+                      {shiftTime(p.startTime)}–{shiftTime(p.endTime)}
                     </td>
                     <td>{p.departmentName ?? p.departmentId}</td>
                     <td>{coverage(p)}</td>
@@ -194,8 +190,8 @@ const OnCall: React.FC = () => {
       {openPeriod && (
         <div className="card">
           <div className="card-header">
-            Who is on call — {openPeriod.date} {time(openPeriod.startTime)}–
-            {time(openPeriod.endTime)}
+            Who is on call — {openPeriod.date} {shiftTime(openPeriod.startTime)}–
+            {shiftTime(openPeriod.endTime)}
           </div>
           <div className="card-body">
             <QueryState

@@ -22,6 +22,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useTimeOffQuery, useTimeOffMutations } from '../../hooks/useTimeOff';
 import type { TimeOffRequest } from '../../types';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -36,13 +37,13 @@ const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 const TimeOff: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const canApprove = (user?.permissions ?? []).includes('timeoff.approve');
 
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
   const [type, setType] = useState<string>('vacation');
   const [reason, setReason] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
 
   const mine = useTimeOffQuery(user?.id ? { userId: Number(user.id) } : {});
   // Only asked for by someone who can act on it: a queue nobody may decide is
@@ -50,16 +51,6 @@ const TimeOff: React.FC = () => {
   const queue = useTimeOffQuery({ status: 'pending' }, canApprove);
   const { request, approve, reject, cancel } = useTimeOffMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      // The server explains overlaps and illegal transitions by name; a
-      // generic failure would discard the only explanation there is.
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

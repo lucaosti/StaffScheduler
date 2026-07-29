@@ -30,6 +30,11 @@ import {
 } from '../../hooks/useShiftSwaps';
 import type { Assignment, ShiftSwapRequest } from '../../types';
 import type { SwapCandidate } from '../../services/shiftSwapService';
+import { formatTime } from '../../utils/format';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
+
+/** The shared formatter, with the dash these tables use for an absent time. */
+const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -38,35 +43,26 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: 'bg-secondary',
 };
 
-const time = (value?: string): string => (value ? value.slice(0, 5) : '—');
 
 const describe = (a: Assignment): string =>
-  `${String(a.shiftDate ?? '').slice(0, 10)} ${time(a.startTime)}–${time(a.endTime)}`;
+  `${String(a.shiftDate ?? '').slice(0, 10)} ${shiftTime(a.startTime)}–${shiftTime(a.endTime)}`;
 
 const describeCandidate = (c: SwapCandidate): string =>
-  `${c.date} ${time(c.startTime)}–${time(c.endTime)}`;
+  `${c.date} ${shiftTime(c.startTime)}–${shiftTime(c.endTime)}`;
 
 const ShiftSwaps: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const myId = user?.id ? Number(user.id) : null;
   const canDecide = (user?.permissions ?? []).includes('shiftswap.approve');
 
   const [giving, setGiving] = useState<Assignment | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const mine = useMyAssignmentsQuery(myId);
   const requests = useSwapRequestsQuery();
   const candidates = useSwapCandidatesQuery(giving ? Number(giving.id) : null);
   const { propose, approve, decline, cancel } = useSwapMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const swappable = (mine.data ?? []).filter(
     (a: Assignment) => a.status === 'pending' || a.status === 'confirmed'
