@@ -139,6 +139,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'timeline.read',
     },
     {
+      path: '/admin/employment-contracts',
+      icon: 'bi-file-earmark-text',
+      label: 'Contracts',
+      requiredPermission: 'employee.read',
+    },
+    {
       path: '/admin/skills',
       icon: 'bi-award',
       label: 'Skills',
