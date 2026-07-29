@@ -55,17 +55,43 @@ const JWT_COOKIE_OPTIONS = {
 // on ordinary API calls, shrinking its exposure. It lives for the full refresh
 // lifetime so the session survives many access-token expiries.
 //
-// Coupling to the API prefix: routes are mounted under both `/api` (legacy)
-// and `/api/v1` (canonical). This path matches the SPA's `/api/auth/refresh`,
-// which is what the frontend uses today. When the legacy `/api` prefix is
-// retired in favour of `/api/v1` (#319), this path MUST move to
-// `/api/v1/auth/refresh` in lockstep, or the browser will stop sending the
-// refresh cookie to the endpoint.
-const REFRESH_COOKIE_OPTIONS = {
-  ...BASE_COOKIE_OPTIONS,
-  path: '/api/auth/refresh',
-  maxAge: config.jwt.refreshExpiresInMs,
+// Coupling to the API prefix: routes are mounted under both `/api` (legacy) and
+// `/api/v1` (canonical), and a browser sends a path-scoped cookie only to paths
+// that START WITH the cookie's path. A hardcoded `/api/auth/refresh` therefore
+// meant a client using the CANONICAL prefix exclusively could call
+// `/api/v1/auth/refresh` and never have the cookie sent to it — so its session
+// died at the first access-token expiry, fifteen minutes in. `/api/v1` was
+// documented as the prefix to migrate to while its refresh flow did not work.
+//
+// The path is now derived from the prefix the request arrived on, so both
+// prefixes are fully functional and retiring the legacy one (#319) no longer
+// requires editing this constant in lockstep with the mount table.
+//
+// Deriving it rather than widening it to `/api` is the point: a wide path would
+// attach the long-lived refresh token to EVERY api call, which is exactly the
+// exposure the narrow scope exists to prevent.
+/**
+ * Clears the refresh cookie on BOTH prefixes.
+ *
+ * A session started on one prefix and ended on the other would otherwise leave
+ * the cookie in place: `clearCookie` only matches a cookie whose path it names.
+ * The token is revoked server-side either way, so what is left behind is a
+ * browser repeatedly presenting a dead credential — harmless, and confusing to
+ * anyone reading a request log.
+ */
+const clearRefreshCookie = (req: Request, res: Response): void => {
+  for (const path of new Set([`${req.baseUrl}/refresh`, '/api/auth/refresh', '/api/v1/auth/refresh'])) {
+    res.clearCookie(REFRESH_COOKIE_NAME, { path });
+  }
 };
+
+const refreshCookieOptions = (req: Request) => ({
+  ...BASE_COOKIE_OPTIONS,
+  // Inside this router `req.baseUrl` is `/api/auth` or `/api/v1/auth`, so this
+  // is the endpoint's own absolute path and nothing else.
+  path: `${req.baseUrl}/refresh`,
+  maxAge: config.jwt.refreshExpiresInMs,
+});
 
 export const createAuthRouter = (pool: Pool) => {
   const router = Router();
@@ -87,9 +113,13 @@ export const createAuthRouter = (pool: Pool) => {
   };
 
   /** Issues a fresh refresh token for a user and sets the (path-scoped) refresh cookie. */
-  const setRefreshCookie = async (res: Response, userId: number): Promise<void> => {
+  const setRefreshCookie = async (
+    req: Request,
+    res: Response,
+    userId: number
+  ): Promise<void> => {
     const { token } = await refreshTokens.issue(userId);
-    res.cookie(REFRESH_COOKIE_NAME, token, REFRESH_COOKIE_OPTIONS);
+    res.cookie(REFRESH_COOKIE_NAME, token, refreshCookieOptions(req));
   };
 
   /**
@@ -143,7 +173,7 @@ export const createAuthRouter = (pool: Pool) => {
  *   }
  * }
  */
-router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Request, res: Response) => {
+router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request, res: Response) => {
   try {
     const { email, password, totpCode } = res.locals.body as {
       email: string;
@@ -202,7 +232,7 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (_req: Reques
     // Only the user id is embedded in the access token; permissions are
     // resolved from the database on every request by the auth middleware.
     setAccessCookie(res, user.id);
-    await setRefreshCookie(res, user.id);
+    await setRefreshCookie(req, res, user.id);
     res.json({
       success: true,
       data: {
@@ -264,7 +294,7 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
 router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   const presented = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
   const clearAndReject = () => {
-    res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_OPTIONS.path });
+    clearRefreshCookie(req, res);
     res.clearCookie(JWT_COOKIE_NAME);
     return res.status(401).json({
       success: false,
@@ -291,7 +321,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
   ]);
 
   setAccessCookie(res, user.id);
-  res.cookie(REFRESH_COOKIE_NAME, rotated.issued.token, REFRESH_COOKIE_OPTIONS);
+  res.cookie(REFRESH_COOKIE_NAME, rotated.issued.token, refreshCookieOptions(req));
   res.json({
     success: true,
     data: {
@@ -332,7 +362,7 @@ router.post('/logout', authenticate, asyncHandler(async (req: Request, res: Resp
     await refreshTokens.revoke(presentedRefresh);
   }
   res.clearCookie(JWT_COOKIE_NAME);
-  res.clearCookie(REFRESH_COOKIE_NAME, { path: REFRESH_COOKIE_OPTIONS.path });
+  clearRefreshCookie(req, res);
   res.json({
     success: true,
     message: 'Logged out successfully'
