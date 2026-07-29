@@ -16,6 +16,11 @@ import Skills from './Skills';
 
 const okResponse = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
+let permissions: string[] = ['employee.read', 'employee.manage'];
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 5, permissions } }),
+}));
+
 const getSkills = jest.fn();
 const createSkill = jest.fn();
 const updateSkill = jest.fn();
@@ -40,6 +45,7 @@ const skill = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  permissions = ['employee.read', 'employee.manage'];
   getSkills.mockReset().mockImplementation(() => okResponse([skill()]));
   createSkill.mockReset().mockImplementation(() => okResponse(skill({ id: 2 })));
   updateSkill.mockReset().mockImplementation(() => okResponse(skill({ isActive: false })));
@@ -112,5 +118,24 @@ describe('Skills', () => {
     await screen.findByText('Triage');
     await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(deleteSkill).toHaveBeenCalledWith(1));
+  });
+
+  /**
+   * The route is gated on `employee.read` so a picker can list the catalogue,
+   * while editing takes `employee.manage`. Controls that exist only to come
+   * back 403 teach the reader that the app is broken, not that they lack the
+   * permission.
+   */
+  it('hides every write control without employee.manage', async () => {
+    permissions = ['employee.read'];
+    render(<Skills />);
+    await screen.findByText('Triage');
+
+    expect(screen.queryByRole('button', { name: 'Add skill' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retire' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+    // The catalogue itself is still readable, which is the whole point of the
+    // weaker permission.
+    expect(screen.getByText('Triage')).toBeInTheDocument();
   });
 });
