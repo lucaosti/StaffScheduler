@@ -278,6 +278,17 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
   });
 }));
 
+// Which schedules could precede this one.
+//
+// A monthly schedule continues from the one before it — rest, consecutive days
+// and weekly hours all run across the boundary — and when several generations
+// cover the same period, which one actually happened is a manager's judgement
+// rather than something the system can infer. This is the list to choose from;
+// `PUT /schedules/:id` records the choice as `previousScheduleId`.
+router.get('/:id/predecessor-candidates', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  res.json({ success: true, data: await scheduleService.getPredecessorCandidates(res.locals.params.id) });
+}));
+
 // Replanning proposals.
 //
 // A re-solve of a PUBLISHED schedule records a plan instead of applying it —

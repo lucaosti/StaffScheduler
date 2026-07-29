@@ -235,6 +235,8 @@ export interface CreateScheduleRequest {
   createdBy?: number;
   templateIds?: number[];
   notes?: string;
+  /** Schedule this one continues from; omitted means resolve the default. */
+  previousScheduleId?: number | null;
 }
 
 export interface UpdateScheduleRequest {
@@ -244,6 +246,8 @@ export interface UpdateScheduleRequest {
   status?: 'draft' | 'published' | 'archived';
   departmentId?: number;
   notes?: string;
+  /** Schedule this one continues from; null restores the default. */
+  previousScheduleId?: number | null;
 }
 
 // ============================================================================

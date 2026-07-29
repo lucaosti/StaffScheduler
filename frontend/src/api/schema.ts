@@ -6062,6 +6062,7 @@ export interface paths {
                         departmentId: number;
                         templateIds?: number[];
                         notes?: string;
+                        previousScheduleId?: number | null;
                     };
                 };
             };
@@ -6218,6 +6219,7 @@ export interface paths {
                         status?: "draft" | "published" | "archived";
                         departmentId?: number;
                         notes?: string;
+                        previousScheduleId?: number | null;
                     };
                 };
             };
@@ -6436,6 +6438,48 @@ export interface paths {
                 404: components["responses"]["NotFound"];
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/schedules/{id}/predecessor-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the schedules that could precede this one
+         * @description A monthly schedule continues from the one before it — rest between shifts, consecutive days worked and weekly hours all run across the boundary. When several generations cover the same period, which one actually happened is a manager's judgement rather than something the system can infer, and this is the list to choose from; `PUT /schedules/{id}` records the choice as `previousScheduleId`. Same department, starting no later than this one, newest first. Archived schedules are included on purpose — an abandoned generation for the period is precisely what the choice may be between. Each entry is flagged `isCurrent` (the recorded choice) and `isDefault` (what would be used if nothing is chosen: the most recent published schedule ending before this one starts). Requires `schedule.read`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Candidate predecessors, newest first. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -9734,6 +9778,7 @@ export interface components {
             totalShifts?: number;
             totalAssignments?: number;
             notes?: string | null;
+            previousScheduleId?: number | null;
             /** Format: date-time */
             createdAt?: string;
             /** Format: date-time */
