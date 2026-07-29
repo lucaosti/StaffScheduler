@@ -115,6 +115,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/time-off',
+      icon: 'bi-calendar-x',
+      label: 'Time off',
+      requiredPermission: null,
+    },
+    {
       path: '/timeline',
       icon: 'bi-bar-chart-steps',
       label: 'Timeline',
