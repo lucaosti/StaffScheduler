@@ -121,6 +121,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/shift-swaps',
+      icon: 'bi-arrow-left-right',
+      label: 'Shift swaps',
+      requiredPermission: null,
+    },
+    {
       path: '/timeline',
       icon: 'bi-bar-chart-steps',
       label: 'Timeline',
