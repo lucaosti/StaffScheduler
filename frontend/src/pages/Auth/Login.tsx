@@ -21,6 +21,7 @@ import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../services/apiUtils';
+import { internalPathOr } from '../../utils/internalPath';
 
 /**
  * Interface for location state with redirect information
@@ -49,7 +50,11 @@ const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as LocationState)?.from?.pathname || '/dashboard';
+  // The path the visitor originally asked for, which reached router state
+  // from the URL — so it is input, not code. Validated before it is navigated
+  // to: react-router's open-redirect advisory turns `/\evil.com` into a path
+  // the router accepts and the browser reads as a host.
+  const from = internalPathOr((location.state as LocationState)?.from?.pathname);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
