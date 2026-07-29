@@ -18,6 +18,8 @@ import TemplateModal from '../Shifts/TemplateModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { useShiftsPageData, useDeleteShift, useSaveShift } from '../../hooks/useShifts';
+import { useAuth } from '../../contexts/AuthContext';
+import ShiftAssignmentPanel from '../Assignments/ShiftAssignmentPanel';
 
 interface ConfirmState {
   show: boolean;
@@ -27,6 +29,10 @@ interface ConfirmState {
 }
 
 const Shifts: React.FC = () => {
+  const { user } = useAuth();
+  // Assigning people is `assignment.manage`; editing the shift itself is not.
+  // The menu entry is omitted without it rather than shown and refused.
+  const canAssign = (user?.permissions ?? []).includes('assignment.manage');
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -43,6 +49,7 @@ const Shifts: React.FC = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  const [staffingShift, setStaffingShift] = useState<Shift | null>(null);
   const [confirm, setConfirm] = useState<ConfirmState>({
     show: false,
     title: '',
@@ -251,6 +258,7 @@ const Shifts: React.FC = () => {
           setEditingShift(shift);
           setShowAddModal(true);
         }}
+        onManageStaff={canAssign ? (shift) => setStaffingShift(shift) : undefined}
         onDelete={handleDeleteShift}
         onAddNew={() => {
           setFormError(null);
@@ -273,6 +281,35 @@ const Shifts: React.FC = () => {
         }}
         onSubmit={handleSubmitShift}
       />
+
+      {staffingShift && (
+        <div
+          className="modal d-block"
+          role="dialog"
+          tabIndex={-1}
+          style={{ backgroundColor: 'rgba(0,0,0,.5)' }}
+        >
+          <div className="modal-dialog modal-lg" role="document">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h2 className="modal-title h5">
+                  Staff — {String(staffingShift.date).slice(0, 10)} {staffingShift.startTime}–
+                  {staffingShift.endTime}
+                </h2>
+                <button
+                  type="button"
+                  className="btn-close"
+                  aria-label="Close"
+                  onClick={() => setStaffingShift(null)}
+                />
+              </div>
+              <div className="modal-body">
+                <ShiftAssignmentPanel shiftId={Number(staffingShift.id)} canManage={canAssign} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         show={confirm.show}

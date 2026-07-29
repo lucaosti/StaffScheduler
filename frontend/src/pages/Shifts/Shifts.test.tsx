@@ -10,6 +10,26 @@ const mockDeleteShift = jest.fn();
 const mockGetSchedules = jest.fn();
 const mockGetDepartments = jest.fn();
 
+// The page reads the caller's permissions to decide whether to offer the
+// staffing action, so it needs the auth context. Declared here rather than
+// wrapping in a real provider: these tests are about the shift list, and a
+// provider would drag login state into every one of them.
+let permissions: string[] = ['assignment.manage'];
+jest.mock('../../contexts/AuthContext', () => ({
+  useAuth: () => ({ user: { id: 1, permissions } }),
+}));
+
+jest.mock('../../services/assignmentService', () => ({
+  __esModule: true,
+  getAssignments: jest.fn(() => Promise.resolve({ success: true, data: [] })),
+  getAvailableEmployees: jest.fn(() => Promise.resolve({ success: true, data: [] })),
+  createAssignment: jest.fn(),
+  deleteAssignment: jest.fn(),
+  confirmAssignment: jest.fn(),
+  declineAssignment: jest.fn(),
+  completeAssignment: jest.fn(),
+}));
+
 jest.mock('../../services/shiftService', () => ({
   __esModule: true,
   getShifts: (...args: unknown[]) => mockGetShifts(...args),
@@ -34,6 +54,7 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
 describe('<Shifts />', () => {
   beforeEach(() => {
+    permissions = ['assignment.manage'];
     mockGetSchedules.mockResolvedValue(
       ok([
         {
@@ -139,5 +160,39 @@ describe('<Shifts />', () => {
     const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
     await userEvent.click(cancelBtn);
     expect(mockDeleteShift).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Staffing a shift is `assignment.manage`; editing the shift itself is not.
+   * The menu entry is omitted without it rather than shown and refused — the
+   * same rule the rest of the app follows, and the reason `onManageStaff` is
+   * an optional prop on the table.
+   */
+  it('offers the staffing action only with assignment.manage', async () => {
+    render(<Shifts />);
+    await screen.findByRole('button', { name: /Edit/ });
+    expect(screen.getByRole('button', { name: /Staff/ })).toBeInTheDocument();
+  });
+
+  it('omits the staffing action without assignment.manage', async () => {
+    permissions = [];
+    render(<Shifts />);
+    await screen.findByRole('button', { name: /Edit/ });
+    expect(screen.queryByRole('button', { name: /Staff/ })).not.toBeInTheDocument();
+    // Editing and deleting are unaffected: they are a different authority and
+    // this change must not have narrowed them.
+    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Delete/ })).toBeInTheDocument();
+  });
+
+  it('opens the staffing panel for the chosen shift', async () => {
+    render(<Shifts />);
+    await screen.findByRole('button', { name: /Edit/ });
+    await userEvent.click(screen.getByRole('button', { name: /Staff/ }));
+
+    const dialog = await screen.findByRole('dialog');
+    // The heading names the shift, so a modal opened from a long list is not
+    // ambiguous about which one it is editing.
+    expect(within(dialog).getByText(/2026-04-02/)).toBeInTheDocument();
   });
 });
