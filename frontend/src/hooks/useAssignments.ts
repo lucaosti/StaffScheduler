@@ -22,10 +22,12 @@ import {
   deleteAssignment,
   getAssignments,
   getAvailableEmployees,
+  getMyAssignments,
 } from '../services/assignmentService';
 
 const assignmentKeys = {
   all: ['assignments'] as const,
+  mine: (userId: number) => ['assignments', 'mine', userId] as const,
   list: (filters: AssignmentFilters) => ['assignments', filters] as const,
   available: (shiftId: number) => ['assignments', 'available', shiftId] as const,
 };
@@ -34,6 +36,24 @@ export function useAssignmentsQuery(filters: AssignmentFilters = {}) {
   return useQuery({
     queryKey: assignmentKeys.list(filters),
     queryFn: async (): Promise<Assignment[]> => (await getAssignments(filters)).data ?? [],
+  });
+}
+
+/**
+ * The caller's own assignments.
+ *
+ * A different endpoint from the planner's listing, not a filtered form of it:
+ * `GET /assignments` is gated on `assignment.manage`, which an ordinary
+ * employee does not hold, while `GET /assignments/user/{id}` lets someone read
+ * their own. Reaching for the collection with a `userId` filter looks
+ * equivalent and fails for precisely the audience this serves.
+ */
+export function useMyAssignmentsQuery(userId: number | null) {
+  return useQuery({
+    queryKey: assignmentKeys.mine(userId ?? 0),
+    queryFn: async (): Promise<Assignment[]> =>
+      (await getMyAssignments(userId as number)).data ?? [],
+    enabled: userId !== null,
   });
 }
 

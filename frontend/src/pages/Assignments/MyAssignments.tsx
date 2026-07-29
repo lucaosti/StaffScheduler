@@ -19,10 +19,10 @@
  * @author Luca Ostinelli
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
-import { useAssignmentsQuery, useAssignmentMutations } from '../../hooks/useAssignments';
+import { useMyAssignmentsQuery, useAssignmentMutations } from '../../hooks/useAssignments';
 import type { Assignment } from '../../types';
 
 const STATUS_BADGE: Record<string, string> = {
@@ -47,11 +47,10 @@ const MyAssignments: React.FC = () => {
   const { user } = useAuth();
   const [message, setMessage] = useState<string | null>(null);
 
-  const filters = useMemo(
-    () => (user?.id ? { userId: Number(user.id) } : {}),
-    [user?.id]
-  );
-  const assignments = useAssignmentsQuery(filters);
+  // The self-service endpoint, not the planner's listing with a filter: the
+  // latter is gated on `assignment.manage` and would 403 for everyone this
+  // page exists for.
+  const assignments = useMyAssignmentsQuery(user?.id ? Number(user.id) : null);
   const { confirm, decline } = useAssignmentMutations();
 
   const act = async (run: Promise<unknown>) => {

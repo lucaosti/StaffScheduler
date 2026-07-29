@@ -20,13 +20,14 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 5, permissions: [] } }),
 }));
 
-const getAssignments = jest.fn();
+const getMyAssignments = jest.fn();
 const confirmAssignment = jest.fn();
 const declineAssignment = jest.fn();
 
 jest.mock('../../services/assignmentService', () => ({
   __esModule: true,
-  getAssignments: (...a: unknown[]) => getAssignments(...a),
+  getMyAssignments: (...a: unknown[]) => getMyAssignments(...a),
+  getAssignments: jest.fn(),
   confirmAssignment: (...a: unknown[]) => confirmAssignment(...a),
   declineAssignment: (...a: unknown[]) => declineAssignment(...a),
   completeAssignment: jest.fn(),
@@ -49,18 +50,19 @@ const assignment = (over: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
-  getAssignments.mockReset().mockImplementation(() => okResponse([assignment()]));
+  getMyAssignments.mockReset().mockImplementation(() => okResponse([assignment()]));
   confirmAssignment.mockReset().mockImplementation(() => okResponse(assignment({ status: 'confirmed' })));
   declineAssignment.mockReset().mockImplementation(() => okResponse(assignment({ status: 'cancelled' })));
 });
 
 describe('MyAssignments', () => {
-  it('asks only for the signed-in user\'s assignments', async () => {
+  it('reads through the self-service endpoint, not the planner listing', async () => {
     render(<MyAssignments />);
     await screen.findByText('Ward A');
-    // Without the filter this is every assignment in the organization, which
-    // is both wrong and a disclosure.
-    expect(getAssignments).toHaveBeenCalledWith({ userId: 5 });
+    // `GET /assignments` is gated on `assignment.manage`, which the default
+    // Employee role does not hold — filtering it by userId looks equivalent
+    // and 403s for exactly the audience this page is for.
+    expect(getMyAssignments).toHaveBeenCalledWith(5);
   });
 
   it('shows the shift with its times', async () => {
@@ -69,7 +71,7 @@ describe('MyAssignments', () => {
   });
 
   it('shows the empty state rather than a bare table', async () => {
-    getAssignments.mockImplementation(() => okResponse([]));
+    getMyAssignments.mockImplementation(() => okResponse([]));
     render(<MyAssignments />);
     expect(await screen.findByText(/no shifts assigned/i)).toBeInTheDocument();
   });
@@ -91,7 +93,7 @@ describe('MyAssignments', () => {
   it.each([['confirmed'], ['completed'], ['cancelled']])(
     'offers no decision on a %s shift',
     async (status) => {
-      getAssignments.mockImplementation(() => okResponse([assignment({ status })]));
+      getMyAssignments.mockImplementation(() => okResponse([assignment({ status })]));
       render(<MyAssignments />);
       await screen.findByText('Ward A');
       // A settled shift is not a question. Offering the buttons would invite a
@@ -102,7 +104,7 @@ describe('MyAssignments', () => {
   );
 
   it('keeps a declined shift visible with its status', async () => {
-    getAssignments.mockImplementation(() => okResponse([assignment({ status: 'cancelled' })]));
+    getMyAssignments.mockImplementation(() => okResponse([assignment({ status: 'cancelled' })]));
     render(<MyAssignments />);
     // Removing it would leave someone unsure whether their decline registered.
     expect(await screen.findByText('cancelled')).toBeInTheDocument();
