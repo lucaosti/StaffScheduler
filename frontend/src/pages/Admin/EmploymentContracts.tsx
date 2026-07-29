@@ -28,6 +28,7 @@ import QueryState from '../../components/QueryState';
 import { useContractsQuery, useUserContractsQuery, useContractMutations } from '../../hooks/useEmploymentContracts';
 import { useEmployeesQuery } from '../../hooks/useEmployees';
 import type { EmploymentContract } from '../../services/employmentContractService';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 const LIMITS: Array<{ key: keyof EmploymentContract; label: string }> = [
   { key: 'maxHoursPerWeek', label: 'Max hours / week' },
@@ -42,6 +43,7 @@ const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 const EmploymentContracts: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const canManage = (user?.permissions ?? []).includes('preferences.manage');
 
   const [name, setName] = useState('');
@@ -50,23 +52,12 @@ const EmploymentContracts: React.FC = () => {
   const [contractId, setContractId] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(todayIso());
   const [effectiveTo, setEffectiveTo] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
 
   const contracts = useContractsQuery();
   const employees = useEmployeesQuery('', '', canManage);
   const history = useUserContractsQuery(personId ? Number(personId) : null);
   const { create, assign } = useContractMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      // The overlap refusal is the one that matters: two contracts in force at
-      // once has no defined meaning, and the server says so by name.
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const submitContract = async (e: React.FormEvent) => {
     e.preventDefault();
