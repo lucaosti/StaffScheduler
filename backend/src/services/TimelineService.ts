@@ -44,6 +44,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { ValidationError } from '../errors';
 import { DateUtils } from '../utils';
 import { shiftBoundsMs } from '../optimization/shiftTime';
+import { inClause } from '../utils/sql';
 
 export interface TimelineLane {
   id: string;
@@ -100,7 +101,7 @@ interface TimelineSource {
 }
 
 const scopeClause = (orgUnitIds: number[] | null): string =>
-  orgUnitIds === null ? '' : ` AND d.org_unit_id IN (${orgUnitIds.join(',')})`;
+  orgUnitIds === null ? '' : ` AND d.org_unit_id IN (${inClause(orgUnitIds)})`;
 
 const SOURCES: TimelineSource[] = [
   {
@@ -191,7 +192,7 @@ export class TimelineService {
         if (!lanes.has(laneId)) {
           lanes.set(laneId, { id: laneId, label: row.user_name, kind: 'employee' });
         }
-        const date = row.date instanceof Date ? DateUtils.fromMySQLDate(row.date) : String(row.date).slice(0, 10);
+        const date = DateUtils.toDateString(row.date as string | Date);
         // Absolute instants via the shared overnight arithmetic: a 22:00–06:00
         // bar must be one interval ending the next morning, not one that ends
         // before it begins. Re-deriving that here would be a fifth copy of a
