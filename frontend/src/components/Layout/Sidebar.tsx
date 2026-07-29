@@ -109,6 +109,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/timeline',
+      icon: 'bi-bar-chart-steps',
+      label: 'Timeline',
+      requiredPermission: 'timeline.read',
+    },
+    {
       path: '/approvals/pending',
       icon: 'bi-inbox',
       label: 'Pending Approvals',
