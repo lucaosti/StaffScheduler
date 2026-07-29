@@ -1,9 +1,18 @@
 /**
- * Calendar service — personal iCalendar feed token.
+ * Calendar service — personal iCalendar feed tokens.
  *
- * `getOrCreateCalendarToken` and `rotateCalendarToken` go through the
- * generated client so path and method are checked against the OpenAPI
- * contract at compile time. See `departmentService` for the full rationale.
+ * SEVERAL tokens, each revocable on its own. There used to be one per person,
+ * so obtaining a new one overwrote the old and silently broke every device
+ * already subscribed — the opposite of what a calendar subscription is for.
+ *
+ * The list never carries a raw token: only its digest is stored, so the value
+ * exists exactly once, in the response that created it. A caller that wanted to
+ * show it again would have to keep the secret, which is the whole thing hashing
+ * avoids.
+ *
+ * These go through the generated client so path and method are checked against
+ * the OpenAPI contract at compile time. See `departmentService` for the full
+ * rationale.
  *
  * `buildFeedUrl` deliberately does NOT: the feed URL is handed to an external
  * calendar client (Google Calendar, Outlook, Apple Calendar) to poll on its
@@ -19,24 +28,37 @@
 import { API_BASE_URL } from './apiUtils';
 import { apiClient } from '../api/client';
 
-export interface CalendarTokenResponse {
+/** A token as its owner sees it — never including the raw value. */
+export interface CalendarToken {
+  id: number;
+  label: string;
+  createdAt: string;
+  /** Non-null once revoked; the row stays so the history is visible. */
+  revokedAt: string | null;
+}
+
+/** The one response that ever carries the raw token. */
+export interface CreatedCalendarToken {
+  id: number;
   token: string;
 }
 
-export async function getOrCreateCalendarToken(): Promise<CalendarTokenResponse> {
-  const res = await apiClient.post<CalendarTokenResponse, '/calendar/token'>(
-    '/calendar/token',
-    undefined
-  );
-  return res.data as CalendarTokenResponse;
+export async function listCalendarTokens(): Promise<CalendarToken[]> {
+  const res = await apiClient.get<CalendarToken[], '/calendar/tokens'>('/calendar/tokens');
+  return res.data ?? [];
 }
 
-export async function rotateCalendarToken(): Promise<CalendarTokenResponse> {
-  const res = await apiClient.post<CalendarTokenResponse, '/calendar/token/rotate'>(
-    '/calendar/token/rotate',
-    undefined
-  );
-  return res.data as CalendarTokenResponse;
+export async function createCalendarToken(label: string): Promise<CreatedCalendarToken> {
+  const res = await apiClient.post<CreatedCalendarToken, '/calendar/tokens'>('/calendar/tokens', {
+    label,
+  });
+  return res.data as CreatedCalendarToken;
+}
+
+export async function revokeCalendarToken(id: number): Promise<void> {
+  await apiClient.delete<void, '/calendar/tokens/{id}'>('/calendar/tokens/{id}', {
+    params: { id },
+  });
 }
 
 export function buildFeedUrl(token: string): string {

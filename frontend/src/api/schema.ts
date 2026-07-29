@@ -1512,20 +1512,18 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/calendar/token": {
+    "/calendar/tokens": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
         /**
-         * Get or create calendar feed token
-         * @description Returns a stable token used to authenticate the iCalendar feed URL.
+         * List one's own calendar feed tokens
+         * @description Newest first, revoked ones included — a feed that vanished from the list would be indistinguishable from one that was never created. The raw token is never here: only its SHA-256 digest is stored, so the value exists exactly once, in the response that created it. Authentication alone; these are the caller's own subscriptions.
          */
-        post: {
+        get: {
             parameters: {
                 query?: never;
                 header?: never;
@@ -1534,13 +1532,46 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Token. */
+                /** @description The caller's tokens. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        /**
+         * Create a calendar feed token
+         * @description **Additive**: existing subscriptions keep working. The previous model held one token per person keyed on `user_id`, so obtaining a new one overwrote the hash and silently broke every device already subscribed.
+         *
+         *     The response carries the raw token and is the only place it will ever appear. `label` is required and not defaulted: with several tokens, revoking the right one means knowing which is which, and the moment of creation is the only time the caller knows.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        label: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Created; the raw token is in the response and nowhere else. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
                 401: components["responses"]["Unauthorized"];
             };
         };
@@ -1550,7 +1581,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/calendar/token/rotate": {
+    "/calendar/tokens/{id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1559,20 +1590,25 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        post?: never;
         /**
-         * Rotate the personal calendar feed token
-         * @description Invalidates the previous token.
+         * Revoke one calendar feed token
+         * @description Leaves the others working. The row is kept with a `revoked_at` timestamp rather than deleted, so the history stays visible and the hash stays reserved.
+         *
+         *     Answers 404 for an unknown id, someone else's, or one already revoked — deliberately one answer, so a caller cannot learn whether another person's token id exists. Ownership is enforced inside the statement rather than checked first, leaving no window between the check and the write.
          */
-        post: {
+        delete: {
             parameters: {
                 query?: never;
                 header?: never;
-                path?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
                 cookie?: never;
             };
             requestBody?: never;
             responses: {
-                /** @description New token in `data.token`. */
+                /** @description Revoked. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1580,9 +1616,9 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
             };
         };
-        delete?: never;
         options?: never;
         head?: never;
         patch?: never;

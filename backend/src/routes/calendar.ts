@@ -18,8 +18,9 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
-import { validateParams, validateQuery } from '../middleware/validation';
-import { idParam, calendarFeedQuery } from '../schemas';
+import { validateBody, validateParams, validateQuery } from '../middleware/validation';
+import { idParam, calendarFeedQuery, createCalendarTokenBody } from '../schemas';
+import { NotFoundError } from '../errors';
 import { CalendarService } from '../services/CalendarService';
 import { RbacService } from '../services/RbacService';
 
@@ -46,14 +47,33 @@ export const createCalendarRouter = (pool: Pool): Router => {
   const service = new CalendarService(pool);
   const rbac = new RbacService(pool);
 
-  router.post('/token', authenticate, asyncHandler(async (req: Request, res: Response) => {
-    const token = await service.getOrCreateToken(req.user!.id);
-    res.json({ success: true, data: { token } });
+  // A person's own feed tokens. Authentication alone: these are theirs, and no
+  // permission gates seeing your own subscriptions.
+  router.get('/tokens', authenticate, asyncHandler(async (req: Request, res: Response) => {
+    res.json({ success: true, data: await service.listTokens(req.user!.id) });
   }));
 
-  router.post('/token/rotate', authenticate, asyncHandler(async (req: Request, res: Response) => {
-    const token = await service.rotateToken(req.user!.id);
-    res.json({ success: true, data: { token } });
+  // Creating one is ADDITIVE: existing subscriptions keep working, which is the
+  // whole point of the change. The raw token is in this response and nowhere
+  // else, ever — only its digest is stored.
+  router.post('/tokens', authenticate, validateBody(createCalendarTokenBody), asyncHandler(async (req: Request, res: Response) => {
+    const created = await service.createToken(req.user!.id, res.locals.body.label);
+    res.status(201).json({
+      success: true,
+      data: created,
+      message: 'Token created. Copy it now — it cannot be shown again.',
+    });
+  }));
+
+  router.delete('/tokens/:id', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+    const revoked = await service.revokeToken(req.user!.id, res.locals.params.id);
+    if (!revoked) {
+      // Unknown id, someone else's, or already revoked — all the same answer
+      // from outside, deliberately: distinguishing them would tell a caller
+      // whether another person's token id exists.
+      throw new NotFoundError('Token not found');
+    }
+    res.json({ success: true, message: 'Token revoked' });
   }));
 
   router.get('/feed.ics', validateQuery(calendarFeedQuery), asyncHandler(async (req: Request, res: Response) => {

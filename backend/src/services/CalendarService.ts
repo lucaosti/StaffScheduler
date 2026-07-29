@@ -107,6 +107,15 @@ const computeEtag = (...parts: Array<string | number | null | undefined>): strin
 };
 
 
+/** A feed token as its owner sees it — never including the raw value. */
+export interface CalendarToken {
+  id: number;
+  label: string;
+  createdAt: string;
+  /** Non-null once revoked; the row stays so the history is visible. */
+  revokedAt: string | null;
+}
+
 export class CalendarService {
   constructor(private pool: Pool) {}
 
@@ -115,49 +124,74 @@ export class CalendarService {
   }
 
   /**
-   * Returns a new raw token if none exists for the user, storing its SHA-256
-   * digest. Returns null if a token_hash is already stored — caller must use
-   * rotateToken to obtain a new raw value.
+   * A person's feed tokens, newest first, revoked ones included.
+   *
+   * The raw token is NEVER here: only its digest is stored, so the value is
+   * available exactly once, at creation. Listing it would require keeping the
+   * secret, which is the whole thing hashing avoids — a leaked database would
+   * otherwise hand over every live subscription.
    */
-  async getToken(userId: number): Promise<string | null> {
+  async listTokens(userId: number): Promise<CalendarToken[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT token_hash FROM user_calendar_tokens WHERE user_id = ? LIMIT 1`,
+      `SELECT id, label, created_at, revoked_at
+         FROM calendar_tokens WHERE user_id = ? ORDER BY id DESC`,
       [userId]
     );
-    if (rows.length > 0) return null;
-    const raw = randomBytes(24).toString('hex');
-    await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)`,
-      [userId, this.sha256(raw)]
-    );
-    return raw;
+    return rows.map((row) => ({
+      id: row.id as number,
+      label: row.label as string,
+      createdAt: String(row.created_at),
+      revokedAt: row.revoked_at === null ? null : String(row.revoked_at),
+    }));
   }
 
   /**
-   * Returns the raw token on first call (creates and stores its SHA-256 hash).
-   * On subsequent calls rotates: generates a new token, overwrites the stored hash,
-   * and returns the new raw value — the old subscription URL is invalidated.
-   * Kept for route backwards-compatibility with GET /api/calendar/token.
+   * Issues a new token and returns its raw value, once.
+   *
+   * Additive: existing subscriptions keep working. The old single-token model
+   * overwrote the stored hash, so adding a second device silently broke the
+   * first — the defect this replaces.
    */
-  async getOrCreateToken(userId: number): Promise<string> {
-    const raw = await this.getToken(userId);
-    if (raw !== null) return raw;
-    return this.rotateToken(userId);
-  }
-
-  async rotateToken(userId: number): Promise<string> {
+  async createToken(userId: number, label: string): Promise<{ id: number; token: string }> {
     const raw = randomBytes(24).toString('hex');
-    await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)
-       ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash), created_at = CURRENT_TIMESTAMP`,
-      [userId, this.sha256(raw)]
+    const [res] = await this.pool.execute<ResultSetHeader>(
+      `INSERT INTO calendar_tokens (user_id, label, token_hash) VALUES (?, ?, ?)`,
+      [userId, label, this.sha256(raw)]
     );
-    return raw;
+    return { id: res.insertId, token: raw };
   }
 
+  /**
+   * Revokes one token, leaving the others alone.
+   *
+   * Scoped by `user_id` in the statement rather than checked beforehand: a
+   * caller who guesses another person's token id must not be able to switch off
+   * their calendar, and doing it in one statement leaves no window between the
+   * check and the write.
+   *
+   * Returns false when nothing matched — an unknown id, someone else's, or one
+   * already revoked — so the route can answer honestly instead of reporting a
+   * revocation that did not happen.
+   */
+  async revokeToken(userId: number, tokenId: number): Promise<boolean> {
+    const [res] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE calendar_tokens SET revoked_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+      [tokenId, userId]
+    );
+    return res.affectedRows > 0;
+  }
+
+  /**
+   * The owner of a live token, or null.
+   *
+   * `revoked_at IS NULL` is the entire point of revocation: without it the row
+   * still exists and the feed still works.
+   */
   async resolveToken(token: string): Promise<number | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT user_id FROM user_calendar_tokens WHERE token_hash = ? LIMIT 1`,
+      `SELECT user_id FROM calendar_tokens
+        WHERE token_hash = ? AND revoked_at IS NULL LIMIT 1`,
       [this.sha256(token)]
     );
     return rows.length === 0 ? null : (rows[0].user_id as number);
