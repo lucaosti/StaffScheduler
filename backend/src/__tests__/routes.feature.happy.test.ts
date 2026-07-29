@@ -19,6 +19,10 @@ jest.mock('../middleware/auth', () => ({
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
+  // The 2FA routes drop the cached auth context after a transition, because
+  // `twoFactorEnabled` is part of what that cache stores. A double that omits
+  // it makes the route throw and the test report a 400 on a valid code.
+  invalidateAuthContext: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('../services/TimeOffService');
