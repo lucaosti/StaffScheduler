@@ -127,6 +127,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/on-call',
+      icon: 'bi-telephone',
+      label: 'On call',
+      requiredPermission: null,
+    },
+    {
       path: '/timeline',
       icon: 'bi-bar-chart-steps',
       label: 'Timeline',
