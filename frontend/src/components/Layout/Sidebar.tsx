@@ -133,6 +133,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'schedule.read',
     },
     {
+      path: '/directory',
+      icon: 'bi-journal-text',
+      label: 'Directory',
+      requiredPermission: null,
+    },
+    {
       path: '/on-call',
       icon: 'bi-telephone',
       label: 'On call',
