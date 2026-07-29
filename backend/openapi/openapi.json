@@ -2144,6 +2144,31 @@
         }
       }
     },
+    "/assignments/{id}/swap-candidates": {
+      "get": {
+        "summary": "Shifts this assignment could be swapped for",
+        "description": "Deliberately **not** gated on `assignment.manage`. Proposing a swap is something an ordinary employee does, and every other endpoint listing someone else's assignments requires that permission — which left the swap feature reachable only by a caller who already knew a colleague's numeric assignment id.\n\nTwo things make it safe: the caller must **own** the assignment, and the answer is bounded by the organization units they belong to, resolved server-side from their memberships and narrowed further by a scoped role. Someone attached to no unit gets an empty list rather than everyone.\n\nExcluded: the caller's own assignments, anything on the same shift, shifts that have already run or fall beyond a 60-day horizon, and any exchange that would leave either person holding two overlapping shifts — checked through the same overnight-aware overlap rule assignment creation uses.\n\n`truncated` is true when more assignments matched than were examined for conflicts, so a partial list is never presented as the whole answer.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate assignments, and whether the list is partial."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
     "/assignments/{id}/complete": {
       "patch": {
         "tags": [

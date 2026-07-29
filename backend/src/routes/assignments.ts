@@ -30,6 +30,8 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
+import { SwapCandidateService } from '../services/SwapCandidateService';
+import { RbacService } from '../services/RbacService';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
@@ -145,6 +147,36 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHand
 
   const assignments = await assignmentService.getAssignmentsByUser(userId);
   res.json({ success: true, data: assignments });
+}));
+
+// Which of other people's shifts this one could be swapped for.
+//
+// Deliberately NOT gated on `assignment.manage`. Proposing a swap is something
+// an ordinary employee does, and every other endpoint that lists someone
+// else's assignments requires that permission — which left the swap feature
+// reachable only by someone who already knew a colleague's numeric assignment
+// id. The service enforces the two things that make this safe: the caller must
+// own the assignment, and the answer is bounded by the org units they belong
+// to, resolved here rather than accepted from the request.
+router.get('/:id/swap-candidates', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  const { id } = res.locals.params;
+  const actor = req.user as User;
+
+  // `allowedOrgUnitIds` is NULL for anyone whose roles carry no scope, and
+  // NULL means unrestricted — so membership is the bound, narrowed further by
+  // a scoped role where there is one. The same reasoning as the timeline, and
+  // for the same reason: this is a question about seeing people.
+  const scoped = actor.allowedOrgUnitIds ?? null;
+  let orgUnitIds: number[] | null;
+  if (userHasPermission(actor, 'assignment.manage')) {
+    orgUnitIds = scoped;
+  } else {
+    const own = await new RbacService(pool).getUserOrgUnitSubtreeIds(actor.id);
+    orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
+  }
+
+  const result = await new SwapCandidateService(pool).forAssignment(id, actor.id, orgUnitIds);
+  res.json({ success: true, data: result });
 }));
 
 // Get assignments by shift
