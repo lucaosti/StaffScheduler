@@ -135,6 +135,23 @@ export const createUserBody = z.object({
   skillIds: z.array(z.number().int().positive()).optional(),
 });
 
+/**
+ * The schedule this one continues from.
+ *
+ * Optional, and omitting it is not the same as saying there is none: the
+ * server resolves the most recent published schedule for the department. It
+ * exists for the case the default cannot decide — several generations covering
+ * the same period, where which one actually happened is a manager's judgement.
+ */
+const previousScheduleIdField = {
+  // `z.number()` and not the shared `positiveInt`, which is `z.coerce`: a
+  // coercing schema has an INPUT type of `unknown`, and `zodResolver` types the
+  // form from the input side, so the whole form's field names collapse to
+  // `string` and every handler stops type-checking. `positiveInt` is for path
+  // and query params, where values arrive as strings and coercion is the point.
+  previousScheduleId: z.number().int().positive().nullable().optional(),
+};
+
 export const createScheduleBody = z.object({
   name: z.string().min(1, 'Name is required'),
   startDate: dateString,
@@ -142,6 +159,7 @@ export const createScheduleBody = z.object({
   departmentId: z.number().int().positive(),
   templateIds: z.array(z.number().int().positive()).optional(),
   notes: z.string().optional(),
+  ...previousScheduleIdField,
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const duplicateScheduleBody = z.object({
@@ -210,6 +228,7 @@ export const updateScheduleBody = z.object({
   status: z.enum(['draft', 'published', 'archived']).optional(),
   departmentId: z.number().int().positive().optional(),
   notes: z.string().optional(),
+  ...previousScheduleIdField,
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const updateAssignmentBody = z.object({

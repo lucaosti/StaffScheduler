@@ -170,6 +170,149 @@ describe('ScheduleService.publishSchedule', () => {
   });
 });
 
+/**
+ * Choosing which schedule this one continues from.
+ *
+ * The default — the most recent published schedule for the department — covers
+ * the ordinary case. The column exists for the case it cannot decide: several
+ * generations covering the same period, where which one actually happened is a
+ * manager's judgement.
+ */
+describe('ScheduleService predecessor', () => {
+  it('records an explicit choice on create', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 3 }], null]) // department exists
+      .mockResolvedValueOnce([[], null]) // no overlap
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: '2026-04-01' }], null]) // predecessor
+      .mockResolvedValueOnce([{ insertId: 9 }, null]);
+    execute.mockResolvedValueOnce([[buildScheduleRow({ id: 9 })], null]);
+
+    await new ScheduleService(pool).createSchedule({
+      name: 'May',
+      startDate: '2026-05-01',
+      endDate: '2026-05-31',
+      departmentId: 3,
+      createdBy: 1,
+      previousScheduleId: 5,
+    });
+
+    const [, params] = conn.execute.mock.calls[3];
+    expect(params[params.length - 1]).toBe(5);
+  });
+
+  it('refuses a predecessor in another department', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 3 }], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[{ department_id: 99, start_date: '2026-04-01' }], null]);
+
+    // Continuity is about the same people; another department's schedule says
+    // nothing about how this one's month ended.
+    await expect(
+      new ScheduleService(pool).createSchedule({
+        name: 'May',
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        departmentId: 3,
+        createdBy: 1,
+        previousScheduleId: 5,
+      })
+    ).rejects.toThrow(/same department/);
+  });
+
+  it('refuses a predecessor that starts after this schedule', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 3 }], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: '2026-06-01' }], null]);
+
+    await expect(
+      new ScheduleService(pool).createSchedule({
+        name: 'May',
+        startDate: '2026-05-01',
+        endDate: '2026-05-31',
+        departmentId: 3,
+        createdBy: 1,
+        previousScheduleId: 5,
+      })
+    ).rejects.toThrow(/cannot start after/);
+  });
+
+  it('refuses a schedule continuing from itself', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ status: 'draft' }], null]) // current status
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: '2026-05-01' }], null]); // self
+
+    await expect(
+      new ScheduleService(pool).updateSchedule(9, { previousScheduleId: 9 })
+    ).rejects.toThrow(/cannot continue from itself/);
+  });
+
+  it('treats an explicit null as restoring the default, not as a rejection', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ status: 'draft' }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute.mockResolvedValueOnce([[buildScheduleRow({ id: 9 })], null]);
+
+    await new ScheduleService(pool).updateSchedule(9, { previousScheduleId: null });
+
+    // Null is written without validation: there is nothing to validate, and
+    // the server resolves the default from then on.
+    const [sql, params] = conn.execute.mock.calls[1];
+    expect(sql).toContain('previous_schedule_id = ?');
+    expect(params[0]).toBeNull();
+  });
+});
+
+describe('ScheduleService.getPredecessorCandidates', () => {
+  const candidateRows = [
+    { id: 7, name: 'April (abandoned)', start_date: new Date('2026-04-01T00:00:00Z'), end_date: new Date('2026-04-30T00:00:00Z'), status: 'archived' },
+    { id: 6, name: 'April', start_date: new Date('2026-04-01T00:00:00Z'), end_date: new Date('2026-04-30T00:00:00Z'), status: 'published' },
+  ];
+
+  it('flags the default and the recorded choice', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: new Date('2026-05-01T00:00:00Z'), previous_schedule_id: null }], null])
+      .mockResolvedValueOnce([candidateRows, null]);
+
+    const out = await new ScheduleService(pool).getPredecessorCandidates(9);
+
+    // Archived generations are listed on purpose: an abandoned one for the
+    // period is precisely what the choice may be between.
+    expect(out.map((c) => c.id)).toEqual([7, 6]);
+    expect(out.find((c) => c.id === 6)?.isDefault).toBe(true);
+    expect(out.find((c) => c.id === 7)?.isDefault).toBe(false);
+    expect(out.every((c) => !c.isCurrent)).toBe(true);
+  });
+
+  it('marks nothing as default once a choice has been recorded', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: new Date('2026-05-01T00:00:00Z'), previous_schedule_id: 7 }], null])
+      .mockResolvedValueOnce([candidateRows, null]);
+
+    const out = await new ScheduleService(pool).getPredecessorCandidates(9);
+    expect(out.find((c) => c.id === 7)?.isCurrent).toBe(true);
+    // The default is what would be used if nothing were chosen; showing it
+    // alongside an actual choice would suggest two answers.
+    expect(out.every((c) => !c.isDefault)).toBe(true);
+  });
+
+  it('throws for an unknown schedule', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(new ScheduleService(pool).getPredecessorCandidates(99)).rejects.toThrow(
+      /Schedule not found/
+    );
+  });
+});
+
 describe('ScheduleService.archiveSchedule', () => {
   it('marks a draft/published schedule with no pending assignments as archived', async () => {
     const { pool, conn, execute } = makePool();
