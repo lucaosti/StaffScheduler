@@ -10,7 +10,7 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { isEmailConfigured } from './MailerService';
 
@@ -50,6 +50,48 @@ export class NotificationService {
   constructor(private pool: Pool) {}
 
   /**
+   * The same two writes, on a caller's connection and inside their transaction.
+   *
+   * WHY THIS IS EXPOSED. Some events must not be able to happen without the
+   * person hearing about it — applying a replanning plan removes shifts people
+   * were told they were working. Calling `notify()` there would open a SECOND
+   * transaction: the plan could commit and the notification fail, leaving
+   * someone unassigned and uninformed, which is the failure the outbox exists
+   * to rule out. Joining the caller's transaction makes the notification as
+   * durable as the change it announces.
+   *
+   * Returns the new notification's id rather than the row: the caller's
+   * transaction has not committed yet, so reading it back through the pool
+   * would not see it.
+   */
+  async notifyWithin(conn: PoolConnection, input: CreateNotificationInput): Promise<number> {
+    const [res] = await conn.execute<ResultSetHeader>(
+      `INSERT INTO notifications (user_id, type, title, body, link)
+       VALUES (?, ?, ?, ?, ?)`,
+      [input.userId, input.type, input.title, input.body ?? null, input.link ?? null]
+    );
+
+    // Same-transaction outbox write — only when email can actually be sent and
+    // the recipient has an address, so a no-SMTP deployment never accumulates
+    // rows and the no-email path is unchanged.
+    if (isEmailConfigured()) {
+      const [users] = await conn.execute<RowDataPacket[]>(
+        `SELECT email FROM users WHERE id = ? LIMIT 1`,
+        [input.userId]
+      );
+      const recipient = users[0]?.email as string | undefined;
+      if (recipient) {
+        await conn.execute(
+          `INSERT INTO email_outbox (notification_id, recipient_email, subject, body)
+           VALUES (?, ?, ?, ?)`,
+          [res.insertId, recipient, input.title, input.body ?? input.title]
+        );
+      }
+    }
+    return res.insertId;
+  }
+
+  /**
    * Create an in-app notification and, when email is configured, atomically
    * enqueue its email in the outbox (transactional outbox pattern). Both writes
    * commit together or not at all, so a delivered notification always has its
@@ -61,31 +103,7 @@ export class NotificationService {
     let insertId: number;
     try {
       await conn.beginTransaction();
-      const [res] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO notifications (user_id, type, title, body, link)
-         VALUES (?, ?, ?, ?, ?)`,
-        [input.userId, input.type, input.title, input.body ?? null, input.link ?? null]
-      );
-      insertId = res.insertId;
-
-      // Same-transaction outbox write — only when email can actually be sent and
-      // the recipient has an address, so a no-SMTP deployment never accumulates
-      // rows and the no-email path is unchanged.
-      if (isEmailConfigured()) {
-        const [users] = await conn.execute<RowDataPacket[]>(
-          `SELECT email FROM users WHERE id = ? LIMIT 1`,
-          [input.userId]
-        );
-        const recipient = users[0]?.email as string | undefined;
-        if (recipient) {
-          const body = input.body ?? input.title;
-          await conn.execute(
-            `INSERT INTO email_outbox (notification_id, recipient_email, subject, body)
-             VALUES (?, ?, ?, ?)`,
-            [insertId, recipient, input.title, body]
-          );
-        }
-      }
+      insertId = await this.notifyWithin(conn, input);
       await conn.commit();
     } catch (err) {
       await conn.rollback();
