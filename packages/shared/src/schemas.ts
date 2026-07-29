@@ -955,6 +955,29 @@ export const updateEmploymentContractBody = z.object({
 });
 
 /**
+ * The skills catalogue.
+ *
+ * `isActive` is on the update body and not on create: a skill is created to be
+ * used, and offering "create it already retired" would be a state with no
+ * purpose that someone would eventually reach by accident.
+ */
+export const createSkillBody = z.object({
+  name: shortString,
+  description: z.string().max(2000).nullable().optional(),
+});
+
+export const updateSkillBody = z.object({
+  name: shortString.optional(),
+  description: z.string().max(2000).nullable().optional(),
+  isActive: z.boolean().optional(),
+});
+
+/** Hide retired skills, for pickers that should only offer usable ones. */
+export const skillListQuery = z.object({
+  activeOnly: z.coerce.boolean().optional(),
+});
+
+/**
  * Pairing rules: relationships between two named people that constrain who may
  * share a shift.
  *
