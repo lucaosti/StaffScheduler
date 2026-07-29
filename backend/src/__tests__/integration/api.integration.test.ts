@@ -336,6 +336,8 @@ describe('every fixture-free GET runs against the real schema', () => {
     '/employees',
     '/employment-contracts',
     '/employee-pairings',
+    '/timeline?from=2033-04-01&to=2033-04-07',
+    '/timeline/sources',
     '/modules',
     '/notifications',
     '/notifications/unread-count',
@@ -1340,6 +1342,94 @@ describe('self-service preferences run against the real schema', () => {
     const after = await readLimits();
     expect(Number(after.max_hours_per_week)).toBe(36);
     expect(Number(after.max_consecutive_days)).toBe(5);
+  });
+});
+
+/**
+ * The timeline against real MySQL.
+ *
+ * The scoping is a join through `departments.org_unit_id` and a recursive
+ * subtree walk, so whether MySQL agrees about which rows a person may see is
+ * exactly what has to be proven here — a mocked pool can only show the clause
+ * was composed.
+ */
+describe('timeline runs against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const bars = async (cookie: string, query = 'from=2033-04-01&to=2033-04-07') => {
+    const res = await request(app).get(`/api/timeline?${query}`).set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    return res.body.data;
+  };
+
+  let shiftId: number;
+
+  beforeAll(async () => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, '2033-04-01', '2033-04-07', ?, 'published', ?)`,
+      [`tl-${tag()}`, departmentId, userId]
+    );
+    const [sh] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, '2033-04-02', '22:00:00', '06:00:00', 1, 3, 'open')`,
+      [sc.insertId, departmentId]
+    );
+    shiftId = sh.insertId;
+    await admin.query(
+      `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
+      [shiftId, userId]
+    );
+  });
+
+  it('returns a lane and an overnight bar spanning midnight', async () => {
+    const cookie = await authCookie();
+    const data = await bars(cookie);
+
+    const lane = data.lanes.find((l: { id: string }) => l.id === String(userId));
+    expect(lane).toBeDefined();
+    const bar = data.bars.find((b: { laneId: string }) => b.laneId === String(userId));
+    // One interval ending the following morning, not two fragments and not a
+    // bar that ends before it begins.
+    expect(bar.start).toBe('2033-04-02T22:00:00.000Z');
+    expect(bar.end).toBe('2033-04-03T06:00:00.000Z');
+  });
+
+  it('never returns pay, notes or absence information', async () => {
+    const cookie = await authCookie();
+    const data = await bars(cookie);
+    const serialised = JSON.stringify(data);
+    // The fixture admin has an hourly_rate of 20; if the projection ever
+    // widened, this is where it would show.
+    expect(serialised).not.toContain('hourly_rate');
+    expect(serialised).not.toContain('hourlyRate');
+    expect(Object.keys(data.bars[0]).sort()).toEqual(
+      ['end', 'label', 'laneId', 'source', 'start', 'status']
+    );
+  });
+
+  it('draws only the sources asked for', async () => {
+    const cookie = await authCookie();
+    const data = await bars(cookie, 'from=2033-04-01&to=2033-04-07&sources=on-call');
+    // The shift above is a `shifts` bar, so asking only for on-call must not
+    // return it.
+    expect(data.bars).toEqual([]);
+    expect(data.sources).toEqual(['on-call']);
+  });
+
+  it('rejects a range longer than a quarter', async () => {
+    const cookie = await authCookie();
+    const res = await request(app)
+      .get('/api/timeline?from=2033-01-01&to=2033-12-31')
+      .set('Cookie', cookie);
+    expect(res.status).toBe(400);
+  });
+
+  it('lists the sources', async () => {
+    const cookie = await authCookie();
+    const res = await request(app).get('/api/timeline/sources').set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(expect.arrayContaining(['shifts', 'on-call']));
   });
 });
 

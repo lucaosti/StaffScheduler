@@ -417,6 +417,28 @@ export class RbacService {
    * access). Returns a de-duplicated array when at least one scoped role
    * exists (access restricted to those org-unit subtrees).
    */
+  /**
+   * The org units a person BELONGS to, with everything beneath them.
+   *
+   * Distinct from `computeAllowedOrgUnitIds`, which answers "what may this
+   * person's roles reach" and is NULL — unrestricted — for anyone whose roles
+   * carry no scope. That is the right answer for authority and the wrong one
+   * for visibility: it would show the whole organization's movements to every
+   * employee. This answers "where is this person", which is what a view of
+   * one's own colleagues should be bounded by, and returns an empty list when
+   * they belong nowhere rather than falling back to everything.
+   */
+  async getUserOrgUnitSubtreeIds(userId: number): Promise<number[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT org_unit_id FROM user_org_units WHERE user_id = ?',
+      [userId]
+    );
+    const roots = rows.map((r) => r.org_unit_id as number);
+    if (roots.length === 0) return [];
+    const subtrees = await Promise.all(roots.map((id) => this.getDescendantOrgUnitIds(id)));
+    return [...new Set(subtrees.flat())];
+  }
+
   async computeAllowedOrgUnitIds(roles: UserRoleAssignment[]): Promise<number[] | null> {
     const scopedRoots = roles
       .map((r) => r.scopeOrgUnitId)
