@@ -455,6 +455,18 @@ export const timelineQuery = z.object({
   { message: 'from must be on or before to', path: ['to'] }
 );
 
+/**
+ * A new calendar feed token.
+ *
+ * The label is required and not defaulted: with several tokens, revoking the
+ * right one means knowing which is which, and "Token 3" tells nobody whether it
+ * is the phone that was lost. Making the caller name it is the only point at
+ * which they know.
+ */
+export const createCalendarTokenBody = z.object({
+  label: shortString,
+});
+
 /** Free-text reason recorded with a publish or a deletion. */
 export const auditReasonBody = z.object({
   reason: z.string().max(2000).optional(),

@@ -74,49 +74,101 @@ const makePool = () => {
   return { pool: { execute } as never, execute };
 };
 
-describe('CalendarService.getToken', () => {
-  it('returns null when a token_hash is already stored', async () => {
+/**
+ * Feed tokens.
+ *
+ * The behaviour that matters is that creating one is ADDITIVE. The old shape
+ * held a single token per person keyed on `user_id`, so obtaining a new one
+ * overwrote the hash and silently broke every device already subscribed — the
+ * opposite of what a calendar subscription is for.
+ */
+describe('CalendarService.createToken', () => {
+  it('returns a 48-hex-char raw token and stores only its digest', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[{ token_hash: sha256('abc') }], null]);
-    const service = new CalendarService(pool);
-    expect(await service.getToken(7)).toBeNull();
-    expect(execute).toHaveBeenCalledTimes(1);
+    execute.mockResolvedValueOnce([{ insertId: 5, affectedRows: 1 }, null]);
+
+    const created = await new CalendarService(pool).createToken(7, 'Phone');
+
+    expect(created.token).toMatch(/^[a-f0-9]{48}$/);
+    expect(created.id).toBe(5);
+    // The raw value exists in this response and nowhere else, ever.
+    const [, params] = execute.mock.calls[0];
+    expect(params).toEqual([7, 'Phone', sha256(created.token)]);
+    expect(params).not.toContain(created.token);
   });
 
-  it('creates and returns a new 48-hex-char raw token when none is stored', async () => {
+  it('inserts rather than overwriting, so existing feeds keep working', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]);
-    const service = new CalendarService(pool);
-    const raw = await service.getToken(7);
-    expect(raw).toMatch(/^[a-f0-9]{48}$/);
-    // The stored value must be the SHA-256 of the returned raw token, not the raw token itself.
-    const insertCall = execute.mock.calls[1];
-    expect(insertCall[1][1]).toBe(sha256(raw!));
+    execute.mockResolvedValueOnce([{ insertId: 6, affectedRows: 1 }, null]);
+
+    await new CalendarService(pool).createToken(7, 'Laptop');
+
+    const sql = String(execute.mock.calls[0][0]);
+    expect(sql).toContain('INSERT INTO calendar_tokens');
+    // The old implementation used ON DUPLICATE KEY UPDATE on a user_id primary
+    // key, which is exactly how adding a second device broke the first.
+    expect(sql).not.toContain('ON DUPLICATE KEY');
   });
 });
 
-describe('CalendarService.getOrCreateToken', () => {
-  it('rotates and returns a raw token when one already exists', async () => {
+describe('CalendarService.listTokens', () => {
+  it('never returns the raw value, because it is not stored', async () => {
     const { pool, execute } = makePool();
-    // getToken: hash exists → returns null → falls through to rotateToken
-    execute
-      .mockResolvedValueOnce([[{ token_hash: sha256('existing') }], null])
-      .mockResolvedValueOnce([{ insertId: 0, affectedRows: 1 }, null]);
-    const service = new CalendarService(pool);
-    const token = await service.getOrCreateToken(7);
-    expect(token).toMatch(/^[a-f0-9]{48}$/);
+    execute.mockResolvedValueOnce([
+      [{ id: 1, label: 'Phone', created_at: 'x', revoked_at: null }],
+      null,
+    ]);
+
+    const tokens = await new CalendarService(pool).listTokens(7);
+
+    expect(tokens[0]).toEqual({ id: 1, label: 'Phone', createdAt: 'x', revokedAt: null });
+    expect(JSON.stringify(tokens)).not.toContain('token_hash');
   });
 
-  it('creates a new 48-hex-char token when none is stored', async () => {
+  it('includes revoked tokens', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]);
-    const service = new CalendarService(pool);
-    const token = await service.getOrCreateToken(7);
-    expect(token).toMatch(/^[a-f0-9]{48}$/);
+    execute.mockResolvedValueOnce([
+      [{ id: 1, label: 'Lost phone', created_at: 'x', revoked_at: 'y' }],
+      null,
+    ]);
+
+    const tokens = await new CalendarService(pool).listTokens(7);
+    // A feed that vanished from the list is indistinguishable from one that
+    // was never created, so a revoked row stays visible with its date.
+    expect(tokens[0].revokedAt).toBe('y');
+    expect(String(execute.mock.calls[0][0])).not.toContain('revoked_at IS NULL');
+  });
+});
+
+describe('CalendarService.revokeToken', () => {
+  it('scopes the update by owner in the statement itself', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+
+    expect(await new CalendarService(pool).revokeToken(7, 3)).toBe(true);
+
+    const [sql, params] = execute.mock.calls[0];
+    // Checking ownership beforehand would leave a window between the check and
+    // the write; one statement leaves none.
+    expect(String(sql)).toContain('user_id = ?');
+    expect(params).toEqual([3, 7]);
+  });
+
+  it('reports a miss rather than a revocation that did not happen', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    // Unknown id, someone else's, or already revoked — the caller learns only
+    // that nothing changed.
+    expect(await new CalendarService(pool).revokeToken(7, 999)).toBe(false);
+  });
+
+  it('does not re-revoke an already revoked token', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    await new CalendarService(pool).revokeToken(7, 3);
+    // Otherwise the recorded revocation time would move every time someone
+    // clicked again, losing when access actually stopped.
+    expect(String(execute.mock.calls[0][0])).toContain('revoked_at IS NULL');
   });
 });
 

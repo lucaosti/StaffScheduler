@@ -3028,36 +3028,73 @@
         }
       }
     },
-    "/calendar/token": {
-      "post": {
-        "tags": [
-          "Calendar"
-        ],
-        "summary": "Get or create calendar feed token",
-        "description": "Returns a stable token used to authenticate the iCalendar feed URL.",
+    "/calendar/tokens": {
+      "get": {
+        "summary": "List one's own calendar feed tokens",
+        "description": "Newest first, revoked ones included — a feed that vanished from the list would be indistinguishable from one that was never created. The raw token is never here: only its SHA-256 digest is stored, so the value exists exactly once, in the response that created it. Authentication alone; these are the caller's own subscriptions.",
         "responses": {
           "200": {
-            "description": "Token."
+            "description": "The caller's tokens."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
         }
-      }
-    },
-    "/calendar/token/rotate": {
+      },
       "post": {
-        "tags": [
-          "Calendar"
-        ],
-        "summary": "Rotate the personal calendar feed token",
-        "description": "Invalidates the previous token.",
+        "summary": "Create a calendar feed token",
+        "description": "**Additive**: existing subscriptions keep working. The previous model held one token per person keyed on `user_id`, so obtaining a new one overwrote the hash and silently broke every device already subscribed.\n\nThe response carries the raw token and is the only place it will ever appear. `label` is required and not defaulted: with several tokens, revoking the right one means knowing which is which, and the moment of creation is the only time the caller knows.",
         "responses": {
-          "200": {
-            "description": "New token in `data.token`."
+          "201": {
+            "description": "Created; the raw token is in the response and nowhere else."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "label"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/calendar/tokens/{id}": {
+      "delete": {
+        "summary": "Revoke one calendar feed token",
+        "description": "Leaves the others working. The row is kept with a `revoked_at` timestamp rather than deleted, so the history stays visible and the hash stays reserved.\n\nAnswers 404 for an unknown id, someone else's, or one already revoked — deliberately one answer, so a caller cannot learn whether another person's token id exists. Ownership is enforced inside the statement rather than checked first, leaving no window between the check and the write.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
