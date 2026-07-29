@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import ThemeToggle from '../ThemeToggle';
 import * as notificationService from '../../services/notificationService';
 import type { AppNotification } from '../../services/notificationService';
+import { isInternalPath } from '../../utils/internalPath';
 
 /**
  * Props interface for Header component
@@ -83,7 +84,11 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
         // Swallow: the read-state update is best-effort UI feedback.
       }
     }
-    if (notification.link) navigate(notification.link);
+    // A notification's link is stored data. No producer sets one today and no
+    // endpoint lets a client create a notification, so this is currently
+    // unreachable — but it is one new producer away from being live, and the
+    // guard costs nothing.
+    if (isInternalPath(notification.link)) navigate(notification.link);
   };
 
   const handleMarkAllRead = async (): Promise<void> => {
