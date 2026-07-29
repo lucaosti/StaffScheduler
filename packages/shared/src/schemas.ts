@@ -972,9 +972,16 @@ export const updateSkillBody = z.object({
   isActive: z.boolean().optional(),
 });
 
-/** Hide retired skills, for pickers that should only offer usable ones. */
+/**
+ * Hide retired skills, for pickers that should only offer usable ones.
+ *
+ * NOT `z.coerce.boolean()`. Coercion follows JavaScript truthiness, and a query
+ * string is always a string — so `?activeOnly=false` parses as TRUE and does
+ * the exact opposite of what it says, silently. `'true'`/`'false'` are matched
+ * literally instead, and anything else is a 400 rather than a guess.
+ */
 export const skillListQuery = z.object({
-  activeOnly: z.coerce.boolean().optional(),
+  activeOnly: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
 });
 
 /**

@@ -15,11 +15,19 @@
  */
 
 import React, { useState } from 'react';
+import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useSkillsQuery, useSkillMutations } from '../../hooks/useSkills';
 import type { Skill } from '../../services/skillService';
 
 const Skills: React.FC = () => {
+  const { user } = useAuth();
+  // The route is gated on `employee.read` so a picker can list the catalogue,
+  // but editing it takes `employee.manage`. Without this, everyone saw Add,
+  // Retire and Delete and every click came back 403 — controls that exist only
+  // to fail teach the reader that the app is broken, not that they lack the
+  // permission.
+  const canManage = (user?.permissions ?? []).includes('employee.manage');
   const skills = useSkillsQuery();
   const { create, update, remove } = useSkillMutations();
 
@@ -72,6 +80,7 @@ const Skills: React.FC = () => {
         </div>
       )}
 
+      {canManage && (
       <form className="row g-2 align-items-end mb-4" onSubmit={submit}>
         <div className="col-md-3">
           <label className="form-label" htmlFor="skill-name">Name</label>
@@ -98,6 +107,7 @@ const Skills: React.FC = () => {
           </button>
         </div>
       </form>
+      )}
 
       <QueryState
         isLoading={skills.isLoading}
@@ -116,7 +126,7 @@ const Skills: React.FC = () => {
               <th className="text-end">Employees</th>
               <th className="text-end">Shift requirements</th>
               <th>Status</th>
-              <th />
+              {canManage && <th />}
             </tr>
           </thead>
           <tbody>
@@ -132,22 +142,26 @@ const Skills: React.FC = () => {
                   </span>
                 </td>
                 <td className="text-end">
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-secondary me-2"
-                    onClick={() => retire(skill)}
-                    disabled={update.isPending}
-                  >
-                    {skill.isActive ? 'Retire' : 'Reactivate'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-outline-danger"
-                    onClick={() => destroy(skill)}
-                    disabled={remove.isPending}
-                  >
-                    Delete
-                  </button>
+                  {canManage && (
+                    <>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary me-2"
+                        onClick={() => retire(skill)}
+                        disabled={update.isPending}
+                      >
+                        {skill.isActive ? 'Retire' : 'Reactivate'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => destroy(skill)}
+                        disabled={remove.isPending}
+                      >
+                        Delete
+                      </button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
