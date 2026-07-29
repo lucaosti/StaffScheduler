@@ -14,6 +14,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { formatCurrency } from '../../utils/format';
+import BarChart from '../../components/BarChart';
 import { errorMessage } from '../../utils/notify';
 import {
   useRangeReportsQuery,
@@ -103,6 +104,22 @@ const Reports: React.FC = () => {
         <div className="col-lg-6">
           <div className="card h-100">
             <div className="card-header">Hours worked by user</div>
+            {hours.length > 0 && (
+              <div className="card-body pb-0">
+                <BarChart
+                  caption="Hours worked per person, highest first"
+                  data={[...hours]
+                    // Sorted, because the question a ranking answers is "who is
+                    // highest" — in source order the reader has to scan.
+                    .sort((a, b) => b.hours - a.hours)
+                    .map((row) => ({
+                      label: row.fullName,
+                      value: row.hours,
+                      display: row.hours.toFixed(1),
+                    }))}
+                />
+              </div>
+            )}
             <div className="table-responsive">
               <table className="table table-sm mb-0">
                 <thead>
@@ -136,6 +153,20 @@ const Reports: React.FC = () => {
               <span>Cost by department</span>
               <span className="text-muted">Total: {formatCurrency(totalCost)}</span>
             </div>
+            {cost.length > 0 && (
+              <div className="card-body pb-0">
+                <BarChart
+                  caption="Labour cost per department, highest first"
+                  data={[...cost]
+                    .sort((a, b) => b.cost - a.cost)
+                    .map((row) => ({
+                      label: row.departmentName,
+                      value: row.cost,
+                      display: formatCurrency(row.cost),
+                    }))}
+                />
+              </div>
+            )}
             <div className="table-responsive">
               <table className="table table-sm mb-0">
                 <thead>
@@ -216,6 +247,25 @@ const Reports: React.FC = () => {
                   </div>
                 </div>
               ))}
+            </div>
+            <div className="mb-3">
+              <BarChart
+                caption="Hours per person on this schedule, against the mean"
+                // The mean is drawn because fairness is read as distance from
+                // it: a list of hours answers "how many", the line answers
+                // "compared with whom", which is the actual question.
+                reference={{
+                  value: fairness.stats.mean,
+                  label: `mean, ${fairness.stats.mean.toFixed(1)} hours`,
+                }}
+                data={[...fairness.perUser]
+                  .sort((a, b) => b.hours - a.hours)
+                  .map((row) => ({
+                    label: row.fullName,
+                    value: row.hours,
+                    display: row.hours.toFixed(1),
+                  }))}
+              />
             </div>
             <div className="table-responsive">
               <table className="table table-sm mb-0">

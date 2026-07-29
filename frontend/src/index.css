@@ -17,6 +17,21 @@
   --box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   --box-shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
   --box-shadow-lg: 0 1rem 3rem rgba(0, 0, 0, 0.175);
+
+  /*
+   * Chart series colour.
+   *
+   * A validated sequential blue, with a step chosen per surface rather than
+   * one colour dimmed by the theme: the light step is picked to clear 3:1 on
+   * a near-white surface and the dark step to clear it on a near-black one,
+   * which the same hex cannot do for both. Dark mode is a selection, not an
+   * automatic flip.
+   */
+  --chart-bar: #2a78d6;
+}
+
+[data-bs-theme='dark'] {
+  --chart-bar: #3987e5;
 }
 
 * {
