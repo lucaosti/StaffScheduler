@@ -1137,6 +1137,16 @@ Feature requests are welcome — describe the use case, not just the solution.
 
 The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and ESLint 8 (the flat-config migration required by ESLint 9+ is pending). Security patches within these majors are applied as they appear.
 
+**react-router 6, with the open redirect closed at the call sites.** `react-router-dom ^6.30.4` carries two *moderate* advisories fixed only in 7.x, which is a major with a different route API. `npm audit` gates on *high*, so neither would ever fail the build — this is the record that they were examined rather than missed.
+
+The **SSR hydration** advisory (`deserializeErrors`) needs server-side rendering; this app is a client-rendered Vite SPA and never calls the affected path.
+
+The **open redirect via backslash** was reachable, which the grep found rather than the reasoning predicted. Two navigations take a target that did not come from the code: the post-login redirect replays the path an unauthenticated visitor originally asked for (`Login.tsx`, from router state set by `ProtectedRoute`), and a notification may carry a link (`Header.tsx`, currently never populated by any producer and with no endpoint to create one — unreachable today, one new producer from being live).
+
+Both now go through `isInternalPath`, which requires a single leading slash and rejects anything a browser could read as an authority: `//host`, and `/\host` — the backslash being the bypass, and the case a reader would not think to reject. That guard is not a substitute for the upgrade, it is better than one: never navigating to an unvalidated external target is correct whichever router version is underneath, and it survives the migration.
+
+**Re-check trigger:** raise the v7 upgrade when a route change is wanted for its own sake, when a *high* advisory lands on the 6.x line, or when the guard's assumptions stop holding — a new notification producer taking a link from user input would be the likely one.
+
 ## 13. Architectural decisions
 
 | Decision | Rationale |
