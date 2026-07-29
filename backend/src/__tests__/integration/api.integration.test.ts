@@ -338,6 +338,8 @@ describe('every fixture-free GET runs against the real schema', () => {
     '/employee-pairings',
     '/timeline?from=2033-04-01&to=2033-04-07',
     '/timeline/sources',
+    '/skills',
+    '/skills?activeOnly=true',
     '/modules',
     '/notifications',
     '/notifications/unread-count',
@@ -1342,6 +1344,82 @@ describe('self-service preferences run against the real schema', () => {
     const after = await readLimits();
     expect(Number(after.max_hours_per_week)).toBe(36);
     expect(Number(after.max_consecutive_days)).toBe(5);
+  });
+});
+
+/**
+ * The skills catalogue against real MySQL.
+ *
+ * The refusal to delete a skill in use is the point, and it can only be proven
+ * here: the counts come from correlated subqueries over `user_skills` and
+ * `shift_skills`, and the danger being guarded against is a cascade the
+ * database would perform happily.
+ */
+describe('skills catalogue runs against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  it('creates, reads back with usage counts, and deletes when unused', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/skills')
+      .set('Cookie', cookie)
+      .send({ name: `Triage ${tag()}`, description: 'Assess and prioritise' });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ employeeCount: 0, shiftRequirementCount: 0 });
+
+    const removed = await request(app)
+      .delete(`/api/skills/${created.body.data.id}`)
+      .set('Cookie', cookie);
+    // Nothing references it, so deleting is safe and a typo is not permanent.
+    expect(removed.status).toBe(200);
+  });
+
+  it('refuses a duplicate name rather than letting the unique key surface as a 500', async () => {
+    const cookie = await authCookie();
+    const name = `Duplicate ${tag()}`;
+    expect((await request(app).post('/api/skills').set('Cookie', cookie).send({ name })).status).toBe(201);
+    const again = await request(app).post('/api/skills').set('Cookie', cookie).send({ name });
+    expect(again.status).toBe(409);
+  });
+
+  it('refuses to delete a skill an employee holds, and counts it', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/skills')
+      .set('Cookie', cookie)
+      .send({ name: `Held ${tag()}` });
+    const skillId = created.body.data.id;
+    await admin.query(`INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)`, [userId, skillId]);
+
+    const read = await request(app).get(`/api/skills/${skillId}`).set('Cookie', cookie);
+    expect(read.body.data.employeeCount).toBe(1);
+
+    // The foreign key cascades, so without this guard the delete would succeed
+    // and strip the skill from the person holding it.
+    const refused = await request(app).delete(`/api/skills/${skillId}`).set('Cookie', cookie);
+    expect(refused.status).toBe(409);
+  });
+
+  it('retires a skill and hides it from the active list', async () => {
+    const cookie = await authCookie();
+    const created = await request(app)
+      .post('/api/skills')
+      .set('Cookie', cookie)
+      .send({ name: `Retired ${tag()}` });
+    const skillId = created.body.data.id;
+
+    const retired = await request(app)
+      .put(`/api/skills/${skillId}`)
+      .set('Cookie', cookie)
+      .send({ isActive: false });
+    expect(retired.status).toBe(200);
+    expect(retired.body.data.isActive).toBe(false);
+
+    const active = await request(app).get('/api/skills?activeOnly=true').set('Cookie', cookie);
+    expect(active.body.data.map((s: { id: number }) => s.id)).not.toContain(skillId);
+    const all = await request(app).get('/api/skills').set('Cookie', cookie);
+    // Still there, because existing requirements naming it stay meaningful.
+    expect(all.body.data.map((s: { id: number }) => s.id)).toContain(skillId);
   });
 });
 

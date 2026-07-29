@@ -75,6 +75,7 @@ const ApprovalWorkflows = lazy(() => import('./pages/Admin/ApprovalWorkflows'));
 const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
 const Attendance = lazy(() => import('./pages/Attendance/Attendance'));
 const Timeline = lazy(() => import('./pages/Timeline/Timeline'));
+const Skills = lazy(() => import('./pages/Admin/Skills'));
 
 /**
  * Main Application Component
@@ -177,6 +178,11 @@ const App: React.FC = () => {
           <Route path="timeline" element={
             <PermissionRoute permission="timeline.read">
               <Timeline />
+            </PermissionRoute>
+          } />
+          <Route path="admin/skills" element={
+            <PermissionRoute permission="employee.read">
+              <Skills />
             </PermissionRoute>
           } />
           <Route path="approvals/pending" element={<PendingApprovals />} />
