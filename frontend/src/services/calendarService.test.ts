@@ -5,8 +5,9 @@
  */
 
 import {
-  getOrCreateCalendarToken,
-  rotateCalendarToken,
+  createCalendarToken,
+  listCalendarTokens,
+  revokeCalendarToken,
   buildFeedUrl,
 } from './calendarService';
 
@@ -28,23 +29,44 @@ afterEach(() => jest.resetAllMocks());
 
 const fetchMock = () => global.fetch as jest.Mock;
 
-describe('getOrCreateCalendarToken', () => {
-  it('POSTs to /calendar/token and returns the token', async () => {
-    const result = await getOrCreateCalendarToken();
+describe('createCalendarToken', () => {
+  it('POSTs the label to /calendar/tokens and returns the raw token', async () => {
+    const result = await createCalendarToken('Phone');
     const [url, init] = fetchMock().mock.calls[0];
-    expect(url).toMatch(/\/calendar\/token$/);
+    expect(url).toMatch(/\/calendar\/tokens$/);
     expect(init?.method).toBe('POST');
+    // The label travels because revoking the right one later requires knowing
+    // which is which, and creation is the only moment the caller knows.
+    expect(JSON.parse(String(init?.body))).toEqual({ label: 'Phone' });
     expect(result).toEqual({ token: 'tok-abc' });
   });
 });
 
-describe('rotateCalendarToken', () => {
-  it('POSTs to /calendar/token/rotate and returns the new token', async () => {
-    const result = await rotateCalendarToken();
+describe('listCalendarTokens', () => {
+  it('GETs /calendar/tokens', async () => {
+    global.fetch = jest.fn().mockResolvedValue(
+      okJson({ success: true, data: [{ id: 1, label: 'Phone', createdAt: 'x', revokedAt: null }] })
+    );
+    const tokens = await listCalendarTokens();
     const [url, init] = fetchMock().mock.calls[0];
-    expect(url).toMatch(/\/calendar\/token\/rotate$/);
-    expect(init?.method).toBe('POST');
-    expect(result).toEqual({ token: 'tok-abc' });
+    expect(url).toMatch(/\/calendar\/tokens$/);
+    expect(init?.method ?? 'GET').toBe('GET');
+    expect(tokens).toHaveLength(1);
+  });
+
+  it('returns an empty list rather than undefined', async () => {
+    global.fetch = jest.fn().mockResolvedValue(okJson({ success: true }));
+    // Callers map over this; `undefined` would be a crash rather than "none".
+    await expect(listCalendarTokens()).resolves.toEqual([]);
+  });
+});
+
+describe('revokeCalendarToken', () => {
+  it('DELETEs the one token', async () => {
+    await revokeCalendarToken(3);
+    const [url, init] = fetchMock().mock.calls[0];
+    expect(url).toMatch(/\/calendar\/tokens\/3$/);
+    expect(init?.method).toBe('DELETE');
   });
 });
 

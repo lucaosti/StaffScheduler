@@ -1,6 +1,18 @@
 /**
  * Tests for CalendarSection (Settings → Calendar tab).
  *
+ * Rewritten when the feature changed shape: one token per person became several
+ * named ones, revocable independently. Every case that still means something
+ * was kept — the client instructions, the clipboard paths, the confirmation
+ * before a destructive act — and the ones about "rotating" went, because
+ * rotation was the defect: it overwrote the only token and silently broke every
+ * device already subscribed.
+ *
+ * The assertion carrying the most weight is that the URL is shown only for a
+ * token just created. Only the digest is stored, so the raw value exists
+ * exactly once; a page that offered to redisplay it would be claiming the
+ * secret had been kept.
+ *
  * @author Luca Ostinelli
  */
 
@@ -8,123 +20,188 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const mockGetOrCreate = jest.fn();
-const mockRotate = jest.fn();
-const mockBuildFeedUrl = jest.fn((token: string) => `http://localhost:3001/calendar/feed.ics?token=${token}`);
+const mockList = jest.fn();
+const mockCreate = jest.fn();
+const mockRevoke = jest.fn();
+const mockBuildFeedUrl = jest.fn(
+  (token: string) => `http://localhost:3001/calendar/feed.ics?token=${token}`
+);
 
 jest.mock('../../services/calendarService', () => ({
   __esModule: true,
-  getOrCreateCalendarToken: (...args: unknown[]) => mockGetOrCreate(...args),
-  rotateCalendarToken: (...args: unknown[]) => mockRotate(...args),
+  listCalendarTokens: (...args: unknown[]) => mockList(...args),
+  createCalendarToken: (...args: unknown[]) => mockCreate(...args),
+  revokeCalendarToken: (...args: unknown[]) => mockRevoke(...args),
   buildFeedUrl: (...args: unknown[]) => mockBuildFeedUrl(...(args as [string])),
 }));
 
 const CalendarSection = require('./CalendarSection').default as React.FC;
 
+const token = (over: Record<string, unknown> = {}) => ({
+  id: 1,
+  label: 'Phone',
+  createdAt: '2033-04-01T10:00:00Z',
+  revokedAt: null,
+  ...over,
+});
+
 describe('<CalendarSection />', () => {
   beforeEach(() => {
-    mockGetOrCreate.mockResolvedValue({ token: 'test-token-123' });
-    mockRotate.mockResolvedValue({ token: 'rotated-token-456' });
+    mockList.mockResolvedValue([token()]);
+    mockCreate.mockResolvedValue({ id: 2, token: 'fresh-token' });
+    mockRevoke.mockResolvedValue(undefined);
     mockBuildFeedUrl.mockImplementation(
-      (token: string) => `http://localhost:3001/calendar/feed.ics?token=${token}`
+      (t: string) => `http://localhost:3001/calendar/feed.ics?token=${t}`
     );
   });
 
   afterEach(() => jest.clearAllMocks());
 
-  it('shows a loading spinner initially then renders the feed URL', async () => {
+  it('lists the existing subscriptions', async () => {
     render(<CalendarSection />);
-
-    await screen.findByLabelText('Calendar feed URL');
-
-    const input = screen.getByLabelText('Calendar feed URL') as HTMLInputElement;
-    expect(input.value).toContain('test-token-123');
+    expect(await screen.findByRole('cell', { name: 'Phone' })).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
   });
 
-  it('shows an error alert if token loading fails', async () => {
-    mockGetOrCreate.mockRejectedValue(new Error('Network error'));
+  it('shows no feed URL for a token it did not just create', async () => {
     render(<CalendarSection />);
+    await screen.findByRole('cell', { name: 'Phone' });
+    // The raw value is not stored, so there is nothing to show — and offering
+    // to show it would claim otherwise.
+    expect(screen.queryByLabelText('Calendar feed URL')).not.toBeInTheDocument();
+  });
 
-    await screen.findByRole('alert');
-    expect(screen.getByText(/network error/i)).toBeInTheDocument();
+  it('says so plainly when there are none', async () => {
+    mockList.mockResolvedValue([]);
+    render(<CalendarSection />);
+    expect(await screen.findByText(/no feed urls yet/i)).toBeInTheDocument();
+  });
+
+  it('keeps a revoked subscription visible with its date', async () => {
+    mockList.mockResolvedValue([token({ label: 'Lost phone', revokedAt: '2033-05-02T09:00:00Z' })]);
+    render(<CalendarSection />);
+    // "Did I already revoke the lost phone?" is the question this screen exists
+    // to answer; a vanished row cannot answer it.
+    expect(await screen.findByText(/Revoked 2033-05-02/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
+  });
+
+  it('shows an error alert if loading fails', async () => {
+    mockList.mockRejectedValue(new Error('boom'));
+    render(<CalendarSection />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
   });
 
   it('renders all four client instruction sections', async () => {
     render(<CalendarSection />);
-
-    await screen.findByLabelText('Calendar feed URL');
-
-    expect(screen.getAllByText(/Google Calendar/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Apple Calendar/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Outlook/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Thunderbird/).length).toBeGreaterThan(0);
+    await screen.findByRole('cell', { name: 'Phone' });
+    // A client's name also occurs inside its own steps and refresh note, so
+    // matching plain text is ambiguous; the accordion trigger is the one
+    // occurrence that means "this section exists".
+    for (const client of ['Google Calendar', 'Apple Calendar', 'Outlook', 'Thunderbird']) {
+      expect(screen.getByRole('button', { name: new RegExp(`^${client}`) })).toBeInTheDocument();
+    }
   });
 
-  it('copies the feed URL to clipboard when Copy is clicked', async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: jest.fn().mockResolvedValue(undefined) },
+  describe('creating a subscription', () => {
+    it('sends the label and shows the URL once', async () => {
+      render(<CalendarSection />);
+      await screen.findByRole('cell', { name: 'Phone' });
+
+      await userEvent.type(screen.getByLabelText('Name this subscription'), 'Work laptop');
+      await userEvent.click(screen.getByRole('button', { name: 'Create feed URL' }));
+
+      await waitFor(() => expect(mockCreate).toHaveBeenCalledWith('Work laptop'));
+      const input = (await screen.findByLabelText('Calendar feed URL')) as HTMLInputElement;
+      expect(input.value).toContain('fresh-token');
+      expect(screen.getByText(/one and only time it can be shown/i)).toBeInTheDocument();
     });
 
-    render(<CalendarSection />);
-    await screen.findByLabelText('Calendar feed URL');
-
-    await userEvent.click(screen.getByRole('button', { name: /copy feed url to clipboard/i }));
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      expect.stringContaining('test-token-123')
-    );
-    await screen.findByText(/copied/i);
-  });
-
-  it('shows error when clipboard write fails', async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: jest.fn().mockRejectedValue(new Error('Clipboard denied')) },
+    it('refreshes the list, so the new one appears without a reload', async () => {
+      render(<CalendarSection />);
+      await screen.findByRole('cell', { name: 'Phone' });
+      await userEvent.type(screen.getByLabelText('Name this subscription'), 'Work laptop');
+      await userEvent.click(screen.getByRole('button', { name: 'Create feed URL' }));
+      await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
     });
 
-    render(<CalendarSection />);
-    await screen.findByLabelText('Calendar feed URL');
+    it('hides the URL once the user says they have saved it', async () => {
+      render(<CalendarSection />);
+      await screen.findByRole('cell', { name: 'Phone' });
+      await userEvent.type(screen.getByLabelText('Name this subscription'), 'Work laptop');
+      await userEvent.click(screen.getByRole('button', { name: 'Create feed URL' }));
+      await screen.findByLabelText('Calendar feed URL');
 
-    await userEvent.click(screen.getByRole('button', { name: /copy feed url to clipboard/i }));
-    await screen.findByRole('alert');
-  });
-
-  it('rotates the token when confirmed via window.confirm', async () => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
-
-    render(<CalendarSection />);
-    await screen.findByRole('button', { name: /rotate token/i });
-
-    await userEvent.click(screen.getByRole('button', { name: /rotate token/i }));
-
-    await waitFor(() => {
-      const input = screen.getByLabelText('Calendar feed URL') as HTMLInputElement;
-      expect(input.value).toContain('rotated-token-456');
+      await userEvent.click(screen.getByRole('button', { name: 'I have saved it' }));
+      expect(screen.queryByLabelText('Calendar feed URL')).not.toBeInTheDocument();
     });
 
-    (window.confirm as jest.Mock).mockRestore();
+    it('relays a refusal', async () => {
+      mockCreate.mockRejectedValue(new Error('Label is required'));
+      render(<CalendarSection />);
+      await screen.findByRole('cell', { name: 'Phone' });
+      await userEvent.type(screen.getByLabelText('Name this subscription'), 'x');
+      await userEvent.click(screen.getByRole('button', { name: 'Create feed URL' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Label is required');
+    });
   });
 
-  it('does not rotate the token when window.confirm is cancelled', async () => {
-    jest.spyOn(window, 'confirm').mockReturnValue(false);
+  describe('the clipboard', () => {
+    const created = async () => {
+      render(<CalendarSection />);
+      await screen.findByRole('cell', { name: 'Phone' });
+      await userEvent.type(screen.getByLabelText('Name this subscription'), 'Work laptop');
+      await userEvent.click(screen.getByRole('button', { name: 'Create feed URL' }));
+      await screen.findByLabelText('Calendar feed URL');
+    };
 
-    render(<CalendarSection />);
-    await screen.findByRole('button', { name: /rotate token/i });
+    it('copies the URL', async () => {
+      const writeText = jest.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { clipboard: { writeText } });
+      await created();
 
-    await userEvent.click(screen.getByRole('button', { name: /rotate token/i }));
-    expect(mockRotate).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: /copy feed url/i }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(expect.stringContaining('fresh-token')));
+    });
 
-    (window.confirm as jest.Mock).mockRestore();
+    it('reports a clipboard failure instead of appearing to succeed', async () => {
+      Object.assign(navigator, {
+        clipboard: { writeText: jest.fn().mockRejectedValue(new Error('denied')) },
+      });
+      await created();
+
+      await userEvent.click(screen.getByRole('button', { name: /copy feed url/i }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(/failed to copy/i);
+    });
   });
 
-  it('shows an error alert when rotation fails', async () => {
-    jest.spyOn(window, 'confirm').mockReturnValue(true);
-    mockRotate.mockRejectedValue(new Error('Rotation failed'));
+  describe('revoking', () => {
+    it('asks first, and says the others are unaffected', async () => {
+      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+      render(<CalendarSection />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
 
-    render(<CalendarSection />);
-    await screen.findByRole('button', { name: /rotate token/i });
+      // The reassurance matters: under the old single-token model this action
+      // broke every subscription, so a user who remembers that needs telling.
+      expect(confirmSpy.mock.calls[0][0]).toMatch(/other feeds are unaffected/i);
+      await waitFor(() => expect(mockRevoke).toHaveBeenCalledWith(1));
+      confirmSpy.mockRestore();
+    });
 
-    await userEvent.click(screen.getByRole('button', { name: /rotate token/i }));
-    await screen.findByText(/rotation failed/i);
+    it('does nothing when the confirmation is cancelled', async () => {
+      const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false);
+      render(<CalendarSection />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
+      expect(mockRevoke).not.toHaveBeenCalled();
+      confirmSpy.mockRestore();
+    });
 
-    (window.confirm as jest.Mock).mockRestore();
+    it('relays a failure', async () => {
+      jest.spyOn(window, 'confirm').mockReturnValue(true);
+      mockRevoke.mockRejectedValue(new Error('Token not found'));
+      render(<CalendarSection />);
+      await userEvent.click(await screen.findByRole('button', { name: 'Revoke' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Token not found');
+    });
   });
 });

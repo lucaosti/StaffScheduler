@@ -240,16 +240,40 @@ describe('notifications router', () => {
 });
 
 describe('calendar router', () => {
-  it('POST /token returns the token', async () => {
-    (CalendarService.prototype.getOrCreateToken as jest.Mock) = jest.fn().mockResolvedValue('abc');
-    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool))).post('/api/calendar/token');
+  it('POST /tokens returns the raw token once', async () => {
+    (CalendarService.prototype.createToken as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 1, token: 'abc' });
+    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool)))
+      .post('/api/calendar/tokens')
+      .send({ label: 'Phone' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.token).toBe('abc');
+    // The message is part of the contract: the value cannot be shown again.
+    expect(res.body.message).toMatch(/cannot be shown again/i);
+  });
+
+  it('GET /tokens lists them without any raw value', async () => {
+    (CalendarService.prototype.listTokens as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ id: 1, label: 'Phone', createdAt: 'x', revokedAt: null }]);
+    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool))).get('/api/calendar/tokens');
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(res.body)).not.toContain('token_hash');
+  });
+
+  it('DELETE /tokens/:id revokes one', async () => {
+    (CalendarService.prototype.revokeToken as jest.Mock) = jest.fn().mockResolvedValue(true);
+    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool))).delete('/api/calendar/tokens/3');
     expect(res.status).toBe(200);
   });
 
-  it('POST /token/rotate returns the new token', async () => {
-    (CalendarService.prototype.rotateToken as jest.Mock) = jest.fn().mockResolvedValue('xyz');
-    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool))).post('/api/calendar/token/rotate');
-    expect(res.status).toBe(200);
+  it('DELETE /tokens/:id 404s when nothing matched', async () => {
+    (CalendarService.prototype.revokeToken as jest.Mock) = jest.fn().mockResolvedValue(false);
+    const res = await request(mountApp('/api/calendar', createCalendarRouter(fakePool))).delete('/api/calendar/tokens/999');
+    // Unknown id, someone else's, or already revoked — one answer, so a caller
+    // cannot learn whether another person's token id exists.
+    expect(res.status).toBe(404);
   });
 });
 

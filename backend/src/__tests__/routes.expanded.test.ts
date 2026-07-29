@@ -1724,10 +1724,12 @@ describe('audit-logs router (extended)', () => {
 describe('calendar router (extended)', () => {
   const app = () => mountApp('/api/calendar', createCalendarRouter(fakePool));
 
-  it('GET /me does not require auth via 200 on token resolved', async () => {
-    (CalendarService.prototype.getOrCreateToken as jest.Mock) = jest.fn().mockResolvedValue('x');
-    const res = await request(app()).post('/api/calendar/token');
-    expect(res.status).toBe(200);
+  it('creates a feed token', async () => {
+    (CalendarService.prototype.createToken as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 1, token: 'x' });
+    const res = await request(app()).post('/api/calendar/tokens').send({ label: 'Phone' });
+    expect(res.status).toBe(201);
   });
 });
 
