@@ -44,6 +44,9 @@
 import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
+import { NotificationService } from './NotificationService';
+import { AuditLogService } from './AuditLogService';
+import { DateUtils } from '../utils';
 
 export interface ProposedAssignment {
   shiftId: number;
@@ -71,6 +74,16 @@ export interface ReplanProposal {
   createdAt: string;
 }
 
+/**
+ * "YYYY-MM-DD" from whichever shape mysql2 hands back for a DATE column.
+ *
+ * `String(dateCol).slice(0, 10)` gives "Sat Jan 01" when the driver
+ * materializes it as a `Date`, which is how a date once reached a user-facing
+ * string as a weekday.
+ */
+const formatShiftDate = (value: unknown): string =>
+  value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
+
 const mapProposal = (row: RowDataPacket): ReplanProposal => ({
   id: row.id as number,
   scheduleId: row.schedule_id as number,
@@ -87,7 +100,13 @@ const mapProposal = (row: RowDataPacket): ReplanProposal => ({
 });
 
 export class ReplanProposalService {
-  constructor(private pool: Pool) {}
+  private notifications: NotificationService;
+  private audit: AuditLogService;
+
+  constructor(private pool: Pool) {
+    this.notifications = new NotificationService(pool);
+    this.audit = new AuditLogService(pool);
+  }
 
   /**
    * Records a solved plan for a published schedule, awaiting a decision.
@@ -217,16 +236,16 @@ export class ReplanProposalService {
       // shifts and to live assignments: a declined or cancelled row is not
       // something the plan is replacing.
       const [existing] = await conn.execute<RowDataPacket[]>(
-        `SELECT sa.id, sa.shift_id, sa.user_id
+        `SELECT sa.id, sa.shift_id, sa.user_id, sa.is_pinned,
+                s.date, s.start_time, s.end_time
            FROM shift_assignments sa
            JOIN shifts s ON s.id = sa.shift_id
           WHERE s.schedule_id = ?
             AND sa.status IN ('pending', 'confirmed')`,
         [proposal.scheduleId]
       );
-      const doomed = existing
-        .filter((r) => !keep.has(`${r.shift_id}:${r.user_id}`))
-        .map((r) => r.id as number);
+      const losses = existing.filter((r) => !keep.has(`${r.shift_id}:${r.user_id}`));
+      const doomed = losses.map((r) => r.id as number);
 
       let removed = 0;
       if (doomed.length > 0) {
@@ -254,6 +273,8 @@ export class ReplanProposalService {
         inserted += ins.affectedRows;
       }
 
+      await this.announceLosses(conn, proposal, losses, decidedBy);
+
       await conn.commit();
       logger.info(
         `Replan proposal ${id} applied by user=${decidedBy}: ` +
@@ -266,6 +287,87 @@ export class ReplanProposalService {
     } finally {
       conn.release();
     }
+  }
+
+  /**
+   * Tells each person what they have lost, before the transaction commits.
+   *
+   * WHY IN THE TRANSACTION. Removing a shift someone was told they were
+   * working is the one change that must not be able to happen silently. A
+   * separate `notify()` call would open its own transaction, so the removal
+   * could commit and the notification fail — leaving someone unassigned and
+   * uninformed, which is exactly the failure the outbox exists to rule out.
+   *
+   * WHY ONE MESSAGE PER PERSON. A re-solve that moves forty people can take
+   * several shifts from the same one. Forty separate emails to that person is
+   * not diligence, it is noise that buries the fact that their week changed;
+   * the shifts are listed in a single message instead.
+   *
+   * ONLY PINNED LOSSES ARE ANNOUNCED. An unpinned assignment on a published
+   * schedule is one nobody has been told about — a planner's draft addition,
+   * or an assignment deliberately unpinned so the optimizer could move it.
+   * Announcing those would tell people a shift was taken away that they never
+   * knew they had.
+   */
+  private async announceLosses(
+    conn: PoolConnection,
+    proposal: ReplanProposal,
+    losses: RowDataPacket[],
+    decidedBy: number
+  ): Promise<void> {
+    const broken = losses.filter((r) => Boolean(r.is_pinned));
+    if (broken.length === 0) return;
+
+    const byUser = new Map<number, RowDataPacket[]>();
+    for (const row of broken) {
+      const uid = row.user_id as number;
+      byUser.set(uid, [...(byUser.get(uid) ?? []), row]);
+    }
+
+    for (const [userId, rows] of byUser) {
+      const when = rows
+        .map((r) => `${formatShiftDate(r.date)} ${String(r.start_time).slice(0, 5)}–${String(r.end_time).slice(0, 5)}`)
+        .sort();
+      await this.notifications.notifyWithin(conn, {
+        userId,
+        type: 'schedule.commitment_broken',
+        title:
+          when.length === 1
+            ? 'A shift you were assigned has been reassigned'
+            : `${when.length} shifts you were assigned have been reassigned`,
+        // Plain and specific. The person needs to know which dates are no
+        // longer theirs; why the schedule was re-planned is a conversation
+        // with their manager, not something a generated message should
+        // attempt to explain.
+        body: `The schedule was re-planned and these shifts are no longer assigned to you: ${when.join('; ')}.`,
+        link: `/schedules/${proposal.scheduleId}`,
+      });
+    }
+
+    // One audit row per broken commitment, not per notification: the record is
+    // of what happened to each assignment.
+    //
+    // THE ACTOR IS THE APPROVER, deliberately. The optimizer produced the plan,
+    // but a person decided to apply it — which is the whole point of the
+    // proposal step. Attributing it to a machine would now be the synthetic
+    // attribution, hiding a real decision behind one.
+    for (const row of broken) {
+      await this.audit.write({
+        actorId: decidedBy,
+        action: 'schedule.commitment_broken',
+        entityType: 'shift_assignment',
+        entityId: row.id as number,
+        description:
+          `Commitment broken by replan proposal #${proposal.id}: user ${row.user_id} ` +
+          `removed from shift ${row.shift_id} on ${formatShiftDate(row.date)}`,
+        before: { userId: row.user_id, shiftId: row.shift_id, isPinned: true },
+      });
+    }
+
+    logger.warn(
+      `Replan proposal ${proposal.id} broke ${broken.length} commitment(s) ` +
+        `across ${byUser.size} employee(s); all were notified`
+    );
   }
 
   /**

@@ -1424,6 +1424,26 @@ describe('replanning a published schedule', () => {
     // used to happen, which is what made `brokenCommitments` describe people
     // who were in fact still assigned.
     expect(await assignedUsers(scheduleId)).toEqual([replacement.insertId]);
+
+    // And the person whose shift it was has been told, in the same commit as
+    // the removal — the notification cannot outlive a rollback or be lost
+    // while the removal stands.
+    const [notes] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT title, body FROM notifications
+        WHERE user_id = ? AND type = 'schedule.commitment_broken'`,
+      [userId]
+    );
+    expect(notes).toHaveLength(1);
+    expect(String(notes[0].body)).toContain('09:00–17:00');
+
+    // One audit row per broken commitment. Who it is attributed to is pinned
+    // by the unit tests, where the approver and the affected person are
+    // different people; here they are both the fixture admin, so this only
+    // proves the row is written.
+    const [audits] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT id FROM audit_logs WHERE action = 'schedule.commitment_broken'`
+    );
+    expect(audits).toHaveLength(1);
   });
 
   it('refuses the whole plan when a shift it names has gone', async () => {
