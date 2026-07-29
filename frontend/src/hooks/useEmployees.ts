@@ -42,8 +42,14 @@ const departmentKeys = {
 };
 
 /** Employees filtered server-side by search/department. */
-export function useEmployeesQuery(search: string, department: string) {
+/**
+ * @param enabled false when the caller has no use for the list yet — an
+ * employee picker that is not on screen is a request for an answer nobody
+ * reads. Defaults to true so existing callers are unaffected.
+ */
+export function useEmployeesQuery(search: string, department: string, enabled = true) {
   return useQuery({
+    enabled,
     queryKey: employeeKeys.list(search, department),
     queryFn: async () => {
       const res = await employeeService.getEmployees({
