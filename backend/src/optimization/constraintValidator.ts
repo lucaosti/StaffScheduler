@@ -563,11 +563,22 @@ export interface CategoryLoad {
   days: number;
 }
 
-/** Whether a date falls on a configured weekend day (`0` = Sunday). */
-const isWeekendDate = (problem: OptimizationProblem, date: string): boolean => {
-  const days = new Set(problem.constraints?.weekend_days ?? DEFAULT_WEEKEND_DAYS);
+/**
+ * Whether a date falls on a configured weekend day (`0` = Sunday).
+ *
+ * Exported in this problem-free form because the same question is asked of
+ * history that predates the problem — the carried equity load in
+ * `Employee.carried_load` classifies shifts from earlier schedules, which are
+ * not in `problem.shifts`. Re-deriving "what counts as a weekend" there would
+ * be a second authority on it, and this file is the one.
+ */
+export const isWeekendDay = (date: string, weekendDays?: number[]): boolean => {
+  const days = new Set(weekendDays ?? DEFAULT_WEEKEND_DAYS);
   return days.has(new Date(`${date}T00:00:00Z`).getUTCDay());
 };
+
+const isWeekendDate = (problem: OptimizationProblem, date: string): boolean =>
+  isWeekendDay(date, problem.constraints?.weekend_days);
 
 /**
  * Whether a shift overlaps the configured night window.
@@ -577,8 +588,11 @@ const isWeekendDate = (problem: OptimizationProblem, date: string): boolean => {
  * starts "late". Overlap catches both, and it is the definition someone
  * working the shift would recognise.
  */
-const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean => {
-  const window = problem.constraints?.night_window ?? DEFAULT_NIGHT_WINDOW;
+export const isNightWork = (
+  shift: ShiftTimes,
+  nightWindow?: { start: string; end: string }
+): boolean => {
+  const window = nightWindow ?? DEFAULT_NIGHT_WINDOW;
   const nightStart = timeToMinutes(window.start);
   const nightEnd = timeToMinutes(window.end);
   const start = timeToMinutes(shift.start_time);
@@ -596,6 +610,9 @@ const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean 
   }
   return false;
 };
+
+const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean =>
+  isNightWork(shift, problem.constraints?.night_window);
 
 /**
  * Days of a given shift category worked per employee.
@@ -621,7 +638,8 @@ const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean 
 export function categoryLoads(
   problem: OptimizationProblem,
   assignments: ValidatedAssignment[],
-  matches: (shift: ShiftTimes) => boolean
+  matches: (shift: ShiftTimes) => boolean,
+  carried?: 'weekend' | 'night'
 ): CategoryLoad[] {
   const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
 
@@ -635,7 +653,12 @@ export function categoryLoads(
     for (const ext of emp.existing_assignments ?? []) {
       if (matches(ext)) days.add(ext.date);
     }
-    return { employeeId: emp.id, days: days.size };
+    // History from BEFORE this period, so equity is measured across months
+    // rather than reset by each one. Added to the load rather than compared
+    // separately: the spread already answers "who is losing more days", and
+    // the only thing wrong with it was that it started counting today.
+    const before = (carried && emp.carried_load?.[carried]) ?? 0;
+    return { employeeId: emp.id, days: days.size + before };
   });
 }
 
@@ -648,13 +671,13 @@ export const weekendLoads = (
   problem: OptimizationProblem,
   assignments: ValidatedAssignment[]
 ): CategoryLoad[] =>
-  categoryLoads(problem, assignments, (s) => isWeekendDate(problem, s.date));
+  categoryLoads(problem, assignments, (s) => isWeekendDate(problem, s.date), 'weekend');
 
 /** Night days worked per employee. */
 export const nightLoads = (
   problem: OptimizationProblem,
   assignments: ValidatedAssignment[]
-): CategoryLoad[] => categoryLoads(problem, assignments, (s) => isNightShift(problem, s));
+): CategoryLoad[] => categoryLoads(problem, assignments, (s) => isNightShift(problem, s), 'night');
 
 /**
  * Gap between the most and least weekend-loaded employee.
