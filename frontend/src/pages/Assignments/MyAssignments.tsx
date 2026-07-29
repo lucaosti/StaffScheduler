@@ -23,7 +23,7 @@ import React from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useMyAssignmentsQuery, useAssignmentMutations } from '../../hooks/useAssignments';
-import type { Assignment } from '../../types';
+import type { ShiftAssignment } from '../../types';
 import { formatTime } from '../../utils/format';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 
@@ -88,7 +88,7 @@ const MyAssignments: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {(assignments.data ?? []).map((assignment: Assignment) => (
+            {(assignments.data ?? []).map((assignment: ShiftAssignment) => (
               <tr key={String(assignment.id)}>
                 <td>{formatDate(assignment.shiftDate)}</td>
                 <td>

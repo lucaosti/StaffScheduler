@@ -11,7 +11,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Assignment } from '../types';
+import type { ShiftAssignment } from '../types';
 import {
   AssignmentFilters,
   AvailableEmployee,
@@ -35,7 +35,7 @@ const assignmentKeys = {
 export function useAssignmentsQuery(filters: AssignmentFilters = {}) {
   return useQuery({
     queryKey: assignmentKeys.list(filters),
-    queryFn: async (): Promise<Assignment[]> => (await getAssignments(filters)).data ?? [],
+    queryFn: async (): Promise<ShiftAssignment[]> => (await getAssignments(filters)).data ?? [],
   });
 }
 
@@ -51,7 +51,7 @@ export function useAssignmentsQuery(filters: AssignmentFilters = {}) {
 export function useMyAssignmentsQuery(userId: number | null) {
   return useQuery({
     queryKey: assignmentKeys.mine(userId ?? 0),
-    queryFn: async (): Promise<Assignment[]> =>
+    queryFn: async (): Promise<ShiftAssignment[]> =>
       (await getMyAssignments(userId as number)).data ?? [],
     enabled: userId !== null,
   });
