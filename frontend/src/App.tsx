@@ -83,6 +83,7 @@ const OnCall = lazy(() => import('./pages/OnCall/OnCall'));
 const EmploymentContracts = lazy(() => import('./pages/Admin/EmploymentContracts'));
 const ShiftTemplates = lazy(() => import('./pages/Shifts/ShiftTemplates'));
 const UserAccounts = lazy(() => import('./pages/Admin/UserAccounts'));
+const Directory = lazy(() => import('./pages/Directory/Directory'));
 
 /**
  * Main Application Component
@@ -201,6 +202,7 @@ const App: React.FC = () => {
               <EmploymentContracts />
             </PermissionRoute>
           } />
+          <Route path="directory" element={<Directory />} />
           <Route path="admin/users" element={
             <PermissionRoute permission="user.read">
               <UserAccounts />
