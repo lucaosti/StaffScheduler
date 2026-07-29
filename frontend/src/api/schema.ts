@@ -9690,6 +9690,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Timeline (Gantt) data for a date range
+         * @description Lanes, bars and a scope — the data behind a Gantt view, deliberately smaller than scheduling so it can represent things that are not shifts. A lane is something time is booked against, a bar is a half-open interval on one lane. Bars carry absolute instants, so an overnight interval is one bar ending the next morning rather than two fragments.
+         *
+         *     Draws on the sources named in `sources` (comma-separated; all of them when omitted) — see `GET /timeline/sources`.
+         *
+         *     **Scope is resolved server-side and cannot be requested.** `timeline.read` shows the caller's own organization units and their subtrees, computed from their memberships and narrowed further by their role scope if they have one; `timeline.read_all` lifts the restriction. Someone attached to no unit sees an empty timeline rather than everything.
+         *
+         *     **The projection is narrow on purpose**: name, activity, start, end and status. Never pay, never the reason for an absence, never assignment notes — and absences do not appear at all, because showing who is away on the covered days makes leave and sickness deducible.
+         *
+         *     A request may span at most 92 days.
+         */
+        get: {
+            parameters: {
+                query: {
+                    from: string;
+                    to: string;
+                    sources?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Lanes and bars for the range. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/timeline/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the timeline sources a client may request
+         * @description Read from the server rather than duplicated in the frontend, so adding a source does not leave a stale list behind. Requires `timeline.read`.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Source keys. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

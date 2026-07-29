@@ -12363,6 +12363,71 @@
           }
         }
       }
+    },
+    "/timeline": {
+      "get": {
+        "summary": "Timeline (Gantt) data for a date range",
+        "description": "Lanes, bars and a scope — the data behind a Gantt view, deliberately smaller than scheduling so it can represent things that are not shifts. A lane is something time is booked against, a bar is a half-open interval on one lane. Bars carry absolute instants, so an overnight interval is one bar ending the next morning rather than two fragments.\n\nDraws on the sources named in `sources` (comma-separated; all of them when omitted) — see `GET /timeline/sources`.\n\n**Scope is resolved server-side and cannot be requested.** `timeline.read` shows the caller's own organization units and their subtrees, computed from their memberships and narrowed further by their role scope if they have one; `timeline.read_all` lifts the restriction. Someone attached to no unit sees an empty timeline rather than everything.\n\n**The projection is narrow on purpose**: name, activity, start, end and status. Never pay, never the reason for an absence, never assignment notes — and absences do not appear at all, because showing who is away on the covered days makes leave and sickness deducible.\n\nA request may span at most 92 days.",
+        "responses": {
+          "200": {
+            "description": "Lanes and bars for the range."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          },
+          {
+            "name": "sources",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        ]
+      }
+    },
+    "/timeline/sources": {
+      "get": {
+        "summary": "List the timeline sources a client may request",
+        "description": "Read from the server rather than duplicated in the frontend, so adding a source does not leave a stale list behind. Requires `timeline.read`.",
+        "responses": {
+          "200": {
+            "description": "Source keys."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
     }
   }
 }

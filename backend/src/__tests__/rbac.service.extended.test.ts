@@ -674,6 +674,49 @@ describe('RbacService.removeRole', () => {
 });
 
 // ---------------------------------------------------------------------------
+// getUserOrgUnitSubtreeIds
+// ---------------------------------------------------------------------------
+
+/**
+ * Where a person IS, as opposed to what their roles may reach.
+ *
+ * `computeAllowedOrgUnitIds` answers the second question and returns null —
+ * unrestricted — for anyone whose roles carry no scope. That is right for
+ * authority and wrong for visibility: used to bound a view of one's
+ * colleagues, it would show the whole organization to every employee.
+ */
+describe('RbacService.getUserOrgUnitSubtreeIds', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('expands each membership into its subtree and de-duplicates', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ org_unit_id: 3 }, { org_unit_id: 5 }], null]) // memberships
+      .mockResolvedValueOnce([[{ id: 3 }, { id: 4 }], null]) // subtree of 3
+      .mockResolvedValueOnce([[{ id: 5 }, { id: 4 }], null]); // subtree of 5, overlapping
+
+    const ids = await new RbacService(pool).getUserOrgUnitSubtreeIds(7);
+
+    // Someone in a ward sees the ward, including anything organised beneath
+    // it; an overlapping subtree must not list a unit twice.
+    expect(ids.sort()).toEqual([3, 4, 5]);
+  });
+
+  it('returns an empty list for someone who belongs nowhere', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const ids = await new RbacService(pool).getUserOrgUnitSubtreeIds(7);
+
+    // Empty, and NOT null: null would mean unrestricted to every caller of
+    // this, which is how a missing membership becomes a disclosure.
+    expect(ids).toEqual([]);
+    // No subtree walk either, since there is no root to walk from.
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getDescendantOrgUnitIds
 // ---------------------------------------------------------------------------
 
