@@ -18,20 +18,20 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { SHIFT_HOURS_SQL } from '../utils/sql';
 
-interface HoursWorkedRow {
+export interface HoursWorkedRow {
   userId: number;
   fullName: string;
   hours: number;
 }
 
-interface CostByDepartmentRow {
+export interface CostByDepartmentRow {
   departmentId: number;
   departmentName: string;
   hours: number;
   cost: number;
 }
 
-interface FairnessReport {
+export interface FairnessReport {
   scheduleId: number;
   perUser: HoursWorkedRow[];
   stats: { count: number; min: number; max: number; mean: number; stddev: number };

@@ -21,6 +21,7 @@ import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import ExportCsvLink from '../../components/ExportCsvLink';
 import {
   useEmployeesQuery,
   useDepartmentsQuery,
@@ -128,6 +129,15 @@ const Employees: React.FC = () => {
                 Manage your workforce and employee information
               </p>
             </div>
+            <div className="d-flex gap-2">
+            {/* The server applies the same search/department filters, so the
+                file matches the table the user is looking at. */}
+            <ExportCsvLink
+              path="/employees/export"
+              params={{ search: searchTerm, department: selectedDepartment }}
+              disabled={filteredEmployees.length === 0}
+              className="btn btn-outline-secondary"
+            />
             <button 
               className="btn btn-primary"
               onClick={() => setShowAddModal(true)}
@@ -135,6 +145,7 @@ const Employees: React.FC = () => {
               <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
               Add Employee
             </button>
+            </div>
           </div>
         </div>
       </div>
