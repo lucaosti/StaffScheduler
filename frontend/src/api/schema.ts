@@ -650,6 +650,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assignments/{id}/swap-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shifts this assignment could be swapped for
+         * @description Deliberately **not** gated on `assignment.manage`. Proposing a swap is something an ordinary employee does, and every other endpoint listing someone else's assignments requires that permission — which left the swap feature reachable only by a caller who already knew a colleague's numeric assignment id.
+         *
+         *     Two things make it safe: the caller must **own** the assignment, and the answer is bounded by the organization units they belong to, resolved server-side from their memberships and narrowed further by a scoped role. Someone attached to no unit gets an empty list rather than everyone.
+         *
+         *     Excluded: the caller's own assignments, anything on the same shift, shifts that have already run or fall beyond a 60-day horizon, and any exchange that would leave either person holding two overlapping shifts — checked through the same overnight-aware overlap rule assignment creation uses.
+         *
+         *     `truncated` is true when more assignments matched than were examined for conflicts, so a partial list is never presented as the whole answer.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Candidate assignments, and whether the list is partial. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/assignments/{id}/complete": {
         parameters: {
             query?: never;
