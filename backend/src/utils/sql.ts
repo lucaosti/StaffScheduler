@@ -10,8 +10,10 @@
  * TypeScript version. A named constant is not abstraction for its own sake
  * here; it is the difference between one definition and several that disagree.
  *
- * These are fragments, never whole statements, and they interpolate no user
- * input — every value still travels as a bound parameter.
+ * These are fragments, never whole statements. The SQL expressions here
+ * interpolate no user input; `inClause` is the one exception and exists
+ * precisely to make that exception safe by construction rather than by each
+ * caller arguing that its own ids are trustworthy.
  *
  * @author Luca Ostinelli
  */
@@ -52,3 +54,39 @@ export const SHIFT_ABS_END_SQL = `(
       + IF(s.end_time <= s.start_time, 86400, 0)
     ) SECOND
 )`;
+
+
+/**
+ * A safe `IN (...)` list from ids that must be integers.
+ *
+ * WHY INTERPOLATION AT ALL. An `IN` list cannot be one bound parameter — the
+ * placeholder count depends on the list length — so the choice is between
+ * building `?, ?, ?` per call or interpolating validated integers. Both are
+ * fine; what is not fine is what the codebase actually had: SIX call sites
+ * interpolating `ids.join(',')`, of which exactly ONE checked the ids were
+ * integers.
+ *
+ * Each of the other five was safe by PROVENANCE — "these came from a SELECT",
+ * "these are the caller's resolved org-unit scope" — and provenance is an
+ * argument that has to be re-made, correctly, at every new call site, by
+ * someone who may not know it is load-bearing. One of the five was already
+ * weaker than the others: the replan-proposal ids come from a JSON column,
+ * where nothing in the schema or the type system constrains what was stored.
+ *
+ * THROWS RATHER THAN FILTERS. Silently dropping an id would narrow a query
+ * without saying so — and one of the call sites is a DELETE, where a quietly
+ * shorter list means the wrong rows survive. An empty list throws for the same
+ * reason it must never be reached: `IN ()` is a syntax error, so a caller that
+ * can produce an empty set has to decide what empty MEANS before asking, and
+ * every current caller does.
+ */
+export const inClause = (ids: Array<number | string>): string => {
+  if (ids.length === 0) {
+    throw new Error('inClause called with no ids; the caller must handle the empty case');
+  }
+  const safe = ids.map((id) => Number(id));
+  if (!safe.every((id) => Number.isInteger(id))) {
+    throw new Error('inClause called with a non-integer id');
+  }
+  return safe.join(',');
+};

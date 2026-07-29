@@ -37,6 +37,7 @@ import { config } from '../config';
 import { EmploymentContractService } from './EmploymentContractService';
 import { ReplanProposalService } from './ReplanProposalService';
 import { isWeekendDay, isNightWork } from '../optimization/constraintValidator';
+import { inClause } from '../utils/sql';
 
 /**
  * Parses a `name:level` list into a lookup.
@@ -124,9 +125,6 @@ interface AutoScheduleResult {
   /** Why the run degraded, when it did (for logs and the UI banner). */
   degradedReason?: string;
 }
-
-const formatDate = (raw: unknown): string =>
-  typeof raw === 'string' ? raw : DateUtils.fromMySQLDate(raw as Date);
 
 /**
  * How far back equity is measured, in days.
@@ -365,7 +363,7 @@ export class AutoScheduleService {
             WHERE sc.status = 'published'
               AND sc.id != ?
               AND sa.status IN ('pending', 'confirmed')
-              AND sa.user_id IN (${employeeIds.join(',')})
+              AND sa.user_id IN (${inClause(employeeIds)})
               AND s.date >= DATE_SUB(?, INTERVAL ${EQUITY_HORIZON_DAYS} DAY)
               AND s.date < ?`,
           [scheduleId, schedule.start_date, schedule.start_date]
@@ -373,7 +371,7 @@ export class AutoScheduleService {
     const carried = carriedLoads(
       historyRows.map((r) => ({
         userId: r.user_id as number,
-        date: formatDate(r.date),
+        date: DateUtils.toDateString(r.date as string | Date),
         startTime: r.start_time as string,
         endTime: r.end_time as string,
       })),
@@ -452,7 +450,7 @@ export class AutoScheduleService {
     for (const row of externalRows) {
       const userId = row.user_id as number;
       const list = externalAssignmentsByUser.get(userId) ?? [];
-      list.push({ date: formatDate(row.date), start_time: row.start_time as string, end_time: row.end_time as string });
+      list.push({ date: DateUtils.toDateString(row.date as string | Date), start_time: row.start_time as string, end_time: row.end_time as string });
       externalAssignmentsByUser.set(userId, list);
     }
 
@@ -461,7 +459,7 @@ export class AutoScheduleService {
     const problem = {
       shifts: shiftRows.map((s) => ({
         id: String(s.id),
-        date: formatDate(s.date),
+        date: DateUtils.toDateString(s.date as string | Date),
         start_time: s.start_time as string,
         end_time: s.end_time as string,
         min_staff: s.min_staff as number,

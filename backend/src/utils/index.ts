@@ -48,6 +48,36 @@ export class DateUtils {
   }
 
   /**
+   * "YYYY-MM-DD" from whichever shape the driver hands back for a DATE column.
+   *
+   * WHY THIS EXISTS RATHER THAN EACH READER DECIDING. mysql2 materializes a
+   * DATE as a `Date`, but the same column arrives as a string through a seed,
+   * a JSON payload or a test fixture, so every reader has to handle both. Six
+   * services were each doing that, in TWO SPELLINGS that are not equivalent:
+   *
+   *   `v instanceof Date ? fromMySQLDate(v) : String(v).slice(0, 10)`
+   *   `typeof v === 'string' ? v : fromMySQLDate(v as Date)`
+   *
+   * On anything that is neither, the first returns nonsense ("null" sliced to
+   * a date-shaped string) and the second throws `getFullYear is not a
+   * function`. Both are wrong and they are wrong differently, which is worse
+   * than either — the same value produces a crash in one code path and a
+   * plausible-looking wrong date in another.
+   *
+   * The parameter type is `string | Date` deliberately: a caller holding
+   * something nullable must decide what null means before asking (an absent
+   * `effective_to` means "still in force", not a date), and the compiler now
+   * makes them.
+   *
+   * This rule has already produced two defects — a weekday where a date
+   * belonged, and `Invalid time value` in conflict detection — which is why it
+   * has one home.
+   */
+  static toDateString(value: string | Date): string {
+    return value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
+  }
+
+  /**
    * Add days to a date
    */
   static addDays(date: Date, days: number): Date {

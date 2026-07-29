@@ -47,6 +47,7 @@ import { logger } from '../config/logger';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
+import { inClause } from '../utils/sql';
 
 export interface ProposedAssignment {
   shiftId: number;
@@ -73,16 +74,6 @@ export interface ReplanProposal {
   decisionReason: string | null;
   createdAt: string;
 }
-
-/**
- * "YYYY-MM-DD" from whichever shape mysql2 hands back for a DATE column.
- *
- * `String(dateCol).slice(0, 10)` gives "Sat Jan 01" when the driver
- * materializes it as a `Date`, which is how a date once reached a user-facing
- * string as a weekday.
- */
-const formatShiftDate = (value: unknown): string =>
-  value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
 
 const mapProposal = (row: RowDataPacket): ReplanProposal => ({
   id: row.id as number,
@@ -253,7 +244,7 @@ export class ReplanProposalService {
         // parameter; they come from a SELECT this method just issued, so they
         // are integers by construction rather than by validation.
         const [del] = await conn.execute<ResultSetHeader>(
-          `DELETE FROM shift_assignments WHERE id IN (${doomed.join(',')})`
+          `DELETE FROM shift_assignments WHERE id IN (${inClause(doomed)})`
         );
         removed = del.affectedRows;
       }
@@ -326,7 +317,7 @@ export class ReplanProposalService {
 
     for (const [userId, rows] of byUser) {
       const when = rows
-        .map((r) => `${formatShiftDate(r.date)} ${String(r.start_time).slice(0, 5)}–${String(r.end_time).slice(0, 5)}`)
+        .map((r) => `${DateUtils.toDateString(r.date)} ${String(r.start_time).slice(0, 5)}–${String(r.end_time).slice(0, 5)}`)
         .sort();
       await this.notifications.notifyWithin(conn, {
         userId,
@@ -359,7 +350,7 @@ export class ReplanProposalService {
         entityId: row.id as number,
         description:
           `Commitment broken by replan proposal #${proposal.id}: user ${row.user_id} ` +
-          `removed from shift ${row.shift_id} on ${formatShiftDate(row.date)}`,
+          `removed from shift ${row.shift_id} on ${DateUtils.toDateString(row.date)}`,
         before: { userId: row.user_id, shiftId: row.shift_id, isPinned: true },
       });
     }
@@ -386,7 +377,7 @@ export class ReplanProposalService {
 
     const shiftIds = [...new Set(assignments.map((a) => a.shiftId))];
     const [shifts] = await conn.execute<RowDataPacket[]>(
-      `SELECT id FROM shifts WHERE schedule_id = ? AND id IN (${shiftIds.join(',')})`,
+      `SELECT id FROM shifts WHERE schedule_id = ? AND id IN (${inClause(shiftIds)})`,
       [proposal.scheduleId]
     );
     if (shifts.length !== shiftIds.length) {
@@ -398,7 +389,7 @@ export class ReplanProposalService {
 
     const userIds = [...new Set(assignments.map((a) => a.userId))];
     const [users] = await conn.execute<RowDataPacket[]>(
-      `SELECT id FROM users WHERE is_active = 1 AND id IN (${userIds.join(',')})`
+      `SELECT id FROM users WHERE is_active = 1 AND id IN (${inClause(userIds)})`
     );
     if (users.length !== userIds.length) {
       throw new ConflictError(
