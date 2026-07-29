@@ -36,6 +36,7 @@ import { DateUtils } from '../utils';
 import { config } from '../config';
 import { EmploymentContractService } from './EmploymentContractService';
 import { ReplanProposalService } from './ReplanProposalService';
+import { isWeekendDay, isNightWork } from '../optimization/constraintValidator';
 
 /**
  * Parses a `name:level` list into a lookup.
@@ -126,6 +127,69 @@ interface AutoScheduleResult {
 
 const formatDate = (raw: unknown): string =>
   typeof raw === 'string' ? raw : DateUtils.fromMySQLDate(raw as Date);
+
+/**
+ * How far back equity is measured, in days.
+ *
+ * A CHOSEN number, not a derived one, and it should be read as such. Ninety
+ * days is long enough that a heavy month is compensated within the window and
+ * short enough to be explainable to the person it affects — "over the last
+ * three months". A calendar quarter was rejected because it resets: whoever
+ * took every weekend in March would be level again on 1 April, which is the
+ * defect this fixes moved three months along rather than fixed.
+ */
+const EQUITY_HORIZON_DAYS = 90;
+
+/**
+ * Category days worked before this period, as a normalised deviation from the
+ * average of the people being scheduled.
+ *
+ * WHY THE AVERAGE IS OVER THE CANDIDATES and not the whole organization: the
+ * comparison that means anything is with the people the solver is choosing
+ * between. Averaging across departments would compare a ward with an office.
+ *
+ * WHY NORMALISED TO NON-NEGATIVE. The objective minimises `max - min`, which
+ * does not change if every load moves by the same amount, so shifting the set
+ * up until the lowest sits at zero costs nothing and spares both engines a
+ * negative lower bound on every load variable.
+ *
+ * Rounded to whole days: a fractional day is not something anyone experiences,
+ * and both engines' load variables are integral.
+ */
+const carriedLoads = (
+  rows: Array<{ userId: number; date: string; startTime: string; endTime: string }>,
+  employeeIds: number[]
+): Map<number, { weekend: number; night: number }> => {
+  const weekendDays = new Map<number, Set<string>>();
+  const nightDays = new Map<number, Set<string>>();
+  for (const id of employeeIds) {
+    weekendDays.set(id, new Set());
+    nightDays.set(id, new Set());
+  }
+
+  for (const row of rows) {
+    // Days, not shifts: two matching shifts on one date cost one day, the same
+    // unit the in-period measure uses.
+    if (isWeekendDay(row.date)) weekendDays.get(row.userId)?.add(row.date);
+    if (isNightWork({ date: row.date, start_time: row.startTime, end_time: row.endTime })) {
+      nightDays.get(row.userId)?.add(row.date);
+    }
+  }
+
+  const deviations = (counts: Map<number, Set<string>>): Map<number, number> => {
+    const totals = employeeIds.map((id) => counts.get(id)?.size ?? 0);
+    const mean = totals.reduce((a, b) => a + b, 0) / (totals.length || 1);
+    const raw = new Map(employeeIds.map((id, i) => [id, Math.round(totals[i] - mean)]));
+    const lowest = Math.min(0, ...raw.values());
+    return new Map([...raw].map(([id, d]) => [id, d - lowest]));
+  };
+
+  const weekend = deviations(weekendDays);
+  const night = deviations(nightDays);
+  return new Map(
+    employeeIds.map((id) => [id, { weekend: weekend.get(id) ?? 0, night: night.get(id) ?? 0 }])
+  );
+};
 
 export class AutoScheduleService {
   constructor(private pool: Pool) {}
@@ -283,6 +347,39 @@ export class AutoScheduleService {
       kind: r.kind as 'apart' | 'requires',
     }));
 
+    // Equity history: category days worked in the window BEFORE this period,
+    // from PUBLISHED schedules only — a draft is not what happened, and a
+    // draft's weekends would follow someone into the next month having never
+    // been worked.
+    //
+    // Read for the same candidates the solver is choosing between, since the
+    // deviation is measured against their average.
+    const employeeIds = empRows.map((e) => e.id as number);
+    const [historyRows] = employeeIds.length === 0
+      ? [[] as RowDataPacket[]]
+      : await this.pool.execute<RowDataPacket[]>(
+          `SELECT sa.user_id, s.date, s.start_time, s.end_time
+             FROM shift_assignments sa
+             JOIN shifts s ON s.id = sa.shift_id
+             JOIN schedules sc ON sc.id = s.schedule_id
+            WHERE sc.status = 'published'
+              AND sc.id != ?
+              AND sa.status IN ('pending', 'confirmed')
+              AND sa.user_id IN (${employeeIds.join(',')})
+              AND s.date >= DATE_SUB(?, INTERVAL ${EQUITY_HORIZON_DAYS} DAY)
+              AND s.date < ?`,
+          [scheduleId, schedule.start_date, schedule.start_date]
+        );
+    const carried = carriedLoads(
+      historyRows.map((r) => ({
+        userId: r.user_id as number,
+        date: formatDate(r.date),
+        startTime: r.start_time as string,
+        endTime: r.end_time as string,
+      })),
+      employeeIds
+    );
+
     const contracts = new EmploymentContractService(this.pool);
     const contractLimits = await contracts.resolveLimitsForPeriod(
       empRows.map((e) => e.id as number),
@@ -389,6 +486,7 @@ export class AutoScheduleService {
         skill_levels: parseSkillLevels(e.skill_levels as string | null),
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
+        carried_load: carried.get(e.id as number),
         };
       }),
       pinned_assignments: pinned,

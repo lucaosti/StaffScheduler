@@ -24,7 +24,7 @@ import sys
 import json
 import argparse
 from datetime import datetime
-from typing import List, Dict, Tuple
+from typing import List, Dict, Optional, Tuple
 from ortools.sat.python import cp_model
 
 
@@ -1011,7 +1011,7 @@ class ScheduleOptimizerORTools:
         return False
 
     def _category_balance_terms(
-        self, label: str, matches, scale: int
+        self, label: str, matches, scale: int, carried_key: Optional[str] = None
     ) -> Tuple[List, int]:
         """
         SOFT: spread the DAYS on which a category of shift is worked evenly
@@ -1032,6 +1032,15 @@ class ScheduleOptimizerORTools:
 
         Work held on OTHER schedules counts: the evening is gone regardless of
         which schedule took it.
+
+        And so does work from BEFORE this period, through `carried_load`:
+        without it, equity was true of each month in isolation and could be
+        false of the year, since someone who worked every weekend in March
+        started April level with a colleague who worked none. The carried
+        values are a normalised deviation from the candidates' average, not raw
+        counts — see the TypeScript type for why a count penalises whoever
+        joined later — and are non-negative because the spread `max - min` is
+        invariant under adding the same constant to every load.
         """
         if len(self.employees) < 2:
             return [], 0  # Nothing to balance.
@@ -1062,6 +1071,10 @@ class ScheduleOptimizerORTools:
                 ext['date'] for ext in self.external_by_employee.get(emp_id, [])
                 if matches(ext)
             })
+            if carried_key is not None:
+                fixed += (
+                    self.employees[emp_id].get('carried_load', {}) or {}
+                ).get(carried_key, 0)
             max_fixed = max(max_fixed, fixed)
             load = self.model.NewIntVar(0, upper + fixed, f'{label}_load_e{emp_id}')
             self.model.Add(load == sum(day_flags) + fixed)
@@ -1138,9 +1151,11 @@ class ScheduleOptimizerORTools:
             # how many they work. Same weight as the hours fairness — all three
             # are equity goals and none obviously outranks the others.
             self._category_balance_terms(
-                'wknd', lambda sh: self._is_weekend(sh['date']), fairness_scale
+                'wknd', lambda sh: self._is_weekend(sh['date']), fairness_scale, 'weekend'
             ),
-            self._category_balance_terms('night', self._is_night, fairness_scale),
+            self._category_balance_terms(
+                'night', self._is_night, fairness_scale, 'night'
+            ),
         ):
             soft_terms.extend(terms)
             soft_bound += bound
