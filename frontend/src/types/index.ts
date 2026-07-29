@@ -31,6 +31,7 @@ import type {
   OrgUnit,
   Timestamp,
   TimeOffRequest,
+  ShiftSwapRequest,
 } from '@staff-scheduler/shared';
 export type {
   Permission,
@@ -44,6 +45,7 @@ export type {
   OrgUnit,
   Timestamp,
   TimeOffRequest,
+  ShiftSwapRequest,
 };
 
 
