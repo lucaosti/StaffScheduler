@@ -188,7 +188,16 @@ const scanRoutes = (): FoundOp[] => {
           ...[...handler.matchAll(/req\.query\[['"](\w+)/g)].map((r) => r[1]),
         ]),
       ];
-      if (!body && !query && rawQueryReads.length === 0) continue;
+      // NOT skipped when there is no schema to generate. A route carrying only
+      // `validateParams` produces no artefact, and skipping it here meant it
+      // was never compared against the spec either — so read-one and
+      // delete-one endpoints could be mounted with no OpenAPI entry at all and
+      // generation still reported success. That was found by mounting
+      // `GET /assignments/{id}/swap-candidates`, which generated clean while
+      // absent from the spec entirely.
+      //
+      // The presence check below is what every operation needs; the schema
+      // work further down is what only some of them need.
       const resolve = (local: string) => aliases.get(local) ?? local;
       const specPath = (prefix + (routePath === '/' ? '' : routePath)).replace(
         /:(\w+)\??/g,
