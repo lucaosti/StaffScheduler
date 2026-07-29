@@ -22,6 +22,7 @@ import ScheduleList from '../Schedule/ScheduleList';
 import CreateScheduleModal, { type CreateScheduleValues } from '../Schedule/CreateScheduleModal';
 import StatsBadge from '../Schedule/StatsBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
+import { toLocalDateString } from '../../utils/format';
 
 /**
  * The engine-provenance subset of an optimization result the UI cares about.
@@ -85,14 +86,6 @@ const Schedule: React.FC = () => {
 
   const formatDate = (date: Date) =>
     date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
-
-  /**
-   * A shift's own calendar date, used as its label. The API contract has no
-   * `Shift.name`, so the row previously rendered `undefined`; the date is the
-   * shift's natural identifier (ShiftTable already falls back to it).
-   */
-  const formatShiftDate = (date: string | Date): string =>
-    typeof date === 'string' ? date.slice(0, 10) : new Date(date).toISOString().slice(0, 10);
 
   const departmentNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -191,7 +184,7 @@ const Schedule: React.FC = () => {
   const shiftsByDate = useMemo(() => {
     const index = new Map<string, Shift[]>();
     for (const shift of monthShifts) {
-      const dateStr = typeof shift.date === 'string' ? shift.date.slice(0, 10) : new Date(shift.date as unknown as string).toISOString().slice(0, 10);
+      const dateStr = toLocalDateString(shift.date);
       const bucket = index.get(dateStr);
       if (bucket) bucket.push(shift);
       else index.set(dateStr, [shift]);
@@ -511,7 +504,7 @@ const Schedule: React.FC = () => {
                         <tr key={shift.id}>
                           <td className="align-middle">
                             <div>
-                              <strong>{formatShiftDate(shift.date)}</strong>
+                              <strong>{toLocalDateString(shift.date)}</strong>
                               <br />
                               <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
                               <br />

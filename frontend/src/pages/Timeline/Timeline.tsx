@@ -73,6 +73,10 @@ const Timeline: React.FC = () => {
   const days = useMemo(() => {
     const out: string[] = [];
     for (let t = windowStart; t < windowEnd; t += 86_400_000) {
+      // UTC on purpose, and the one place it is right: `windowStart` is parsed
+      // as UTC midnight two lines above, so these ticks are labelled in the
+      // same frame the bar geometry is measured in. Formatting them locally
+      // would slide the labels off the bars by an offset.
       out.push(new Date(t).toISOString().slice(0, 10));
     }
     return out;
