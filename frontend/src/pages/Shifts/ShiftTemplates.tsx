@@ -20,11 +20,16 @@ import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useShiftTemplatesQuery, useShiftTemplateMutations } from '../../hooks/useShiftTemplates';
 import { useDepartmentsQuery } from '../../hooks/useDepartments';
+import { formatTime } from '../../utils/format';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
-const time = (value?: string): string => (value ? value.slice(0, 5) : '—');
+/** The shared formatter, with the dash these tables use for an absent time. */
+const shiftTime = (value?: string): string => formatTime(value) || '—';
+
 
 const ShiftTemplates: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const canManage = (user?.permissions ?? []).includes('shift.manage');
 
   const [name, setName] = useState('');
@@ -33,7 +38,6 @@ const ShiftTemplates: React.FC = () => {
   const [endTime, setEndTime] = useState('17:00');
   const [minStaff, setMinStaff] = useState('1');
   const [maxStaff, setMaxStaff] = useState('1');
-  const [message, setMessage] = useState<string | null>(null);
 
   const templates = useShiftTemplatesQuery();
   // Only a manager picks a department here, so the list is not fetched for a
@@ -41,14 +45,6 @@ const ShiftTemplates: React.FC = () => {
   const departments = useDepartmentsQuery(canManage);
   const { create, remove } = useShiftTemplateMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,7 +180,7 @@ const ShiftTemplates: React.FC = () => {
                 <td>{t.name}</td>
                 <td>{t.departmentName ?? t.departmentId}</td>
                 <td>
-                  {time(t.startTime)}–{time(t.endTime)}
+                  {shiftTime(t.startTime)}–{shiftTime(t.endTime)}
                 </td>
                 <td>
                   {t.minStaff}–{t.maxStaff}

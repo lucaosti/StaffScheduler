@@ -25,6 +25,7 @@ import {
   useAssignmentMutations,
 } from '../../hooks/useAssignments';
 import type { Assignment } from '../../types';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 interface Props {
   shiftId: number;
@@ -33,8 +34,8 @@ interface Props {
 }
 
 const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
+  const { message, run: act } = useActionFeedback();
   const [picking, setPicking] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
 
   const assigned = useAssignmentsQuery({ shiftId });
   // Only asked for while the picker is open: the answer is worthless to
@@ -42,14 +43,6 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
   const available = useAvailableEmployeesQuery(picking ? shiftId : null);
   const { create, remove } = useAssignmentMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const nameOf = (person: { firstName?: string; lastName?: string; email?: string }): string =>
     [person.firstName, person.lastName].filter(Boolean).join(' ') || person.email || 'Unnamed';
