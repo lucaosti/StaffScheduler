@@ -82,6 +82,7 @@ const ShiftSwaps = lazy(() => import('./pages/ShiftSwaps/ShiftSwaps'));
 const OnCall = lazy(() => import('./pages/OnCall/OnCall'));
 const EmploymentContracts = lazy(() => import('./pages/Admin/EmploymentContracts'));
 const ShiftTemplates = lazy(() => import('./pages/Shifts/ShiftTemplates'));
+const UserAccounts = lazy(() => import('./pages/Admin/UserAccounts'));
 
 /**
  * Main Application Component
@@ -198,6 +199,11 @@ const App: React.FC = () => {
           <Route path="admin/employment-contracts" element={
             <PermissionRoute permission="employee.read">
               <EmploymentContracts />
+            </PermissionRoute>
+          } />
+          <Route path="admin/users" element={
+            <PermissionRoute permission="user.read">
+              <UserAccounts />
             </PermissionRoute>
           } />
           <Route path="admin/skills" element={
