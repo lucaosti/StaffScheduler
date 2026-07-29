@@ -359,11 +359,25 @@ describe('ShiftService templates', () => {
     expect(conn.rollback).toHaveBeenCalled();
   });
 
-  it('deleteShiftTemplate marks inactive', async () => {
+  it('deleteShiftTemplate marks inactive rather than removing the row', async () => {
     const { pool, conn } = makePool();
     conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     const svc = new ShiftService(pool);
     expect(await svc.deleteShiftTemplate(1)).toBe(true);
+    // Soft on purpose: shifts already created from a template are ordinary
+    // shifts with their own rows, and retiring the pattern must not reach back
+    // into schedules that have already run.
+    expect(String(conn.execute.mock.calls[0][0])).toContain('is_active = 0');
+  });
+
+  it('deleteShiftTemplate reports a miss so the route can 404', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]);
+    const svc = new ShiftService(pool);
+    // It returned `true` unconditionally, so deleting a template that does not
+    // exist reported "deleted successfully" and the route's 404 branch could
+    // never be taken.
+    expect(await svc.deleteShiftTemplate(99)).toBe(false);
   });
 
   it('deleteShiftTemplate rolls back on error', async () => {
