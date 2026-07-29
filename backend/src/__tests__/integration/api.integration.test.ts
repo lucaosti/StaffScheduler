@@ -1344,6 +1344,182 @@ describe('self-service preferences run against the real schema', () => {
 });
 
 /**
+ * Replanning a published schedule end to end.
+ *
+ * The removal half is what only real MySQL proves. The old persist path was
+ * `INSERT IGNORE` and nothing else, so an assignment the optimizer dropped
+ * survived the run and `brokenCommitments` described a removal that never
+ * happened. Applying a proposal has to actually delete, and a mocked pool can
+ * only show the statement was composed.
+ */
+describe('replanning a published schedule', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const publishedScheduleWithShift = async () => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE(), CURDATE() + INTERVAL 7 DAY, ?, 'published', ?)`,
+      [`replan-${tag()}`, departmentId, userId]
+    );
+    const [sh] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL 3 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+      [sc.insertId, departmentId]
+    );
+    return { scheduleId: sc.insertId, shiftId: sh.insertId };
+  };
+
+  const proposal = async (
+    scheduleId: number,
+    payload: Record<string, unknown>,
+    status = 'pending'
+  ): Promise<number> => {
+    const [r] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedule_replan_proposals (schedule_id, proposed_by, status, engine, payload)
+       VALUES (?, ?, ?, 'greedy', ?)`,
+      [scheduleId, userId, status, JSON.stringify(payload)]
+    );
+    return r.insertId;
+  };
+
+  const assignedUsers = async (scheduleId: number): Promise<number[]> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT sa.user_id FROM shift_assignments sa
+         JOIN shifts s ON s.id = sa.shift_id
+        WHERE s.schedule_id = ? ORDER BY sa.user_id`,
+      [scheduleId]
+    );
+    return rows.map((r) => r.user_id as number);
+  };
+
+  it('applies a plan by removing what it leaves out and adding what it introduces', async () => {
+    const cookie = await authCookie();
+    const { scheduleId, shiftId } = await publishedScheduleWithShift();
+    const [replacement] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Replan', 'Target', 1)`,
+      [`replan-${tag()}@example.com`]
+    );
+    await admin.query(
+      `INSERT INTO shift_assignments (shift_id, user_id, status, is_pinned)
+       VALUES (?, ?, 'pending', 1)`,
+      [shiftId, userId]
+    );
+
+    const id = await proposal(scheduleId, {
+      assignments: [{ shiftId, userId: replacement.insertId }],
+      brokenCommitments: [{ userId, shiftId }],
+      keptCommitments: 0,
+      totalShifts: 1,
+    });
+
+    const applied = await request(app)
+      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .set('Cookie', cookie)
+      .send({ reason: 'Approved' });
+    expect(applied.status).toBe(200);
+    expect(applied.body.data).toMatchObject({ inserted: 1, removed: 1 });
+
+    // The schedule is now exactly the plan. The removal is the half that never
+    // used to happen, which is what made `brokenCommitments` describe people
+    // who were in fact still assigned.
+    expect(await assignedUsers(scheduleId)).toEqual([replacement.insertId]);
+  });
+
+  it('refuses the whole plan when a shift it names has gone', async () => {
+    const cookie = await authCookie();
+    const { scheduleId, shiftId } = await publishedScheduleWithShift();
+    await admin.query(
+      `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`,
+      [shiftId, userId]
+    );
+    const id = await proposal(scheduleId, {
+      assignments: [{ shiftId: 999999, userId }],
+      brokenCommitments: [],
+      keptCommitments: 0,
+      totalShifts: 1,
+    });
+
+    const res = await request(app)
+      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .set('Cookie', cookie)
+      .send({});
+    expect(res.status).toBe(409);
+
+    // Refused whole: nothing removed, and the claim that opened the
+    // transaction must not leave the proposal marked applied.
+    expect(await assignedUsers(scheduleId)).toEqual([userId]);
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      'SELECT status FROM schedule_replan_proposals WHERE id = ?',
+      [id]
+    );
+    expect(rows[0].status).toBe('pending');
+  });
+
+  it('cannot decide the same proposal twice', async () => {
+    const cookie = await authCookie();
+    const { scheduleId } = await publishedScheduleWithShift();
+    const id = await proposal(scheduleId, {
+      assignments: [],
+      brokenCommitments: [],
+      keptCommitments: 0,
+      totalShifts: 0,
+    });
+
+    const first = await request(app)
+      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/reject`)
+      .set('Cookie', cookie)
+      .send({ reason: 'Too disruptive' });
+    expect(first.status).toBe(200);
+
+    const second = await request(app)
+      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .set('Cookie', cookie)
+      .send({});
+    expect(second.status).toBe(409);
+  });
+
+  it('refuses a proposal belonging to a different schedule', async () => {
+    const cookie = await authCookie();
+    const mine = await publishedScheduleWithShift();
+    const other = await publishedScheduleWithShift();
+    const id = await proposal(other.scheduleId, {
+      assignments: [],
+      brokenCommitments: [],
+      keptCommitments: 0,
+      totalShifts: 0,
+    });
+
+    // Without this check the schedule segment would be decoration.
+    const res = await request(app)
+      .post(`/api/schedules/${mine.scheduleId}/replan-proposals/${id}/apply`)
+      .set('Cookie', cookie)
+      .send({});
+    expect(res.status).toBe(404);
+  });
+
+  it('lists proposals for a schedule with their payload parsed', async () => {
+    const cookie = await authCookie();
+    const { scheduleId } = await publishedScheduleWithShift();
+    await proposal(scheduleId, {
+      assignments: [],
+      brokenCommitments: [],
+      keptCommitments: 0,
+      totalShifts: 0,
+    });
+
+    const res = await request(app)
+      .get(`/api/schedules/${scheduleId}/replan-proposals`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    // The JSON column comes back parsed by the driver rather than as a string;
+    // the mapper accepts either, and this is the shape that actually arrives.
+    expect(res.body.data[0].payload).toHaveProperty('assignments');
+  });
+});
+
+/**
  * Publishing turns assignments into commitments.
  *
  * `is_pinned` is what the optimizer reads to know an assignment must be

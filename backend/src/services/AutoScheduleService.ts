@@ -35,6 +35,7 @@ import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import { config } from '../config';
 import { EmploymentContractService } from './EmploymentContractService';
+import { ReplanProposalService } from './ReplanProposalService';
 
 /**
  * Parses a `name:level` list into a lookup.
@@ -89,6 +90,13 @@ interface AutoScheduleResult {
   totalShifts: number;
   coveragePercentage: number;
   status: string;
+  /**
+   * Set when `status` is `PROPOSED`: the schedule was published, so the run
+   * recorded a plan for approval instead of writing it.
+   */
+  proposalId?: number;
+  /** How many assignments the pending proposal contains. */
+  proposedAssignments?: number;
   /** The engine that actually produced this schedule. */
   engine: 'or-tools' | 'greedy';
   /**
@@ -125,7 +133,7 @@ export class AutoScheduleService {
   async generate(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
     // 1. Schedule and its shifts.
     const [schedRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, department_id, start_date, end_date FROM schedules WHERE id = ? LIMIT 1`,
+      `SELECT id, department_id, start_date, end_date, status FROM schedules WHERE id = ? LIMIT 1`,
       [scheduleId]
     );
     if (schedRows.length === 0) throw new NotFoundError('Schedule not found');
@@ -394,6 +402,50 @@ export class AutoScheduleService {
         `Optimization for schedule=${scheduleId} broke ${brokenCommitments.length} published ` +
           `commitment(s); affected users: ${[...new Set(brokenCommitments.map((b) => b.userId))].join(', ')}`
       );
+    }
+
+    // A PUBLISHED schedule is not re-planned in place; it is PROPOSED.
+    //
+    // Applying first and reporting afterwards inverts the decision: the change
+    // to people's commitments has already happened by the time the planner can
+    // judge whether it was worth making. For a draft that is right — nobody
+    // has been told anything — so drafts keep the immediate path.
+    //
+    // Nothing is written to `shift_assignments` here. The proposal carries the
+    // whole solved set, and approving it is what writes and removes rows; see
+    // `ReplanProposalService` for why verify-at-apply beat re-solving at
+    // approval time.
+    if (schedule.status === 'published') {
+      const proposal = await new ReplanProposalService(this.pool).propose({
+        scheduleId,
+        proposedBy: createdBy,
+        engine,
+        payload: {
+          assignments: assignments.map((a) => ({
+            shiftId: Number(a.shiftId),
+            userId: Number(a.employeeId),
+          })),
+          brokenCommitments,
+          keptCommitments,
+          totalShifts: shiftRows.length,
+        },
+      });
+      return {
+        scheduleId,
+        // Nothing was created: this run proposed. Reporting the proposed count
+        // here would say work happened that has not.
+        assignmentsCreated: 0,
+        totalShifts: shiftRows.length,
+        coveragePercentage: 0,
+        status: 'PROPOSED',
+        proposalId: proposal.id,
+        proposedAssignments: proposal.payload.assignments.length,
+        engine,
+        degraded,
+        degradedReason,
+        keptCommitments,
+        brokenCommitments,
+      };
     }
 
     const INSERT_CHUNK_SIZE = 500;
