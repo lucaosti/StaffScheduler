@@ -30,10 +30,30 @@ export interface AvailableEmployee {
   email?: string;
 }
 
+/**
+ * The planner's listing. Requires `assignment.manage`.
+ *
+ * NOT the way to read one's own shifts — see `getMyAssignments`. Using this
+ * with a `userId` filter looks equivalent and 403s for exactly the audience
+ * self-service is for.
+ */
 export const getAssignments = (
   filters: AssignmentFilters = {}
 ): Promise<ApiResponse<Assignment[]>> =>
   apiClient.get<Assignment[], '/assignments'>('/assignments', { query: filters });
+
+/**
+ * One person's assignments, readable by that person.
+ *
+ * The route allows the caller through when the id is their own, which is what
+ * makes a self-service view possible at all: the collection endpoint is gated
+ * on `assignment.manage`, a permission the default Employee role does not
+ * hold.
+ */
+export const getMyAssignments = (userId: number): Promise<ApiResponse<Assignment[]>> =>
+  apiClient.get<Assignment[], '/assignments/user/{userId}'>('/assignments/user/{userId}', {
+    params: { userId },
+  });
 
 export const createAssignment = (
   body: CreateAssignmentBody
