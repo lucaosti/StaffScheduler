@@ -109,6 +109,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/my-shifts',
+      icon: 'bi-calendar-check',
+      label: 'My shifts',
+      requiredPermission: null,
+    },
+    {
       path: '/timeline',
       icon: 'bi-bar-chart-steps',
       label: 'Timeline',

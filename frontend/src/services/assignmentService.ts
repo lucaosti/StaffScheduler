@@ -1,0 +1,73 @@
+/**
+ * Assignment service — wraps `/api/assignments`.
+ *
+ * Routed through the generated client, so path, method, body and query are all
+ * checked against the OpenAPI contract at compile time.
+ *
+ * `Assignment` comes from the types barrel rather than being re-declared here,
+ * per the no-local-duplicates rule. That barrel entry is itself a hand-written
+ * copy of the shared package's derived `Assignment`, which is a real
+ * duplication — filed separately rather than fixed here, because unpicking it
+ * touches every consumer and would bury this change.
+ *
+ * @author Luca Ostinelli
+ */
+
+import { ApiResponse, Assignment } from '../types';
+import type { paths } from '../api/schema';
+import { apiClient } from '../api/client';
+
+export type AssignmentFilters = NonNullable<paths['/assignments']['get']['parameters']['query']>;
+type CreateAssignmentBody = NonNullable<
+  paths['/assignments']['post']['requestBody']
+>['content']['application/json'];
+
+/** Someone the server considers eligible for a shift, with why they are not. */
+export interface AvailableEmployee {
+  id: number;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
+export const getAssignments = (
+  filters: AssignmentFilters = {}
+): Promise<ApiResponse<Assignment[]>> =>
+  apiClient.get<Assignment[], '/assignments'>('/assignments', { query: filters });
+
+export const createAssignment = (
+  body: CreateAssignmentBody
+): Promise<ApiResponse<Assignment>> =>
+  apiClient.post<Assignment, '/assignments'>('/assignments', body);
+
+export const deleteAssignment = (id: number): Promise<ApiResponse<void>> =>
+  apiClient.delete<void, '/assignments/{id}'>('/assignments/{id}', { params: { id } });
+
+export const confirmAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
+  apiClient.patch<Assignment, '/assignments/{id}/confirm'>(
+    '/assignments/{id}/confirm',
+    undefined,
+    { params: { id } }
+  );
+
+export const declineAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
+  apiClient.patch<Assignment, '/assignments/{id}/decline'>(
+    '/assignments/{id}/decline',
+    undefined,
+    { params: { id } }
+  );
+
+export const completeAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
+  apiClient.patch<Assignment, '/assignments/{id}/complete'>(
+    '/assignments/{id}/complete',
+    undefined,
+    { params: { id } }
+  );
+
+export const getAvailableEmployees = (
+  shiftId: number
+): Promise<ApiResponse<AvailableEmployee[]>> =>
+  apiClient.get<AvailableEmployee[], '/assignments/shift/{shiftId}/available-employees'>(
+    '/assignments/shift/{shiftId}/available-employees',
+    { params: { shiftId } }
+  );
