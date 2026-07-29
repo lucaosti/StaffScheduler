@@ -32,16 +32,28 @@ import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
+import { z } from 'zod';
+import { AuditLogService } from '../services/AuditLogService';
+import { ExportService } from '../services/ExportService';
+import { employeeColumns } from '../services/exportColumns';
 import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody, employeeListQuery } from '../schemas';
 
 export const createEmployeesRouter = (pool: Pool) => {
   const router = Router();
   const employeeService = new EmployeeService(pool);
+  const exporter = new ExportService(new AuditLogService(pool));
 
-// Get all employees
-router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
+/**
+ * The listing filters, including the caller's org-unit scope.
+ *
+ * Extracted so the export below is filtered IDENTICALLY to the list. Rebuilding
+ * this by hand in the export handler would make it a second authorization path
+ * — and the one that decides whether someone sees employees outside their own
+ * subtree, which is precisely the decision that must not exist twice.
+ */
+const listFilters = (req: Request, query: z.infer<typeof employeeListQuery>) => {
   const scope = req.user?.allowedOrgUnitIds;
-  const { search, department, isActive } = res.locals.query;
+  const { search, department, isActive } = query;
   const filters: { orgUnitIds?: number[]; search?: string; departmentId?: number; departmentName?: string; isActive?: boolean } = {};
   if (scope !== null && scope !== undefined) filters.orgUnitIds = scope;
   if (isActive !== undefined) filters.isActive = isActive;
@@ -54,7 +66,12 @@ router.get('/', authenticate, requirePermission('employee.read'), validateQuery(
       filters.departmentName = department;
     }
   }
-  const activeFilters = Object.keys(filters).length > 0 ? filters : undefined;
+  return Object.keys(filters).length > 0 ? filters : undefined;
+};
+
+// Get all employees
+router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
+  const activeFilters = listFilters(req, res.locals.query);
   const pagination = parsePagination(req);
   if (pagination) {
     const [total, employees] = await Promise.all([
@@ -65,6 +82,21 @@ router.get('/', authenticate, requirePermission('employee.read'), validateQuery(
   }
   const employees = await employeeService.getAllEmployees(activeFilters);
   res.json({ success: true, data: employees });
+}));
+
+// `/export` is declared before `/:id` so Express does not read "export" as an id.
+router.get('/export', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
+  const filters = listFilters(req, res.locals.query);
+  // Unpaginated on purpose: a file is the one place where "all of it" is the
+  // point, and the caller's scope still bounds it.
+  const employees = await employeeService.getAllEmployees(filters);
+  await exporter.sendCsv(res, {
+    actorId: req.user?.id ?? null,
+    dataset: 'employees',
+    rows: employees,
+    columns: employeeColumns,
+    filters: filters ?? {},
+  });
 }));
 
 // Get employee by ID

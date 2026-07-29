@@ -21,6 +21,10 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { clockInBody, optionalNotesBody, idParam, costEstimateQuery, attendanceListQuery } from '../schemas';
 import { AttendanceService } from '../services/AttendanceService';
+import { z } from 'zod';
+import { AuditLogService } from '../services/AuditLogService';
+import { ExportService } from '../services/ExportService';
+import { attendanceColumns } from '../services/exportColumns';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -30,6 +34,25 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createAttendanceRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new AttendanceService(pool);
+  const exporter = new ExportService(new AuditLogService(pool));
+
+  /**
+   * The listing filters, with the caller pinned to their own records unless they
+   * approve or read attendance.
+   *
+   * Shared with `/export`: this is the rule that decides whether someone can
+   * download other people's clock-in times, and it must exist once.
+   */
+  const listFilters = (req: Request, query: z.infer<typeof attendanceListQuery>) => {
+    const { userId, status, startDate: rangeStart, endDate: rangeEnd } = query;
+    const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
+    return {
+      userId: isApprover ? userId : req.user!.id,
+      status: status as never,
+      rangeStart,
+      rangeEnd,
+    };
+  };
 
   router.use(authenticate, requireModuleForUser('attendance'));
 
@@ -51,17 +74,22 @@ export const createAttendanceRouter = (pool: Pool): Router => {
   }));
 
   router.get('/', validateQuery(attendanceListQuery), asyncHandler(async (req: Request, res: Response) => {
-    const { userId, status, startDate: rangeStart, endDate: rangeEnd } = res.locals.query;
-    // Approvers may list anyone's records; everyone else is pinned to their own.
-    const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
-    const filters = {
-      userId: isApprover ? userId : req.user!.id,
-      status: status as never,
-      rangeStart,
-      rangeEnd,
-    };
+    const filters = listFilters(req, res.locals.query);
     const list = await service.list(filters);
     res.json({ success: true, data: list });
+  }));
+
+  // Before `/:id`, so "export" is not read as a record id.
+  router.get('/export', validateQuery(attendanceListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const filters = listFilters(req, res.locals.query);
+    const rows = await service.list(filters);
+    await exporter.sendCsv(res, {
+      actorId: req.user?.id ?? null,
+      dataset: 'attendance',
+      rows,
+      columns: attendanceColumns,
+      filters,
+    });
   }));
 
   router.get('/:id', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {

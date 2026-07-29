@@ -19,6 +19,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { ValidationError } from '../errors';
 import { getRequestId, getRequestIp, getRequestUserAgent } from '../middleware/requestContext';
+import { CsvColumn, toCsv } from '../utils/csv';
 
 /**
  * Hard ceiling on a single audit export. Sized so a full export still fits
@@ -248,31 +249,43 @@ export class AuditLogService {
    * Serialises an array of audit log entries to CSV. Includes a header row.
    * Snapshot fields are rendered as compact JSON strings.
    */
+  /**
+   * The audit log's own CSV columns.
+   *
+   * WHY THIS BECAME COLUMNS RATHER THAN A SERIALIZER. This method used to build
+   * the CSV itself, and it was the only export in the system, so its quoting was
+   * the system's quoting. It lacked a BOM (Excel mangled every accented name)
+   * and a formula guard (a `description` is partly free text). Both are now the
+   * shared serializer's business; what stays here is the column list, which is
+   * genuinely this dataset's own — snapshots included, which is why `csvField`
+   * JSON-encodes objects at all.
+   */
+  static readonly csvColumns: readonly CsvColumn<AuditLogEntry>[] = [
+    { header: 'id', value: (e) => e.id },
+    { header: 'created_at', value: (e) => e.createdAt },
+    { header: 'user_id', value: (e) => e.userId },
+    { header: 'on_behalf_of_user_id', value: (e) => e.onBehalfOfUserId },
+    { header: 'action', value: (e) => e.action },
+    { header: 'entity_type', value: (e) => e.entityType },
+    { header: 'entity_id', value: (e) => e.entityId },
+    { header: 'description', value: (e) => e.description },
+    { header: 'justification', value: (e) => e.justification },
+    { header: 'ip_address', value: (e) => e.ipAddress },
+    { header: 'user_agent', value: (e) => e.userAgent },
+    { header: 'request_id', value: (e) => e.requestId },
+    { header: 'before_snapshot', value: (e) => e.beforeSnapshot },
+    { header: 'after_snapshot', value: (e) => e.afterSnapshot },
+  ];
+
+  /**
+   * Kept as a named entry point because the header names above are a published
+   * contract — compliance tooling parses this file by column name — and a caller
+   * should not have to know which column list belongs to which dataset.
+   */
   static toCsv(entries: AuditLogEntry[]): string {
-    const HEADER = [
-      'id', 'created_at', 'user_id', 'on_behalf_of_user_id', 'action',
-      'entity_type', 'entity_id', 'description', 'justification',
-      'ip_address', 'user_agent', 'request_id',
-      'before_snapshot', 'after_snapshot',
-    ];
-    const escape = (v: unknown): string => {
-      if (v === null || v === undefined) return '';
-      const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-      return s.includes(',') || s.includes('"') || s.includes('\n')
-        ? `"${s.replace(/"/g, '""')}"`
-        : s;
-    };
-    const lines = [HEADER.join(',')];
-    for (const e of entries) {
-      lines.push([
-        e.id, e.createdAt, e.userId, e.onBehalfOfUserId, e.action,
-        e.entityType, e.entityId, e.description, e.justification,
-        e.ipAddress, e.userAgent, e.requestId,
-        e.beforeSnapshot, e.afterSnapshot,
-      ].map(escape).join(','));
-    }
-    return lines.join('\r\n');
+    return toCsv(entries, AuditLogService.csvColumns);
   }
+
 
   /**
    * Writes a single audit log entry. `ip_address`, `user_agent`, and
