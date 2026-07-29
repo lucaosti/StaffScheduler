@@ -9795,7 +9795,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    activeOnly?: boolean;
+                    activeOnly?: "true" | "false";
                 };
                 header?: never;
                 path?: never;

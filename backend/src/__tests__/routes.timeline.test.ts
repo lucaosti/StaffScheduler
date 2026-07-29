@@ -73,12 +73,27 @@ describe('scope resolution', () => {
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ orgUnitIds: [3, 4] }));
   });
 
-  it('lifts the restriction for timeline.read_all', async () => {
-    currentUser = { id: 7, permissions: ['timeline.read', 'timeline.read_all'] };
+  it('lifts the membership bound for timeline.read_all', async () => {
+    currentUser = { id: 7, permissions: ['timeline.read', 'timeline.read_all'], allowedOrgUnitIds: null };
     await request(mountApp()).get(`/api/timeline?${RANGE}`);
     expect(build).toHaveBeenCalledWith(expect.objectContaining({ orgUnitIds: null }));
-    // No membership lookup at all: the answer does not depend on it.
+    // No membership lookup at all: a planner is not limited to the ward they
+    // happen to belong to.
     expect(getUserOrgUnitSubtreeIds).not.toHaveBeenCalled();
+  });
+
+  it('still respects a scoped role under timeline.read_all', async () => {
+    currentUser = {
+      id: 7,
+      permissions: ['timeline.read', 'timeline.read_all'],
+      allowedOrgUnitIds: [4, 9],
+    };
+    await request(mountApp()).get(`/api/timeline?${RANGE}`);
+    // `read_all` lifts the MEMBERSHIP bound, not the role scope. Lifting both
+    // would let a manager scoped to one ward see every other ward's people —
+    // and the Manager role holds this permission by default, so the over-grant
+    // would be the norm rather than an edge case.
+    expect(build).toHaveBeenCalledWith(expect.objectContaining({ orgUnitIds: [4, 9] }));
   });
 
   it('lets a role scope narrow the membership scope, never widen it', async () => {

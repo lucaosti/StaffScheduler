@@ -12452,7 +12452,11 @@
             "name": "activeOnly",
             "in": "query",
             "schema": {
-              "type": "boolean"
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
             }
           }
         ]
