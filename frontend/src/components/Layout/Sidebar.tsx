@@ -127,6 +127,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: null,
     },
     {
+      path: '/shift-templates',
+      icon: 'bi-files',
+      label: 'Shift templates',
+      requiredPermission: 'schedule.read',
+    },
+    {
       path: '/on-call',
       icon: 'bi-telephone',
       label: 'On call',

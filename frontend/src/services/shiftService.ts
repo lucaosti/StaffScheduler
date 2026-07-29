@@ -54,3 +54,55 @@ export const updateShift = (
 
 export const deleteShift = (shiftId: string | number): Promise<ApiResponse<void>> =>
   apiClient.delete<void, '/shifts/{id}'>('/shifts/{id}', { params: { id: Number(shiftId) } });
+
+/**
+ * Shift templates — a named pattern of times, staffing and department that
+ * shifts are created from.
+ *
+ * Appended to this service rather than given its own: a template is a shift
+ * without a date, the endpoints live under `/shifts/templates`, and splitting
+ * them would put two halves of one idea in two files.
+ *
+ * `ShiftTemplate` is declared here because it is not in `domain.ts` yet.
+ * `isActive` is part of it deliberately: retiring a template is a soft delete,
+ * so "gone" and "inactive" are the same state and a caller that could not see
+ * the flag would be unable to tell a retired template from a missing one.
+ */
+export interface ShiftTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  departmentId: number;
+  departmentName?: string;
+  startTime: string;
+  endTime: string;
+  minStaff: number;
+  maxStaff: number;
+  isActive?: boolean;
+}
+
+type CreateTemplateBody = NonNullable<
+  paths['/shifts/templates']['post']['requestBody']
+>['content']['application/json'];
+type UpdateTemplateBody = NonNullable<
+  paths['/shifts/templates/{id}']['put']['requestBody']
+>['content']['application/json'];
+
+export const getShiftTemplates = (): Promise<ApiResponse<ShiftTemplate[]>> =>
+  apiClient.get<ShiftTemplate[], '/shifts/templates'>('/shifts/templates');
+
+export const createShiftTemplate = (
+  body: CreateTemplateBody
+): Promise<ApiResponse<ShiftTemplate>> =>
+  apiClient.post<ShiftTemplate, '/shifts/templates'>('/shifts/templates', body);
+
+export const updateShiftTemplate = (
+  id: number,
+  body: UpdateTemplateBody
+): Promise<ApiResponse<ShiftTemplate>> =>
+  apiClient.put<ShiftTemplate, '/shifts/templates/{id}'>('/shifts/templates/{id}', body, {
+    params: { id },
+  });
+
+export const deleteShiftTemplate = (id: number): Promise<ApiResponse<void>> =>
+  apiClient.delete<void, '/shifts/templates/{id}'>('/shifts/templates/{id}', { params: { id } });

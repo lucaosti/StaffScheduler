@@ -847,12 +847,27 @@ export class ShiftService {
     }
   }
 
+  /**
+   * Retires a template. SOFT, and deliberately so: shifts already created from
+   * it are ordinary shifts with their own rows, and a template is a pattern
+   * used at a moment rather than a thing those shifts belong to. Deleting the
+   * pattern must not reach back into schedules that have already run.
+   *
+   * Returns false for an id that matched nothing, so the route's 404 is
+   * reachable. It previously returned `true` unconditionally, which made
+   * deleting a template that does not exist report "deleted successfully" —
+   * the 404 branch above it could never be taken.
+   */
   async deleteShiftTemplate(id: number): Promise<boolean> {
     const connection = await this.pool.getConnection();
     try {
       await connection.beginTransaction();
-      await connection.execute('UPDATE shift_templates SET is_active = 0 WHERE id = ?', [id]);
+      const [result] = await connection.execute<ResultSetHeader>(
+        'UPDATE shift_templates SET is_active = 0 WHERE id = ? AND is_active = 1',
+        [id]
+      );
       await connection.commit();
+      if (result.affectedRows === 0) return false;
       logger.info('Shift template deleted: ' + id);
       return true;
     } catch (error) {

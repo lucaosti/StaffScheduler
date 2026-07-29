@@ -81,6 +81,7 @@ const TimeOff = lazy(() => import('./pages/TimeOff/TimeOff'));
 const ShiftSwaps = lazy(() => import('./pages/ShiftSwaps/ShiftSwaps'));
 const OnCall = lazy(() => import('./pages/OnCall/OnCall'));
 const EmploymentContracts = lazy(() => import('./pages/Admin/EmploymentContracts'));
+const ShiftTemplates = lazy(() => import('./pages/Shifts/ShiftTemplates'));
 
 /**
  * Main Application Component
@@ -189,6 +190,11 @@ const App: React.FC = () => {
           <Route path="time-off" element={<TimeOff />} />
           <Route path="shift-swaps" element={<ShiftSwaps />} />
           <Route path="on-call" element={<OnCall />} />
+          <Route path="shift-templates" element={
+            <PermissionRoute permission="schedule.read">
+              <ShiftTemplates />
+            </PermissionRoute>
+          } />
           <Route path="admin/employment-contracts" element={
             <PermissionRoute permission="employee.read">
               <EmploymentContracts />
