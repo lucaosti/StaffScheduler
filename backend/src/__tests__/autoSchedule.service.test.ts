@@ -1,9 +1,20 @@
 /**
  * AutoScheduleService unit tests (F09).
  *
- * The orchestrator stitches together five SQL queries, the optimizer call,
- * and the bulk-insert transaction. We mock the optimizer so the test stays
- * deterministic and focuses on the data plumbing.
+ * The orchestrator stitches a dozen SQL queries, the optimizer call and the
+ * bulk-insert transaction together. The optimizer is mocked so the test stays
+ * deterministic and the subject is the data plumbing.
+ *
+ * WHY THE POOL IS MOCKED BY QUERY AND NOT BY CALL ORDER. These tests used to
+ * chain `mockResolvedValueOnce` in the order the service happens to issue its
+ * reads. Every query added to the service then shifted every later response by
+ * one, silently handing the shifts result to the employees read — and the
+ * failure surfaced as a nonsense assertion far from its cause. That happened
+ * four times in one week, once per feature that needed a new read. Dispatching
+ * on a distinctive fragment of each statement makes the fixtures
+ * order-independent, and an unrecognised query THROWS rather than returning
+ * undefined, so the next new read announces itself instead of corrupting a
+ * neighbour.
  */
 
 import { AutoScheduleService } from '../services/AutoScheduleService';
@@ -29,6 +40,102 @@ const makePool = () => {
   };
 };
 
+type Rows = Array<Record<string, unknown>>;
+
+interface Fixtures {
+  schedule?: Rows;
+  shifts?: Rows;
+  employees?: Rows;
+  pinned?: Rows;
+  pairings?: Rows;
+  contracts?: Rows;
+  unavailability?: Rows;
+  history?: Rows;
+  predecessor?: Rows;
+  external?: Rows;
+  proposal?: Rows;
+}
+
+/**
+ * Which fixture answers which statement.
+ *
+ * Ordered most-specific first: several of these read `shift_assignments`, so
+ * the fragment identifying one must not also appear in another. The
+ * predecessor lookup and the schedule read both select from `schedules`, hence
+ * matching on a leading clause rather than the table name.
+ */
+const MATCHERS: Array<[keyof Fixtures, string]> = [
+  ['schedule', 'FROM schedules WHERE id = ?'],
+  ['predecessor', 'SELECT id FROM schedules'],
+  ['shifts', 'GROUP BY s.id'],
+  ['employees', 'FROM users u'],
+  ['pinned', 'sa.is_pinned = 1'],
+  ['pairings', 'employee_pairings'],
+  ['contracts', 'user_employment_contracts'],
+  ['unavailability', 'user_unavailability'],
+  ['history', 'INTERVAL 90 DAY'],
+  ['external', "sc.status = 'published' OR sc.id = ?"],
+  ['proposal', 'schedule_replan_proposals'],
+];
+
+const SCHEDULE_ROW = {
+  id: 1,
+  department_id: 3,
+  start_date: '2026-05-01',
+  end_date: '2026-05-31',
+};
+
+const SHIFT_ROW = {
+  id: 10,
+  date: '2026-05-01',
+  start_time: '08:00',
+  end_time: '16:00',
+  min_staff: 1,
+  max_staff: 5,
+  department_id: 3,
+  skill_names: '',
+};
+
+const EMPLOYEE_ROW = {
+  id: 1,
+  skill_names: '',
+  max_hours_per_week: 40,
+  min_hours_per_week: 0,
+  max_consecutive_days: 5,
+};
+
+/**
+ * Answers each read from the fixture that matches it.
+ *
+ * Everything defaults to empty, so a test states only what it is about. An
+ * unmatched statement throws by design — see the file header.
+ */
+const primeQueries = (execute: jest.Mock, fixtures: Fixtures = {}) => {
+  const table: Fixtures = {
+    schedule: [SCHEDULE_ROW],
+    shifts: [SHIFT_ROW],
+    employees: [EMPLOYEE_ROW],
+    ...fixtures,
+  };
+  execute.mockImplementation(async (sql: string) => {
+    const hit = MATCHERS.find(([, fragment]) => sql.includes(fragment));
+    if (!hit) throw new Error(`no fixture matches this query:\n${sql}`);
+    return [table[hit[0]] ?? [], null];
+  });
+};
+
+/** The call the service made for a given read, as `[sql, params]`. */
+const queryFor = (execute: jest.Mock, key: keyof Fixtures): [string, unknown[]] => {
+  const fragment = MATCHERS.find(([name]) => name === key)![1];
+  const call = execute.mock.calls.find((c) => String(c[0]).includes(fragment));
+  if (!call) throw new Error(`the service never issued the ${key} query`);
+  return call as [string, unknown[]];
+};
+
+const wasQueried = (execute: jest.Mock, key: keyof Fixtures): boolean => {
+  const fragment = MATCHERS.find(([name]) => name === key)![1];
+  return execute.mock.calls.some((c) => String(c[0]).includes(fragment));
+};
 
 /**
  * The problem the optimizer was handed, whichever engine ran.
@@ -76,18 +183,16 @@ describe('AutoScheduleService.generate', () => {
 
   it('throws when the schedule does not exist', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null]);
-    const service = new AutoScheduleService(pool);
-    await expect(service.generate(99, 1)).rejects.toThrow(/Schedule not found/);
+    primeQueries(execute, { schedule: [] });
+    await expect(new AutoScheduleService(pool).generate(99, 1)).rejects.toThrow(
+      /Schedule not found/
+    );
   });
 
   it('returns EMPTY when the schedule has no shifts', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([[], null]); // shifts empty
-    const service = new AutoScheduleService(pool);
-    const out = await service.generate(1, 7);
+    primeQueries(execute, { shifts: [] });
+    const out = await new AutoScheduleService(pool).generate(1, 7);
     expect(out.status).toBe('EMPTY');
     expect(out.totalShifts).toBe(0);
     expect(out.assignmentsCreated).toBe(0);
@@ -95,26 +200,23 @@ describe('AutoScheduleService.generate', () => {
 
   it('runs the optimizer and persists each returned assignment', async () => {
     const { pool, conn, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null]) // schedule
-      .mockResolvedValueOnce([
-        [
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 2, max_staff: 5, department_id: 3, skill_names: 'Triage' },
-          { id: 11, date: '2026-05-01', start_time: '16:00', end_time: '23:59', min_staff: 1, max_staff: 4, department_id: 3, skill_names: null },
-        ],
-        null,
-      ]) // shifts
-      .mockResolvedValueOnce([[{ id: 1, skill_names: 'Triage', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
-      .mockResolvedValueOnce([[], null]) // pairing rules (none)
-      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
+    primeQueries(execute, {
+      shifts: [
+        { ...SHIFT_ROW, min_staff: 2, skill_names: 'Triage' },
+        {
+          ...SHIFT_ROW,
+          id: 11,
+          start_time: '16:00',
+          end_time: '23:59',
+          max_staff: 4,
+          skill_names: null,
+        },
+      ],
+      employees: [{ ...EMPLOYEE_ROW, skill_names: 'Triage' }],
+    });
     conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]);
 
-    const service = new AutoScheduleService(pool);
-    const out = await service.generate(1, 7);
+    const out = await new AutoScheduleService(pool).generate(1, 7);
 
     expect(out.status).toBe('OK');
     expect(out.totalShifts).toBe(2);
@@ -133,40 +235,27 @@ describe('AutoScheduleService.generate', () => {
    */
   it('proposes rather than applies when the schedule is published', async () => {
     const { pool, conn, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([
-        [{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31', status: 'published' }],
-        null,
-      ]) // schedule
-      .mockResolvedValueOnce([
-        [
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: null },
-        ],
-        null,
-      ]) // shifts
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-      .mockResolvedValueOnce([[], null]) // pinned
-      .mockResolvedValueOnce([[], null]) // pairings
-      .mockResolvedValueOnce([[], null]) // contracts
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]) // external assignments
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 44,
-            schedule_id: 1,
-            proposed_by: 7,
-            status: 'pending',
-            engine: 'greedy',
-            payload: JSON.stringify({ assignments: [{ shiftId: 10, userId: 1 }], brokenCommitments: [], keptCommitments: 0, totalShifts: 1 }),
-            decided_by: null,
-            decision_reason: null,
-            created_at: 't',
-          },
-        ],
-        null,
-      ]); // proposal read-back
+    primeQueries(execute, {
+      schedule: [{ ...SCHEDULE_ROW, status: 'published' }],
+      proposal: [
+        {
+          id: 44,
+          schedule_id: 1,
+          proposed_by: 7,
+          status: 'pending',
+          engine: 'greedy',
+          payload: JSON.stringify({
+            assignments: [{ shiftId: 10, userId: 1 }],
+            brokenCommitments: [],
+            keptCommitments: 0,
+            totalShifts: 1,
+          }),
+          decided_by: null,
+          decision_reason: null,
+          created_at: 't',
+        },
+      ],
+    });
     // The proposal's own transaction (supersede + insert).
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 0 }, null])
@@ -179,8 +268,6 @@ describe('AutoScheduleService.generate', () => {
     // Nothing was created. Reporting the proposed count here would say work
     // happened that has not.
     expect(out.assignmentsCreated).toBe(0);
-    // No assignment INSERT: the only statements on a connection are the
-    // proposal's own.
     expect(
       conn.execute.mock.calls.some((c) => String(c[0]).includes('INTO shift_assignments'))
     ).toBe(false);
@@ -188,22 +275,10 @@ describe('AutoScheduleService.generate', () => {
 
   it('persists with one multi-row INSERT and counts only rows actually inserted', async () => {
     const { pool, conn, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([
-        [
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 2, max_staff: 5, department_id: 3, skill_names: '' },
-          { id: 11, date: '2026-05-01', start_time: '16:00', end_time: '23:59', min_staff: 1, max_staff: 4, department_id: 3, skill_names: null },
-        ],
-        null,
-      ])
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
-      .mockResolvedValueOnce([[], null]) // pairing rules (none)
-      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup
-      .mockResolvedValueOnce([[], null]); // external assignments
+    primeQueries(execute, {
+      shifts: [SHIFT_ROW, { ...SHIFT_ROW, id: 11 }],
+      employees: [EMPLOYEE_ROW, { ...EMPLOYEE_ROW, id: 2 }],
+    });
     // INSERT IGNORE skipped one row (a duplicate assignment already existed).
     conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
@@ -223,42 +298,19 @@ describe('AutoScheduleService.generate', () => {
   /**
    * A month is not independent of the one before it: rest, consecutive days
    * and weekly hours all run across the boundary. WHICH schedule precedes this
-   * one is the part that used to be wrong — the read took every other schedule
-   * in the window with no filter on the schedule's status, so drafts and
-   * abandoned generations counted alongside what actually happened.
+   * one used to be answered by taking every other schedule in the window with
+   * no filter on its status, so drafts and abandoned generations counted
+   * alongside what actually happened.
    */
   describe('boundary continuity', () => {
-    const primeUpToPredecessor = (execute: jest.Mock, scheduleRow: Record<string, unknown>) => {
-      execute
-        .mockResolvedValueOnce([[scheduleRow], null]) // schedule
-        .mockResolvedValueOnce([[
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-        ], null])
-        .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-        .mockResolvedValueOnce([[], null]) // pinned
-        .mockResolvedValueOnce([[], null]) // pairings
-        .mockResolvedValueOnce([[], null]) // contracts
-        .mockResolvedValueOnce([[], null]); // unavailability
-    };
-
-    const baseSchedule = {
-      id: 1,
-      department_id: 3,
-      start_date: '2026-05-01',
-      end_date: '2026-05-31',
-    };
-
     it('reads only published schedules plus the resolved predecessor', async () => {
       const { pool, conn, execute } = makePool();
-      primeUpToPredecessor(execute, baseSchedule);
-      execute
-        .mockResolvedValueOnce([[{ id: 77 }], null]) // default predecessor found
-        .mockResolvedValueOnce([[], null]); // external assignments
+      primeQueries(execute, { predecessor: [{ id: 77 }] });
       conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
       await new AutoScheduleService(pool).generate(1, 7);
 
-      const [sql, params] = execute.mock.calls[8] as [string, unknown[]];
+      const [sql, params] = queryFor(execute, 'external');
       // A draft that is not the chosen predecessor must stop constraining
       // anything: at most one of several candidate generations will ever be
       // published, and counting them all inflates one person's history at the
@@ -269,34 +321,26 @@ describe('AutoScheduleService.generate', () => {
 
     it('prefers the schedule the manager chose over the default', async () => {
       const { pool, conn, execute } = makePool();
-      primeUpToPredecessor(execute, { ...baseSchedule, previous_schedule_id: 42 });
-      execute.mockResolvedValueOnce([[], null]); // external assignments
+      primeQueries(execute, { schedule: [{ ...SCHEDULE_ROW, previous_schedule_id: 42 }] });
       conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
       await new AutoScheduleService(pool).generate(1, 7);
 
-      // No default lookup at all: an explicit choice is the answer, and when
-      // several generations cover the period only the manager knows which one
-      // happened.
-      // One query fewer than the default path: the lookup is skipped entirely,
-      // so the external-assignments read is call 7 rather than 8.
-      expect(execute).toHaveBeenCalledTimes(8);
-      const externalCall = execute.mock.calls[7] as [string, unknown[]];
-      expect(externalCall[0]).toContain('FROM shift_assignments');
-      expect(externalCall[1][1]).toBe(42);
+      // The default lookup is skipped entirely: an explicit choice is the
+      // answer, and when several generations cover the period only the manager
+      // knows which one happened.
+      expect(wasQueried(execute, 'predecessor')).toBe(false);
+      expect(queryFor(execute, 'external')[1][1]).toBe(42);
     });
 
     it('resolves the default from published schedules ending before this one starts', async () => {
       const { pool, conn, execute } = makePool();
-      primeUpToPredecessor(execute, baseSchedule);
-      execute
-        .mockResolvedValueOnce([[{ id: 77 }], null])
-        .mockResolvedValueOnce([[], null]);
+      primeQueries(execute, { predecessor: [{ id: 77 }] });
       conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
       await new AutoScheduleService(pool).generate(1, 7);
 
-      const [sql, params] = execute.mock.calls[7] as [string, unknown[]];
+      const [sql, params] = queryFor(execute, 'predecessor');
       // Published, because an unpublished draft is not what happened — and
       // defaulting to one would silently pick a single candidate generation
       // out of several, which is what the explicit column exists to prevent.
@@ -307,10 +351,7 @@ describe('AutoScheduleService.generate', () => {
 
     it('matches nothing rather than dropping the filter when there is no predecessor', async () => {
       const { pool, conn, execute } = makePool();
-      primeUpToPredecessor(execute, baseSchedule);
-      execute
-        .mockResolvedValueOnce([[], null]) // no candidate
-        .mockResolvedValueOnce([[], null]);
+      primeQueries(execute);
       conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
       await new AutoScheduleService(pool).generate(1, 7);
@@ -318,100 +359,172 @@ describe('AutoScheduleService.generate', () => {
       // A NULL here would make `sc.id = NULL` unknown and silently drop the
       // OR branch — the same result by accident rather than by intent, and
       // the wrong one the day the branch matters.
-      expect((execute.mock.calls[8] as [string, unknown[]])[1][1]).toBe(0);
+      expect(queryFor(execute, 'external')[1][1]).toBe(0);
+    });
+  });
+
+  /**
+   * Equity measured across months rather than reset by each one.
+   *
+   * Without carried history "weekend work is spread evenly" was true of every
+   * month in isolation and could be false of the year: the same person could
+   * take the unpopular end every month with nothing in the objective noticing.
+   */
+  describe('carried equity history', () => {
+    const twoEmployees = { employees: [EMPLOYEE_ROW, { ...EMPLOYEE_ROW, id: 2 }] };
+
+    it('reads the horizon from published schedules only, before this period', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, twoEmployees);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const [sql, params] = queryFor(execute, 'history');
+      // A draft's weekends would otherwise follow someone into the next month
+      // having never been worked.
+      expect(sql).toContain("sc.status = 'published'");
+      expect(sql).toContain('INTERVAL 90 DAY');
+      expect(sql).toContain('s.date < ?');
+      expect(params).toEqual([1, '2026-05-01', '2026-05-01']);
+    });
+
+    it("carries a deviation from the candidates' average, not a raw count", async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        // Employee 1 worked two weekend days; employee 2 worked none.
+        history: [
+          { user_id: 1, date: '2026-04-04', start_time: '08:00', end_time: '16:00' },
+          { user_id: 1, date: '2026-04-05', start_time: '08:00', end_time: '16:00' },
+        ],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      // The average is 1, so the deviations are +1 and −1; normalised so the
+      // least loaded sits at zero they become 2 and 0. The spread the
+      // objective minimises is unchanged by that shift, and no load variable
+      // needs a negative lower bound.
+      expect(problem.employees[0].carried_load.weekend).toBe(2);
+      expect(problem.employees[1].carried_load.weekend).toBe(0);
+    });
+
+    it('starts everyone level when the history is even', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        history: [
+          { user_id: 1, date: '2026-04-04', start_time: '08:00', end_time: '16:00' },
+          { user_id: 2, date: '2026-04-05', start_time: '08:00', end_time: '16:00' },
+        ],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      // The point of a deviation: one weekend each is the same as none each.
+      expect(problem.employees[0].carried_load.weekend).toBe(0);
+      expect(problem.employees[1].carried_load.weekend).toBe(0);
+    });
+
+    it('counts a night shift as night history and not as weekend', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        // A Wednesday 22:00–06:00: night, not weekend.
+        history: [{ user_id: 1, date: '2026-04-08', start_time: '22:00', end_time: '06:00' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      expect(problem.employees[0].carried_load.night).toBe(1);
+      expect(problem.employees[0].carried_load.weekend).toBe(0);
+    });
+
+    it('counts a date once however many shifts it held', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        history: [
+          { user_id: 1, date: '2026-04-04', start_time: '08:00', end_time: '12:00' },
+          { user_id: 1, date: '2026-04-04', start_time: '13:00', end_time: '17:00' },
+        ],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // The unit is what the person loses: two shifts on one Saturday cost one
+      // Saturday, the same unit the in-period measure uses.
+      expect(lastProblemGiven().employees[0].carried_load.weekend).toBe(1);
+    });
+
+    it('does not query history at all when there are no candidates', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { employees: [] });
+      conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // The id list is interpolated, so an empty one would produce `IN ()` —
+      // a syntax error rather than an empty result.
+      expect(wasQueried(execute, 'history')).toBe(false);
     });
   });
 
   it('rolls back when an INSERT fails', async () => {
     const { pool, conn, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([
-        [
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-        ],
-        null,
-      ])
-      // Query order: schedule, shifts, employees, pinned commitments, pairing
-      // rules, employment contracts, unavailability, external assignments.
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
+    primeQueries(execute);
     conn.execute.mockRejectedValue(new Error('insert failed'));
 
-    const service = new AutoScheduleService(pool);
-    await expect(service.generate(1, 7)).rejects.toThrow(/insert failed/);
+    await expect(new AutoScheduleService(pool).generate(1, 7)).rejects.toThrow(/insert failed/);
     expect(conn.rollback).toHaveBeenCalled();
   });
 
   it('expands an unavailability date range into a per-day list per user', async () => {
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]); // chunked bulk INSERT
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([[
-        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-      ], null])
-      .mockResolvedValueOnce([[
-        { id: 7, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 },
-      ], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
-      .mockResolvedValueOnce([[], null]) // pairing rules (none)
-      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[
-        { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
-      ], null])
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
+    primeQueries(execute, {
+      employees: [{ ...EMPLOYEE_ROW, id: 7 }],
+      unavailability: [
+        {
+          user_id: 7,
+          start_date: new Date('2026-05-01T00:00:00Z'),
+          end_date: new Date('2026-05-03T00:00:00Z'),
+        },
+      ],
+    });
+    conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]);
 
-    const service = new AutoScheduleService(pool);
-    await service.generate(1, 1);
+    await new AutoScheduleService(pool).generate(1, 1);
 
-    const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results[0].value;
-    const problem = optimizerInstance.generateGreedySchedule.mock.calls[0][0];
-    expect(problem.employees[0].unavailable_dates).toEqual(['2026-05-01', '2026-05-02', '2026-05-03']);
+    expect(lastProblemGiven().employees[0].unavailable_dates).toEqual([
+      '2026-05-01',
+      '2026-05-02',
+      '2026-05-03',
+    ]);
   });
 
   it('feeds other-schedule assignments into the optimizer as busy time', async () => {
-    // The ±14-day window query exists so the greedy engine sees cross-schedule
+    // The ±14-day window query exists so the engines see cross-schedule
     // commitments; this pins the per-user grouping of those rows.
     const { pool, conn, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null]) // schedule
-      .mockResolvedValueOnce([
-        [
-          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-        ],
-        null,
-      ]) // shifts
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
-      .mockResolvedValueOnce([[], null]) // pairing rules (none) // employees
-      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([
-        [
-          { user_id: 1, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
-          { user_id: 1, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
-        ],
-        null,
-      ]); // external assignments: employee 1 already busy on the 1st
+    primeQueries(execute, {
+      external: [
+        { user_id: 1, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+        { user_id: 1, date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+      ],
+    });
     conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
-    const service = new AutoScheduleService(pool);
-    await service.generate(1, 7);
+    await new AutoScheduleService(pool).generate(1, 7);
 
-    // The optimizer is mocked, so the assertion is on the problem plumbing:
-    // both external rows must arrive grouped under the employee's
-    // existing_assignments so the greedy engine treats them as busy time.
-    const optimizerInstance = (ScheduleOptimizer as jest.Mock).mock.results[0].value;
-    const problem = optimizerInstance.generateGreedySchedule.mock.calls[0][0];
-    expect(problem.employees[0].existing_assignments).toEqual([
+    expect(lastProblemGiven().employees[0].existing_assignments).toEqual([
       { date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
       { date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
     ]);
@@ -420,22 +533,6 @@ describe('AutoScheduleService.generate', () => {
 
 describe('AutoScheduleService.generate — engine selection and fallback signalling', () => {
   const originalEngine = config.optimization.engine;
-
-  // Standard 5-query happy path: one shift, one eligible employee.
-  const primeQueries = (execute: jest.Mock) => {
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([[
-        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-      ], null])
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments (none)
-      .mockResolvedValueOnce([[], null]) // pairing rules (none)
-      .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup
-      .mockResolvedValueOnce([[], null]); // external assignments
-  };
 
   afterEach(() => {
     config.optimization.engine = originalEngine;
@@ -448,7 +545,10 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       assignments: [{ shiftId: '10', employeeId: '1' }],
     });
     const generateGreedySchedule = jest.fn();
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({ optimize, generateGreedySchedule }));
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize,
+      generateGreedySchedule,
+    }));
 
     const { pool, conn, execute } = makePool();
     primeQueries(execute);
@@ -471,7 +571,10 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       assignments: [{ shiftId: '10', employeeId: '1' }],
       error: 'python3 not found',
     });
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({ optimize, generateGreedySchedule: jest.fn() }));
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize,
+      generateGreedySchedule: jest.fn(),
+    }));
 
     const { pool, conn, execute } = makePool();
     primeQueries(execute);
@@ -488,7 +591,10 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     config.optimization.engine = 'greedy';
     const optimize = jest.fn();
     const generateGreedySchedule = jest.fn().mockResolvedValue([{ shiftId: '10', employeeId: '1' }]);
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({ optimize, generateGreedySchedule }));
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize,
+      generateGreedySchedule,
+    }));
 
     const { pool, conn, execute } = makePool();
     primeQueries(execute);
@@ -510,37 +616,37 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
    */
   it('reports commitments kept and broken, and warns about the broken ones', async () => {
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null]) // schedule
-      .mockResolvedValueOnce([[
-        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-        { id: 11, date: '2026-05-02', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
-      ], null]) // shifts
-      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null]) // employees
+    primeQueries(execute, {
+      shifts: [SHIFT_ROW, { ...SHIFT_ROW, id: 11, date: '2026-05-02' }],
       // Two published commitments; the optimizer below returns only the first.
-      .mockResolvedValueOnce([[{ user_id: 1, shift_id: 10 }, { user_id: 1, shift_id: 11 }], null])
-      .mockResolvedValueOnce([[], null]) // pairing rules (none)
-      .mockResolvedValueOnce([[], null]) // employment contracts
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments
+      pinned: [
+        { user_id: 1, shift_id: 10 },
+        { user_id: 1, shift_id: 11 },
+      ],
+    });
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
     // Both engine paths return the same single assignment, so this test does
     // not depend on which one the ambient OPTIMIZATION_ENGINE selects — the
     // subject is the diff, not engine selection.
     const kept = [
-      { employeeId: '1', shiftId: '10', date: '2026-05-01', startTime: '08:00', endTime: '16:00', hours: 8 },
+      {
+        employeeId: '1',
+        shiftId: '10',
+        date: '2026-05-01',
+        startTime: '08:00',
+        endTime: '16:00',
+        hours: 8,
+      },
     ];
-    const optimizerInstance = {
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
       generateGreedySchedule: jest.fn().mockResolvedValue(kept),
       optimize: jest.fn().mockResolvedValue({
         status: 'OPTIMAL',
         assignments: kept,
         statistics: { isOptimal: true },
       }),
-    };
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => optimizerInstance);
+    }));
 
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
     const result = await new AutoScheduleService(pool).generate(1, 1);
@@ -552,66 +658,51 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     warn.mockRestore();
   });
 
-  it('ignores malformed skill and qualification lists from the database', () => {
+  it('ignores malformed skill and qualification lists from the database', async () => {
     // GROUP_CONCAT emits an empty segment when a nullable column is NULL, so
     // rows that state no requirement arrive as "name:" or "name::". Those must
     // be skipped rather than parsed as level 0, which would silently
     // disqualify everyone.
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([[
-        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5,
-          department_id: 3, skill_names: 'Triage', skill_levels: 'Triage:', qualified_staff: 'Triage::' },
-      ], null])
-      .mockResolvedValueOnce([[
-        { id: 1, skill_names: 'Triage', skill_levels: 'Triage:', max_hours_per_week: 40,
-          min_hours_per_week: 0, max_consecutive_days: 5 },
-      ], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments
-      .mockResolvedValueOnce([[], null]) // pairing rules
-      .mockResolvedValueOnce([[], null]) // employment contracts
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments
-
-    return new AutoScheduleService(pool).generate(1, 1).then(() => {
-      const problem = lastProblemGiven();
-      expect(problem.shifts[0].required_skill_levels).toEqual({});
-      expect(problem.shifts[0].qualified_staff).toEqual({});
-      expect(problem.employees[0].skill_levels).toEqual({});
+    primeQueries(execute, {
+      shifts: [
+        { ...SHIFT_ROW, skill_names: 'Triage', skill_levels: 'Triage:', qualified_staff: 'Triage::' },
+      ],
+      employees: [{ ...EMPLOYEE_ROW, skill_names: 'Triage', skill_levels: 'Triage:' }],
     });
+    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+    await new AutoScheduleService(pool).generate(1, 1);
+
+    const problem = lastProblemGiven();
+    expect(problem.shifts[0].required_skill_levels).toEqual({});
+    expect(problem.shifts[0].qualified_staff).toEqual({});
+    expect(problem.employees[0].skill_levels).toEqual({});
   });
 
-  it('carries well-formed skill levels and qualification requirements through', () => {
+  it('carries well-formed skill levels and qualification requirements through', async () => {
     // The counterpart of the malformed case: the parsers must still populate
     // when the columns ARE set, or the previous test would pass against a
     // parser that simply returned nothing.
     const { pool, conn, execute } = makePool();
-    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
-    execute
-      .mockResolvedValueOnce([[{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31' }], null])
-      .mockResolvedValueOnce([[
-        { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5,
-          department_id: 3, skill_names: 'Triage', skill_levels: 'Triage:3', qualified_staff: 'Triage:5:1' },
-      ], null])
-      .mockResolvedValueOnce([[
-        { id: 1, skill_names: 'Triage', skill_levels: 'Triage:4', max_hours_per_week: 40,
-          min_hours_per_week: 0, max_consecutive_days: 5 },
-      ], null])
-      .mockResolvedValueOnce([[], null]) // pinned commitments
-      .mockResolvedValueOnce([[], null]) // pairing rules
-      .mockResolvedValueOnce([[], null]) // employment contracts
-      .mockResolvedValueOnce([[], null]) // unavailability
-      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
-      .mockResolvedValueOnce([[], null]); // external assignments
-
-    return new AutoScheduleService(pool).generate(1, 1).then(() => {
-      const problem = lastProblemGiven();
-      expect(problem.shifts[0].required_skill_levels).toEqual({ Triage: 3 });
-      expect(problem.shifts[0].qualified_staff).toEqual({ Triage: { level: 5, count: 1 } });
-      expect(problem.employees[0].skill_levels).toEqual({ Triage: 4 });
+    primeQueries(execute, {
+      shifts: [
+        {
+          ...SHIFT_ROW,
+          skill_names: 'Triage',
+          skill_levels: 'Triage:3',
+          qualified_staff: 'Triage:5:1',
+        },
+      ],
+      employees: [{ ...EMPLOYEE_ROW, skill_names: 'Triage', skill_levels: 'Triage:4' }],
     });
+    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+    await new AutoScheduleService(pool).generate(1, 1);
+
+    const problem = lastProblemGiven();
+    expect(problem.shifts[0].required_skill_levels).toEqual({ Triage: 3 });
+    expect(problem.shifts[0].qualified_staff).toEqual({ Triage: { level: 5, count: 1 } });
+    expect(problem.employees[0].skill_levels).toEqual({ Triage: 4 });
   });
 });
