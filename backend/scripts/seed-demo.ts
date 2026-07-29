@@ -155,7 +155,7 @@ const wipeAll = async (conn: mysql.Connection): Promise<void> => {
     'time_off_requests',
     'on_call_assignments',
     'on_call_periods',
-    'user_calendar_tokens',
+    'calendar_tokens',
     'shift_assignments',
     'shift_skills',
     'shifts',
@@ -901,8 +901,10 @@ const insertCalendarTokens = async (
       .padStart(6, '0')}`;
     const tokenHash = sha256(rawToken);
     await conn.execute(
-      'INSERT INTO user_calendar_tokens (user_id, token_hash) VALUES (?, ?)',
-      [userId, tokenHash]
+      // A label is required now that a person may hold several feeds; the seed
+      // gives one so the demo shows the list as a real account would look.
+      'INSERT INTO calendar_tokens (user_id, label, token_hash) VALUES (?, ?, ?)',
+      [userId, 'Demo subscription', tokenHash]
     );
     if (counter <= 4) {
       feedSamples.push(`  ${email}: /api/calendar/feed.ics?token=${rawToken}`);
