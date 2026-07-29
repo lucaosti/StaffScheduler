@@ -30,6 +30,7 @@ import type {
   Department,
   OrgUnit,
   Timestamp,
+  TimeOffRequest,
 } from '@staff-scheduler/shared';
 export type {
   Permission,
@@ -42,6 +43,7 @@ export type {
   Department,
   OrgUnit,
   Timestamp,
+  TimeOffRequest,
 };
 
 
