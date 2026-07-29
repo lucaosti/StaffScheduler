@@ -27,9 +27,11 @@ import QueryState from '../../components/QueryState';
 import { useUserAccountsQuery, useUserAccountMutations } from '../../hooks/useUserAccounts';
 import { useRolesAndPermissionsQuery } from '../../hooks/useRbac';
 import type { UserAccount } from '../../services/userAccountService';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 const UserAccounts: React.FC = () => {
   const { user } = useAuth();
+  const { message, run: act } = useActionFeedback();
   const permissions = user?.permissions ?? [];
   const canRead = permissions.includes('user.read') || permissions.includes('user.read_all');
   const canManage = permissions.includes('user.manage');
@@ -39,22 +41,11 @@ const UserAccounts: React.FC = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [roleId, setRoleId] = useState('');
-  const [message, setMessage] = useState<string | null>(null);
 
   const accounts = useUserAccountsQuery(search ? { search } : {}, canRead);
   const rbac = useRolesAndPermissionsQuery();
   const { create, update, deactivate } = useUserAccountMutations();
 
-  const act = async (run: Promise<unknown>) => {
-    setMessage(null);
-    try {
-      await run;
-    } catch (error) {
-      // The server refuses privilege escalation through role assignment by
-      // name; a generic failure would hide why a role was rejected.
-      setMessage(error instanceof Error ? error.message : 'The request failed');
-    }
-  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
