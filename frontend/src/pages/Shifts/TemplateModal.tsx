@@ -7,6 +7,7 @@
 import React from 'react';
 import { Shift, Schedule } from '../../types';
 import type { Department } from '../../services/departmentService';
+import { toLocalDateString, todayIso } from '../../utils/format';
 
 interface Props {
   show: boolean;
@@ -31,11 +32,7 @@ const TemplateModal: React.FC<Props> = ({
 }) => {
   if (!show) return null;
 
-  const editingDateDefault = editingShift?.date
-    ? typeof editingShift.date === 'string'
-      ? editingShift.date.slice(0, 10)
-      : editingShift.date.toISOString().slice(0, 10)
-    : new Date().toISOString().slice(0, 10);
+  const editingDateDefault = toLocalDateString(editingShift?.date) || todayIso();
 
   return (
     <div

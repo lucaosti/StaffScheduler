@@ -7,6 +7,7 @@
 import React from 'react';
 import { Shift } from '../../types';
 import EmptyState from '../../components/EmptyState';
+import { toLocalDateString } from '../../utils/format';
 
 interface Props {
   shifts: Shift[];
@@ -77,11 +78,7 @@ const ShiftTable: React.FC<Props> = ({
           shift.departmentName ||
           (shift.departmentId ? departmentNameById.get(Number(shift.departmentId)) : '') ||
           'Unknown';
-        const dateStr = shift.date
-          ? typeof shift.date === 'string'
-            ? shift.date.slice(0, 10)
-            : shift.date.toISOString().slice(0, 10)
-          : '';
+        const dateStr = toLocalDateString(shift.date);
 
         return (
           <div key={shift.id} className="col-md-6 col-lg-4 mb-4">
