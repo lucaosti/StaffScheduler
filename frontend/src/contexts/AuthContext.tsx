@@ -23,6 +23,15 @@ interface AuthContextType extends AuthState {
   login: (credentials: LoginRequest) => Promise<void>;
   logout: () => void;
   refreshToken: () => Promise<void>;
+  /**
+   * Re-reads the signed-in user.
+   *
+   * Needed because some of the account's own state changes through endpoints
+   * that do not mint a token — enabling two-factor is the first: it flips
+   * `twoFactorEnabled` server-side, and without this the page would keep
+   * offering "Set up" to someone who had just finished setting it up.
+   */
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -137,6 +146,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     dispatch({ type: 'LOGOUT' });
   }, []);
 
+  const refreshUser = useCallback(async (): Promise<void> => {
+    // Deliberately silent on failure: this runs after an action that already
+    // succeeded, and turning a stale display into a logout would be a worse
+    // answer than a stale display.
+    try {
+      const response = await authService.verifyToken();
+      if (response.success && response.data) {
+        dispatch({ type: 'SET_USER', payload: response.data });
+      }
+    } catch {
+      // keep whatever we had
+    }
+  }, []);
+
   const refreshToken = useCallback(async (): Promise<void> => {
     try {
       const response = await authService.refreshToken();
@@ -173,8 +196,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       login,
       logout,
       refreshToken,
+      refreshUser,
     }),
-    [state, login, logout, refreshToken]
+    [state, login, logout, refreshToken, refreshUser]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

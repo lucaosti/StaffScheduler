@@ -14,6 +14,7 @@ import ProfileSection from '../Settings/ProfileSection';
 import SystemSection from '../Settings/SystemSection';
 import ModulesSection from '../Settings/ModulesSection';
 import CalendarSection from '../Settings/CalendarSection';
+import TwoFactorSection from '../Settings/TwoFactorSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
@@ -44,7 +45,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'system' | 'modules'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -163,6 +164,14 @@ const Settings: React.FC = () => {
                 <i className="bi bi-calendar-event me-2"></i>Calendar
               </button>
             </li>
+            <li className="nav-item">
+              <button
+                className={`nav-link ${activeTab === 'security' ? 'active' : ''}`}
+                onClick={() => setActiveTab('security')}
+              >
+                <i className="bi bi-shield-lock me-2"></i>Security
+              </button>
+            </li>
             {isAdmin && (
               <li className="nav-item">
                 <button
@@ -208,6 +217,8 @@ const Settings: React.FC = () => {
       )}
 
       {activeTab === 'calendar' && <CalendarSection />}
+
+      {activeTab === 'security' && <TwoFactorSection />}
 
       {activeTab === 'system' && isAdmin && <SystemSection />}
 
