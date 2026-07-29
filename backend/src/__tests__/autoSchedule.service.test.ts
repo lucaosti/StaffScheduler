@@ -109,6 +109,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
     conn.execute.mockResolvedValue([{ affectedRows: 2 }, null]);
 
@@ -148,6 +149,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[], null]) // pairings
       .mockResolvedValueOnce([[], null]) // contracts
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]) // external assignments
       .mockResolvedValueOnce([
         [
@@ -199,8 +201,9 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup
+      .mockResolvedValueOnce([[], null]); // external assignments
     // INSERT IGNORE skipped one row (a duplicate assignment already existed).
     conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
 
@@ -215,6 +218,108 @@ describe('AutoScheduleService.generate', () => {
     // ...and the count reflects rows the database actually inserted, so an
     // IGNOREd duplicate is not reported as created.
     expect(out.assignmentsCreated).toBe(1);
+  });
+
+  /**
+   * A month is not independent of the one before it: rest, consecutive days
+   * and weekly hours all run across the boundary. WHICH schedule precedes this
+   * one is the part that used to be wrong — the read took every other schedule
+   * in the window with no filter on the schedule's status, so drafts and
+   * abandoned generations counted alongside what actually happened.
+   */
+  describe('boundary continuity', () => {
+    const primeUpToPredecessor = (execute: jest.Mock, scheduleRow: Record<string, unknown>) => {
+      execute
+        .mockResolvedValueOnce([[scheduleRow], null]) // schedule
+        .mockResolvedValueOnce([[
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: '' },
+        ], null])
+        .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+        .mockResolvedValueOnce([[], null]) // pinned
+        .mockResolvedValueOnce([[], null]) // pairings
+        .mockResolvedValueOnce([[], null]) // contracts
+        .mockResolvedValueOnce([[], null]); // unavailability
+    };
+
+    const baseSchedule = {
+      id: 1,
+      department_id: 3,
+      start_date: '2026-05-01',
+      end_date: '2026-05-31',
+    };
+
+    it('reads only published schedules plus the resolved predecessor', async () => {
+      const { pool, conn, execute } = makePool();
+      primeUpToPredecessor(execute, baseSchedule);
+      execute
+        .mockResolvedValueOnce([[{ id: 77 }], null]) // default predecessor found
+        .mockResolvedValueOnce([[], null]); // external assignments
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const [sql, params] = execute.mock.calls[8] as [string, unknown[]];
+      // A draft that is not the chosen predecessor must stop constraining
+      // anything: at most one of several candidate generations will ever be
+      // published, and counting them all inflates one person's history at the
+      // boundary by however many exist.
+      expect(sql).toContain("sc.status = 'published' OR sc.id = ?");
+      expect(params[1]).toBe(77);
+    });
+
+    it('prefers the schedule the manager chose over the default', async () => {
+      const { pool, conn, execute } = makePool();
+      primeUpToPredecessor(execute, { ...baseSchedule, previous_schedule_id: 42 });
+      execute.mockResolvedValueOnce([[], null]); // external assignments
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // No default lookup at all: an explicit choice is the answer, and when
+      // several generations cover the period only the manager knows which one
+      // happened.
+      // One query fewer than the default path: the lookup is skipped entirely,
+      // so the external-assignments read is call 7 rather than 8.
+      expect(execute).toHaveBeenCalledTimes(8);
+      const externalCall = execute.mock.calls[7] as [string, unknown[]];
+      expect(externalCall[0]).toContain('FROM shift_assignments');
+      expect(externalCall[1][1]).toBe(42);
+    });
+
+    it('resolves the default from published schedules ending before this one starts', async () => {
+      const { pool, conn, execute } = makePool();
+      primeUpToPredecessor(execute, baseSchedule);
+      execute
+        .mockResolvedValueOnce([[{ id: 77 }], null])
+        .mockResolvedValueOnce([[], null]);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const [sql, params] = execute.mock.calls[7] as [string, unknown[]];
+      // Published, because an unpublished draft is not what happened — and
+      // defaulting to one would silently pick a single candidate generation
+      // out of several, which is what the explicit column exists to prevent.
+      expect(sql).toContain("status = 'published'");
+      expect(sql).toContain('end_date <');
+      expect(params).toEqual([3, 1, '2026-05-01']);
+    });
+
+    it('matches nothing rather than dropping the filter when there is no predecessor', async () => {
+      const { pool, conn, execute } = makePool();
+      primeUpToPredecessor(execute, baseSchedule);
+      execute
+        .mockResolvedValueOnce([[], null]) // no candidate
+        .mockResolvedValueOnce([[], null]);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // A NULL here would make `sc.id = NULL` unknown and silently drop the
+      // OR branch — the same result by accident rather than by intent, and
+      // the wrong one the day the branch matters.
+      expect((execute.mock.calls[8] as [string, unknown[]])[1][1]).toBe(0);
+    });
   });
 
   it('rolls back when an INSERT fails', async () => {
@@ -234,6 +339,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
     conn.execute.mockRejectedValue(new Error('insert failed'));
 
@@ -259,6 +365,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[
         { user_id: 7, start_date: new Date('2026-05-01T00:00:00Z'), end_date: new Date('2026-05-03T00:00:00Z') },
       ], null])
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments (other schedules)
 
     const service = new AutoScheduleService(pool);
@@ -286,6 +393,7 @@ describe('AutoScheduleService.generate', () => {
       .mockResolvedValueOnce([[], null]) // pairing rules (none) // employees
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([
         [
           { user_id: 1, date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
@@ -324,8 +432,9 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]) // pinned commitments (none)
       .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts (none: defaults apply)
-      .mockResolvedValueOnce([[], null])
-      .mockResolvedValueOnce([[], null]);
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup
+      .mockResolvedValueOnce([[], null]); // external assignments
   };
 
   afterEach(() => {
@@ -414,6 +523,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]) // pairing rules (none)
       .mockResolvedValueOnce([[], null]) // employment contracts
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments
 
     // Both engine paths return the same single assignment, so this test does
@@ -463,6 +573,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]) // pairing rules
       .mockResolvedValueOnce([[], null]) // employment contracts
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments
 
     return new AutoScheduleService(pool).generate(1, 1).then(() => {
@@ -493,6 +604,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       .mockResolvedValueOnce([[], null]) // pairing rules
       .mockResolvedValueOnce([[], null]) // employment contracts
       .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // predecessor lookup (default: none published before)
       .mockResolvedValueOnce([[], null]); // external assignments
 
     return new AutoScheduleService(pool).generate(1, 1).then(() => {

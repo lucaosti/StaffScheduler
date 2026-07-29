@@ -160,6 +160,15 @@ export const scheduleSchema = z.object({
   totalShifts: z.number().int().optional(),
   totalAssignments: z.number().int().optional(),
   notes: z.string().nullable().optional(),
+  /**
+   * The schedule this one continues from, when a manager has chosen one.
+   *
+   * `null` does not mean "no predecessor" — it means the server resolves the
+   * default, the most recent published schedule for the department. The
+   * distinction matters to the UI, which must show "default" rather than
+   * "none".
+   */
+  previousScheduleId: z.number().int().nullable().optional(),
   createdAt: timestamp.optional(),
   updatedAt: timestamp.optional(),
 });

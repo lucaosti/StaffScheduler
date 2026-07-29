@@ -101,6 +101,27 @@ describe('DELETE /api/schedules/:id/optimization', () => {
 });
 
 /**
+ * Offering the predecessors to choose from.
+ *
+ * Gated on `schedule.read` rather than a planning permission: this is a list
+ * of schedules the caller can already see, and needing it is what precedes
+ * making the choice, which `PUT /schedules/:id` gates on its own terms.
+ */
+describe('GET /api/schedules/:id/predecessor-candidates', () => {
+  it('returns the candidate list', async () => {
+    const candidates = [{ id: 6, name: 'April', isDefault: true, isCurrent: false }];
+    (ScheduleService.prototype.getPredecessorCandidates as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue(candidates);
+
+    const res = await request(app()).get('/api/schedules/5/predecessor-candidates');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual(candidates);
+    expect(ScheduleService.prototype.getPredecessorCandidates).toHaveBeenCalledWith(5);
+  });
+});
+
+/**
  * Deciding a replanning proposal.
  *
  * The gate is `schedule.publish`, not `schedule.optimize`: applying a plan

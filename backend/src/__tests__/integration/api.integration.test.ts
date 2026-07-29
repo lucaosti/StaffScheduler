@@ -1344,6 +1344,117 @@ describe('self-service preferences run against the real schema', () => {
 });
 
 /**
+ * Which schedule a new one continues from.
+ *
+ * The boundary read is SQL — a join on `schedules` plus an `OR sc.id = ?` — so
+ * whether MySQL agrees about which rows it selects is exactly what has to be
+ * proven here. The `0` sentinel for "no predecessor" in particular: a NULL
+ * would make the comparison unknown and silently drop the branch, which a
+ * mocked pool cannot show.
+ */
+describe('schedule predecessors run against the real schema', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const makeSchedule = async (
+    start: string,
+    end: string,
+    status: string,
+    previous: number | null = null
+  ): Promise<number> => {
+    const [r] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by, previous_schedule_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [`pred-${tag()}`, start, end, departmentId, status, userId, previous]
+    );
+    return r.insertId;
+  };
+
+  it('lists candidates newest first, flagging the default', async () => {
+    const cookie = await authCookie();
+    const published = await makeSchedule('2040-03-01', '2040-03-31', 'published');
+    const abandoned = await makeSchedule('2040-03-01', '2040-03-31', 'archived');
+    const current = await makeSchedule('2040-04-01', '2040-04-30', 'draft');
+
+    const res = await request(app)
+      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .set('Cookie', cookie);
+    expect(res.status).toBe(200);
+
+    const ids = res.body.data.map((c: { id: number }) => c.id);
+    expect(ids).toEqual(expect.arrayContaining([published, abandoned]));
+    // The abandoned generation is offered too — it is precisely what the
+    // choice may be between — but the default is the published one.
+    const byId = Object.fromEntries(res.body.data.map((c: { id: number }) => [c.id, c]));
+    expect(byId[published].isDefault).toBe(true);
+    expect(byId[abandoned].isDefault).toBe(false);
+  });
+
+  it('records a chosen predecessor and stops offering it as the default', async () => {
+    const cookie = await authCookie();
+    const published = await makeSchedule('2041-03-01', '2041-03-31', 'published');
+    const abandoned = await makeSchedule('2041-03-01', '2041-03-31', 'archived');
+    const current = await makeSchedule('2041-04-01', '2041-04-30', 'draft');
+
+    const saved = await request(app)
+      .put(`/api/schedules/${current}`)
+      .set('Cookie', cookie)
+      .send({ previousScheduleId: abandoned });
+    expect(saved.status).toBe(200);
+    expect(saved.body.data.previousScheduleId).toBe(abandoned);
+
+    const res = await request(app)
+      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .set('Cookie', cookie);
+    const byId = Object.fromEntries(res.body.data.map((c: { id: number }) => [c.id, c]));
+    expect(byId[abandoned].isCurrent).toBe(true);
+    // Showing a default alongside an actual choice would suggest two answers.
+    expect(byId[published].isDefault).toBe(false);
+  });
+
+  it('refuses a predecessor from another department', async () => {
+    const cookie = await authCookie();
+    const [otherDept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, is_active) VALUES (?, 1)`,
+      [`pred-dept-${tag()}`]
+    );
+    const [foreign] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, '2042-03-01', '2042-03-31', ?, 'published', ?)`,
+      [`pred-foreign-${tag()}`, otherDept.insertId, userId]
+    );
+    const current = await makeSchedule('2042-04-01', '2042-04-30', 'draft');
+
+    const res = await request(app)
+      .put(`/api/schedules/${current}`)
+      .set('Cookie', cookie)
+      .send({ previousScheduleId: foreign.insertId });
+    // Continuity is about the same people.
+    expect(res.status).toBe(409);
+  });
+
+  it('clears a choice back to the default', async () => {
+    const cookie = await authCookie();
+    const published = await makeSchedule('2043-03-01', '2043-03-31', 'published');
+    const current = await makeSchedule('2043-04-01', '2043-04-30', 'draft', published);
+
+    const cleared = await request(app)
+      .put(`/api/schedules/${current}`)
+      .set('Cookie', cookie)
+      .send({ previousScheduleId: null });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data.previousScheduleId).toBeNull();
+
+    // Null restores the default rather than saying there is no predecessor,
+    // so the published schedule is offered again as such.
+    const res = await request(app)
+      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .set('Cookie', cookie);
+    const byId = Object.fromEntries(res.body.data.map((c: { id: number }) => [c.id, c]));
+    expect(byId[published].isDefault).toBe(true);
+  });
+});
+
+/**
  * Replanning a published schedule end to end.
  *
  * The removal half is what only real MySQL proves. The old persist path was

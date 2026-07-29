@@ -19,16 +19,28 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   Schedule,
   CreateScheduleRequest,
   UpdateScheduleRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
+import { DateUtils } from '../utils';
 import { AuditLogService } from './AuditLogService';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
 import { NotificationService } from './NotificationService';
+
+/**
+ * "YYYY-MM-DD" from whichever shape mysql2 hands back for a DATE column.
+ *
+ * The driver materializes DATE as a `Date`, but a string arrives from other
+ * paths (and from tests), and `String(dateCol).slice(0, 10)` on a `Date` gives
+ * "Sat Jan 01" — the trap that has already put a weekday where a date belonged
+ * twice in this codebase.
+ */
+const toDateString = (value: unknown): string =>
+  value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
 
 export class ScheduleService {
   private audit: AuditLogService;
@@ -73,9 +85,17 @@ export class ScheduleService {
         throw new ConflictError('A schedule already exists for this department in the specified date range');
       }
 
+      if (scheduleData.previousScheduleId) {
+        await this.assertUsablePredecessor(connection, {
+          predecessorId: scheduleData.previousScheduleId,
+          departmentId: scheduleData.departmentId,
+          startDate: scheduleData.startDate,
+        });
+      }
+
       const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes, previous_schedule_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           scheduleData.name,
           null,
@@ -84,7 +104,8 @@ export class ScheduleService {
           scheduleData.endDate,
           'draft',
           scheduleData.createdBy,
-          scheduleData.notes || null
+          scheduleData.notes || null,
+          scheduleData.previousScheduleId ?? null
         ]
       );
 
@@ -110,6 +131,7 @@ export class ScheduleService {
         `SELECT
           s.id, s.name, s.department_id, s.start_date, s.end_date,
           s.status, s.published_at, s.notes, s.created_at, s.updated_at,
+          s.previous_schedule_id,
           d.name as department_name,
           d.org_unit_id as department_org_unit_id,
           COUNT(DISTINCT sh.id) as total_shifts,
@@ -139,6 +161,7 @@ export class ScheduleService {
         totalShifts: row.total_shifts || 0,
         totalAssignments: row.total_assignments || 0,
         notes: row.notes,
+        previousScheduleId: row.previous_schedule_id ?? null,
         createdAt: row.created_at,
         updatedAt: row.updated_at
       };
@@ -275,6 +298,25 @@ export class ScheduleService {
         if (scheduleData.status === 'published') updates.push('published_at = CURRENT_TIMESTAMP');
       }
       if (scheduleData.notes !== undefined) { updates.push('notes = ?'); values.push(scheduleData.notes); }
+      if (scheduleData.previousScheduleId !== undefined) {
+        // Explicit null is meaningful: it restores the default resolution
+        // rather than saying there is no predecessor, so it must be told apart
+        // from the field being absent.
+        if (scheduleData.previousScheduleId !== null) {
+          const [self] = await connection.execute<RowDataPacket[]>(
+            'SELECT department_id, start_date FROM schedules WHERE id = ? LIMIT 1',
+            [id]
+          );
+          await this.assertUsablePredecessor(connection, {
+            predecessorId: scheduleData.previousScheduleId,
+            departmentId: self[0].department_id as number,
+            startDate: toDateString(self[0].start_date),
+            selfId: id,
+          });
+        }
+        updates.push('previous_schedule_id = ?');
+        values.push(scheduleData.previousScheduleId);
+      }
 
       if (updates.length > 0) {
         values.push(id);
@@ -345,6 +387,94 @@ export class ScheduleService {
     } finally {
       connection.release();
     }
+  }
+
+  /**
+   * Refuses a predecessor that cannot be one.
+   *
+   * The foreign key only proves the row exists. What makes a schedule a usable
+   * predecessor is that it belongs to the same department — continuity is
+   * about the same people — and that it does not start after this one, which
+   * would make the sequence circular in meaning if not in data. A schedule
+   * cannot precede itself.
+   *
+   * Overlap is deliberately allowed. An archived generation for the same
+   * period is exactly the case the explicit column exists for: the manager is
+   * saying "this is the one that happened".
+   */
+  private async assertUsablePredecessor(
+    connection: PoolConnection,
+    input: { predecessorId: number; departmentId: number; startDate: string; selfId?: number }
+  ): Promise<void> {
+    if (input.selfId !== undefined && input.predecessorId === input.selfId) {
+      throw new ConflictError('A schedule cannot continue from itself');
+    }
+    const [rows] = await connection.execute<RowDataPacket[]>(
+      'SELECT department_id, start_date FROM schedules WHERE id = ? LIMIT 1',
+      [input.predecessorId]
+    );
+    if (rows.length === 0) throw new NotFoundError('Previous schedule not found');
+    if ((rows[0].department_id as number) !== input.departmentId) {
+      throw new ConflictError('The previous schedule must belong to the same department');
+    }
+    if (toDateString(rows[0].start_date) > input.startDate) {
+      throw new ConflictError('The previous schedule cannot start after this one');
+    }
+  }
+
+  /**
+   * The schedules that could plausibly precede this one, newest first.
+   *
+   * Exists so the choice can be made from a list rather than by knowing an id.
+   * Archived ones are included on purpose — an abandoned generation for the
+   * period is precisely what a manager might be choosing between, and
+   * excluding it would hide the case this feature was built for.
+   *
+   * The one that would be used if nothing is chosen is flagged rather than
+   * left for the caller to re-derive, so the UI can show "current default"
+   * without reimplementing the rule.
+   */
+  async getPredecessorCandidates(id: number): Promise<Array<{
+    id: number;
+    name: string;
+    startDate: string;
+    endDate: string;
+    status: string;
+    isCurrent: boolean;
+    isDefault: boolean;
+  }>> {
+    const [selfRows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT department_id, start_date, previous_schedule_id FROM schedules WHERE id = ? LIMIT 1',
+      [id]
+    );
+    if (selfRows.length === 0) throw new NotFoundError('Schedule not found');
+    const self = selfRows[0];
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id, name, start_date, end_date, status FROM schedules
+        WHERE department_id = ?
+          AND id != ?
+          AND start_date <= ?
+        ORDER BY end_date DESC, id DESC`,
+      [self.department_id, id, self.start_date]
+    );
+
+    // The default is the most recent PUBLISHED one ending before this starts —
+    // the same rule the optimizer applies, stated in one place here and read
+    // from the same ordering.
+    const defaultId = rows.find(
+      (r) => r.status === 'published' && toDateString(r.end_date) < toDateString(self.start_date)
+    )?.id as number | undefined;
+
+    return rows.map((r) => ({
+      id: r.id as number,
+      name: r.name as string,
+      startDate: toDateString(r.start_date),
+      endDate: toDateString(r.end_date),
+      status: r.status as string,
+      isCurrent: (self.previous_schedule_id as number | null) === r.id,
+      isDefault: (self.previous_schedule_id as number | null) === null && r.id === defaultId,
+    }));
   }
 
   async publishSchedule(id: number, actorId?: number | null, reason?: string): Promise<Schedule> {
