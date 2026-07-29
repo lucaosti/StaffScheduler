@@ -8547,6 +8547,140 @@
         }
       }
     },
+    "/schedules/{id}/replan-proposals": {
+      "get": {
+        "summary": "List replanning proposals for a schedule",
+        "description": "A re-solve of a **published** schedule records a plan instead of applying it, so a planner decides the change to people's commitments before it happens. Newest first. Requires `schedule.optimize`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proposals, newest first."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/schedules/{id}/replan-proposals/{proposalId}/apply": {
+      "post": {
+        "summary": "Apply a replanning proposal",
+        "description": "The schedule becomes exactly what was proposed: assignments the plan leaves out are removed, and the ones it adds are written pinned. Verified against live data first and refused as a whole if any shift or person it names has changed — what is applied is exactly what was approved, or nothing. Requires `schedule.publish`, deliberately stronger than the permission to run the optimizer: applying a plan changes commitments people have already been told about.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan applied."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Already decided, or the plan refers to shifts or people that have since changed."
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/schedules/{id}/replan-proposals/{proposalId}/reject": {
+      "post": {
+        "summary": "Reject a replanning proposal",
+        "description": "The schedule is left exactly as it was. Requires `schedule.publish`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "proposalId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Plan rejected."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The proposal has already been decided."
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 2000
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/schedules/{id}/publish": {
       "patch": {
         "tags": [

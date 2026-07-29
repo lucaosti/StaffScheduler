@@ -51,6 +51,7 @@ export const shiftIdParam = z.object({ shiftId: positiveInt });
 export const scheduleIdParam = z.object({ scheduleId: positiveInt });
 export const departmentIdParam = z.object({ departmentId: positiveInt });
 export const idAndSkillIdParam = z.object({ id: positiveInt, skillId: positiveInt });
+export const idAndProposalIdParam = z.object({ id: positiveInt, proposalId: positiveInt });
 export const idAndUserIdParam = z.object({ id: positiveInt, userId: positiveInt });
 export const userIdAndRoleIdParam = z.object({ userId: positiveInt, roleId: positiveInt });
 
