@@ -48,19 +48,22 @@ export const createTimelineRouter = (pool: Pool) => {
         sources?: string;
       };
 
+      // The role scope binds in BOTH branches. `timeline.read_all` lifts the
+      // MEMBERSHIP bound — a planner is not limited to the ward they happen to
+      // belong to — and it must not also lift the org-unit scope their role
+      // carries, or a manager scoped to one ward would see every other ward's
+      // people. Every other permission in the system narrows this way, and an
+      // exception here would be one nobody expects to find.
+      const scoped = user.allowedOrgUnitIds ?? null;
       let orgUnitIds: number[] | null;
       if (userHasPermission(user, 'timeline.read_all')) {
-        orgUnitIds = null;
+        orgUnitIds = scoped;
       } else {
         // The subtree of each unit the person belongs to: someone in a ward
-        // sees the ward, including anything organised beneath it. Intersected
-        // with their role scope when they have one, so a scoped role can only
-        // narrow this and never widen it.
+        // sees the ward, including anything organised beneath it, intersected
+        // with their role scope when they have one.
         const own = await rbac.getUserOrgUnitSubtreeIds(user.id);
-        const scoped = user.allowedOrgUnitIds;
-        orgUnitIds = scoped === null || scoped === undefined
-          ? own
-          : own.filter((id) => scoped.includes(id));
+        orgUnitIds = scoped === null ? own : own.filter((id) => scoped.includes(id));
       }
 
       const data = await timeline.build({

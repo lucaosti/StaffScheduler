@@ -73,14 +73,27 @@ describe('skills routes', () => {
     expect(service.list).toHaveBeenCalledWith({ activeOnly: undefined });
   });
 
-  it('passes activeOnly through as a boolean', async () => {
+  it('passes activeOnly=true through as true', async () => {
     service.list.mockResolvedValue([]);
     const res = await request(mountApp()).get('/api/skills?activeOnly=true');
     expect(res.status).toBe(200);
-    // Coerced by the schema: the raw query value is the string "true", and a
-    // string is truthy either way, so an uncoerced value would appear to work
-    // and then treat "false" as true.
     expect(service.list).toHaveBeenCalledWith({ activeOnly: true });
+  });
+
+  it('passes activeOnly=false through as FALSE', async () => {
+    service.list.mockResolvedValue([]);
+    const res = await request(mountApp()).get('/api/skills?activeOnly=false');
+    expect(res.status).toBe(200);
+    // `z.coerce.boolean()` parses the string "false" as TRUE, because coercion
+    // follows JavaScript truthiness and a query value is always a string. The
+    // parameter therefore did the exact opposite of what it says, and a test
+    // that only exercised `true` passed either way.
+    expect(service.list).toHaveBeenCalledWith({ activeOnly: false });
+  });
+
+  it('rejects a value that is neither, rather than guessing', async () => {
+    const res = await request(mountApp()).get('/api/skills?activeOnly=yes');
+    expect(res.status).toBe(400);
   });
 
   it('gets one skill', async () => {
