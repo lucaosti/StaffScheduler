@@ -28,7 +28,7 @@ import {
   useSwapCandidatesQuery,
   useSwapMutations,
 } from '../../hooks/useShiftSwaps';
-import type { Assignment, ShiftSwapRequest } from '../../types';
+import type { ShiftAssignment, ShiftSwapRequest } from '../../types';
 import type { SwapCandidate } from '../../services/shiftSwapService';
 import { formatTime } from '../../utils/format';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
@@ -44,7 +44,7 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 
-const describe = (a: Assignment): string =>
+const describe = (a: ShiftAssignment): string =>
   `${String(a.shiftDate ?? '').slice(0, 10)} ${shiftTime(a.startTime)}–${shiftTime(a.endTime)}`;
 
 const describeCandidate = (c: SwapCandidate): string =>
@@ -56,7 +56,7 @@ const ShiftSwaps: React.FC = () => {
   const myId = user?.id ? Number(user.id) : null;
   const canDecide = (user?.permissions ?? []).includes('shiftswap.approve');
 
-  const [giving, setGiving] = useState<Assignment | null>(null);
+  const [giving, setGiving] = useState<ShiftAssignment | null>(null);
 
   const mine = useMyAssignmentsQuery(myId);
   const requests = useSwapRequestsQuery();
@@ -65,7 +65,7 @@ const ShiftSwaps: React.FC = () => {
 
 
   const swappable = (mine.data ?? []).filter(
-    (a: Assignment) => a.status === 'pending' || a.status === 'confirmed'
+    (a: ShiftAssignment) => a.status === 'pending' || a.status === 'confirmed'
   );
 
   return (

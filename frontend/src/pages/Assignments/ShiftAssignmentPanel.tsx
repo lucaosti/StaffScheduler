@@ -24,7 +24,7 @@ import {
   useAvailableEmployeesQuery,
   useAssignmentMutations,
 } from '../../hooks/useAssignments';
-import type { Assignment } from '../../types';
+import type { ShiftAssignment } from '../../types';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 interface Props {
@@ -65,7 +65,7 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
         empty={<p className="text-muted">Nobody is assigned to this shift.</p>}
       >
         <ul className="list-group mb-3">
-          {(assigned.data ?? []).map((assignment: Assignment) => (
+          {(assigned.data ?? []).map((assignment: ShiftAssignment) => (
             <li
               key={String(assignment.id)}
               className="list-group-item d-flex justify-content-between align-items-center"

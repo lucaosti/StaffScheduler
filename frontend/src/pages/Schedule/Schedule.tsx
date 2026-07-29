@@ -13,7 +13,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { Assignment, Shift } from '../../types';
+import { ShiftAssignment, Shift } from '../../types';
 import * as scheduleService from '../../services/scheduleService';
 import { useSchedulePageData } from '../../hooks/useSchedulePage';
 import { useShiftsInRange } from '../../hooks/useShifts';
@@ -115,7 +115,7 @@ const Schedule: React.FC = () => {
   // Pre-index assignments by "dateStr|shiftId" so each cell lookup is O(1)
   // instead of scanning the full assignments array for every shift × date cell.
   const assignmentIndex = useMemo(() => {
-    const index = new Map<string, Assignment[]>();
+    const index = new Map<string, ShiftAssignment[]>();
     for (const a of assignments) {
       const src = a.shiftDate || a.assignedAt;
       if (!src) continue;
@@ -131,7 +131,7 @@ const Schedule: React.FC = () => {
     return index;
   }, [assignments]);
 
-  const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number): Assignment[] => {
+  const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number): ShiftAssignment[] => {
     const dateStr = date.toISOString().split('T')[0];
     return assignmentIndex.get(`${dateStr}|${String(shiftId)}`) ?? [];
   };
@@ -531,9 +531,13 @@ const Schedule: React.FC = () => {
                                 {dayAssignments.length > 0 ? (
                                   <div className="d-flex flex-column gap-1">
                                     {dayAssignments.map((assignment) => {
-                                      const employee = getEmployeeById(
-                                        assignment.userId ?? assignment.employeeId ?? ''
-                                      );
+                                      // `userId` is required on the contract, so
+                                      // the fallbacks this used to carry could
+                                      // never fire: `employeeId` is not a field
+                                      // the API returns on an assignment, and
+                                      // the empty string stood in for a case
+                                      // that cannot arise.
+                                      const employee = getEmployeeById(assignment.userId);
                                       return (
                                         <div
                                           key={assignment.id}
