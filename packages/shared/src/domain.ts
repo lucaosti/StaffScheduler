@@ -202,6 +202,15 @@ export const userSchema = z.object({
   position: z.string().optional(),
   hourlyRate: z.number().optional(),
   isActive: z.boolean(),
+  /**
+   * Whether two-factor authentication is enabled on the account.
+   *
+   * The FLAG, never the secret — that stays on the server. It is here because
+   * the enrolment screen has to say whether 2FA is already on, and without it
+   * the feature was unreachable from the application despite every endpoint
+   * existing.
+   */
+  twoFactorEnabled: z.boolean().optional(),
   lastLogin: timestamp.optional(),
   /** Roles assigned to the user, each optionally scoped to an org unit. */
   roles: z.array(userRoleAssignmentSchema).optional(),

@@ -10063,6 +10063,7 @@ export interface components {
             position?: string;
             hourlyRate?: number;
             isActive: boolean;
+            twoFactorEnabled?: boolean;
             /** Format: date-time */
             lastLogin?: string;
             roles?: {

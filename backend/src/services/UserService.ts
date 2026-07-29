@@ -108,6 +108,11 @@ export class UserService {
         position: row.position ?? undefined,
         hourlyRate: row.hourly_rate != null ? Number(row.hourly_rate) : undefined,
         isActive: Boolean(row.is_active),
+        // Whether the account has two-factor enabled — NOT the secret, which
+        // never leaves the server. Without this the enrolment UI cannot say
+        // whether 2FA is already on, so the feature was unusable from the
+        // application even though the endpoints all existed.
+        twoFactorEnabled: Boolean(row.totp_enabled),
         lastLogin: row.last_login,
         organizationName: (row.organization_name as string | null) ?? null,
         departments: deptRows.map((d: any) => ({ id: d.id, name: d.name })),
