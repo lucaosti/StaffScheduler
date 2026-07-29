@@ -38,6 +38,7 @@ import { NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import type { SqlParam } from '../types';
+import { inClause } from '../utils/sql';
 
 /** The limits a contract may bound. `null` means "this contract does not constrain it". */
 export interface ContractLimits {
@@ -65,10 +66,6 @@ export interface ContractAssignment {
   effectiveFrom: string;
   effectiveTo: string | null;
 }
-
-/** "YYYY-MM-DD" from whichever of the two shapes mysql2 hands back. */
-const toDateString = (value: unknown): string =>
-  value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
 
 const mapContract = (row: RowDataPacket): EmploymentContract => ({
   id: row.id as number,
@@ -189,8 +186,8 @@ export class EmploymentContractService {
       // that produced `Invalid time value` in conflict detection; DateUtils
       // exists for exactly this, and reads LOCAL components rather than
       // `toISOString()`, which rolls back a day in any positive UTC offset.
-      effectiveFrom: toDateString(r.effective_from),
-      effectiveTo: r.effective_to === null ? null : toDateString(r.effective_to),
+      effectiveFrom: DateUtils.toDateString(r.effective_from),
+      effectiveTo: r.effective_to === null ? null : DateUtils.toDateString(r.effective_to),
     }));
   }
 
@@ -268,7 +265,7 @@ export class EmploymentContractService {
       `SELECT uec.user_id, c.*
          FROM user_employment_contracts uec
          JOIN employment_contracts c ON c.id = uec.contract_id
-        WHERE uec.user_id IN (${ids.join(',')})
+        WHERE uec.user_id IN (${inClause(ids)})
           AND c.is_active = 1
           AND uec.effective_from <= ?
           AND COALESCE(uec.effective_to, '9999-12-31') >= ?`,
