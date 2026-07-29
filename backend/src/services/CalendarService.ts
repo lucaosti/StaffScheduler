@@ -106,8 +106,6 @@ const computeEtag = (...parts: Array<string | number | null | undefined>): strin
   return `"${h.digest('hex').slice(0, 16)}"`;
 };
 
-const isoDate = (raw: unknown): string =>
-  typeof raw === 'string' ? raw : DateUtils.fromMySQLDate(raw as Date);
 
 export class CalendarService {
   constructor(private pool: Pool) {}
@@ -203,7 +201,7 @@ export class CalendarService {
     let latestUpdated = '';
 
     for (const row of shiftRows) {
-      const date = isoDate(row.date);
+      const date = DateUtils.toDateString(row.date as string | Date);
       const { start, end } = shiftToEventTimes(date, row.start_time as string, row.end_time as string);
       const colleagues = colleaguesByShift.get(row.shift_id as number) ?? [];
       const description = [
@@ -224,7 +222,7 @@ export class CalendarService {
     }
 
     for (const row of onCallRows) {
-      const date = isoDate(row.date);
+      const date = DateUtils.toDateString(row.date as string | Date);
       const { start, end } = shiftToEventTimes(date, row.start_time as string, row.end_time as string);
       events.push({
         uid: `oncall-${row.assignment_id}@staffscheduler`,
@@ -267,7 +265,7 @@ export class CalendarService {
     let latestUpdated = '';
 
     for (const row of shiftRows) {
-      const date = isoDate(row.date);
+      const date = DateUtils.toDateString(row.date as string | Date);
       const { start, end } = shiftToEventTimes(date, row.start_time as string, row.end_time as string);
       const assignees = (row.assignees as string | null)?.split(',').filter(Boolean) ?? [];
       const description = [

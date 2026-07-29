@@ -21,6 +21,29 @@ describe('DateUtils', () => {
     expect(DateUtils.toMySQLDate(sample)).toBe('2026-04-26');
   });
 
+  /**
+   * Six services each carried this rule, in two spellings that were not
+   * equivalent: on anything unexpected one returned nonsense and the other
+   * threw. Same value, crash in one code path and a plausible-looking wrong
+   * date in another.
+   */
+  describe('toDateString', () => {
+    it('reads a Date through the local-calendar path', () => {
+      const localMidnight = new Date(2033, 3, 1);
+      // NOT toISOString(): mysql2 materializes a DATE at LOCAL midnight, and
+      // converting that to UTC rolls back a day in any positive offset.
+      expect(DateUtils.toDateString(localMidnight)).toBe('2033-04-01');
+    });
+
+    it('trims a string that already carries a time', () => {
+      expect(DateUtils.toDateString('2033-04-01 09:00:00')).toBe('2033-04-01');
+    });
+
+    it('leaves a bare date string alone', () => {
+      expect(DateUtils.toDateString('2033-04-01')).toBe('2033-04-01');
+    });
+  });
+
   it('addDays advances the calendar day', () => {
     expect(DateUtils.toMySQLDate(DateUtils.addDays(sample, 5))).toBe('2026-05-01');
   });

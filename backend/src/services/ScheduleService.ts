@@ -31,17 +31,6 @@ import { AuditLogService } from './AuditLogService';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
 import { NotificationService } from './NotificationService';
 
-/**
- * "YYYY-MM-DD" from whichever shape mysql2 hands back for a DATE column.
- *
- * The driver materializes DATE as a `Date`, but a string arrives from other
- * paths (and from tests), and `String(dateCol).slice(0, 10)` on a `Date` gives
- * "Sat Jan 01" — the trap that has already put a weekday where a date belonged
- * twice in this codebase.
- */
-const toDateString = (value: unknown): string =>
-  value instanceof Date ? DateUtils.fromMySQLDate(value) : String(value).slice(0, 10);
-
 export class ScheduleService {
   private audit: AuditLogService;
   private orchestrator: ScheduleOptimizationOrchestrator;
@@ -310,7 +299,7 @@ export class ScheduleService {
           await this.assertUsablePredecessor(connection, {
             predecessorId: scheduleData.previousScheduleId,
             departmentId: self[0].department_id as number,
-            startDate: toDateString(self[0].start_date),
+            startDate: DateUtils.toDateString(self[0].start_date),
             selfId: id,
           });
         }
@@ -417,7 +406,7 @@ export class ScheduleService {
     if ((rows[0].department_id as number) !== input.departmentId) {
       throw new ConflictError('The previous schedule must belong to the same department');
     }
-    if (toDateString(rows[0].start_date) > input.startDate) {
+    if (DateUtils.toDateString(rows[0].start_date) > input.startDate) {
       throw new ConflictError('The previous schedule cannot start after this one');
     }
   }
@@ -463,14 +452,14 @@ export class ScheduleService {
     // the same rule the optimizer applies, stated in one place here and read
     // from the same ordering.
     const defaultId = rows.find(
-      (r) => r.status === 'published' && toDateString(r.end_date) < toDateString(self.start_date)
+      (r) => r.status === 'published' && DateUtils.toDateString(r.end_date) < DateUtils.toDateString(self.start_date)
     )?.id as number | undefined;
 
     return rows.map((r) => ({
       id: r.id as number,
       name: r.name as string,
-      startDate: toDateString(r.start_date),
-      endDate: toDateString(r.end_date),
+      startDate: DateUtils.toDateString(r.start_date),
+      endDate: DateUtils.toDateString(r.end_date),
       status: r.status as string,
       isCurrent: (self.previous_schedule_id as number | null) === r.id,
       isDefault: (self.previous_schedule_id as number | null) === null && r.id === defaultId,
