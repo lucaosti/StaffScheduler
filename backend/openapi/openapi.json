@@ -370,6 +370,18 @@
               }
             ]
           },
+          "previousScheduleId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -8158,6 +8170,18 @@
                   },
                   "notes": {
                     "type": "string"
+                  },
+                  "previousScheduleId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -8311,6 +8335,18 @@
                   },
                   "notes": {
                     "type": "string"
+                  },
+                  "previousScheduleId": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 }
               }
@@ -8534,6 +8570,31 @@
                 }
               }
             }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/schedules/{id}/predecessor-candidates": {
+      "get": {
+        "summary": "List the schedules that could precede this one",
+        "description": "A monthly schedule continues from the one before it — rest between shifts, consecutive days worked and weekly hours all run across the boundary. When several generations cover the same period, which one actually happened is a manager's judgement rather than something the system can infer, and this is the list to choose from; `PUT /schedules/{id}` records the choice as `previousScheduleId`. Same department, starting no later than this one, newest first. Archived schedules are included on purpose — an abandoned generation for the period is precisely what the choice may be between. Each entry is flagged `isCurrent` (the recorded choice) and `isDefault` (what would be used if nothing is chosen: the most recent published schedule ending before this one starts). Requires `schedule.read`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Candidate predecessors, newest first."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"

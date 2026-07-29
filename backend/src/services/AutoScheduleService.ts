@@ -130,10 +130,47 @@ const formatDate = (raw: unknown): string =>
 export class AutoScheduleService {
   constructor(private pool: Pool) {}
 
+  /**
+   * The schedule this one continues from.
+   *
+   * An explicit `previous_schedule_id` wins. It exists because when several
+   * generations cover the same period, which one actually happened is a
+   * judgement a manager makes and the system cannot infer.
+   *
+   * NULL means "use the default", not "no predecessor": the most recent
+   * PUBLISHED schedule for the same department ending before this one starts.
+   * Published, because an unpublished draft is not what happened — and because
+   * defaulting to a draft would reintroduce the problem the explicit column
+   * exists to solve, silently picking one candidate generation out of several.
+   *
+   * Returns null when there is nothing before this schedule, which is the
+   * honest answer for the first schedule a department ever has.
+   */
+  private async resolvePredecessorId(
+    scheduleId: number,
+    schedule: RowDataPacket
+  ): Promise<number | null> {
+    const explicit = schedule.previous_schedule_id as number | null;
+    if (explicit) return explicit;
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM schedules
+        WHERE department_id = ?
+          AND id != ?
+          AND status = 'published'
+          AND end_date < ?
+        ORDER BY end_date DESC, id DESC
+        LIMIT 1`,
+      [schedule.department_id, scheduleId, schedule.start_date]
+    );
+    return rows.length > 0 ? (rows[0].id as number) : null;
+  }
+
   async generate(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
     // 1. Schedule and its shifts.
     const [schedRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, department_id, start_date, end_date, status FROM schedules WHERE id = ? LIMIT 1`,
+      `SELECT id, department_id, start_date, end_date, status, previous_schedule_id
+         FROM schedules WHERE id = ? LIMIT 1`,
       [scheduleId]
     );
     if (schedRows.length === 0) throw new NotFoundError('Schedule not found');
@@ -272,22 +309,47 @@ export class AutoScheduleService {
       unavailableByUser.set(userId, [...existing, ...dates]);
     }
 
-    // Assignments this employee already holds on *other* schedules, within
-    // reach of this one's rolling-window checks (±14 days, matching
+    // Assignments this employee already holds elsewhere, within reach of this
+    // schedule's rolling-window checks (±14 days, matching
     // ComplianceEngine.evaluateAssignmentCompliance's own lookback/lookahead).
     // Without this, back-to-back schedule periods are optimized in total
     // isolation from each other — each can look individually compliant while
     // an employee assigned late in period N and early in period N+1 quietly
     // busts max-consecutive-days/max-weekly-hours across the boundary.
+    //
+    // WHICH schedules count is the part that used to be wrong. This read took
+    // every OTHER schedule in the window and filtered on the assignment's
+    // status, never the schedule's — so drafts counted. A planner comparing
+    // three candidate generations for last month had all three read at once:
+    // one person appeared to be working three overlapping sets of shifts,
+    // their history at the boundary was inflated threefold, and this month was
+    // constrained by work that will never happen, since at most one of those
+    // drafts can ever be published.
+    //
+    // So: published schedules, which are what actually happened, PLUS the
+    // chosen predecessor whatever its status — a planner who names a draft as
+    // the schedule this one continues from means it.
+    const predecessorId = await this.resolvePredecessorId(scheduleId, schedule);
     const [externalRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT sa.user_id, s.date, s.start_time, s.end_time
          FROM shift_assignments sa
          JOIN shifts s ON s.id = sa.shift_id
+         JOIN schedules sc ON sc.id = s.schedule_id
         WHERE s.schedule_id != ?
+          AND (sc.status = 'published' OR sc.id = ?)
           AND sa.status IN ('pending', 'confirmed')
           AND sa.user_id IN (SELECT user_id FROM user_departments WHERE department_id = ?)
           AND s.date BETWEEN DATE_SUB(?, INTERVAL 14 DAY) AND DATE_ADD(?, INTERVAL 14 DAY)`,
-      [scheduleId, schedule.department_id, schedule.start_date, schedule.end_date]
+      [
+        scheduleId,
+        // 0 matches nothing, which is what "no predecessor" has to mean here.
+        // A NULL would make the comparison NULL and silently drop the whole
+        // OR branch — the same result by accident rather than by intent.
+        predecessorId ?? 0,
+        schedule.department_id,
+        schedule.start_date,
+        schedule.end_date,
+      ]
     );
     const externalAssignmentsByUser = new Map<number, Array<{ date: string; start_time: string; end_time: string }>>();
     for (const row of externalRows) {
