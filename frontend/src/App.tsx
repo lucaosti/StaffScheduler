@@ -76,6 +76,7 @@ const RbacManagement = lazy(() => import('./pages/Admin/RbacManagement'));
 const Attendance = lazy(() => import('./pages/Attendance/Attendance'));
 const Timeline = lazy(() => import('./pages/Timeline/Timeline'));
 const Skills = lazy(() => import('./pages/Admin/Skills'));
+const MyAssignments = lazy(() => import('./pages/Assignments/MyAssignments'));
 
 /**
  * Main Application Component
@@ -180,6 +181,7 @@ const App: React.FC = () => {
               <Timeline />
             </PermissionRoute>
           } />
+          <Route path="my-shifts" element={<MyAssignments />} />
           <Route path="admin/skills" element={
             <PermissionRoute permission="employee.read">
               <Skills />

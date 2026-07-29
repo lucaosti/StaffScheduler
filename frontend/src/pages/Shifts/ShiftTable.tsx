@@ -1,5 +1,5 @@
 /**
- * ShiftTable — Grid/card list of shifts with edit and delete actions.
+ * ShiftTable — Grid/card list of shifts with edit, staffing and delete actions.
  *
  * @author Luca Ostinelli
  */
@@ -13,6 +13,13 @@ interface Props {
   departmentNameById: Map<number, string>;
   searchTerm: string;
   onEdit: (shift: Shift) => void;
+  /**
+   * Optional so the table stays usable by a caller who cannot staff a shift.
+   * The menu entry is omitted rather than disabled: a control that only ever
+   * refuses teaches the reader the app is broken, not that they lack the
+   * permission.
+   */
+  onManageStaff?: (shift: Shift) => void;
   onDelete: (shiftId: string | number) => void;
   onAddNew: () => void;
   hasSchedules: boolean;
@@ -37,6 +44,7 @@ const ShiftTable: React.FC<Props> = ({
   departmentNameById,
   searchTerm,
   onEdit,
+  onManageStaff,
   onDelete,
   onAddNew,
   hasSchedules,
@@ -99,6 +107,17 @@ const ShiftTable: React.FC<Props> = ({
                         <i className="bi bi-pencil me-2" aria-hidden="true"></i>Edit
                       </button>
                     </li>
+                    {onManageStaff && (
+                      <li>
+                        <button
+                          className="dropdown-item"
+                          type="button"
+                          onClick={() => onManageStaff(shift)}
+                        >
+                          <i className="bi bi-people me-2" aria-hidden="true"></i>Staff
+                        </button>
+                      </li>
+                    )}
                     <li>
                       <hr className="dropdown-divider" />
                     </li>
