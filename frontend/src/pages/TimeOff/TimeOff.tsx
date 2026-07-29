@@ -23,6 +23,7 @@ import QueryState from '../../components/QueryState';
 import { useTimeOffQuery, useTimeOffMutations } from '../../hooks/useTimeOff';
 import type { TimeOffRequest } from '../../types';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
+import { todayIso } from '../../utils/format';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -33,7 +34,6 @@ const STATUS_BADGE: Record<string, string> = {
 
 const TYPES = ['vacation', 'sick', 'personal', 'other'] as const;
 
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 const TimeOff: React.FC = () => {
   const { user } = useAuth();

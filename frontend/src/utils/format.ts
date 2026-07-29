@@ -11,6 +11,46 @@ const DEFAULT_LOCALE = 'en-US';
 const DEFAULT_CURRENCY = 'EUR';
 
 /**
+ * "YYYY-MM-DD" for today, or a number of days either side of it.
+ *
+ * WHY NOT `new Date().toISOString().slice(0, 10)`. That is the UTC date. In any
+ * positive-offset timezone — Europe/Rome, where this project is used — the
+ * hours between local midnight and the offset are still YESTERDAY in UTC, so
+ * "today" comes back as the day before. At 00:30 in Rome the expression yields
+ * the 29th when the calendar says the 30th.
+ *
+ * That is not hypothetical: six pages each wrote their own version of this,
+ * under four different names, and every one of them had it. A default date
+ * range that silently starts a day early is the kind of defect nobody reports
+ * because it looks like the app just chose a different default.
+ *
+ * The backend documents the same trap on `DateUtils.fromMySQLDate` and reads
+ * local calendar components for exactly this reason; this is the browser half
+ * of that rule.
+ *
+ * It lives beside the formatters rather than in a file of its own because
+ * discoverability is what failed: people wrote their own because they did not
+ * find one here.
+ */
+export const todayIso = (offsetDays = 0): string => {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+/** "YYYY-MM-DD" for the first day of the current month, in local time. */
+export const firstOfMonthIso = (): string => {
+  const d = new Date();
+  d.setDate(1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}-01`;
+};
+
+/**
  * Formats an ISO date or Date object as a short locale date (e.g. "Apr 25, 2026").
  */
 export const formatDate = (

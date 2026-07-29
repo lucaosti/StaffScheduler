@@ -29,6 +29,7 @@ import { useContractsQuery, useUserContractsQuery, useContractMutations } from '
 import { useEmployeesQuery } from '../../hooks/useEmployees';
 import type { EmploymentContract } from '../../services/employmentContractService';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
+import { todayIso } from '../../utils/format';
 
 const LIMITS: Array<{ key: keyof EmploymentContract; label: string }> = [
   { key: 'maxHoursPerWeek', label: 'Max hours / week' },
@@ -39,7 +40,6 @@ const LIMITS: Array<{ key: keyof EmploymentContract; label: string }> = [
   { key: 'minConsecutiveDaysOff', label: 'Min consecutive days off' },
 ];
 
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
 
 const EmploymentContracts: React.FC = () => {
   const { user } = useAuth();

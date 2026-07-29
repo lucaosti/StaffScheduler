@@ -8,6 +8,7 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { todayIso } from '../../utils/format';
 import {
   useMyAttendanceQuery,
   usePendingAttendanceQuery,
@@ -26,12 +27,6 @@ const formatDateTime = (value?: string | Date | null): string => {
   try { return new Date(value).toLocaleString(); } catch { return String(value); }
 };
 
-const todayIso = (): string => new Date().toISOString().slice(0, 10);
-const daysAgoIso = (days: number): string => {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString().slice(0, 10);
-};
 
 const Attendance: React.FC = () => {
   const { user } = useAuth();
@@ -48,7 +43,7 @@ const Attendance: React.FC = () => {
   const userId = user?.id ? Number(user.id) : undefined;
   const recordsQuery = useMyAttendanceQuery(userId);
   const pendingQuery = usePendingAttendanceQuery(canApprove);
-  const costQuery = useAttendanceCostQuery(canReadCost, daysAgoIso(30), todayIso());
+  const costQuery = useAttendanceCostQuery(canReadCost, todayIso(-30), todayIso());
   const { clockInMutation, clockOutMutation, decisionMutation } = useAttendanceMutations();
 
   const myRecords = recordsQuery.data ?? [];
