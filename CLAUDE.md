@@ -241,7 +241,7 @@ CORS_ORIGIN=http://localhost:3000
 
 **Sessions**: short-lived access token (`JWT_EXPIRES_IN`, default `15m`) in the
 `token` cookie, plus a rotating refresh token (`JWT_REFRESH_EXPIRES_IN`, default
-`30d`) in the `refresh_token` cookie (scoped to `/api/auth/refresh`).
+`30d`) in the `refresh_token` cookie, whose path is **derived from the prefix the request arrived on** (`/api/auth/refresh` or `/api/v1/auth/refresh`). A browser sends a path-scoped cookie only to paths starting with the cookie's path, so a hardcoded path meant a client using the canonical `/api/v1` prefix exclusively never had the cookie sent to its refresh endpoint — its session died at the first access-token expiry. Derived rather than widened to `/api`: a wide path would attach the long-lived refresh token to every API call, which is the exposure the narrow scope exists to prevent.
 `RefreshTokenService` stores only the token hash, rotates on every `/refresh`,
 and revokes the whole family on reuse of a spent token. `POST /api/auth/refresh`
 is NOT behind `authenticate` — it works precisely when the access token has
