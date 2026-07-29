@@ -22,12 +22,8 @@ import React, { useMemo, useState } from 'react';
 import QueryState from '../../components/QueryState';
 import { useTimelineQuery, useTimelineSourcesQuery } from '../../hooks/useTimeline';
 import type { TimelineBar } from '../../services/timelineService';
+import { todayIso } from '../../utils/format';
 
-const isoDay = (offsetDays = 0): string => {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
-};
 
 /** Colour per source, so a shift and an on-call period are distinguishable. */
 const SOURCE_CLASS: Record<string, string> = {
@@ -41,8 +37,8 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 const Timeline: React.FC = () => {
-  const [from, setFrom] = useState(isoDay());
-  const [to, setTo] = useState(isoDay(6));
+  const [from, setFrom] = useState(todayIso());
+  const [to, setTo] = useState(todayIso(6));
   const [source, setSource] = useState('');
 
   const sources = useTimelineSourcesQuery();

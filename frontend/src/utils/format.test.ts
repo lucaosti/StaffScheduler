@@ -2,7 +2,7 @@
  * Unit tests for the format helpers.
  */
 
-import { formatCurrency, formatDate, formatPercentage, formatTime } from './format';
+import { formatCurrency, formatDate, formatPercentage, formatTime, todayIso, firstOfMonthIso } from './format';
 
 describe('formatDate', () => {
   it('returns an empty string for null/undefined/invalid input', () => {
@@ -53,5 +53,57 @@ describe('formatPercentage', () => {
 
   it('treats the input as a 0-100 number when asRatio is false', () => {
     expect(formatPercentage(50, false, 'en-US')).toBe('50%');
+  });
+});
+
+/**
+ * The "today" helpers.
+ *
+ * Six pages each wrote their own version of this with
+ * `new Date().toISOString().slice(0, 10)`, which is the UTC date: in a
+ * positive-offset timezone the hours between local midnight and the offset are
+ * still yesterday in UTC. A default range silently starting a day early is the
+ * kind of defect nobody reports, because it looks like the app just chose a
+ * different default.
+ */
+describe('todayIso', () => {
+  it('agrees with the local calendar, not with UTC', () => {
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+      now.getDate()
+    ).padStart(2, '0')}`;
+    expect(todayIso()).toBe(expected);
+  });
+
+  it('offsets forward and backward by whole days', () => {
+    const plus = new Date();
+    plus.setDate(plus.getDate() + 7);
+    const expected = `${plus.getFullYear()}-${String(plus.getMonth() + 1).padStart(2, '0')}-${String(
+      plus.getDate()
+    ).padStart(2, '0')}`;
+    expect(todayIso(7)).toBe(expected);
+
+    const minus = new Date();
+    minus.setDate(minus.getDate() - 30);
+    expect(todayIso(-30)).toBe(
+      `${minus.getFullYear()}-${String(minus.getMonth() + 1).padStart(2, '0')}-${String(
+        minus.getDate()
+      ).padStart(2, '0')}`
+    );
+  });
+
+  it('rolls across a month boundary rather than producing day 32', () => {
+    // `setDate` normalises, which is why the offset is applied to a Date
+    // rather than to the string.
+    expect(todayIso(400)).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('firstOfMonthIso', () => {
+  it('returns day 01 of the current local month', () => {
+    const now = new Date();
+    expect(firstOfMonthIso()).toBe(
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+    );
   });
 });
