@@ -10059,6 +10059,387 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/hours-worked/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the hours-worked report as CSV
+         * @description Requires `report.read`. Same range and department filters as `GET /reports/hours-worked`, and the same underlying query — the file and the screen cannot disagree. Unpaginated. The export is recorded in the audit log with the filters that produced it.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    startDate?: string;
+                    endDate?: string;
+                    start?: string;
+                    end?: string;
+                    departmentId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/cost-by-department/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export the cost-by-department report as CSV
+         * @description Requires `report.read`. Same range filters as `GET /reports/cost-by-department`. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    startDate?: string;
+                    endDate?: string;
+                    start?: string;
+                    end?: string;
+                    departmentId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/reports/fairness/{scheduleId}/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export a schedule fairness breakdown as CSV
+         * @description Requires `report.read`. Exports the per-employee hours breakdown, not the summary statistics — the reason to open a spreadsheet is to sort people by hours. Audited.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/employees/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export employees as CSV
+         * @description Requires `employee.read`. Same filters and the same org-unit scope as `GET /employees`, unpaginated. Publishes a declared column set, so a field added to the entity is not exported until someone chooses to export it. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    search?: string;
+                    department?: string;
+                    isActive?: boolean | ("true" | "false");
+                    page?: number;
+                    pageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shifts/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export shifts as CSV
+         * @description Requires `schedule.read`. Same filters and org-unit scope as `GET /shifts`, unpaginated. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    scheduleId?: number;
+                    departmentId?: number;
+                    date?: string;
+                    startDate?: string;
+                    endDate?: string;
+                    status?: "open" | "assigned" | "confirmed" | "cancelled";
+                    page?: number;
+                    pageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export shift assignments as CSV
+         * @description Requires `assignment.manage`. Same filters as `GET /assignments`, unpaginated — an oversized result is refused rather than truncated, because a truncated file is a wrong answer that looks complete. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    shiftId?: number;
+                    userId?: number;
+                    scheduleId?: number;
+                    departmentId?: number;
+                    status?: "pending" | "confirmed" | "completed" | "cancelled";
+                    startDate?: string;
+                    endDate?: string;
+                    page?: number;
+                    pageSize?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attendance/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export attendance records as CSV
+         * @description Callers holding `attendance.read` or `attendance.approve` export the records their filters select; everyone else is pinned to their own, exactly as on `GET /attendance`. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    userId?: number;
+                    status?: string;
+                    startDate?: string;
+                    endDate?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/time-off/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Export time-off requests as CSV
+         * @description Callers holding `timeoff.approve` export any requests their filters select; everyone else is pinned to their own. Audited.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    status?: string;
+                    userId?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings). */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/csv": string;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

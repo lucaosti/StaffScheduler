@@ -18,6 +18,10 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { createTimeOffBody, optionalNotesBody, idParam, timeOffListQuery } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
+import { z } from 'zod';
+import { AuditLogService } from '../services/AuditLogService';
+import { ExportService } from '../services/ExportService';
+import { timeOffColumns } from '../services/exportColumns';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -26,6 +30,22 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createTimeOffRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new TimeOffService(pool);
+  const exporter = new ExportService(new AuditLogService(pool));
+
+  /**
+   * The listing filters. A non-approver is pinned to their own requests, so a
+   * `userId` from one is ignored rather than obeyed.
+   *
+   * Shared with `/export` because this is the rule that decides whether someone
+   * can download other people's stated reasons for absence.
+   */
+  const listFilters = (req: Request, query: z.infer<typeof timeOffListQuery>) => {
+    const { userId, status } = query;
+    const isManager = userHasPermission(req.user, 'timeoff.approve');
+    return isManager
+      ? { userId, status: status as never }
+      : { userId: req.user!.id, status: status as never };
+  };
 
   router.use(authenticate);
 
@@ -41,15 +61,22 @@ export const createTimeOffRouter = (pool: Pool): Router => {
   }));
 
   router.get('/', validateQuery(timeOffListQuery), asyncHandler(async (req: Request, res: Response) => {
-    const { userId, status } = res.locals.query;
-    // Approvers may list anyone's requests; everyone else is pinned to their
-    // own, so a userId filter from a non-approver is ignored rather than obeyed.
-    const isManager = userHasPermission(req.user, 'timeoff.approve');
-    const filters = isManager
-      ? { userId, status: status as never }
-      : { userId: req.user!.id, status: status as never };
+    const filters = listFilters(req, res.locals.query);
     const list = await service.list(filters);
     res.json({ success: true, data: list });
+  }));
+
+  // Before `/:id`, so "export" is not read as a request id.
+  router.get('/export', validateQuery(timeOffListQuery), asyncHandler(async (req: Request, res: Response) => {
+    const filters = listFilters(req, res.locals.query);
+    const rows = await service.list(filters);
+    await exporter.sendCsv(res, {
+      actorId: req.user?.id ?? null,
+      dataset: 'time-off',
+      rows,
+      columns: timeOffColumns,
+      filters,
+    });
   }));
 
   router.get('/:id', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {

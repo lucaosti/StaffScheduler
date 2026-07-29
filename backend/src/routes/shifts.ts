@@ -24,6 +24,10 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
+import { z } from 'zod';
+import { AuditLogService } from '../services/AuditLogService';
+import { ExportService } from '../services/ExportService';
+import { shiftColumns } from '../services/exportColumns';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
@@ -42,6 +46,27 @@ import {
 export const createShiftsRouter = (pool: Pool) => {
   const router = Router();
   const shiftService = new ShiftService(pool);
+const exporter = new ExportService(new AuditLogService(pool));
+
+/**
+ * The listing filters, org-unit scope included.
+ *
+ * Shared with `/export` so the file and the screen are filtered by one rule.
+ * The scope clause is the part that must not be written twice.
+ */
+const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
+  const scope = req.user?.allowedOrgUnitIds;
+  const { date, startDate, endDate, page: _page, pageSize: _pageSize, ...rest } = query;
+  // `date` is the documented single-day convenience form. An explicit range wins
+  // if both are supplied.
+  return {
+    ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
+    ...rest,
+    ...(date ? { startDate: date, endDate: date } : {}),
+    ...(startDate ? { startDate } : {}),
+    ...(endDate ? { endDate } : {}),
+  };
+};
 
 // Shift Template Routes
 
@@ -118,17 +143,7 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 
 // Get all shifts
 router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(shiftListQuery), asyncHandler(async (req: Request, res: Response) => {
-  const scope = req.user?.allowedOrgUnitIds;
-  const { date, startDate, endDate, ...rest } = res.locals.query;
-  // `date` is the documented single-day convenience form; it was published but
-  // never read. An explicit range wins if both are supplied.
-  const filters = {
-    ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
-    ...rest,
-    ...(date ? { startDate: date, endDate: date } : {}),
-    ...(startDate ? { startDate } : {}),
-    ...(endDate ? { endDate } : {}),
-  };
+  const filters = listFilters(req, res.locals.query);
   const pagination = parsePagination(req);
   if (pagination) {
     const [total, shifts] = await Promise.all([
@@ -139,6 +154,19 @@ router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(
   }
   const shifts = await shiftService.getAllShifts(filters);
   res.json({ success: true, data: shifts });
+}));
+
+// Before `/:id`, so "export" is not read as a shift id.
+router.get('/export', authenticate, requirePermission('schedule.read'), validateQuery(shiftListQuery), asyncHandler(async (req: Request, res: Response) => {
+  const filters = listFilters(req, res.locals.query);
+  const shifts = await shiftService.getAllShifts(filters);
+  await exporter.sendCsv(res, {
+    actorId: req.user?.id ?? null,
+    dataset: 'shifts',
+    rows: shifts,
+    columns: shiftColumns,
+    filters,
+  });
 }));
 
 // Get shift by ID
