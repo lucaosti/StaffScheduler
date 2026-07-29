@@ -12,7 +12,12 @@
  */
 
 import { ReplanProposalService } from '../services/ReplanProposalService';
+import { NotificationService } from '../services/NotificationService';
+import { AuditLogService } from '../services/AuditLogService';
 import { ConflictError, NotFoundError } from '../errors';
+
+jest.mock('../services/NotificationService');
+jest.mock('../services/AuditLogService');
 
 export {};
 
@@ -276,5 +281,123 @@ describe('apply', () => {
     const out = await new ReplanProposalService(pool).apply(5, 3);
     expect(out.inserted).toBe(0);
     expect(out.removed).toBe(1);
+  });
+});
+
+/**
+ * Telling people what they lost.
+ *
+ * A broken commitment is someone who was told they were working and now is
+ * not. Until the plan was actually applied there was no such moment — the old
+ * persist path removed nothing, so the diff described a change that had not
+ * happened and notifying on it would have said something untrue. Now that
+ * applying removes, this is the point at which the person must hear it.
+ */
+describe('notifying broken commitments', () => {
+  let notifyWithin: jest.Mock;
+  let auditWrite: jest.Mock;
+
+  beforeEach(() => {
+    notifyWithin = jest.fn().mockResolvedValue(1);
+    auditWrite = jest.fn().mockResolvedValue(undefined);
+    (NotificationService as unknown as jest.Mock).mockImplementation(() => ({ notifyWithin }));
+    (AuditLogService as unknown as jest.Mock).mockImplementation(() => ({ write: auditWrite }));
+  });
+
+  const lost = (over: Record<string, unknown> = {}) => ({
+    id: 100,
+    shift_id: 10,
+    user_id: 3,
+    is_pinned: 1,
+    date: '2033-04-01',
+    start_time: '09:00:00',
+    end_time: '17:00:00',
+    ...over,
+  });
+
+  const applyWith = async (existing: Array<Record<string, unknown>>) => {
+    const { pool, execute, conn } = makePool();
+    execute.mockResolvedValueOnce([[proposalRow()], []]);
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]) // claim
+      .mockResolvedValueOnce([[{ id: 10 }, { id: 11 }], []]) // shifts
+      .mockResolvedValueOnce([[{ id: 1 }, { id: 2 }], []]) // users
+      .mockResolvedValueOnce([existing, []]) // current
+      .mockResolvedValue([{ affectedRows: 1 }, []]); // delete, insert, notifications
+    execute.mockResolvedValueOnce([[proposalRow({ status: 'applied' })], []]);
+    await new ReplanProposalService(pool).apply(5, 42);
+    return { conn };
+  };
+
+  it('notifies the person whose pinned shift the plan removes', async () => {
+    await applyWith([lost()]);
+
+    expect(notifyWithin).toHaveBeenCalledTimes(1);
+    const [conn, input] = notifyWithin.mock.calls[0];
+    // On the caller's connection: a separate transaction could commit the
+    // removal and fail the notification, leaving someone unassigned and
+    // uninformed.
+    expect(conn).toBeDefined();
+    expect(input).toMatchObject({ userId: 3, type: 'schedule.commitment_broken' });
+    expect(input.body).toContain('2033-04-01 09:00–17:00');
+  });
+
+  it('sends one message per person, not one per shift', async () => {
+    await applyWith([
+      lost({ id: 100, shift_id: 10, date: '2033-04-01' }),
+      lost({ id: 101, shift_id: 11, date: '2033-04-02' }),
+    ]);
+
+    // Forty emails to the same person is not diligence; it buries the fact
+    // that their week changed.
+    expect(notifyWithin).toHaveBeenCalledTimes(1);
+    const input = notifyWithin.mock.calls[0][1];
+    expect(input.title).toContain('2 shifts');
+    expect(input.body).toContain('2033-04-01');
+    expect(input.body).toContain('2033-04-02');
+    // One audit row per broken commitment: the record is of what happened to
+    // each assignment.
+    expect(auditWrite).toHaveBeenCalledTimes(2);
+  });
+
+  it('separates people who each lost something', async () => {
+    await applyWith([lost({ id: 100, user_id: 3 }), lost({ id: 101, user_id: 4, shift_id: 11 })]);
+    expect(notifyWithin).toHaveBeenCalledTimes(2);
+    expect(notifyWithin.mock.calls.map((c) => c[1].userId).sort()).toEqual([3, 4]);
+  });
+
+  it('says nothing about an unpinned assignment it removes', async () => {
+    await applyWith([lost({ is_pinned: 0 })]);
+
+    // An unpinned assignment on a published schedule is one nobody was told
+    // about — a planner's draft addition, or one deliberately unpinned so the
+    // optimizer could move it. Announcing it would tell someone a shift was
+    // taken away that they never knew they had.
+    expect(notifyWithin).not.toHaveBeenCalled();
+    expect(auditWrite).not.toHaveBeenCalled();
+  });
+
+  it('attributes the break to the approver, not to the machine', async () => {
+    await applyWith([lost()]);
+    // The optimizer produced the plan, but a person decided to apply it —
+    // which is the point of the proposal step. Recording a machine actor would
+    // now be the synthetic attribution, hiding a real decision behind one.
+    expect(auditWrite.mock.calls[0][0]).toMatchObject({
+      actorId: 42,
+      action: 'schedule.commitment_broken',
+      entityId: 100,
+    });
+  });
+
+  it('formats a date the driver hands back as a Date', async () => {
+    await applyWith([lost({ date: new Date('2033-04-01T00:00:00Z') })]);
+    // `String(dateCol).slice(0, 10)` would put "Fri Apr 01" in a message sent
+    // to a person.
+    expect(notifyWithin.mock.calls[0][1].body).toContain('2033-04-01');
+  });
+
+  it('notifies nobody when the plan keeps every commitment', async () => {
+    await applyWith([{ id: 101, shift_id: 10, user_id: 1, is_pinned: 1, date: '2033-04-01', start_time: '09:00:00', end_time: '17:00:00' }]);
+    expect(notifyWithin).not.toHaveBeenCalled();
   });
 });
