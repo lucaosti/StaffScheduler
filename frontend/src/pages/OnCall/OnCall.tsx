@@ -26,18 +26,13 @@ import {
 } from '../../hooks/useOnCall';
 import { useEmployeesQuery } from '../../hooks/useEmployees';
 import type { OnCallPeriod } from '../../services/onCallService';
-import { formatTime } from '../../utils/format';
+import { formatTime, todayIso } from '../../utils/format';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 /** The shared formatter, with the dash these tables use for an absent time. */
 const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 
-const isoDay = (offset = 0): string => {
-  const d = new Date();
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
-};
 
 const OnCall: React.FC = () => {
   const { user } = useAuth();
@@ -46,8 +41,8 @@ const OnCall: React.FC = () => {
   const canRead = permissions.includes('schedule.read');
   const canManage = permissions.includes('oncall.manage');
 
-  const [from, setFrom] = useState(isoDay());
-  const [to, setTo] = useState(isoDay(30));
+  const [from, setFrom] = useState(todayIso());
+  const [to, setTo] = useState(todayIso(30));
   const [openPeriod, setOpenPeriod] = useState<OnCallPeriod | null>(null);
   const [assignUserId, setAssignUserId] = useState('');
 

@@ -13,7 +13,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { formatCurrency } from '../../utils/format';
+import { formatCurrency, todayIso, firstOfMonthIso } from '../../utils/format';
 import BarChart from '../../components/BarChart';
 import { errorMessage } from '../../utils/notify';
 import {
@@ -22,16 +22,10 @@ import {
   useFairnessQuery,
 } from '../../hooks/useReports';
 
-const isoToday = (): string => new Date().toISOString().slice(0, 10);
-const isoFirstOfMonth = (): string => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().slice(0, 10);
-};
 
 const Reports: React.FC = () => {
-  const [start, setStart] = useState(() => isoFirstOfMonth());
-  const [end, setEnd] = useState(() => isoToday());
+  const [start, setStart] = useState(() => firstOfMonthIso());
+  const [end, setEnd] = useState(() => todayIso());
   const [selectedScheduleId, setSelectedScheduleId] = useState<number | null>(null);
 
   // Server state via TanStack Query: the range pair refetches when start/end
