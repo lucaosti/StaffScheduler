@@ -32,6 +32,7 @@ import type {
   Timestamp,
   TimeOffRequest,
   ShiftSwapRequest,
+  ShiftAssignment,
 } from '@staff-scheduler/shared';
 export type {
   Permission,
@@ -46,6 +47,7 @@ export type {
   Timestamp,
   TimeOffRequest,
   ShiftSwapRequest,
+  ShiftAssignment,
 };
 
 
@@ -95,27 +97,6 @@ export interface Employee {
 }
 
 // Shift (including special shifts)
-
-export interface Assignment {
-  id: ID;
-  shiftId: ID;
-  userId?: ID;
-  userName?: string;
-  userEmail?: string;
-  shiftDate?: string | Date;
-  startTime?: string;
-  endTime?: string;
-  departmentId?: ID;
-  departmentName?: string;
-  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
-  assignedAt?: string | Date;
-  confirmedAt?: string | Date | null;
-  notes?: string | null;
-
-  // Legacy fields (optional)
-  employeeId?: ID;
-  role?: string;
-}
 
 // Attendance tracking (clock-in / clock-out) types
 export interface AttendanceRecord {
