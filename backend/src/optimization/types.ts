@@ -97,6 +97,34 @@ export interface Employee {
    * reassignable (they aren't part of `problem.shifts`).
    */
   existing_assignments?: Array<{ date: string; start_time: string; end_time: string }>;
+  /**
+   * Category days already worked before this period, as a NORMALIZED
+   * deviation from the candidates' average.
+   *
+   * WHY THIS EXISTS. The equity terms are computed within one solve, so
+   * someone who worked every weekend in March started April level with a
+   * colleague who worked none. "Weekend work is spread evenly" was true of
+   * each month in isolation and could be false of the year: the same person
+   * could take the unpopular end every month with nothing in the objective
+   * noticing, as long as each month was internally balanced.
+   *
+   * WHY A DEVIATION AND NOT A COUNT. Raw totals make someone who joined
+   * mid-period look as though they had never worked a weekend, so they are
+   * chosen for the next ones until they "catch up" — a penalty for having been
+   * hired later. A deviation puts a new joiner at zero, which is the correct
+   * position: neither owed nor owing.
+   *
+   * WHY THE VALUES ARE NON-NEGATIVE despite being deviations. The objective
+   * minimises `max(load) - min(load)`, which is invariant under adding the
+   * same constant to every employee's load. The producer therefore shifts the
+   * whole set up so the least-loaded candidate sits at zero, and nothing about
+   * what the solver optimises changes. Keeping them signed would mean every
+   * load variable in CP-SAT needing a negative lower bound for no gain.
+   *
+   * Integers, because a fractional day is not a unit anyone experiences and
+   * both engines' load variables are integral.
+   */
+  carried_load?: { weekend?: number; night?: number };
 }
 
 export interface Shift {

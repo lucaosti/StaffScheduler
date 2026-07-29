@@ -361,6 +361,112 @@ describeOrtools('CP-SAT engine plans under insufficient staff', () => {
  * Verified against the previous implementation: the fixture below gave ALL
  * FOUR shifts to one employee and none to the other.
  */
+describeOrtools('CP-SAT engine carries equity across the boundary', () => {
+  /**
+   * The discriminating fixture, which is the hard part of testing this.
+   *
+   * WEEKDAY SHIFTS ARE PART OF IT, not padding. With only the two weekend days
+   * the weekend term and the HOURS term are in direct opposition — giving both
+   * weekend days to one person is the only way to balance weekends and the
+   * surest way to unbalance hours — and hours wins, so the run is 1–1 whatever
+   * the history says. Two weekday shifts give the solver a way to satisfy both:
+   * whoever is behind on weekends takes them, the other takes the weekdays, and
+   * the hours stay level. Without them this test passes against an engine that
+   * ignores carried history entirely.
+   *
+   * The person already ahead is also the one who WANTS the weekend, so the
+   * preference pulls the wrong way and cannot be what produces the result.
+   */
+  const weekendProblem = (carried?: number) => {
+    const shift = (id: string, date: string) => ({
+      id,
+      date,
+      start_time: '08:00',
+      end_time: '16:00',
+      min_staff: 1,
+      max_staff: 1,
+      required_skills: [],
+      priority: 1,
+    });
+    return {
+      shifts: [
+        shift('sat', '2026-05-02'),
+        shift('sun', '2026-05-03'),
+        shift('mon', '2026-05-04'),
+        shift('tue', '2026-05-05'),
+      ],
+      employees: [
+        {
+          id: 'ahead',
+          max_hours_per_week: 40,
+          min_hours_per_week: 0,
+          max_consecutive_days: 7,
+          skills: [],
+          unavailable_dates: [],
+          ...(carried === undefined ? {} : { carried_load: { weekend: carried } }),
+        },
+        {
+          id: 'behind',
+          max_hours_per_week: 40,
+          min_hours_per_week: 0,
+          max_consecutive_days: 7,
+          skills: [],
+          unavailable_dates: [],
+        },
+      ],
+      preferences: [
+        { employee_id: 'ahead', shift_id: 'sat', preference: 'prefer' },
+        { employee_id: 'ahead', shift_id: 'sun', preference: 'prefer' },
+      ],
+    };
+  };
+
+  const weekendDaysOf = (assignments: ValidatedAssignment[], employeeId: string): number =>
+    assignments.filter(
+      (a) => a.employeeId === employeeId && (a.shiftId === 'sat' || a.shiftId === 'sun')
+    ).length;
+
+  it('splits the weekend evenly when no history is carried', () => {
+    // The control, and it is not what the preference alone would give: the
+    // in-period equity term already outweighs two satisfied preferences. The
+    // test below is only meaningful as a DIFFERENCE from this baseline.
+    const assignments = runPython(weekendProblem());
+    expect(weekendDaysOf(assignments, 'ahead')).toBe(1);
+    expect(weekendDaysOf(assignments, 'behind')).toBe(1);
+  });
+
+  it('gives the weekend to whoever is behind once the history says so', () => {
+    // Four weekend days more than the other candidate, carried in. Everything
+    // else is identical to the control, including the preference pulling the
+    // other way; the only difference is that the spread no longer starts at
+    // zero, so an even split is no longer the balanced answer.
+    const assignments = runPython(weekendProblem(4));
+    expect(weekendDaysOf(assignments, 'behind')).toBe(2);
+    expect(weekendDaysOf(assignments, 'ahead')).toBe(0);
+  });
+
+  it('does not pay for that with the hours', () => {
+    // The weekdays exist so equity on WHICH hours and equity on HOW MANY can
+    // both be satisfied. If the engine bought weekend balance by handing
+    // someone the whole week, that would be a worse schedule reported as a
+    // better one.
+    const assignments = runPython(weekendProblem(4));
+    const shiftsOf = (id: string) => assignments.filter((a) => a.employeeId === id).length;
+    expect(shiftsOf('ahead')).toBe(2);
+    expect(shiftsOf('behind')).toBe(2);
+  });
+
+  it('leaves both engines reading the carried load the same way', () => {
+    const problem = weekendProblem(4) as never;
+    const assignments = runPython(problem);
+    // Four carried plus none worked against zero carried plus two worked: a
+    // spread of two, the smallest reachable here, measured by the canonical
+    // validator rather than by the engine's own arithmetic.
+    expect(weekendSpread(problem, assignments)).toBe(2);
+    expect(findConstraintViolations(problem, assignments)).toEqual([]);
+  });
+});
+
 describeOrtools('CP-SAT engine balances workload', () => {
   const twoEmployees = [1, 2].map((i) => ({
     id: `e${i}`,
@@ -1347,6 +1453,90 @@ describeOrtools('CP-SAT engine respects pairing rules', () => {
  * validation. That is why the readers had to agree rather than the case being
  * dismissed as impossible.
  */
+/**
+ * Equity carried across the schedule boundary.
+ *
+ * The category spread used to start counting today, so "weekend work is spread
+ * evenly" was true of every month in isolation and could be false of the year:
+ * the same person could take the unpopular end every month with nothing in the
+ * objective noticing, as long as each month was internally balanced.
+ */
+describe('carried equity history', () => {
+  const twoPeople = (carried?: Array<{ weekend?: number; night?: number }>) => ({
+    shifts: [
+      // A Saturday and a Sunday, one seat each.
+      { id: 's1', date: '2026-05-02', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 1, required_skills: [], priority: 1 },
+      { id: 's2', date: '2026-05-03', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 1, required_skills: [], priority: 1 },
+    ],
+    employees: [
+      { id: 'a', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 7, skills: [], carried_load: carried?.[0] },
+      { id: 'b', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 7, skills: [], carried_load: carried?.[1] },
+    ],
+    preferences: [],
+  });
+
+  it('adds the carried load to the in-period weekend load', () => {
+    const problem = twoPeople([{ weekend: 3 }, { weekend: 0 }]) as never;
+    const loads = weekendLoads(problem, [{ employeeId: 'a', shiftId: 's1' }]);
+
+    // One weekend day worked here plus three carried in.
+    expect(loads.find((l) => l.employeeId === 'a')?.days).toBe(4);
+    expect(loads.find((l) => l.employeeId === 'b')?.days).toBe(0);
+  });
+
+  it('makes an even split look uneven when the history is uneven', () => {
+    const problem = twoPeople([{ weekend: 2 }, { weekend: 0 }]) as never;
+
+    // One weekend day each: perfectly balanced by the old measure...
+    const even = weekendSpread(problem, [
+      { employeeId: 'a', shiftId: 's1' },
+      { employeeId: 'b', shiftId: 's2' },
+    ]);
+    // ...and giving both to the person already ahead is what the old measure
+    // could not tell apart from giving both to the other one.
+    const worse = weekendSpread(problem, [
+      { employeeId: 'a', shiftId: 's1' },
+      { employeeId: 'a', shiftId: 's2' },
+    ]);
+    const better = weekendSpread(problem, [
+      { employeeId: 'b', shiftId: 's1' },
+      { employeeId: 'b', shiftId: 's2' },
+    ]);
+
+    expect(even).toBe(2);
+    expect(worse).toBe(4);
+    // Assigning both to whoever is behind is the only option that closes the
+    // gap — which is the whole point of carrying the history.
+    expect(better).toBe(0);
+    expect(better).toBeLessThan(even);
+  });
+
+  it('changes nothing when no history is carried', () => {
+    const problem = twoPeople() as never;
+    // The field is optional, and an installation with no published past must
+    // behave exactly as before.
+    expect(
+      weekendSpread(problem, [
+        { employeeId: 'a', shiftId: 's1' },
+        { employeeId: 'b', shiftId: 's2' },
+      ])
+    ).toBe(0);
+  });
+
+  it('keeps the weekend and night histories separate', () => {
+    const problem = twoPeople([{ night: 5 }, { weekend: 5 }]) as never;
+    const weekend = weekendLoads(problem, []);
+    const night = nightLoads(problem, []);
+
+    // A night carried in must not read as a weekend carried in: they are
+    // different things to lose, which is why there are two categories.
+    expect(weekend.find((l) => l.employeeId === 'a')?.days).toBe(0);
+    expect(weekend.find((l) => l.employeeId === 'b')?.days).toBe(5);
+    expect(night.find((l) => l.employeeId === 'a')?.days).toBe(5);
+    expect(night.find((l) => l.employeeId === 'b')?.days).toBe(0);
+  });
+});
+
 describe('zero-length shifts are read consistently', () => {
   const zeroLength = { date: '2033-12-01', start_time: '08:00', end_time: '08:00' };
 
