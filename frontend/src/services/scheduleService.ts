@@ -21,11 +21,11 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, Schedule, Shift, Assignment } from '../types';
+import { ApiResponse, Schedule, Shift, ShiftAssignment } from '../types';
 import { apiClient } from '../api/client';
 
 interface ShiftWithAssignments extends Shift {
-  assignments?: Assignment[];
+  assignments?: ShiftAssignment[];
 }
 
 interface ScheduleWithShifts extends Schedule {

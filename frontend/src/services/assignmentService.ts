@@ -13,7 +13,7 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, Assignment } from '../types';
+import { ApiResponse, ShiftAssignment } from '../types';
 import type { paths } from '../api/schema';
 import { apiClient } from '../api/client';
 
@@ -39,8 +39,8 @@ export interface AvailableEmployee {
  */
 export const getAssignments = (
   filters: AssignmentFilters = {}
-): Promise<ApiResponse<Assignment[]>> =>
-  apiClient.get<Assignment[], '/assignments'>('/assignments', { query: filters });
+): Promise<ApiResponse<ShiftAssignment[]>> =>
+  apiClient.get<ShiftAssignment[], '/assignments'>('/assignments', { query: filters });
 
 /**
  * One person's assignments, readable by that person.
@@ -50,35 +50,35 @@ export const getAssignments = (
  * on `assignment.manage`, a permission the default Employee role does not
  * hold.
  */
-export const getMyAssignments = (userId: number): Promise<ApiResponse<Assignment[]>> =>
-  apiClient.get<Assignment[], '/assignments/user/{userId}'>('/assignments/user/{userId}', {
+export const getMyAssignments = (userId: number): Promise<ApiResponse<ShiftAssignment[]>> =>
+  apiClient.get<ShiftAssignment[], '/assignments/user/{userId}'>('/assignments/user/{userId}', {
     params: { userId },
   });
 
 export const createAssignment = (
   body: CreateAssignmentBody
-): Promise<ApiResponse<Assignment>> =>
-  apiClient.post<Assignment, '/assignments'>('/assignments', body);
+): Promise<ApiResponse<ShiftAssignment>> =>
+  apiClient.post<ShiftAssignment, '/assignments'>('/assignments', body);
 
 export const deleteAssignment = (id: number): Promise<ApiResponse<void>> =>
   apiClient.delete<void, '/assignments/{id}'>('/assignments/{id}', { params: { id } });
 
-export const confirmAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
-  apiClient.patch<Assignment, '/assignments/{id}/confirm'>(
+export const confirmAssignment = (id: number): Promise<ApiResponse<ShiftAssignment>> =>
+  apiClient.patch<ShiftAssignment, '/assignments/{id}/confirm'>(
     '/assignments/{id}/confirm',
     undefined,
     { params: { id } }
   );
 
-export const declineAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
-  apiClient.patch<Assignment, '/assignments/{id}/decline'>(
+export const declineAssignment = (id: number): Promise<ApiResponse<ShiftAssignment>> =>
+  apiClient.patch<ShiftAssignment, '/assignments/{id}/decline'>(
     '/assignments/{id}/decline',
     undefined,
     { params: { id } }
   );
 
-export const completeAssignment = (id: number): Promise<ApiResponse<Assignment>> =>
-  apiClient.patch<Assignment, '/assignments/{id}/complete'>(
+export const completeAssignment = (id: number): Promise<ApiResponse<ShiftAssignment>> =>
+  apiClient.patch<ShiftAssignment, '/assignments/{id}/complete'>(
     '/assignments/{id}/complete',
     undefined,
     { params: { id } }

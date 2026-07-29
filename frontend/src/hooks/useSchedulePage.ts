@@ -24,7 +24,7 @@
  */
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { Schedule as ScheduleType, Assignment, Employee, Shift } from '../types';
+import type { Schedule as ScheduleType, ShiftAssignment, Employee, Shift } from '../types';
 import * as scheduleService from '../services/scheduleService';
 import * as employeeService from '../services/employeeService';
 import * as shiftService from '../services/shiftService';
@@ -36,7 +36,7 @@ interface SchedulePageData {
   employees: Employee[];
   shifts: Shift[];
   departments: Department[];
-  assignments: Assignment[];
+  assignments: ShiftAssignment[];
 }
 
 const schedulePageKey = ['schedule-page'] as const;
@@ -61,7 +61,7 @@ const fetchSchedulePageData = async (): Promise<SchedulePageData> => {
 
   // Assignments of the first schedule, flattened from its shifts. Kept as a
   // dependent fetch inside the same query so the page still has one load unit.
-  const assignments: Assignment[] = [];
+  const assignments: ShiftAssignment[] = [];
   if (schedules.length > 0) {
     const details = await scheduleService.getScheduleWithShifts(schedules[0].id);
     if (details.success && details.data && Array.isArray(details.data.shifts)) {
