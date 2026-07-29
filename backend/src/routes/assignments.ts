@@ -30,6 +30,9 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AssignmentService } from '../services/AssignmentService';
+import { AuditLogService } from '../services/AuditLogService';
+import { ExportService } from '../services/ExportService';
+import { assignmentColumns } from '../services/exportColumns';
 import { SwapCandidateService } from '../services/SwapCandidateService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
@@ -54,6 +57,7 @@ import { parsePagination, sendPaginated } from '../middleware/pagination';
 export const createAssignmentsRouter = (pool: Pool) => {
   const router = Router();
   const assignmentService = new AssignmentService(pool);
+const exporter = new ExportService(new AuditLogService(pool));
 
 // Get all assignments.
 //
@@ -77,6 +81,22 @@ router.get('/', authenticate, requirePermission('assignment.manage'), validateQu
 
   const assignments = await assignmentService.getAllAssignments(filters);
   res.json({ success: true, data: assignments });
+}));
+
+// Before `/:id`, so "export" is not read as an assignment id.
+router.get('/export', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), asyncHandler(async (req: Request, res: Response) => {
+  const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
+  // The unpaginated listing refuses an oversized result rather than truncating
+  // it (see AssignmentService); the export inherits that, which is the right
+  // failure — a silently truncated file is a wrong answer that looks complete.
+  const assignments = await assignmentService.getAllAssignments(filters);
+  await exporter.sendCsv(res, {
+    actorId: req.user?.id ?? null,
+    dataset: 'assignments',
+    rows: assignments,
+    columns: assignmentColumns,
+    filters,
+  });
 }));
 
 // Get assignment by ID

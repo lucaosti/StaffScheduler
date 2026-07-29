@@ -9,6 +9,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { todayIso } from '../../utils/format';
+import ExportCsvLink from '../../components/ExportCsvLink';
 import {
   useMyAttendanceQuery,
   usePendingAttendanceQuery,
@@ -90,9 +91,14 @@ const Attendance: React.FC = () => {
   return (
     <div className="container-fluid py-4">
       <div className="row mb-3">
-        <div className="col">
-          <h1 className="h3 mb-0">Attendance</h1>
-          <p className="text-muted mb-0 small">Clock in and out; punches are reviewed before they count.</p>
+        <div className="col d-flex justify-content-between align-items-start">
+          <div>
+            <h1 className="h3 mb-0">Attendance</h1>
+            <p className="text-muted mb-0 small">Clock in and out; punches are reviewed before they count.</p>
+          </div>
+          {/* An approver exports what their filters select; everyone else gets
+              their own records, which the endpoint enforces rather than trusts. */}
+          <ExportCsvLink path="/attendance/export" disabled={myRecords.length === 0} />
         </div>
       </div>
 

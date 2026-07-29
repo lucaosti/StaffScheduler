@@ -20,6 +20,7 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 import { useShiftsPageData, useDeleteShift, useSaveShift } from '../../hooks/useShifts';
 import { useAuth } from '../../contexts/AuthContext';
 import ShiftAssignmentPanel from '../Assignments/ShiftAssignmentPanel';
+import ExportCsvLink from '../../components/ExportCsvLink';
 
 interface ConfirmState {
   show: boolean;
@@ -182,6 +183,13 @@ const Shifts: React.FC = () => {
                 Create and manage shifts inside published or draft schedules.
               </p>
             </div>
+            <div className="d-flex gap-2">
+            <ExportCsvLink
+              path="/shifts/export"
+              params={{ departmentId: selectedDepartment }}
+              disabled={filteredShifts.length === 0}
+              className="btn btn-outline-secondary"
+            />
             <button
               className="btn btn-primary"
               type="button"
@@ -195,6 +203,7 @@ const Shifts: React.FC = () => {
               <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
               Add New Shift
             </button>
+            </div>
           </div>
         </div>
       </div>

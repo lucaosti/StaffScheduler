@@ -15,6 +15,7 @@
 import React, { useMemo, useState } from 'react';
 import { formatCurrency, todayIso, firstOfMonthIso } from '../../utils/format';
 import BarChart from '../../components/BarChart';
+import ExportCsvLink from '../../components/ExportCsvLink';
 import { errorMessage } from '../../utils/notify';
 import {
   useRangeReportsQuery,
@@ -97,7 +98,17 @@ const Reports: React.FC = () => {
       <div className="row g-4 mb-4">
         <div className="col-lg-6">
           <div className="card h-100">
-            <div className="card-header">Hours worked by user</div>
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <span>Hours worked by user</span>
+              {/* Carries the range currently on screen, so the file matches the
+                  table rather than some server-side default. */}
+              <ExportCsvLink
+                path="/reports/hours-worked/export"
+                params={{ startDate: start, endDate: end }}
+                label="CSV"
+                disabled={hours.length === 0}
+              />
+            </div>
             {hours.length > 0 && (
               <div className="card-body pb-0">
                 <BarChart
@@ -143,9 +154,17 @@ const Reports: React.FC = () => {
 
         <div className="col-lg-6">
           <div className="card h-100">
-            <div className="card-header d-flex justify-content-between">
+            <div className="card-header d-flex justify-content-between align-items-center">
               <span>Cost by department</span>
-              <span className="text-muted">Total: {formatCurrency(totalCost)}</span>
+              <span className="d-flex align-items-center gap-3">
+                <span className="text-muted">Total: {formatCurrency(totalCost)}</span>
+                <ExportCsvLink
+                  path="/reports/cost-by-department/export"
+                  params={{ startDate: start, endDate: end }}
+                  label="CSV"
+                  disabled={cost.length === 0}
+                />
+              </span>
             </div>
             {cost.length > 0 && (
               <div className="card-body pb-0">
@@ -210,6 +229,14 @@ const Reports: React.FC = () => {
               </option>
             ))}
           </select>
+          {selectedScheduleId !== null && (
+            <ExportCsvLink
+              path={`/reports/fairness/${selectedScheduleId}/export`}
+              label="CSV"
+              className="btn btn-outline-secondary btn-sm ms-auto"
+              disabled={!fairness || fairness.perUser.length === 0}
+            />
+          )}
         </div>
 
         {selectedScheduleId === null ? (

@@ -24,6 +24,7 @@ import { useTimeOffQuery, useTimeOffMutations } from '../../hooks/useTimeOff';
 import type { TimeOffRequest } from '../../types';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 import { todayIso } from '../../utils/format';
+import ExportCsvLink from '../../components/ExportCsvLink';
 
 const STATUS_BADGE: Record<string, string> = {
   pending: 'bg-warning text-dark',
@@ -66,7 +67,10 @@ const TimeOff: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">Time off</h1>
+      <div className="d-flex justify-content-between align-items-center mb-3">
+        <h1 className="h4 mb-0">Time off</h1>
+        <ExportCsvLink path="/time-off/export" disabled={(mine.data?.length ?? 0) === 0} />
+      </div>
 
       {message && (
         <div className="alert alert-warning" role="alert">
