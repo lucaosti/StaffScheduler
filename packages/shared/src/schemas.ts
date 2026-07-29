@@ -439,6 +439,22 @@ export const auditJustificationBody = z.object({
   justification: z.string().max(2000).nullable().optional(),
 });
 
+/**
+ * A timeline window and the sources to draw on it.
+ *
+ * `sources` is a comma-separated list rather than a repeated parameter: it is
+ * a small closed set, and repeated query keys are the one shape the generated
+ * client and the OpenAPI parameter types disagree about.
+ */
+export const timelineQuery = z.object({
+  from: dateString,
+  to: dateString,
+  sources: z.string().max(200).optional(),
+}).refine(
+  (v) => v.from <= v.to,
+  { message: 'from must be on or before to', path: ['to'] }
+);
+
 /** Free-text reason recorded with a publish or a deletion. */
 export const auditReasonBody = z.object({
   reason: z.string().max(2000).optional(),
