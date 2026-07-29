@@ -1,18 +1,31 @@
 /**
  * CalendarSection — iCal feed management for the Settings page.
  *
- * Lets users generate and copy their personal calendar feed URL, rotate
- * the token, and read per-client instructions for minimising the refresh
- * interval so schedule changes appear as quickly as the client allows.
+ * SEVERAL NAMED TOKENS, each revocable on its own. There used to be one per
+ * person, and "rotate" overwrote it: adding a second device silently broke the
+ * first, which is the opposite of what a calendar subscription is for — set up
+ * once, expected to keep working until deliberately stopped.
+ *
+ * WHY THE URL IS SHOWN ONLY FOR A TOKEN JUST CREATED. Only the digest is
+ * stored, so the raw value exists exactly once, in the response that created
+ * it. The page says so rather than offering a "show" button that could not
+ * work: a caller able to redisplay it would mean the secret was kept, which is
+ * the whole thing hashing avoids.
+ *
+ * WHY REVOKED TOKENS STAY IN THE LIST. A feed that vanished would be
+ * indistinguishable from one that was never created — and "did I already revoke
+ * the lost phone?" is the question this screen exists to answer.
  *
  * @author Luca Ostinelli
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  getOrCreateCalendarToken,
-  rotateCalendarToken,
+  CalendarToken,
   buildFeedUrl,
+  createCalendarToken,
+  listCalendarTokens,
+  revokeCalendarToken,
 } from '../../services/calendarService';
 
 const CLIENT_INSTRUCTIONS = [
@@ -62,35 +75,35 @@ const CLIENT_INSTRUCTIONS = [
 ];
 
 const CalendarSection: React.FC = () => {
-  const [token, setToken] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<CalendarToken[]>([]);
+  const [label, setLabel] = useState('');
+  /** The one token whose raw URL can be shown: the one just created. */
+  const [freshUrl, setFreshUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [rotating, setRotating] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const feedUrl = token ? buildFeedUrl(token) : null;
-
-  const loadToken = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getOrCreateCalendarToken();
-      setToken(data.token);
+      setTokens(await listCalendarTokens());
     } catch (err) {
-      setError((err as Error).message || 'Failed to load calendar token.');
+      setError((err as Error).message || 'Failed to load calendar tokens.');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void loadToken();
-  }, [loadToken]);
+    void load();
+  }, [load]);
 
   const handleCopy = async () => {
-    if (!feedUrl) return;
+    if (!freshUrl) return;
     try {
-      await navigator.clipboard.writeText(feedUrl);
+      await navigator.clipboard.writeText(freshUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -98,19 +111,38 @@ const CalendarSection: React.FC = () => {
     }
   };
 
-  const handleRotate = async () => {
-    if (!window.confirm(
-      'Rotating the token invalidates the current URL. Any calendar subscriptions using the old URL will stop working until you re-subscribe with the new URL. Continue?'
-    )) return;
-    setRotating(true);
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
     setError(null);
     try {
-      const data = await rotateCalendarToken();
-      setToken(data.token);
+      const created = await createCalendarToken(label);
+      setFreshUrl(buildFeedUrl(created.token));
+      setLabel('');
+      await load();
     } catch (err) {
-      setError((err as Error).message || 'Failed to rotate token.');
+      setError((err as Error).message || 'Failed to create token.');
     } finally {
-      setRotating(false);
+      setBusy(false);
+    }
+  };
+
+  const handleRevoke = async (token: CalendarToken) => {
+    if (
+      !window.confirm(
+        `Revoke "${token.label}"? Any calendar subscribed with that URL stops working immediately. Your other feeds are unaffected.`
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeCalendarToken(token.id);
+      await load();
+    } catch (err) {
+      setError((err as Error).message || 'Failed to revoke token.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -139,20 +171,18 @@ const CalendarSection: React.FC = () => {
               </div>
             )}
 
-            {loading ? (
-              <div className="d-flex align-items-center gap-2 text-muted">
-                <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                Loading…
-              </div>
-            ) : feedUrl ? (
-              <>
-                <label htmlFor="feed-url" className="form-label fw-semibold">Your feed URL</label>
-                <div className="input-group mb-3">
+            {freshUrl && (
+              <div className="alert alert-success" role="status">
+                <p className="mb-2">
+                  <strong>Copy this URL now.</strong> It contains the token, which is stored only
+                  as a digest — this is the one and only time it can be shown.
+                </p>
+                <div className="input-group mb-2">
                   <input
                     id="feed-url"
                     type="text"
                     className="form-control font-monospace"
-                    value={feedUrl}
+                    value={freshUrl}
                     readOnly
                     aria-label="Calendar feed URL"
                   />
@@ -162,46 +192,112 @@ const CalendarSection: React.FC = () => {
                     onClick={handleCopy}
                     aria-label="Copy feed URL to clipboard"
                   >
-                    <i className={`bi ${copied ? 'bi-check-lg' : 'bi-clipboard'} me-1`} aria-hidden="true"></i>
+                    <i
+                      className={`bi ${copied ? 'bi-check-lg' : 'bi-clipboard'} me-1`}
+                      aria-hidden="true"
+                    ></i>
                     {copied ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-
-                <div className="alert alert-info d-flex align-items-start gap-2 mb-3" role="note">
-                  <i className="bi bi-info-circle-fill flex-shrink-0 mt-1" aria-hidden="true"></i>
-                  <div>
-                    <strong>How to get the fastest updates:</strong> after subscribing, open
-                    the calendar settings in your app and set the refresh interval to the
-                    shortest value it allows (see the per-client guide below). The server
-                    sends an <code>ETag</code> header so clients that support it skip
-                    re-downloading the feed when nothing has changed.
-                  </div>
-                </div>
-
                 <button
-                  className="btn btn-outline-danger btn-sm"
+                  className="btn btn-sm btn-outline-secondary"
                   type="button"
-                  onClick={handleRotate}
-                  disabled={rotating}
+                  onClick={() => setFreshUrl(null)}
                 >
-                  {rotating ? (
-                    <>
-                      <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
-                      Rotating…
-                    </>
-                  ) : (
-                    <>
-                      <i className="bi bi-arrow-repeat me-1" aria-hidden="true"></i>
-                      Rotate token
-                    </>
-                  )}
+                  I have saved it
                 </button>
-                <p className="text-muted small mt-2 mb-0">
-                  Rotating the token generates a new URL and invalidates the old one.
-                  You will need to re-subscribe in any calendar app using the old URL.
-                </p>
-              </>
-            ) : null}
+              </div>
+            )}
+
+            <div className="alert alert-info d-flex align-items-start gap-2 mb-3" role="note">
+              <i className="bi bi-info-circle-fill flex-shrink-0 mt-1" aria-hidden="true"></i>
+              <div>
+                <strong>How to get the fastest updates:</strong> after subscribing, open the
+                calendar settings in your app and set the refresh interval to the shortest value
+                it allows (see the per-client guide below). The server sends an <code>ETag</code>
+                header so clients that support it skip re-downloading the feed when nothing has
+                changed.
+              </div>
+            </div>
+
+            <form className="row g-2 align-items-end mb-3" onSubmit={handleCreate}>
+              <div className="col-md-5">
+                <label className="form-label" htmlFor="token-label">
+                  Name this subscription
+                </label>
+                <input
+                  id="token-label"
+                  className="form-control"
+                  placeholder="Phone, Work laptop…"
+                  value={label}
+                  onChange={(e) => setLabel(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="col-auto">
+                <button type="submit" className="btn btn-primary" disabled={busy}>
+                  Create feed URL
+                </button>
+              </div>
+            </form>
+
+            {loading ? (
+              <div className="d-flex align-items-center gap-2 text-muted">
+                <span
+                  className="spinner-border spinner-border-sm"
+                  role="status"
+                  aria-hidden="true"
+                ></span>
+                Loading…
+              </div>
+            ) : tokens.length === 0 ? (
+              <p className="text-muted mb-0">
+                No feed URLs yet. Create one above, name it after the device or app you will
+                subscribe with, and you can revoke it on its own if you lose that device.
+              </p>
+            ) : (
+              <table className="table table-sm align-middle mb-0">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Created</th>
+                    <th>Status</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {tokens.map((t) => (
+                    <tr key={t.id}>
+                      <td>{t.label}</td>
+                      <td className="text-muted">{String(t.createdAt).slice(0, 10)}</td>
+                      <td>
+                        {/* Revoked rows stay: "did I already revoke the lost
+                            phone?" is the question this screen answers. */}
+                        {t.revokedAt ? (
+                          <span className="badge bg-secondary">
+                            Revoked {String(t.revokedAt).slice(0, 10)}
+                          </span>
+                        ) : (
+                          <span className="badge bg-success">Active</span>
+                        )}
+                      </td>
+                      <td className="text-end">
+                        {!t.revokedAt && (
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => handleRevoke(t)}
+                            disabled={busy}
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
