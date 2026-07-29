@@ -124,6 +124,66 @@ describe('AutoScheduleService.generate', () => {
     expect(conn.commit).toHaveBeenCalled();
   });
 
+  /**
+   * A PUBLISHED schedule is not re-planned in place. Applying first and
+   * reporting afterwards means the change to people's commitments has already
+   * happened by the time the planner can judge it — so the run records a plan
+   * and writes nothing.
+   */
+  it('proposes rather than applies when the schedule is published', async () => {
+    const { pool, conn, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [{ id: 1, department_id: 3, start_date: '2026-05-01', end_date: '2026-05-31', status: 'published' }],
+        null,
+      ]) // schedule
+      .mockResolvedValueOnce([
+        [
+          { id: 10, date: '2026-05-01', start_time: '08:00', end_time: '16:00', min_staff: 1, max_staff: 5, department_id: 3, skill_names: null },
+        ],
+        null,
+      ]) // shifts
+      .mockResolvedValueOnce([[{ id: 1, skill_names: '', max_hours_per_week: 40, min_hours_per_week: 0, max_consecutive_days: 5 }], null])
+      .mockResolvedValueOnce([[], null]) // pinned
+      .mockResolvedValueOnce([[], null]) // pairings
+      .mockResolvedValueOnce([[], null]) // contracts
+      .mockResolvedValueOnce([[], null]) // unavailability
+      .mockResolvedValueOnce([[], null]) // external assignments
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 44,
+            schedule_id: 1,
+            proposed_by: 7,
+            status: 'pending',
+            engine: 'greedy',
+            payload: JSON.stringify({ assignments: [{ shiftId: 10, userId: 1 }], brokenCommitments: [], keptCommitments: 0, totalShifts: 1 }),
+            decided_by: null,
+            decision_reason: null,
+            created_at: 't',
+          },
+        ],
+        null,
+      ]); // proposal read-back
+    // The proposal's own transaction (supersede + insert).
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([{ insertId: 44 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(out.status).toBe('PROPOSED');
+    expect(out.proposalId).toBe(44);
+    // Nothing was created. Reporting the proposed count here would say work
+    // happened that has not.
+    expect(out.assignmentsCreated).toBe(0);
+    // No assignment INSERT: the only statements on a connection are the
+    // proposal's own.
+    expect(
+      conn.execute.mock.calls.some((c) => String(c[0]).includes('INTO shift_assignments'))
+    ).toBe(false);
+  });
+
   it('persists with one multi-row INSERT and counts only rows actually inserted', async () => {
     const { pool, conn, execute } = makePool();
     execute

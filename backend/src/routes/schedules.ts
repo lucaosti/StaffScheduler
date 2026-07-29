@@ -33,7 +33,9 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
+import { NotFoundError } from '../errors';
 import { ScheduleService } from '../services/ScheduleService';
+import { ReplanProposalService } from '../services/ReplanProposalService';
 import {
   enqueueOptimization,
   getOptimizationStatus,
@@ -45,6 +47,7 @@ import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
+  idAndProposalIdParam,
   departmentIdParam,
   userIdParam,
   createScheduleBody,
@@ -57,6 +60,7 @@ import {
 export const createSchedulesRouter = (pool: Pool) => {
   const router = Router();
   const scheduleService = new ScheduleService(pool);
+  const replanProposals = new ReplanProposalService(pool);
 
 // Get all schedules
 // departmentId/startDate/endDate were documented but never read: the handler
@@ -272,6 +276,53 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
     data: result,
     message: 'Schedule generated successfully'
   });
+}));
+
+// Replanning proposals.
+//
+// A re-solve of a PUBLISHED schedule records a plan instead of applying it —
+// applying first and reporting afterwards means the change to people's
+// commitments has already happened before anyone could judge it. These are the
+// endpoints that decide such a plan.
+//
+// Reading is gated on `schedule.optimize`: whoever may run the optimizer may
+// see what it proposed. DECIDING is gated on `schedule.publish`, deliberately
+// the stronger permission — applying a plan changes commitments people have
+// already been told about, which is the same authority publishing represents.
+// Gating it on `schedule.optimize` would let anyone who can press "generate"
+// rearrange a live schedule, which is exactly the hole this whole mechanism
+// exists to close.
+router.get('/:id/replan-proposals', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  res.json({ success: true, data: await replanProposals.listForSchedule(res.locals.params.id) });
+}));
+
+// The proposal must belong to the schedule in the path. Without this check the
+// schedule segment would be decoration, and a proposal for another schedule
+// could be applied through a path suggesting it was for this one.
+const proposalOfSchedule = async (scheduleId: number, proposalId: number) => {
+  const proposal = await replanProposals.getById(proposalId);
+  if (proposal.scheduleId !== scheduleId) {
+    throw new NotFoundError('Replan proposal not found for this schedule');
+  }
+  return proposal;
+};
+
+router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+  const { id, proposalId } = res.locals.params;
+  await proposalOfSchedule(id, proposalId);
+  const applied = await replanProposals.apply(proposalId, req.user!.id, res.locals.body.reason ?? null);
+  res.json({
+    success: true,
+    data: applied,
+    message: `Plan applied: ${applied.inserted} assignment(s) added, ${applied.removed} removed`,
+  });
+}));
+
+router.post('/:id/replan-proposals/:proposalId/reject', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+  const { id, proposalId } = res.locals.params;
+  await proposalOfSchedule(id, proposalId);
+  const rejected = await replanProposals.reject(proposalId, req.user!.id, res.locals.body.reason ?? null);
+  res.json({ success: true, data: rejected, message: 'Plan rejected; the schedule is unchanged' });
 }));
 
 // Poll the status/progress/result of a schedule's optimization job.
