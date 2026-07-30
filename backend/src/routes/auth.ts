@@ -16,12 +16,12 @@
 import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import rateLimit from 'express-rate-limit';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { RefreshTokenService } from '../services/RefreshTokenService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
+import { createLoginLimiter } from '../middleware/rateLimit';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { loginBody } from '../schemas';
@@ -122,30 +122,9 @@ export const createAuthRouter = (pool: Pool) => {
     res.cookie(REFRESH_COOKIE_NAME, token, refreshCookieOptions(req));
   };
 
-  /**
-   * Brute-force protection for the login endpoint.
-   *
-   * Limits each client IP to a small number of login attempts per window,
-   * returning the standard error envelope once the threshold is exceeded.
-   * The limiter is intentionally lenient under `NODE_ENV === 'test'` so the
-   * integration suites can call `/login` repeatedly without hitting 429.
-   */
-  const isTestEnv = config.server.env === 'test';
-  const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: isTestEnv ? 1000 : 10,
-    standardHeaders: true,
-    legacyHeaders: false,
-    handler: (_req: Request, res: Response) => {
-      res.status(429).json({
-        success: false,
-        error: {
-          code: 'TOO_MANY_REQUESTS',
-          message: 'Too many login attempts, please try again later.'
-        }
-      });
-    }
-  });
+  // Brute-force protection: IP-keyed, counted in the shared store so the
+  // threshold is the same however many replicas are running.
+  const loginLimiter = createLoginLimiter();
 
 /**
  * User login endpoint.
