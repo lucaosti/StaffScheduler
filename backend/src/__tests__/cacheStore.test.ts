@@ -22,14 +22,7 @@ jest.mock('../config/redis', () => ({
   getRedis: () => (redisConfigured ? redisMock : null),
 }));
 
-import {
-  blacklistJti,
-  isJtiBlacklisted,
-  getAuthContext,
-  setAuthContext,
-  invalidateAuthContext,
-  MemoryTtlStore,
-} from '../services/cacheStore';
+import { blacklistJti, isJtiBlacklisted, getAuthContext, setAuthContext, invalidateAuthContext, MemoryTtlStore, incrementCounter, resetCounter } from '../services/cacheStore';
 
 describe('MemoryTtlStore — bounds and pruning', () => {
   it('evicts the oldest entry (FIFO) at capacity', () => {
@@ -162,5 +155,68 @@ describe('cacheStore — Redis backend', () => {
     redisMock.get.mockRejectedValue(new Error('down'));
     await setAuthContext(11, '{"id":11}', 10_000);
     await expect(getAuthContext(11)).resolves.toBe('{"id":11}');
+  });
+});
+
+/**
+ * The rate-limit counter.
+ *
+ * These run against the in-process fallback, which is what a deployment without
+ * Redis uses — and, more usefully here, what every CI run uses. The Redis path
+ * has the same contract by construction (INCR plus a TTL armed on the first
+ * hit); what the fallback cannot demonstrate is the property the whole change
+ * exists for, that the count is SHARED between processes. That is a claim about
+ * Redis, not about this code, and pretending a single-process test proved it
+ * would be the more misleading option.
+ */
+describe('incrementCounter', () => {
+  const key = () => `test-counter-${Math.random().toString(36).slice(2)}`;
+
+  it('starts at one and counts up', async () => {
+    const k = key();
+    expect((await incrementCounter(k, 60_000)).count).toBe(1);
+    expect((await incrementCounter(k, 60_000)).count).toBe(2);
+    expect((await incrementCounter(k, 60_000)).count).toBe(3);
+  });
+
+  it('keeps separate keys separate', async () => {
+    const a = key();
+    const b = key();
+    await incrementCounter(a, 60_000);
+    await incrementCounter(a, 60_000);
+    expect((await incrementCounter(b, 60_000)).count).toBe(1);
+  });
+
+  it('reports when the window resets', async () => {
+    const { resetTime } = await incrementCounter(key(), 60_000);
+    const ms = resetTime.getTime() - Date.now();
+    expect(ms).toBeGreaterThan(50_000);
+    expect(ms).toBeLessThanOrEqual(60_000);
+  });
+
+  it('keeps the ORIGINAL reset time as the window is spent', async () => {
+    // A fixed window whose expiry moved on every hit would never reset under
+    // sustained traffic — the caller would be locked out permanently.
+    const k = key();
+    const first = await incrementCounter(k, 60_000);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const second = await incrementCounter(k, 60_000);
+
+    expect(second.resetTime.getTime()).toBe(first.resetTime.getTime());
+  });
+
+  it('starts a fresh window once the old one has passed', async () => {
+    const k = key();
+    await incrementCounter(k, 10);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect((await incrementCounter(k, 10)).count).toBe(1);
+  });
+
+  it('is cleared by resetCounter', async () => {
+    const k = key();
+    await incrementCounter(k, 60_000);
+    await incrementCounter(k, 60_000);
+    await resetCounter(k);
+    expect((await incrementCounter(k, 60_000)).count).toBe(1);
   });
 });
