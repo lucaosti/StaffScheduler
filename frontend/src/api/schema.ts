@@ -10526,6 +10526,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/roles/users/{userId}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Role assignment timeline for one person
+         * @description Everything that happened to this person's roles, and what they hold now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed — so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    since?: string;
+                };
+                header?: never;
+                path: {
+                    userId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current grants and the events that explain them. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/roles/{id}/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Role assignment timeline for one role
+         * @description Everyone who has ever held this role, and who holds it now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed — so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story. The role id lives inside the audit snapshot's JSON, which no index covers, so this query is a bounded scan — use `since` to narrow it.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    since?: string;
+                };
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current grants and the events that explain them. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
