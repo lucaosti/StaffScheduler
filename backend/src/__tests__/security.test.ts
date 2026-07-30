@@ -9,7 +9,7 @@
 
 import express from 'express';
 import request from 'supertest';
-import rateLimit from 'express-rate-limit';
+import { createFixedWindowLimiter } from '../middleware/rateLimit';
 
 jest.mock('../config/database', () => ({
   __esModule: true,
@@ -59,23 +59,34 @@ describe('security headers', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe('rate limiter', () => {
-  it('returns 429 JSON after max requests are exhausted', async () => {
+  // These used to configure their own `express-rate-limit` instances, which
+  // tested the library rather than this system — and kept passing after the
+  // limiter was replaced. They now exercise the middleware the app actually
+  // mounts.
+  const appWith = (limit: number) => {
     const testApp = express();
     testApp.use(
-      rateLimit({
+      createFixedWindowLimiter({
         windowMs: 60_000,
-        max: 2,
-        standardHeaders: true,
-        legacyHeaders: false,
-        handler: (_req, res) => {
-          res.status(429).json({
-            success: false,
-            error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests, please try again later.' },
-          });
-        },
+        limit: () => limit,
+        key: async () => ({ key: `test:${keyCounter}`, kind: 'ip' }),
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests, please try again later.',
       })
     );
     testApp.get('/', (_req, res) => res.status(200).json({ ok: true }));
+    return testApp;
+  };
+
+  // A fresh key per case: the counter store is shared process-wide, so cases
+  // reusing one key would count each other's requests.
+  let keyCounter = 0;
+  beforeEach(() => {
+    keyCounter += 1;
+  });
+
+  it('returns 429 JSON after the budget is exhausted', async () => {
+    const testApp = appWith(2);
 
     await request(testApp).get('/');
     await request(testApp).get('/');
@@ -86,22 +97,49 @@ describe('rate limiter', () => {
     expect(blocked.body.error.code).toBe('RATE_LIMIT_EXCEEDED');
   });
 
-  it('rate limiter response includes RateLimit headers', async () => {
+  it('sends Retry-After with the 429, so a client knows when to come back', async () => {
+    const testApp = appWith(1);
+    await request(testApp).get('/');
+    const blocked = await request(testApp).get('/');
+
+    expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
+  });
+
+  it('includes the standard RateLimit headers on an admitted request', async () => {
+    const res = await request(appWith(5)).get('/');
+
+    expect(res.status).toBe(200);
+    expect(res.headers['ratelimit-limit']).toBe('5');
+    expect(res.headers['ratelimit-remaining']).toBe('4');
+  });
+
+  it('counts down as the budget is spent', async () => {
+    const testApp = appWith(3);
+    await request(testApp).get('/');
+    const second = await request(testApp).get('/');
+
+    expect(second.headers['ratelimit-remaining']).toBe('1');
+  });
+
+  it('admits the request when its own key resolution fails', async () => {
+    // A limiter that 500s when its store is unavailable takes the API down to
+    // enforce a budget — worse than the burst it was preventing.
     const testApp = express();
     testApp.use(
-      rateLimit({
+      createFixedWindowLimiter({
         windowMs: 60_000,
-        max: 5,
-        standardHeaders: true,
-        legacyHeaders: false,
-        handler: (_req, res) => res.status(429).json({ success: false }),
+        limit: () => 1,
+        key: async () => {
+          throw new Error('store unavailable');
+        },
+        code: 'RATE_LIMIT_EXCEEDED',
+        message: 'Too many requests, please try again later.',
       })
     );
     testApp.get('/', (_req, res) => res.status(200).json({ ok: true }));
 
     const res = await request(testApp).get('/');
     expect(res.status).toBe(200);
-    expect(res.headers['ratelimit-limit'] ?? res.headers['x-ratelimit-limit']).toBeDefined();
   });
 });
 

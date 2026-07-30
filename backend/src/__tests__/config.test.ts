@@ -87,7 +87,7 @@ describe('defaults (bare environment)', () => {
       populationSize: 100, mutationRate: 0.1, crossoverRate: 0.8,
     });
     expect(config.logging).toEqual({ level: 'info', file: './logs/app.log', maxSize: '10m', maxFiles: 5 });
-    expect(config.security).toEqual({ bcryptRounds: 12, rateLimitWindow: 60000, rateLimitMax: 200 });
+    expect(config.security).toEqual({ bcryptRounds: 12, rateLimitWindow: 60000, rateLimitMax: 200, rateLimitOrgMax: 2000 });
     expect(config.cors.origin).toBe('http://localhost:3000');
     expect(config.notifications).toEqual({ enabled: false, emailEnabled: true, inAppEnabled: true });
   });
@@ -108,6 +108,7 @@ describe('explicit environment (full profile)', () => {
       OPTIMIZATION_POPULATION_SIZE: '20', OPTIMIZATION_MUTATION_RATE: '0.2', OPTIMIZATION_CROSSOVER_RATE: '0.5',
       LOG_LEVEL: 'debug', LOG_FILE: '/tmp/l.log', LOG_MAX_SIZE: '5m', LOG_MAX_FILES: '2',
       BCRYPT_ROUNDS: '14', RATE_LIMIT_WINDOW_MS: '1000', RATE_LIMIT_MAX_REQUESTS: '50',
+      RATE_LIMIT_ORG_MAX_REQUESTS: '500',
       CORS_ORIGIN: 'https://app.example.com',
       NOTIFICATIONS_ENABLED: 'true', EMAIL_NOTIFICATIONS_ENABLED: 'false', IN_APP_NOTIFICATIONS_ENABLED: 'false',
     });
@@ -121,7 +122,7 @@ describe('explicit environment (full profile)', () => {
     expect(config.reports).toEqual({ storagePath: '/tmp/r', cleanupDays: 7 });
     expect(config.optimization).toMatchObject({ engine: 'or-tools', timeout: 60000, maxIterations: 10, populationSize: 20, mutationRate: 0.2, crossoverRate: 0.5 });
     expect(config.logging).toEqual({ level: 'debug', file: '/tmp/l.log', maxSize: '5m', maxFiles: 2 });
-    expect(config.security).toEqual({ bcryptRounds: 14, rateLimitWindow: 1000, rateLimitMax: 50 });
+    expect(config.security).toEqual({ bcryptRounds: 14, rateLimitWindow: 1000, rateLimitMax: 50, rateLimitOrgMax: 500 });
     expect(config.cors.origin).toBe('https://app.example.com');
     expect(config.notifications).toEqual({ enabled: true, emailEnabled: false, inAppEnabled: false });
   });

@@ -151,6 +151,12 @@ export const config = {
     bcryptRounds: Math.max(10, parseInt(process.env.BCRYPT_ROUNDS || '12')),
     rateLimitWindow: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000'), // 1 minute
     rateLimitMax: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || '200'),
+    // An organization bucket aggregates every employee behind it, so charging
+    // it the per-caller budget would throttle a large tenant at the size of a
+    // small one. Ten times the per-caller figure is a starting point, not a
+    // derived number: it is the smallest multiple that keeps a department-sized
+    // tenant from noticing the ceiling in normal use.
+    rateLimitOrgMax: parseInt(process.env.RATE_LIMIT_ORG_MAX_REQUESTS || '2000'),
   },
   cors: {
     origin: process.env.CORS_ORIGIN || 'http://localhost:3000',

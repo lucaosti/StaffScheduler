@@ -14,7 +14,6 @@ import cookieParser from 'cookie-parser';
 import compression from 'compression';
 import morgan from 'morgan';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
 import { config } from './config';
 import { logger } from './config/logger';
@@ -63,6 +62,7 @@ import { createModulesRouter } from './routes/modules';
 import { createChangeRequestsRouter } from './routes/changeRequests';
 import { createResponsibilityRulesRouter } from './routes/responsibilityRules';
 import { createPendingApprovalsRouter } from './routes/pendingApprovals';
+import { createRateLimiter } from './middleware/rateLimit';
 
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
@@ -139,19 +139,10 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(cookieParser());
 
   if (!options.silent) {
-    const limiter = rateLimit({
-      windowMs: config.security.rateLimitWindow,
-      max: config.security.rateLimitMax,
-      standardHeaders: true,
-      legacyHeaders: false,
-      handler: (_req, res) => {
-        res.status(429).json({
-          success: false,
-          error: { code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests, please try again later.' },
-        });
-      },
-    });
-    app.use(limiter);
+    // Keyed by organization where the caller is identifiable, and counted in
+    // the shared store rather than per process — see middleware/rateLimit for
+    // why both halves of the default configuration were wrong here.
+    app.use(createRateLimiter(pool));
 
     // Credential-bearing query parameters must never reach the access log:
     // calendar feeds authenticate via ?token=... (calendar clients cannot set
