@@ -15,6 +15,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Permission, Role, UserRoleAssignment, Employee } from '../../types';
 import { createRole, updateRole, deleteRole, assignRole, removeRole } from '../../services/rbacService';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import RoleTimeline from './RoleTimeline';
 import {
   rbacKeys,
   useRolesAndPermissionsQuery,
@@ -27,7 +28,7 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-type Tab = 'roles' | 'user-roles';
+type Tab = 'roles' | 'user-roles' | 'history';
 
 interface RoleFormState {
   name: string;
@@ -43,6 +44,11 @@ const EMPTY_FORM: RoleFormState = { name: '', description: '', permissionCodes: 
 
 const RbacManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('roles');
+  // The history tab reuses the user already picked in the grants tab rather
+  // than offering a second search: having two selections for "who" on one page
+  // is how they come to disagree.
+  const [historyKind, setHistoryKind] = useState<'user' | 'role'>('user');
+  const [historyRoleId, setHistoryRoleId] = useState<number | null>(null);
 
   const queryClient = useQueryClient();
 
@@ -274,7 +280,68 @@ const RbacManagement: React.FC = () => {
             <i className="bi bi-person-badge me-2" aria-hidden="true"></i>User Role Grants
           </button>
         </li>
+        <li className="nav-item">
+          <button
+            className={`nav-link ${activeTab === 'history' ? 'active' : ''}`}
+            onClick={() => setActiveTab('history')}
+          >
+            <i className="bi bi-clock-history me-2" aria-hidden="true"></i>History
+          </button>
+        </li>
       </ul>
+
+      {/* ---- History tab ---- */}
+      {activeTab === 'history' && (
+        <div className="card">
+          <div className="card-header d-flex align-items-center gap-3 flex-wrap">
+            <span className="fw-semibold">Role assignment history</span>
+            <div className="btn-group btn-group-sm" role="group" aria-label="History subject">
+              <button
+                type="button"
+                className={`btn btn-outline-secondary ${historyKind === 'user' ? 'active' : ''}`}
+                onClick={() => setHistoryKind('user')}
+              >
+                By person
+              </button>
+              <button
+                type="button"
+                className={`btn btn-outline-secondary ${historyKind === 'role' ? 'active' : ''}`}
+                onClick={() => setHistoryKind('role')}
+              >
+                By role
+              </button>
+            </div>
+            {historyKind === 'role' ? (
+              <select
+                className="form-select form-select-sm w-auto"
+                aria-label="Select a role"
+                value={historyRoleId ?? ''}
+                onChange={(e) => setHistoryRoleId(e.target.value ? Number(e.target.value) : null)}
+              >
+                <option value="">— select a role —</option>
+                {roles.map((role) => (
+                  <option key={role.id} value={role.id}>{role.name}</option>
+                ))}
+              </select>
+            ) : (
+              <span className="text-muted small">
+                {selectedUser
+                  ? `Showing ${selectedUser.firstName} ${selectedUser.lastName}`
+                  : 'Pick someone in the User Role Grants tab first.'}
+              </span>
+            )}
+          </div>
+          <div className="card-body">
+            <RoleTimeline
+              subject={
+                historyKind === 'role'
+                  ? (historyRoleId !== null ? { kind: 'role', id: historyRoleId } : null)
+                  : (selectedUser?.id ? { kind: 'user', id: Number(selectedUser.id) } : null)
+              }
+            />
+          </div>
+        </div>
+      )}
 
       {/* ---- Roles tab ---- */}
       {activeTab === 'roles' && (
