@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   getTree,
   getManagerChain,
+  getAuthorityProfile,
   listMembersDetailed,
   listUnits,
   listMembers,
@@ -21,6 +22,7 @@ import {
   type OrgUnit,
   type OrgUnitNode,
   type ManagerChainLink,
+  type AuthorityProfile,
   type OrgUnitMemberDetail,
   type UserOrgUnit,
   type EmployeeLoan,
@@ -33,6 +35,8 @@ export const orgKeys = {
   units: ['org', 'units'] as const,
   unitMembers: (unitId: number | null) => ['org', 'unit-members', unitId] as const,
   loans: ['org', 'loans'] as const,
+  // Keyed by subject, so viewing a colleague's profile does not evict your own.
+  authority: (userId: number | null) => ['org', 'authority', userId] as const,
 };
 
 /** The full org-unit tree (roots with nested children). */
@@ -104,6 +108,22 @@ export function useOrgLoansQuery() {
     queryFn: async (): Promise<EmployeeLoan[]> => {
       const res = await listLoans();
       return res.data ?? [];
+    },
+  });
+}
+
+/**
+ * The authority profile for a person, or for the caller when `userId` is null.
+ *
+ * Not gated with `enabled`: null is a meaningful argument here (it means "mine")
+ * rather than "not ready yet", which is the case `enabled` exists for.
+ */
+export function useAuthorityQuery(userId: number | null) {
+  return useQuery<AuthorityProfile>({
+    queryKey: orgKeys.authority(userId),
+    queryFn: async () => {
+      const res = await getAuthorityProfile(userId ?? undefined);
+      return res.data as AuthorityProfile;
     },
   });
 }

@@ -13286,6 +13286,76 @@
           }
         ]
       }
+    },
+    "/org/authority/{userId}": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "Authority profile for a person",
+        "description": "Who has authority over this person: their manager chain, who may grant or revoke their roles (labelled by whether that comes from a responsibility rule or from holding `role.manage` outright), and — for every configured approval workflow — who would decide each step for them. Defaults to the caller. Reading someone else's profile requires `org_unit.read`, the same gate the rest of the org tree carries; reading your own needs nothing beyond being authenticated, because knowing who decides your requests is what you need in order to use the system. Every name is resolved by the component that would actually take the decision, so this cannot drift from what would really happen. A step that resolves to nobody is reported with `unresolved: true` rather than omitted — it means requests of that kind currently have no one who can decide them.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The authority profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/org/authority": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "Authority profile for the authenticated user",
+        "description": "The caller's own profile: their manager chain, who may grant or revoke their roles, and who would decide each step of every kind of request they can file. Needs no permission beyond authentication — knowing who decides your own requests is what you need in order to use the system. See `/org/authority/{userId}` for someone else's, which requires `org_unit.read`.",
+        "responses": {
+          "200": {
+            "description": "The authority profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
     }
   }
 }
