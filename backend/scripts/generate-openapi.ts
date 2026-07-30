@@ -125,7 +125,46 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'responsibilityRules.ts', variable: 'router', prefix: '/responsibility-rules' },
   { file: 'changeRequests.ts', variable: 'router', prefix: '/change-requests' },
   { file: 'pendingApprovals.ts', variable: 'router', prefix: '/pending-approvals' },
+  { file: 'employeeFieldPolicies.ts', variable: 'router', prefix: '/employee-field-policies' },
 ];
+
+/**
+ * Every router file must appear in the table above.
+ *
+ * The table's own comment used to claim that "the bidirectional check still
+ * catches any omission the moment a mounted route validates a body". It does
+ * not, and could not: every check below iterates ROUTE_MOUNTS, so a router file
+ * MISSING FROM THE TABLE is invisible in both directions — its endpoints are
+ * neither required to be documented nor reported as undocumented. A whole new
+ * router with three endpoints was added and generation reported success, which
+ * is the same failure this guard has had twice before: coverage that reads as
+ * complete while skipping a whole class of route.
+ *
+ * Closing it needs no second parser. A file in `src/routes` that exports a
+ * router factory is a mounted router; if it is not in the table, say so.
+ *
+ * `openapi.ts` is the one legitimate exclusion: it SERVES this document and the
+ * Swagger UI beside it. Documenting the spec endpoint inside the spec would be
+ * circular, and its routes are static file handlers with no schema to check.
+ */
+const NOT_AN_API_ROUTER = new Set(['openapi.ts']);
+
+const assertEveryRouterIsMounted = (): void => {
+  const dir = path.join(BACKEND, 'src', 'routes');
+  const listed = new Set(ROUTE_MOUNTS.map((m) => m.file));
+  const missing = fs
+    .readdirSync(dir)
+    .filter((file) => file.endsWith('.ts'))
+    .filter((file) => /export const create\w+Router\b/.test(fs.readFileSync(path.join(dir, file), 'utf8')))
+    .filter((file) => !listed.has(file) && !NOT_AN_API_ROUTER.has(file));
+
+  if (missing.length > 0) {
+    console.error('\nRouter files missing from ROUTE_MOUNTS — their endpoints are unchecked:');
+    for (const file of missing) console.error(`  - src/routes/${file}`);
+    console.error('\nAdd each to the table in scripts/generate-openapi.ts with its mount prefix.');
+    process.exit(1);
+  }
+};
 
 interface FoundOp {
   method: string;
@@ -152,6 +191,7 @@ const parseSchemaAliases = (source: string): Map<string, string> => {
 };
 
 const scanRoutes = (): FoundOp[] => {
+  assertEveryRouterIsMounted();
   const found: FoundOp[] = [];
   for (const { file, variable, prefix } of ROUTE_MOUNTS) {
     const full = path.join(BACKEND, 'src', 'routes', file);
