@@ -19,10 +19,11 @@ import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { idParam, calendarFeedQuery, createCalendarTokenBody } from '../schemas';
+import { idParam, calendarFeedQuery, calendarAggregateQuery, createCalendarTokenBody } from '../schemas';
 import { NotFoundError } from '../errors';
 import { CalendarService } from '../services/CalendarService';
 import { RbacService } from '../services/RbacService';
+import { resolveVisibleOrgUnits } from '../services/orgScope';
 
 const writeIcsResponse = (
   res: Response,
@@ -88,6 +89,61 @@ export const createCalendarRouter = (pool: Pool): Router => {
       return;
     }
     const { body, etag } = await service.buildUserFeed(userId);
+    writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
+  }));
+
+  /**
+   * A filtered aggregation: departments, roles, people, over a range that
+   * reaches into the past.
+   *
+   * THE SCOPE IS RESOLVED PER FETCH, NOT BAKED INTO THE URL. A feed URL is a
+   * credential that lives as long as the subscription, so a scope decided when
+   * it was created would keep publishing a ward after its owner stopped
+   * managing one. Every fetch re-reads the token owner's permissions and role
+   * scope, which is the only way a feed can narrow when its owner's authority
+   * does.
+   *
+   * IT ANSWERS TO THE TIMELINE'S PERMISSIONS, deliberately reusing them rather
+   * than inventing a parallel rule: `timeline.read` and `timeline.read_all`
+   * exist for exactly this disclosure — seeing WHEN A NAMED COLLEAGUE IS AT
+   * WORK — and two rules for one disclosure is how they come to disagree. The
+   * department feed's older admin-or-department-manager check stays where it is
+   * so existing subscriptions keep working; this endpoint is the general form.
+   */
+  router.get('/aggregate.ics', validateQuery(calendarAggregateQuery), asyncHandler(async (req: Request, res: Response) => {
+    const { token, departmentId, roleId, userId, pastDays, futureDays } = res.locals.query;
+    if (!token) {
+      res.status(401).type('text/plain').send('token query parameter required');
+      return;
+    }
+    const ownerId = await service.resolveToken(token);
+    if (!ownerId) {
+      res.status(401).type('text/plain').send('invalid token');
+      return;
+    }
+
+    const permissions = await rbac.getEffectivePermissions(ownerId);
+    if (!permissions.includes('timeline.read') && !permissions.includes('timeline.read_all')) {
+      res.status(403).type('text/plain').send('forbidden');
+      return;
+    }
+
+    const roles = await rbac.getUserRoles(ownerId);
+    const visibleOrgUnitIds = await resolveVisibleOrgUnits(rbac, {
+      userId: ownerId,
+      permissions,
+      allowedOrgUnitIds: await rbac.computeAllowedOrgUnitIds(roles),
+      allPermission: 'timeline.read_all',
+    });
+
+    const { body, etag } = await service.buildAggregateFeed({
+      visibleOrgUnitIds,
+      ...(departmentId ? { departmentIds: departmentId } : {}),
+      ...(roleId ? { roleIds: roleId } : {}),
+      ...(userId ? { userIds: userId } : {}),
+      ...(pastDays !== undefined ? { pastDays } : {}),
+      ...(futureDays !== undefined ? { futureDays } : {}),
+    });
     writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
   }));
 

@@ -69,7 +69,17 @@ const documentedQuery = (endpoint: string): Set<string> => {
  * right check for the next hand-written filter type, and the coverage
  * assertion is what routes a new one into it.
  */
-const SERVICES: Array<{ file: string; interfaceName: string; endpoint: string }> = [];
+const SERVICES: Array<{ file: string; interfaceName: string; endpoint: string }> = [
+  // `AggregateFeedFilters` cannot derive: the wire form is one comma-joined
+  // string per parameter and the local form is `number[]`, so the shapes
+  // genuinely differ. It is named after the published parameters so it can be
+  // compared here instead — a filter the endpoint does not document fails.
+  {
+    file: 'calendarService.ts',
+    interfaceName: 'AggregateFeedFilters',
+    endpoint: '/calendar/aggregate.ics',
+  },
+];
 
 /**
  * Whether a service takes its types from the generated contract.

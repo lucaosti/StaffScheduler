@@ -23,12 +23,13 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { authenticate, requirePermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateQuery } from '../middleware/validation';
 import { timelineQuery } from '../schemas';
 import { TimelineService, TIMELINE_SOURCE_KEYS } from '../services/TimelineService';
 import { RbacService } from '../services/RbacService';
+import { resolveVisibleOrgUnits } from '../services/orgScope';
 
 export const createTimelineRouter = (pool: Pool) => {
   const router = Router();
@@ -48,23 +49,15 @@ export const createTimelineRouter = (pool: Pool) => {
         sources?: string;
       };
 
-      // The role scope binds in BOTH branches. `timeline.read_all` lifts the
-      // MEMBERSHIP bound — a planner is not limited to the ward they happen to
-      // belong to — and it must not also lift the org-unit scope their role
-      // carries, or a manager scoped to one ward would see every other ward's
-      // people. Every other permission in the system narrows this way, and an
-      // exception here would be one nobody expects to find.
-      const scoped = user.allowedOrgUnitIds ?? null;
-      let orgUnitIds: number[] | null;
-      if (userHasPermission(user, 'timeline.read_all')) {
-        orgUnitIds = scoped;
-      } else {
-        // The subtree of each unit the person belongs to: someone in a ward
-        // sees the ward, including anything organised beneath it, intersected
-        // with their role scope when they have one.
-        const own = await rbac.getUserOrgUnitSubtreeIds(user.id);
-        orgUnitIds = scoped === null ? own : own.filter((id) => scoped.includes(id));
-      }
+      // Shared with the aggregate calendar feed, which asks the same question —
+      // who may see when a named colleague is at work. See services/orgScope
+      // for why the role scope binds even for a caller holding `read_all`.
+      const orgUnitIds = await resolveVisibleOrgUnits(rbac, {
+        userId: user.id,
+        permissions: user.permissions ?? [],
+        allowedOrgUnitIds: user.allowedOrgUnitIds ?? null,
+        allPermission: 'timeline.read_all',
+      });
 
       const data = await timeline.build({
         from,

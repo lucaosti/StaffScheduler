@@ -274,6 +274,143 @@ export class CalendarService {
     return { body: buildIcs(events, 'My Schedule'), etag };
   }
 
+  /**
+   * A filtered aggregation across departments, roles and people.
+   *
+   * WHY THE SCOPE IS AN ARGUMENT AND NOT A FILTER. `visibleOrgUnitIds` is
+   * resolved from the token's owner on every fetch and intersected with
+   * whatever the caller asked for — it is not one filter among the others and a
+   * caller cannot widen it. `null` means unrestricted; an EMPTY ARRAY means the
+   * caller's scope resolves to nothing, and it must return nothing rather than
+   * being read as "no filter", which is the classic way an empty-list check
+   * turns a restriction into its opposite.
+   *
+   * WHY THE RANGE REACHES BACKWARD. The existing department feed started at
+   * CURDATE(), so the calendar a manager subscribed to had no memory: it could
+   * not answer "who was on that Tuesday" the moment Tuesday passed. Past,
+   * present and future was the point of the request, and a subscribed client
+   * keeps historical events it has already seen only if the feed keeps serving
+   * them.
+   *
+   * WHAT IT DOES NOT SHOW. Shifts and their assignees, nothing else. No
+   * absences: publishing who is away on covered days makes leave and sickness
+   * deducible from a calendar anyone in the subscription can read, which is the
+   * inference the timeline's narrow projection exists to prevent, and this feed
+   * reaches the same people. No pay, no assignment notes beyond the shift's own.
+   */
+  async buildAggregateFeed(options: {
+    visibleOrgUnitIds: number[] | null;
+    departmentIds?: number[];
+    roleIds?: number[];
+    userIds?: number[];
+    /** Days back from today. Default 7 — a subscribed calendar with a memory. */
+    pastDays?: number;
+    /** Days forward from today. Default 30, matching the department feed. */
+    futureDays?: number;
+  }): Promise<FeedResult> {
+    const { visibleOrgUnitIds } = options;
+    const pastDays = options.pastDays ?? 7;
+    const futureDays = options.futureDays ?? 30;
+
+    // A scope that resolves to nothing shows nothing. Falling through to an
+    // unfiltered query here is how a restriction becomes its opposite.
+    if (Array.isArray(visibleOrgUnitIds) && visibleOrgUnitIds.length === 0) {
+      return { body: buildIcs([], 'Staff Scheduler — Filtered'), etag: computeEtag('empty-scope') };
+    }
+
+    const conditions: string[] = [
+      's.date BETWEEN DATE_SUB(CURDATE(), INTERVAL ? DAY) AND DATE_ADD(CURDATE(), INTERVAL ? DAY)',
+    ];
+    const params: Array<number | string> = [pastDays, futureDays];
+
+    if (visibleOrgUnitIds !== null) {
+      conditions.push(`d.org_unit_id IN (${visibleOrgUnitIds.map(() => '?').join(',')})`);
+      params.push(...visibleOrgUnitIds);
+    }
+    if (options.departmentIds && options.departmentIds.length > 0) {
+      conditions.push(`s.department_id IN (${options.departmentIds.map(() => '?').join(',')})`);
+      params.push(...options.departmentIds);
+    }
+    if (options.userIds && options.userIds.length > 0) {
+      // EXISTS rather than a join condition: filtering the joined assignment
+      // rows would keep the shift and drop the other assignees from its
+      // description, so the event would understate who is on duty.
+      conditions.push(
+        `EXISTS (SELECT 1 FROM shift_assignments fa
+                  WHERE fa.shift_id = s.id AND fa.status IN ('pending','confirmed')
+                    AND fa.user_id IN (${options.userIds.map(() => '?').join(',')}))`
+      );
+      params.push(...options.userIds);
+    }
+    if (options.roleIds && options.roleIds.length > 0) {
+      conditions.push(
+        `EXISTS (SELECT 1 FROM shift_assignments ra
+                   JOIN user_roles ur ON ur.user_id = ra.user_id
+                                     AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
+                  WHERE ra.shift_id = s.id AND ra.status IN ('pending','confirmed')
+                    AND ur.role_id IN (${options.roleIds.map(() => '?').join(',')}))`
+      );
+      params.push(...options.roleIds);
+    }
+
+    const [shiftRows] = await this.pool.query<RowDataPacket[]>(
+      `SELECT s.id AS shift_id, s.date, s.start_time, s.end_time, s.notes,
+              sch.name AS schedule_name,
+              d.name AS department_name,
+              s.updated_at AS shift_updated,
+              GROUP_CONCAT(DISTINCT CONCAT_WS(' ', u.first_name, u.last_name) ORDER BY u.last_name) AS assignees
+         FROM shifts s
+         JOIN schedules sch ON s.schedule_id = sch.id
+         LEFT JOIN departments d ON s.department_id = d.id
+         LEFT JOIN shift_assignments sa ON sa.shift_id = s.id AND sa.status IN ('pending','confirmed')
+         LEFT JOIN users u ON sa.user_id = u.id
+        WHERE ${conditions.join(' AND ')}
+        GROUP BY s.id
+        ORDER BY s.date ASC, s.start_time ASC`,
+      params
+    );
+
+    const events: CalendarEvent[] = [];
+    let latestUpdated = '';
+
+    for (const row of shiftRows) {
+      const date = DateUtils.toDateString(row.date as string | Date);
+      const { start, end } = shiftToEventTimes(date, row.start_time as string, row.end_time as string);
+      const assignees = (row.assignees as string | null)?.split(',').filter(Boolean) ?? [];
+      events.push({
+        // Distinct from the department feed's UID: subscribing to both must not
+        // make a client treat the two events as one and drop whichever arrived
+        // second.
+        uid: `agg-shift-${row.shift_id}@staffscheduler`,
+        summary: `${row.department_name ?? 'Shift'} — ${assignees.length} on duty`,
+        description: [
+          row.notes || row.schedule_name,
+          assignees.length > 0 ? `Assigned: ${assignees.join(', ')}` : 'Unassigned',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        start,
+        end,
+        location: (row.department_name as string) || '',
+      });
+      if ((row.shift_updated as string) > latestUpdated) latestUpdated = row.shift_updated as string;
+    }
+
+    // The filters are part of the ETag: two different filtered feeds must not
+    // answer 304 to each other's If-None-Match.
+    const etag = computeEtag(
+      'agg',
+      (visibleOrgUnitIds ?? ['all']).join('.'),
+      (options.departmentIds ?? []).join('.'),
+      (options.roleIds ?? []).join('.'),
+      (options.userIds ?? []).join('.'),
+      `${pastDays}-${futureDays}`,
+      latestUpdated,
+      shiftRows.length
+    );
+    return { body: buildIcs(events, 'Staff Scheduler — Filtered'), etag };
+  }
+
   /** Aggregated feed for an entire department. Manager / admin only. */
   async buildDepartmentFeed(departmentId: number, options: { rangeDays?: number } = {}): Promise<FeedResult> {
     const days = options.rangeDays ?? 30;
