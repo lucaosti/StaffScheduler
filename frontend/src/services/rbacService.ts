@@ -49,6 +49,59 @@ export const getUserRoles = (userId: number): Promise<ApiResponse<UserRoleAssign
     params: { userId },
   });
 
+/**
+ * The grant/revoke history for a person or for a role.
+ *
+ * `current` and `entries` travel together because neither is derivable from the
+ * other: a grant made before auditing existed has no event, and a grant that
+ * reached its `expires_at` produced no event when it lapsed. The server marks
+ * each with `hasHistory` and `derived` respectively rather than letting the
+ * reader infer.
+ */
+export interface RoleTimelineEntry {
+  auditId: number | null;
+  at: string;
+  action: 'granted' | 'revoked' | 'expired';
+  userId: number;
+  userName: string | null;
+  roleId: number | null;
+  roleName: string | null;
+  scopeOrgUnitId: number | null;
+  scopeOrgUnitName: string | null;
+  expiresAt: string | null;
+  actorId: number | null;
+  actorName: string | null;
+  justification: string | null;
+  derived: boolean;
+}
+
+interface CurrentGrant {
+  userId: number;
+  userName: string | null;
+  roleId: number;
+  roleName: string | null;
+  scopeOrgUnitId: number | null;
+  scopeOrgUnitName: string | null;
+  expiresAt: string | null;
+  hasHistory: boolean;
+}
+
+export interface RoleTimeline {
+  current: CurrentGrant[];
+  entries: RoleTimelineEntry[];
+  truncated: boolean;
+}
+
+export const getUserRoleTimeline = (userId: number): Promise<ApiResponse<RoleTimeline>> =>
+  apiClient.get<RoleTimeline, '/roles/users/{userId}/timeline'>('/roles/users/{userId}/timeline', {
+    params: { userId },
+  });
+
+export const getRoleTimeline = (roleId: number): Promise<ApiResponse<RoleTimeline>> =>
+  apiClient.get<RoleTimeline, '/roles/{id}/timeline'>('/roles/{id}/timeline', {
+    params: { id: roleId },
+  });
+
 export const assignRole = (userId: number, body: AssignRoleBody): Promise<ApiResponse<void>> =>
   apiClient.post<void, '/roles/users/{userId}'>('/roles/users/{userId}', body, {
     params: { userId },

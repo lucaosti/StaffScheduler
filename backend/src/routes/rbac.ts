@@ -25,6 +25,7 @@ import { authenticate, requirePermission, invalidateAuthContext } from '../middl
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { RbacService } from '../services/RbacService';
+import { RoleTimelineService } from '../services/RoleTimelineService';
 import {
   idParam,
   userIdParam,
@@ -34,12 +35,14 @@ import {
   assignRoleBody,
   bulkAssignRoleBody,
   roleRevokeQuery,
+  roleTimelineQuery,
   auditJustificationBody,
 } from '../schemas';
 import { NotFoundError } from '../errors';
 
 export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Router } => {
   const rbac = new RbacService(pool);
+  const timeline = new RoleTimelineService(pool);
 
   const permissions = Router();
   permissions.use(authenticate, requirePermission('role.manage'));
@@ -126,6 +129,31 @@ export const createRbacRouter = (pool: Pool): { roles: Router; permissions: Rout
     await rbac.removeRole(res.locals.params.userId, res.locals.params.roleId, scope, req.user?.id, justification);
     await invalidateAuthContext(res.locals.params.userId);
     res.json({ success: true });
+  }));
+
+  /**
+   * Everything that happened to one person's roles, plus what they hold now.
+   *
+   * Both are returned together on purpose: the current grants are authoritative
+   * and the events explain them, but neither is derivable from the other — a
+   * grant predating the audit log has no event, and an expired one produced no
+   * event when it lapsed. See RoleTimelineService.
+   */
+  roles.get('/users/:userId/timeline', validateParams(userIdParam), validateQuery(roleTimelineQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const data = await timeline.getTimeline({
+      userId: res.locals.params.userId,
+      ...(res.locals.query.since ? { since: res.locals.query.since } : {}),
+    });
+    res.json({ success: true, data });
+  }));
+
+  /** The same, from the role's side: everyone who has ever held it. */
+  roles.get('/:id/timeline', validateParams(idParam), validateQuery(roleTimelineQuery), asyncHandler(async (_req: Request, res: Response) => {
+    const data = await timeline.getTimeline({
+      roleId: res.locals.params.id,
+      ...(res.locals.query.since ? { since: res.locals.query.since } : {}),
+    });
+    res.json({ success: true, data });
   }));
 
   return { roles, permissions };

@@ -507,6 +507,18 @@ export const roleRevokeQuery = z.object({
   scopeOrgUnitId: positiveInt.optional(),
 });
 
+/**
+ * How far back a role timeline reaches.
+ *
+ * Optional, and the endpoint caps the number of events regardless: the audit
+ * table only grows, and the per-role query cannot use an index on the role id
+ * (it lives inside a JSON snapshot), so the range is what keeps that scan
+ * bounded rather than merely tidy.
+ */
+export const roleTimelineQuery = z.object({
+  since: dateString.optional(),
+});
+
 export const pendingApprovalListQuery = z.object({
   status: shortString.optional(),
 });
