@@ -52,7 +52,7 @@ interface ManagerRef {
   email: string;
 }
 
-interface ManagerChainLink {
+export interface ManagerChainLink {
   unitId: number;
   unitName: string;
   manager: ManagerRef | null;

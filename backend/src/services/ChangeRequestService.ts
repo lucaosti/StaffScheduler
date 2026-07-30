@@ -25,6 +25,7 @@ import {
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ApprovalEngineService } from './ApprovalEngineService';
+import { resolveSubjectContext } from './subjectContext';
 
 const mapRow = (row: RowDataPacket): ChangeRequest => ({
   id: row.id as number,
@@ -176,34 +177,15 @@ export class ChangeRequestService {
   }
 
   /**
-   * Loads the org unit, department IDs, and role IDs for a user so the
-   * approval engine can correctly resolve responsibility-rule-based approvers.
+   * The org unit, departments and roles an approval is routed against.
+   *
+   * Delegates to the shared resolver: this used to take the LOWEST org-unit
+   * membership id while the approval engine read `is_primary`, so a person in
+   * two units had their change requests routed against a different unit than
+   * their time off. See services/subjectContext.
    */
-  private async resolveProposerContext(userId: number): Promise<{
-    orgUnitId: number | null;
-    subjectDepartmentIds: number[];
-    subjectRoleIds: number[];
-  }> {
-    const [orgRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT org_unit_id FROM user_org_units WHERE user_id = ? ORDER BY org_unit_id ASC LIMIT 1`,
-      [userId]
-    );
-    const orgUnitId = orgRows.length > 0 ? ((orgRows[0] as any).org_unit_id as number) : null;
-
-    const [deptRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT department_id FROM user_departments WHERE user_id = ?`,
-      [userId]
-    );
-    const subjectDepartmentIds = (deptRows as any[]).map((r) => r.department_id as number);
-
-    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT role_id FROM user_roles
-        WHERE user_id = ? AND (expires_at IS NULL OR expires_at > NOW())`,
-      [userId]
-    );
-    const subjectRoleIds = (roleRows as any[]).map((r) => r.role_id as number);
-
-    return { orgUnitId, subjectDepartmentIds, subjectRoleIds };
+  private async resolveProposerContext(userId: number) {
+    return resolveSubjectContext(this.pool, userId);
   }
 
   async approve(id: number, approverUserId: number, justification?: string | null): Promise<ChangeRequest> {
