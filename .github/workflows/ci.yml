@@ -67,8 +67,18 @@ jobs:
         run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Audit dependencies
+        # Not a bare `npm audit`: that conflates "found a vulnerability" with
+        # "could not reach the registry" in one exit code, and the retiring
+        # `security/audits/quick` endpoint made the second one fail builds that
+        # had nothing wrong with them. The script decides from the parsed report
+        # instead, retries a flaky registry, and degrades to a visible warning
+        # only when no report arrives at all. See scripts/audit-dependencies.mjs.
         working-directory: .
-        run: npm audit --audit-level=high --omit=dev
+        run: npm run audit:deps
+
+      - name: Test the audit gate itself
+        working-directory: .
+        run: npm run test:scripts
 
       - name: Lint
         run: npm run lint
@@ -156,8 +166,15 @@ jobs:
         run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Audit dependencies
+        # Not a bare `npm audit`: that conflates "found a vulnerability" with
+        # "could not reach the registry" in one exit code, and the retiring
+        # `security/audits/quick` endpoint made the second one fail builds that
+        # had nothing wrong with them. The script decides from the parsed report
+        # instead, retries a flaky registry, and degrades to a visible warning
+        # only when no report arrives at all. See scripts/audit-dependencies.mjs.
         working-directory: .
-        run: npm audit --audit-level=high --omit=dev
+        run: npm run audit:deps
+
 
       - name: Lint
         run: npm run lint

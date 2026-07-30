@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "prepare": "husky",
+    "audit:deps": "node scripts/audit-dependencies.mjs",
+    "test:scripts": "node --test \"scripts/*.test.mjs\"",
     "postinstall": "npm run build --workspace @staff-scheduler/shared"
   },
   "devDependencies": {
