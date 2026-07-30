@@ -79,7 +79,13 @@ const AUTHCTX_MAX = 10_000;
 const BLACKLIST_PREFIX = 'jti:blacklist:';
 const AUTHCTX_PREFIX = 'auth:ctx:';
 
+const COUNTER_PREFIX = 'ratelimit:';
+// Bounded like the others: one entry per active rate-limit key. Tenants and
+// users are few; the ceiling is really about a burst of distinct client IPs.
+const COUNTER_MAX = 50_000;
+
 const memBlacklist = new MemoryTtlStore<true>(BLACKLIST_MAX);
+const memCounters = new MemoryTtlStore<{ count: number; resetAt: number }>(COUNTER_MAX);
 const memAuthCtx = new MemoryTtlStore<string>(AUTHCTX_MAX);
 
 // Prune the fallback stores hourly. unref() so the timer never blocks process
@@ -87,6 +93,7 @@ const memAuthCtx = new MemoryTtlStore<string>(AUTHCTX_MAX);
 const pruneTimer = setInterval(() => {
   memBlacklist.prune();
   memAuthCtx.prune();
+  memCounters.prune();
 }, 60 * 60 * 1000);
 pruneTimer.unref();
 
@@ -169,4 +176,75 @@ export const invalidateAuthContext = async (userId: number): Promise<void> => {
     }
   }
   memAuthCtx.delete(String(userId));
+};
+
+/**
+ * Increments a fixed-window counter and returns the count and when it resets.
+ *
+ * WHY THIS BELONGS HERE. The rate limiter's counters are exactly the third kind
+ * of hot ephemeral state this module exists for, and the one where a
+ * process-local Map does the most damage. `express-rate-limit`'s default store
+ * is per-process, so a deployment running N replicas — which this one documents
+ * and scripts (`--scale backend=2`) — enforces N times the configured budget. A
+ * limit that quietly becomes 400/min when the configuration says 200/min is not
+ * a limit, and nothing in a single-instance test run reveals it.
+ *
+ * WHY INCR-THEN-EXPIRE, and why the race in it is harmless. `INCR` creates the
+ * key at 1, so the TTL is set only on that first hit; two instances racing the
+ * first hit both see 1 and both set the same TTL, which is idempotent. The
+ * genuinely lost case is a crash between INCR and PEXPIRE leaving a key without
+ * one — bounded by re-reading the TTL below and re-arming it whenever it is
+ * missing, so a stuck counter self-heals within a window rather than blocking a
+ * tenant forever.
+ *
+ * WHY A FIXED WINDOW rather than a sliding one. A fixed window admits up to
+ * twice the budget across a boundary, which is the standard objection to it. It
+ * is accepted: this is a fairness budget between tenants, not a security
+ * control, and the alternative — a sorted set per key with a member per request
+ * — costs memory proportional to traffic, which is the wrong thing to make
+ * expensive under load. `express-rate-limit`'s own default store is a fixed
+ * window too, so this keeps the semantics callers already have.
+ */
+export const incrementCounter = async (
+  key: string,
+  windowMs: number
+): Promise<{ count: number; resetTime: Date }> => {
+  const client = redis();
+  if (client) {
+    try {
+      const namespaced = `${COUNTER_PREFIX}${key}`;
+      const count = await client.incr(namespaced);
+      let ttlMs = await client.pttl(namespaced);
+      // -1 is "no expiry", -2 is "no key" (it cannot be, we just wrote it).
+      if (ttlMs < 0) {
+        await client.pexpire(namespaced, windowMs);
+        ttlMs = windowMs;
+      }
+      return { count, resetTime: new Date(Date.now() + ttlMs) };
+    } catch {
+      /* fall through to memory */
+    }
+  }
+
+  const existing = memCounters.get(key);
+  if (existing && existing.resetAt > Date.now()) {
+    existing.count += 1;
+    return { count: existing.count, resetTime: new Date(existing.resetAt) };
+  }
+  const resetAt = Date.now() + windowMs;
+  memCounters.set(key, { count: 1, resetAt }, windowMs);
+  return { count: 1, resetTime: new Date(resetAt) };
+};
+
+/** Clears a counter. Used by the limiter's `resetKey`, and by tests. */
+export const resetCounter = async (key: string): Promise<void> => {
+  const client = redis();
+  if (client) {
+    try {
+      await client.del(`${COUNTER_PREFIX}${key}`);
+    } catch {
+      /* fall through to also clear memory */
+    }
+  }
+  memCounters.delete(key);
 };
