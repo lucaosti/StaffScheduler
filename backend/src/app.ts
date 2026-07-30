@@ -29,6 +29,7 @@ import { createShiftsRouter } from './routes/shifts';
 import { createSchedulesRouter } from './routes/schedules';
 import { createAssignmentsRouter } from './routes/assignments';
 import { createSystemSettingsRouter } from './routes/settings';
+import { createEmployeeFieldPolicyRouter } from './routes/employeeFieldPolicies';
 import healthRoutes from './routes/health';
 import { createMetricsRouter } from './routes/metrics';
 import { httpMetricsMiddleware, registerPoolMetrics } from './observability/metrics';
@@ -192,6 +193,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/schedules`, createSchedulesRouter(pool));
     app.use(`${prefix}/assignments`, createAssignmentsRouter(pool));
     app.use(`${prefix}/settings`, createSystemSettingsRouter(pool));
+    app.use(`${prefix}/employee-field-policies`, createEmployeeFieldPolicyRouter(pool));
     app.use(`${prefix}/time-off`, createTimeOffRouter(pool));
     app.use(`${prefix}/attendance`, createAttendanceRouter(pool));
     app.use(`${prefix}/shift-swap`, createShiftSwapRouter(pool));

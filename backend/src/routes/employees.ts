@@ -33,6 +33,11 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { z } from 'zod';
+import {
+  EmployeeFieldPolicyService,
+  assertPolicies,
+  checkAgainstPolicies,
+} from '../services/EmployeeFieldPolicyService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { employeeColumns } from '../services/exportColumns';
@@ -42,6 +47,36 @@ export const createEmployeesRouter = (pool: Pool) => {
   const router = Router();
   const employeeService = new EmployeeService(pool);
   const exporter = new ExportService(new AuditLogService(pool));
+  const fieldPolicies = new EmployeeFieldPolicyService(pool);
+
+/**
+ * The per-organization field rules, applied AFTER the Zod schema.
+ *
+ * The two answer different questions and must stay separate: Zod says what the
+ * API accepts and is the published contract, while a policy says what this
+ * organization requires and is configuration. Folding the second into the first
+ * would publish one customer's rules in the OpenAPI document as though they
+ * were the API's.
+ *
+ * The organization is the ACTOR's, not a value from the payload — otherwise a
+ * caller could pick which organization's rules to be judged by, which is the
+ * whole ruleset defeated by one field.
+ */
+const enforceFieldPolicy = async (
+  req: Request,
+  payload: Record<string, unknown>,
+  isPartial: boolean
+): Promise<void> => {
+  const policies = await fieldPolicies.listForOrganization(req.user?.organizationName ?? null);
+  if (policies.length === 0) return;
+  assertPolicies(
+    checkAgainstPolicies(payload, policies, {
+      isPartial,
+      callerPermissions: req.user?.permissions ?? [],
+    })
+  );
+};
+
 
 /**
  * The listing filters, including the caller's org-unit scope.
@@ -115,7 +150,8 @@ router.get('/:id', authenticate, requirePermission('employee.read'), validatePar
 }));
 
 // Create new employee
-router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), asyncHandler(async (_req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), asyncHandler(async (req: Request, res: Response) => {
+  await enforceFieldPolicy(req, res.locals.body, false);
   const employee = await employeeService.createEmployee(res.locals.body);
 
   res.status(201).json({
@@ -126,9 +162,13 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
 }));
 
 // Update employee
-router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), asyncHandler(async (_req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
+  // Partial: a field absent from an update is not being cleared, so a
+  // required-field check on it would make every partial update of an incomplete
+  // record impossible — and that is the record most in need of updating.
+  await enforceFieldPolicy(req, res.locals.body, true);
   const employee = await employeeService.updateEmployee(id, res.locals.body);
   res.json({
     success: true,

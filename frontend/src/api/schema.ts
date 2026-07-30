@@ -10692,6 +10692,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/employee-field-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Employee field policies in force
+         * @description Readable by any authenticated caller: a form has to know which fields are required before someone fills one in, or the only way to discover a rule is to break it, and the policies describe the shape of a record rather than anything about a person. Defaults to the caller's own organization. The response also carries `governableCoreFields`, so an admin UI offers the allowlist rather than keeping a copy that goes stale. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    organizationName?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        /**
+         * Create or replace one field's policy
+         * @description Requires `settings.manage`, NOT `employee.manage`: editing an employee and deciding what an employee record must contain are different acts, and the second can make a field visible. `fieldKey` must be a governable core field or `custom:<key>` — a policy that could name any column would let a configuration change make `password_hash` a visible directory field, which is why the allowlist lives in code rather than in this document. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        organizationName?: string | null;
+                        fieldKey: string;
+                        isRequired?: boolean;
+                        visiblePermission?: string | null;
+                        editPermission?: string | null;
+                        minLength?: number | null;
+                        maxLength?: number | null;
+                        minValue?: number | null;
+                        maxValue?: number | null;
+                        pattern?: string | null;
+                        allowedValues?: string[] | null;
+                        helpText?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Success. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        post?: never;
+        /**
+         * Remove one field's policy
+         * @description Requires `settings.manage`. Removing an organization's row falls back to the global policy for that field, if one exists. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.
+         */
+        delete: {
+            parameters: {
+                query: {
+                    organizationName?: string;
+                    fieldKey: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Success. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

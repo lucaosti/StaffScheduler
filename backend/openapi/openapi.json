@@ -13532,6 +13532,270 @@
           }
         ]
       }
+    },
+    "/employee-field-policies": {
+      "get": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Employee field policies in force",
+        "description": "Readable by any authenticated caller: a form has to know which fields are required before someone fills one in, or the only way to discover a rule is to break it, and the policies describe the shape of a record rather than anything about a person. Defaults to the caller's own organization. The response also carries `governableCoreFields`, so an admin UI offers the allowlist rather than keeping a copy that goes stale. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "parameters": [
+          {
+            "name": "organizationName",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Create or replace one field's policy",
+        "description": "Requires `settings.manage`, NOT `employee.manage`: editing an employee and deciding what an employee record must contain are different acts, and the second can make a field visible. `fieldKey` must be a governable core field or `custom:<key>` — a policy that could name any column would let a configuration change make `password_hash` a visible directory field, which is why the allowlist lives in code rather than in this document. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "organizationName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fieldKey": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  },
+                  "isRequired": {
+                    "type": "boolean"
+                  },
+                  "visiblePermission": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "editPermission": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minLength": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxLength": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 65535
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minValue": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "maxValue": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "pattern": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "allowedValues": {
+                    "anyOf": [
+                      {
+                        "maxItems": 200,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "helpText": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "fieldKey"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Settings"
+        ],
+        "summary": "Remove one field's policy",
+        "description": "Requires `settings.manage`. Removing an organization's row falls back to the global policy for that field, if one exists. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
+        "responses": {
+          "200": {
+            "description": "Success.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "parameters": [
+          {
+            "name": "organizationName",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          {
+            "name": "fieldKey",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            }
+          }
+        ]
+      }
     }
   }
 }

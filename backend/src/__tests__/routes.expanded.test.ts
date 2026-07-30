@@ -27,6 +27,21 @@ jest.mock('../middleware/auth', () => ({
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
+// The employee write paths now consult the per-organization field policies, and
+// these suites hand the router an empty pool double. Stubbed to "no policies
+// configured" — the behaviour every existing case was written against. NOT
+// made resilient in the service instead: a policy lookup that failed open would
+// silently disable the rules, which is worse than refusing the write.
+jest.mock('../services/EmployeeFieldPolicyService', () => {
+  const actual = jest.requireActual('../services/EmployeeFieldPolicyService');
+  return {
+    ...actual,
+    EmployeeFieldPolicyService: jest.fn().mockImplementation(() => ({
+      listForOrganization: jest.fn().mockResolvedValue([]),
+    })),
+  };
+});
+
 jest.mock('../services/AssignmentService');
 jest.mock('../services/ScheduleService');
 jest.mock('../services/ShiftService');
