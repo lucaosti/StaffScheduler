@@ -79,6 +79,15 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       requiredPermission: 'responsibility.read',
     },
     {
+      // No requiredPermission: everyone can see who decides their own requests,
+      // which is the whole point — it was invisible to exactly the people it
+      // applied to.
+      path: '/authority',
+      icon: 'bi-person-check',
+      label: 'Authority',
+      requiredPermission: null,
+    },
+    {
       path: '/org-chart',
       icon: 'bi-diagram-3',
       label: 'Org Chart',

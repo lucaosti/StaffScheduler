@@ -150,6 +150,54 @@ export const getManagerChain = (userId?: number): Promise<ApiResponse<ManagerCha
         { params: { userId } }
       );
 
+/**
+ * Who has authority over one person.
+ *
+ * Two operations for the same reason `getManagerChain` has two: the no-argument
+ * form answers for the caller and needs no permission, while the one naming a
+ * user requires `org_unit.read`. That is the authorization boundary, and a
+ * single concatenated path would hide it.
+ *
+ * The response is typed here rather than derived from the schema: the endpoint
+ * publishes a composed view, not a domain entity, so there is no shared Zod
+ * schema behind it to generate from — `object` is all the spec can honestly say.
+ */
+export interface AuthorityPerson {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+interface AuthorityApprovalStep {
+  stepOrder: number;
+  approverScope: string;
+  permissionCode: string | null;
+  approvers: AuthorityPerson[];
+  /** The scope resolved to nobody — requests of this kind have no decider. */
+  unresolved: boolean;
+}
+
+interface AuthorityWorkflow {
+  changeType: string;
+  description: string | null;
+  steps: AuthorityApprovalStep[];
+}
+
+export interface AuthorityProfile {
+  subject: AuthorityPerson;
+  managerChain: ManagerChainLink[];
+  roleAdministrators: Array<AuthorityPerson & { via: 'responsibility_rule' | 'permission' }>;
+  approvals: AuthorityWorkflow[];
+}
+
+export const getAuthorityProfile = (userId?: number): Promise<ApiResponse<AuthorityProfile>> =>
+  userId === undefined
+    ? apiClient.get<AuthorityProfile, '/org/authority'>('/org/authority')
+    : apiClient.get<AuthorityProfile, '/org/authority/{userId}'>('/org/authority/{userId}', {
+        params: { userId },
+      });
+
 export const addMember = (
   orgUnitId: number,
   userId: number,

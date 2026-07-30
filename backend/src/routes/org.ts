@@ -27,6 +27,7 @@ import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody, employeeLoanListQuery } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
+import { AuthorityService } from '../services/AuthorityService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
 
@@ -37,6 +38,7 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createOrgRouter = (pool: Pool): Router => {
   const router = Router();
   const units = new OrgUnitService(pool);
+  const authority = new AuthorityService(pool);
   const loans = new EmployeeLoanService(pool);
   const audit = new AuditLogService(pool);
 
@@ -112,6 +114,31 @@ export const createOrgRouter = (pool: Pool): Router => {
       return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
     }
     res.json({ success: true, data: await units.getManagerChain(targetId) });
+  }));
+
+  /**
+   * Who has authority over one person: superiors, role administrators, and who
+   * would decide each kind of request they can file.
+   *
+   * WHY ANYONE MAY READ THEIR OWN, AND ONLY MANAGERS MAY READ ANOTHER'S. Knowing
+   * who decides your own requests is not privileged information — it is the
+   * information you need in order to use the system at all, and withholding it
+   * is what made the answer discoverable only by filing a request and watching.
+   * Another person's profile is a different thing: read together across a
+   * department it maps the org chart's authority, so it needs `org_unit.read`,
+   * the same gate the rest of the tree carries.
+   */
+  router.get('/authority/:userId?', asyncHandler(async (req: Request, res: Response) => {
+    const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
+    }
+    if (targetId !== req.user!.id && !userHasPermission(req.user, 'org_unit.read')) {
+      return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
+    }
+    const profile = await authority.getAuthorityProfile(targetId);
+    if (!profile) return respondError(res, 404, 'NOT_FOUND', 'User not found');
+    res.json({ success: true, data: profile });
   }));
 
   router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), asyncHandler(async (_req: Request, res: Response) => {
