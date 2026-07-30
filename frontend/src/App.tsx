@@ -66,6 +66,7 @@ const OrgManagement = lazy(() => import('./pages/Org/OrgManagement'));
 const Policies = lazy(() => import('./pages/Policies/Policies'));
 const Governance = lazy(() => import('./pages/Governance/Governance'));
 const OrgChart = lazy(() => import('./pages/OrgChart/OrgChart'));
+const Authority = lazy(() => import('./pages/Org/Authority'));
 const RaciMatrix = lazy(() => import('./pages/Governance/RaciMatrix'));
 const PendingApprovals = lazy(() => import('./pages/Approvals/PendingApprovals'));
 const ChangeRequests = lazy(() => import('./pages/ChangeRequests/ChangeRequests'));
@@ -177,6 +178,9 @@ const App: React.FC = () => {
               <OrgChart />
             </PermissionRoute>
           } />
+          {/* No PermissionRoute: your own profile is readable by anyone, and the
+              server refuses another person's without org_unit.read. */}
+          <Route path="authority" element={<Authority />} />
           <Route path="governance/raci-matrix" element={
             <PermissionRoute permission="responsibility.read">
               <RaciMatrix />
