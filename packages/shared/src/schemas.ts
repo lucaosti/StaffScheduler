@@ -413,6 +413,41 @@ export const calendarAggregateQuery = z.object({
   futureDays: z.coerce.number().int().min(1).max(365).optional(),
 });
 
+/**
+ * A field policy, as the admin API accepts it.
+ *
+ * `fieldKey` is a plain string here and validated against the ALLOWLIST in the
+ * service, not by an enum in this schema. Deliberate: the allowlist is a
+ * security boundary that must live next to the code that knows why each field is
+ * on it, and publishing it as an OpenAPI enum would also publish the set of
+ * custom keys an organization uses — a small disclosure with no upside.
+ */
+export const employeeFieldPolicyBody = z.object({
+  organizationName: z.string().min(1).max(120).nullable().optional(),
+  fieldKey: z.string().min(1).max(80),
+  isRequired: z.boolean().optional(),
+  visiblePermission: z.string().min(1).max(64).nullable().optional(),
+  editPermission: z.string().min(1).max(64).nullable().optional(),
+  minLength: z.number().int().min(0).max(65535).nullable().optional(),
+  maxLength: z.number().int().min(1).max(65535).nullable().optional(),
+  minValue: z.number().nullable().optional(),
+  maxValue: z.number().nullable().optional(),
+  // Length capped here as well as in the column: a user-supplied regex is a
+  // ReDoS surface, and a short one is much harder to make pathological.
+  pattern: z.string().min(1).max(200).nullable().optional(),
+  allowedValues: z.array(z.string().min(1).max(255)).max(200).nullable().optional(),
+  helpText: z.string().min(1).max(255).nullable().optional(),
+});
+
+export const employeeFieldPolicyQuery = z.object({
+  organizationName: z.string().min(1).max(120).optional(),
+});
+
+export const employeeFieldPolicyDeleteQuery = z.object({
+  organizationName: z.string().min(1).max(120).optional(),
+  fieldKey: z.string().min(1).max(80),
+});
+
 export const changeRequestListQuery = z.object({
   proposerUserId: positiveInt.optional(),
   approverUserId: positiveInt.optional(),
