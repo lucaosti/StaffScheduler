@@ -23,22 +23,32 @@ import ProtectedRoute from './ProtectedRoute';
 interface PermissionRouteProps {
   /** Child components to render when the user holds the required permission */
   children: React.ReactNode;
-  /** Permission code that must be present in user.permissions */
-  permission: string;
+  /**
+   * Permission code that must be present in user.permissions.
+   *
+   * An array means ANY of them, not all: some routes are reachable by two
+   * different codes that are alternatives rather than a hierarchy — delegation
+   * is the first, where `delegation.manage` (an administered act) and
+   * `delegation.self` (each person passes on their own authority) both admit
+   * the caller and the server accepts either. Requiring all of them would be
+   * the wrong reading and there is no route that wants it.
+   */
+  permission: string | string[];
 }
 
 /**
- * Returns true when the user holds the given permission or when the
+ * Returns true when the user holds ANY of the given permissions, or when the
  * permissions array is absent / empty (fail-open for backward compat).
  */
 function hasPermission(
   permissions: string[] | undefined,
-  permission: string
+  permission: string | string[]
 ): boolean {
   if (!permissions || permissions.length === 0) {
     return true;
   }
-  return permissions.includes(permission);
+  const accepted = Array.isArray(permission) ? permission : [permission];
+  return accepted.some((code) => permissions.includes(code));
 }
 
 /**

@@ -193,7 +193,10 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       path: '/delegations',
       icon: 'bi-person-check',
       label: 'Delegations',
-      requiredPermission: 'delegation.manage',
+      // Either code: delegation.manage is the administered form, delegation.self
+      // the one where each person passes on their own authority. The server
+      // accepts either, so the menu must offer the page to either.
+      requiredPermission: ['delegation.manage', 'delegation.self'],
     },
     {
       path: '/admin/audit-logs',
@@ -209,10 +212,12 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     },
   ];
 
-  const hasPermission = (requiredPermission: string | null): boolean => {
+  /** An array means ANY of the codes, matching PermissionRoute. */
+  const hasPermission = (requiredPermission: string | string[] | null): boolean => {
     if (requiredPermission === null) return true; // no permission required
     if (user?.permissions) {
-      return user.permissions.includes(requiredPermission);
+      const accepted = Array.isArray(requiredPermission) ? requiredPermission : [requiredPermission];
+      return accepted.some((code) => user.permissions!.includes(code));
     }
     return false; // fail-closed: hide items until permissions are confirmed
   };

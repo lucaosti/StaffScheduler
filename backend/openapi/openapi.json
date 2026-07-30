@@ -3612,7 +3612,7 @@
           "Delegations"
         ],
         "summary": "Create delegation",
-        "description": "Grants a set of permissions to another user for a specified period.",
+        "description": "Creates a delegation of the CALLER's own permissions — the endpoint has never accepted a delegator other than the authenticated user, and the service refuses any code the delegator does not currently hold. Admitted by either `delegation.manage` (delegation as an administered act) or `delegation.self` (each person may pass on their own authority); the two are alternatives rather than a hierarchy, and neither changes what may be delegated. Returns 422 `DELEGATION_INVALID` when a code is not held, when the delegatee is the delegator, or when a delegation rule is otherwise violated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3726,7 +3726,8 @@
               }
             }
           }
-        }
+        },
+        "description": "Revokes a delegation. Authenticated only: the service refuses anyone who is not the delegator, which is stricter than any permission could express. It deliberately carries no permission gate — one used to sit here, and it meant that someone who created a delegation and later lost `delegation.manage` could no longer revoke it, so a delegation they granted outlived their ability to withdraw it."
       }
     },
     "/departments": {

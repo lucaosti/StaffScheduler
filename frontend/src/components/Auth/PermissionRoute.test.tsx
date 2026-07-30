@@ -45,6 +45,45 @@ describe('<PermissionRoute />', () => {
     expect(screen.getByText('protected content')).toBeInTheDocument();
   });
 
+  it('accepts ANY of several codes, which is what alternatives need', () => {
+    // Delegation is the first route with two: `delegation.manage` is the
+    // administered form and `delegation.self` the self-service one. They are
+    // alternatives, not a hierarchy, and the server accepts either.
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, permissions: ['delegation.self'] },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    render(
+      wrap(
+        <PermissionRoute permission={['delegation.manage', 'delegation.self']}>
+          <p>protected content</p>
+        </PermissionRoute>
+      )
+    );
+
+    expect(screen.getByText('protected content')).toBeInTheDocument();
+  });
+
+  it('refuses when the user holds none of several codes', () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, permissions: ['report.read'] },
+      isAuthenticated: true,
+      isLoading: false,
+    });
+
+    render(
+      wrap(
+        <PermissionRoute permission={['delegation.manage', 'delegation.self']}>
+          <p>protected content</p>
+        </PermissionRoute>
+      )
+    );
+
+    expect(screen.queryByText('protected content')).not.toBeInTheDocument();
+  });
+
   it('redirects to /dashboard when user lacks the required permission', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 1, permissions: ['report.read'] },
