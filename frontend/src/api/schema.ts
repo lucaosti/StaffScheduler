@@ -10621,6 +10621,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calendar/aggregate.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Filtered aggregate iCal feed
+         * @description A calendar aggregation across departments, roles and people, over a range that reaches into the PAST as well as the future — the per-department feed started at today, so a subscribed calendar could not answer "who was on that Tuesday" once Tuesday had passed. Authenticated by the `token` query parameter, like the other feeds.
+         *
+         *     The caller must hold `timeline.read` or `timeline.read_all`: this feed makes the same disclosure the timeline does — when a named colleague is at work — and reusing those codes avoids two rules for one disclosure. **The org-unit scope is resolved from the token owner on every fetch and intersected with the filters**, so a feed cannot widen its own reach and stops publishing a unit as soon as its owner's authority over that unit ends. A caller whose scope resolves to nothing gets an empty calendar, not an unfiltered one.
+         *
+         *     Shows shifts and their assignees only. Absences are excluded: publishing who is away on covered days makes leave and sickness deducible from a calendar anyone with the URL can read.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    token?: string;
+                    departmentId?: string;
+                    roleId?: string;
+                    userId?: string;
+                    pastDays?: number;
+                    futureDays?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The filtered calendar, as text/calendar. Carries an ETag; honours If-None-Match. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "text/calendar": string;
+                    };
+                };
+                /** @description Nothing has changed since the ETag the client presented. */
+                304: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Missing or invalid feed token. */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The token's owner may not see other people's schedules. */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

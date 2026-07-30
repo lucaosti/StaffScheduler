@@ -13449,6 +13449,89 @@
           }
         }
       }
+    },
+    "/calendar/aggregate.ics": {
+      "get": {
+        "tags": [
+          "Calendar"
+        ],
+        "summary": "Filtered aggregate iCal feed",
+        "description": "A calendar aggregation across departments, roles and people, over a range that reaches into the PAST as well as the future — the per-department feed started at today, so a subscribed calendar could not answer \"who was on that Tuesday\" once Tuesday had passed. Authenticated by the `token` query parameter, like the other feeds.\n\nThe caller must hold `timeline.read` or `timeline.read_all`: this feed makes the same disclosure the timeline does — when a named colleague is at work — and reusing those codes avoids two rules for one disclosure. **The org-unit scope is resolved from the token owner on every fetch and intersected with the filters**, so a feed cannot widen its own reach and stops publishing a unit as soon as its owner's authority over that unit ends. A caller whose scope resolves to nothing gets an empty calendar, not an unfiltered one.\n\nShows shifts and their assignees only. Absences are excluded: publishing who is away on covered days makes leave and sickness deducible from a calendar anyone with the URL can read.",
+        "responses": {
+          "200": {
+            "description": "The filtered calendar, as text/calendar. Carries an ETag; honours If-None-Match.",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "Nothing has changed since the ETag the client presented."
+          },
+          "401": {
+            "description": "Missing or invalid feed token."
+          },
+          "403": {
+            "description": "The token's owner may not see other people's schedules."
+          }
+        },
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          {
+            "name": "departmentId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(,\\d+)*$"
+            }
+          },
+          {
+            "name": "roleId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(,\\d+)*$"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+(,\\d+)*$"
+            }
+          },
+          {
+            "name": "pastDays",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 365
+            }
+          },
+          {
+            "name": "futureDays",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365
+            }
+          }
+        ]
+      }
     }
   }
 }

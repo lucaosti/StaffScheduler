@@ -17,7 +17,9 @@
  */
 
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+// The section now reads departments and roles through query hooks for the
+// aggregate-feed builder, so it needs a QueryClient — plain RTL `render` throws.
+import { render, screen, waitFor } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 
 const mockList = jest.fn();
