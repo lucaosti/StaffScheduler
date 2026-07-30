@@ -219,8 +219,9 @@ const App: React.FC = () => {
           } />
           <Route path="approvals/pending" element={<PendingApprovals />} />
           <Route path="change-requests" element={<ChangeRequests />} />
+          {/* Either delegation code admits: they are alternatives, not a hierarchy. */}
           <Route path="delegations" element={
-            <PermissionRoute permission="delegation.manage">
+            <PermissionRoute permission={['delegation.manage', 'delegation.self']}>
               <Delegations />
             </PermissionRoute>
           } />
