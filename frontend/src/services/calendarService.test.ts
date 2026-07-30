@@ -4,7 +4,9 @@
  * @author Luca Ostinelli
  */
 
+import { API_BASE_URL } from './apiUtils';
 import {
+  buildAggregateFeedUrl,
   createCalendarToken,
   listCalendarTokens,
   revokeCalendarToken,
@@ -79,5 +81,52 @@ describe('buildFeedUrl', () => {
 
   it('returns a string', () => {
     expect(typeof buildFeedUrl('x')).toBe('string');
+  });
+});
+
+/**
+ * The aggregate feed URL.
+ *
+ * What matters here is what is ABSENT: no scope travels in the URL. The server
+ * resolves the token owner's org-unit scope on every fetch, so a link cannot
+ * widen its own reach and stops publishing a unit when its owner's authority
+ * over that unit ends. A builder that "helpfully" pinned the scope at creation
+ * time would undo that.
+ */
+describe('buildAggregateFeedUrl', () => {
+  it('carries the token and nothing else by default', () => {
+    expect(buildAggregateFeedUrl('abc')).toBe(
+      `${API_BASE_URL}/calendar/aggregate.ics?token=abc`
+    );
+  });
+
+  it('joins id lists with commas, which is what the server parses', () => {
+    const url = buildAggregateFeedUrl('abc', { departmentId: [3, 4], roleId: [2] });
+    expect(url).toContain('departmentId=3%2C4');
+    expect(url).toContain('roleId=2');
+  });
+
+  it('omits an empty list rather than sending a blank filter', () => {
+    // `departmentId=` is neither a filter nor the absence of one, and the query
+    // schema rejects it.
+    const url = buildAggregateFeedUrl('abc', { departmentId: [], userId: [] });
+    expect(url).not.toContain('departmentId');
+    expect(url).not.toContain('userId');
+  });
+
+  it('carries an explicit range, including zero days of history', () => {
+    const url = buildAggregateFeedUrl('abc', { pastDays: 0, futureDays: 90 });
+    expect(url).toContain('pastDays=0');
+    expect(url).toContain('futureDays=90');
+  });
+
+  it('escapes a token with URL-significant characters', () => {
+    expect(buildAggregateFeedUrl('a b&c')).toContain('token=a+b%26c');
+  });
+
+  it('never puts a scope in the URL', () => {
+    const url = buildAggregateFeedUrl('abc', { departmentId: [1] });
+    expect(url).not.toContain('orgUnit');
+    expect(url).not.toContain('scope');
   });
 });
