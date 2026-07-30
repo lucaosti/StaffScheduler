@@ -14,7 +14,14 @@
 import { useQuery } from '@tanstack/react-query';
 import type { Permission, Role, UserRoleAssignment, Employee } from '../types';
 import { listUnits, type OrgUnit } from '../services/orgService';
-import { listPermissions, listRoles, getUserRoles } from '../services/rbacService';
+import {
+  listPermissions,
+  listRoles,
+  getUserRoles,
+  getUserRoleTimeline,
+  getRoleTimeline,
+  type RoleTimeline,
+} from '../services/rbacService';
 import { getEmployees } from '../services/employeeService';
 
 export const rbacKeys = {
@@ -76,5 +83,26 @@ export function useUserRolesQuery(userId: number | null) {
       return res.success && res.data ? res.data : [];
     },
     enabled: userId !== null,
+  });
+}
+
+/**
+ * The grant/revoke history for a person or a role.
+ *
+ * `subject` is discriminated rather than two hooks: the two endpoints return the
+ * same envelope and the page shows it the same way, so one query key with the
+ * kind in it keeps the two histories from evicting each other in the cache.
+ */
+export function useRoleTimelineQuery(subject: { kind: 'user' | 'role'; id: number } | null) {
+  return useQuery({
+    queryKey: ['rbac', 'timeline', subject?.kind ?? null, subject?.id ?? null] as const,
+    queryFn: async (): Promise<RoleTimeline> => {
+      const res =
+        subject!.kind === 'user'
+          ? await getUserRoleTimeline(subject!.id)
+          : await getRoleTimeline(subject!.id);
+      return res.data as RoleTimeline;
+    },
+    enabled: subject !== null,
   });
 }
