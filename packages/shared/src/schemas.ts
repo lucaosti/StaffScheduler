@@ -71,6 +71,21 @@ const timeString = z
   .string()
   .regex(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/, 'Time must be in 24-hour HH:MM format');
 
+/**
+ * A comma-separated list of positive integer ids, parsed to `number[]`.
+ *
+ * Validated here rather than split in a handler: a handler doing
+ * `.split(',').map(Number)` turns "3,abc" into `[3, NaN]` and hands NaN to a
+ * query, where it silently matches nothing — a filter that quietly loses half
+ * its terms. Bounded at 100 so a URL cannot become an unbounded IN clause.
+ */
+const idListString = z
+  .string()
+  .regex(/^\d+(,\d+)*$/, 'Must be a comma-separated list of positive integers')
+  .transform((raw) => raw.split(',').map(Number))
+  .refine((ids) => ids.every((id) => Number.isInteger(id) && id > 0), 'Ids must be positive')
+  .refine((ids) => ids.length <= 100, 'At most 100 ids');
+
 /** Calendar date, "YYYY-MM-DD". */
 const dateString = z
   .string()
@@ -374,6 +389,28 @@ export const auditLogExportQuery = z.object({
  */
 export const calendarFeedQuery = z.object({
   token: z.string().min(1).max(255).optional(),
+});
+
+/**
+ * The filtered aggregate calendar feed.
+ *
+ * Every filter is a comma-separated id list rather than a repeated parameter,
+ * because a calendar client stores a URL and a person edits it by hand; one
+ * `departmentId=3,4` is something you can read and change, where
+ * `departmentId=3&departmentId=4` invites the two halves to be edited apart.
+ *
+ * NONE of these widens what the caller may see. The org-unit scope is resolved
+ * from the token's owner on every fetch and intersected with whatever is asked
+ * for here — see services/orgScope.
+ */
+export const calendarAggregateQuery = z.object({
+  token: z.string().min(1).max(255).optional(),
+  departmentId: idListString.optional(),
+  roleId: idListString.optional(),
+  userId: idListString.optional(),
+  /** Days back from today. The feed reaches into the past on purpose. */
+  pastDays: z.coerce.number().int().min(0).max(365).optional(),
+  futureDays: z.coerce.number().int().min(1).max(365).optional(),
 });
 
 export const changeRequestListQuery = z.object({

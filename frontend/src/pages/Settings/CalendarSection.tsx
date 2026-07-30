@@ -20,6 +20,9 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+import AggregateFeedBuilder from './AggregateFeedBuilder';
+import { useDepartmentsQuery } from '../../hooks/useDepartments';
+import { useRolesAndPermissionsQuery } from '../../hooks/useRbac';
 import {
   CalendarToken,
   buildFeedUrl,
@@ -83,6 +86,12 @@ const CalendarSection: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // The filter options for the aggregate builder. Both are ordinary cached
+  // queries; a failure leaves the selects empty rather than breaking the page,
+  // which is the right degradation for something that only shapes a URL.
+  const departmentsQuery = useDepartmentsQuery();
+  const rolesQuery = useRolesAndPermissionsQuery();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -299,6 +308,14 @@ const CalendarSection: React.FC = () => {
               </table>
             )}
           </div>
+        </div>
+
+        <div className="mb-4">
+          <AggregateFeedBuilder
+            tokens={tokens}
+            departments={(departmentsQuery.data ?? []).map((d) => ({ id: Number(d.id), name: d.name }))}
+            roles={(rolesQuery.data?.roles ?? []).map((r) => ({ id: Number(r.id), name: r.name }))}
+          />
         </div>
 
         {/* Per-client instructions */}
