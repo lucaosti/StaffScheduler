@@ -125,7 +125,13 @@ const Schedule: React.FC = () => {
   }, [assignments]);
 
   const getAssignmentsForDateAndShift = (date: Date, shiftId: string | number): ShiftAssignment[] => {
-    const dateStr = date.toISOString().split('T')[0];
+    // toLocalDateString (local calendar day), not toISOString: `date` carries
+    // the real time-of-day it was constructed at (see weekDates/
+    // generateWeekDates above), so a UTC-based key can land one day off from
+    // the column header — which renders the same `date` with
+    // toLocaleDateString (local) — near local midnight, dropping an
+    // assignment out of its visible cell.
+    const dateStr = toLocalDateString(date);
     return assignmentIndex.get(`${dateStr}|${String(shiftId)}`) ?? [];
   };
 
@@ -141,15 +147,6 @@ const Schedule: React.FC = () => {
       newDate.setDate(newDate.getDate() + (direction === 'next' ? 7 : -7));
     }
     setSelectedWeek(newDate);
-  };
-
-  // Local calendar-date key (not toISOString, which shifts to UTC and can
-  // land a shift on the wrong day for any timezone ahead/behind UTC).
-  const toDateKey = (date: Date) => {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
   };
 
   // 6-week (42-cell) grid covering the selected month, padded with the tail
@@ -172,8 +169,8 @@ const Schedule: React.FC = () => {
   // it scales independently of how many shifts exist overall.
   const monthQuery = useShiftsInRange(
     {
-      startDate: toDateKey(monthGridDates[0]),
-      endDate: toDateKey(monthGridDates[monthGridDates.length - 1]),
+      startDate: toLocalDateString(monthGridDates[0]),
+      endDate: toLocalDateString(monthGridDates[monthGridDates.length - 1]),
       departmentId: selectedDepartment ? Number(selectedDepartment) : undefined,
     },
     { enabled: viewMode === 'month' }
@@ -192,7 +189,7 @@ const Schedule: React.FC = () => {
     return index;
   }, [monthShifts]);
 
-  const todayKey = toDateKey(new Date());
+  const todayKey = toLocalDateString(new Date());
 
 
   // Values arrive already validated against the shared createScheduleBody schema
@@ -598,7 +595,7 @@ const Schedule: React.FC = () => {
                   {Array.from({ length: 6 }, (_, week) => (
                     <tr key={week} style={{ height: '110px' }}>
                       {monthGridDates.slice(week * 7, week * 7 + 7).map((date) => {
-                        const dateKey = toDateKey(date);
+                        const dateKey = toLocalDateString(date);
                         const dayShifts = shiftsByDate.get(dateKey) ?? [];
                         const isCurrentMonth = date.getMonth() === selectedWeek.getMonth();
                         const isToday = dateKey === todayKey;
