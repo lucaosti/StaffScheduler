@@ -21,7 +21,7 @@
 jest.mock('dotenv', () => ({ config: jest.fn() }));
 
 const ENV_KEYS = [
-  'PORT', 'NODE_ENV',
+  'PORT', 'NODE_ENV', 'TRUST_PROXY_HOPS',
   'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_POOL_LIMIT', 'DB_QUEUE_LIMIT',
   'JWT_SECRET', 'JWT_EXPIRES_IN', 'AUTH_PERMISSION_CACHE_TTL_MS',
   'EMAIL_HOST', 'EMAIL_PORT', 'EMAIL_SECURE', 'EMAIL_USER', 'EMAIL_PASSWORD',
@@ -66,6 +66,7 @@ describe('defaults (bare environment)', () => {
 
     expect(config.server.port).toBe(3001);
     expect(config.server.env).toBe('development');
+    expect(config.server.trustProxyHops).toBe(0);
     expect(config.database).toMatchObject({
       host: 'localhost', port: 3306, database: 'staff_scheduler', user: 'scheduler_user',
       password: 'scheduler_password', connectionLimit: 30, queueLimit: 100,
@@ -96,7 +97,7 @@ describe('defaults (bare environment)', () => {
 describe('explicit environment (full profile)', () => {
   it('honours every provided variable', () => {
     const config = loadConfig({
-      PORT: '4000', NODE_ENV: 'staging',
+      PORT: '4000', NODE_ENV: 'staging', TRUST_PROXY_HOPS: '1',
       DB_HOST: 'db', DB_PORT: '3307', DB_NAME: 'ss', DB_USER: 'u', DB_PASSWORD: 'p',
       DB_POOL_LIMIT: '5', DB_QUEUE_LIMIT: '9',
       JWT_SECRET: 'real-secret', JWT_EXPIRES_IN: '15m', AUTH_PERMISSION_CACHE_TTL_MS: '5000',
@@ -113,7 +114,7 @@ describe('explicit environment (full profile)', () => {
       NOTIFICATIONS_ENABLED: 'true', EMAIL_NOTIFICATIONS_ENABLED: 'false', IN_APP_NOTIFICATIONS_ENABLED: 'false',
     });
 
-    expect(config.server).toEqual({ port: 4000, env: 'staging' });
+    expect(config.server).toEqual({ port: 4000, env: 'staging', trustProxyHops: 1 });
     expect(config.database).toMatchObject({ host: 'db', port: 3307, database: 'ss', user: 'u', password: 'p', connectionLimit: 5, queueLimit: 9 });
     expect(config.jwt).toMatchObject({ secret: 'real-secret', expiresIn: '15m', expiresInMs: 15 * 60_000 });
     expect(config.auth.permissionCacheTtlMs).toBe(5000);

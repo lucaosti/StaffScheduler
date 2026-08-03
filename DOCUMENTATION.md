@@ -935,6 +935,16 @@ serve traffic. The default compose file runs a single backend; the
 docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2
 ```
 
+**Set `TRUST_PROXY_HOPS=1` whenever this overlay is in use.** Express does not
+trust `X-Forwarded-For`/`X-Forwarded-Proto` by default, so without it every
+request's `req.ip` resolves to the load balancer's own address rather than the
+real client — collapsing IP-keyed rate limiting (including the login
+brute-force limiter) into one shared bucket across every caller, and making
+audit-log IPs useless. Left at its default of `0` for any directly-exposed
+instance (dev, or a single, unscaled backend): with no proxy actually in
+front, trusting the hop would let a client set its own `X-Forwarded-For` and
+spoof its IP to dodge rate limiting.
+
 The overlay clears the backend's published port (several replicas cannot share
 one host port) and puts `backend-lb` (nginx, `ops/nginx/backend-lb.conf`) in
 front. Both that load balancer and the frontend's own `/api` proxy resolve the
