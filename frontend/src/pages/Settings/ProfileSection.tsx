@@ -12,7 +12,7 @@
 
 import React, { useEffect, useState } from 'react';
 
-interface WorkSettings {
+export interface WorkSettings {
   maxHoursPerWeek: number;
   maxConsecutiveDays: number;
   minRestHours: number;
