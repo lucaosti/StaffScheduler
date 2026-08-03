@@ -12,6 +12,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ShiftAssignment } from '../types';
+import { schedulePageKey } from './useSchedulePage';
 import {
   AssignmentFilters,
   AvailableEmployee,
@@ -75,7 +76,16 @@ export function useAvailableEmployeesQuery(shiftId: number | null) {
 
 export function useAssignmentMutations() {
   const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: assignmentKeys.all });
+  const invalidate = () => {
+    // Two caches hold the same underlying assignment rows: this feature's own
+    // ['assignments'] key, and the Schedule page's composite ['schedule-page']
+    // query (useSchedulePage.ts), which flattens assignments out of
+    // getScheduleWithShifts independently. Without invalidating both, staffing
+    // a shift from here leaves the Schedule page's grid showing stale data
+    // until its own staleTime lapses.
+    queryClient.invalidateQueries({ queryKey: assignmentKeys.all });
+    queryClient.invalidateQueries({ queryKey: schedulePageKey });
+  };
 
   return {
     create: useMutation({
