@@ -92,7 +92,15 @@ const OrgManagement: React.FC = () => {
   const members = membersQuery.data ?? [];
   const loading = unitsQuery.isLoading || loansQuery.isLoading;
 
-  const refreshUnits = () => queryClient.invalidateQueries({ queryKey: orgKeys.units });
+  // Invalidates both cache entries for the unit hierarchy: this page's own
+  // orgKeys.units (units + tree, fetched together) and orgKeys.tree, the
+  // separate cache OrgChart reads through useOrgTreeQuery. The two overlap in
+  // what they hold but are cached independently, so a create/move/delete here
+  // left OrgChart showing the pre-edit hierarchy until its own staleTime lapsed.
+  const refreshUnits = () => {
+    queryClient.invalidateQueries({ queryKey: orgKeys.units });
+    queryClient.invalidateQueries({ queryKey: orgKeys.tree });
+  };
   const refreshLoans = () => queryClient.invalidateQueries({ queryKey: orgKeys.loans });
   // The members query is keyed by the currently-selected unit, so invalidating
   // the whole family refreshes whichever unit is in view.

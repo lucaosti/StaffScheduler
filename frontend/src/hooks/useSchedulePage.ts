@@ -39,7 +39,12 @@ interface SchedulePageData {
   assignments: ShiftAssignment[];
 }
 
-const schedulePageKey = ['schedule-page'] as const;
+// Exported so other features that mutate the same underlying rows (e.g.
+// useAssignments' staffing mutations) can invalidate this cache too — the
+// Schedule page's assignments here and the assignment-management screens'
+// own ['assignments'] cache both read the same server-side rows under
+// disjoint query keys, so only one of the two ever refetches without this.
+export const schedulePageKey = ['schedule-page'] as const;
 
 const fetchSchedulePageData = async (): Promise<SchedulePageData> => {
   const [schedulesResponse, employeesResponse, shiftsResponse, departmentsResponse] =
