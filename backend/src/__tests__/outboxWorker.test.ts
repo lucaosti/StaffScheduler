@@ -106,4 +106,88 @@ describe('startOutboxWorker', () => {
     jest.advanceTimersByTime(50);
     expect((pool as { getConnection: jest.Mock }).getConnection.mock.calls.length).toBe(callsSoFar);
   });
+
+  /**
+   * `timer` is a module-level singleton, not per-instance state — a second
+   * caller (e.g. a second startServer() attempt, or a test that fails to clean
+   * up) must not be able to arm a second interval underneath the first. Two
+   * live intervals would double the polling rate silently, and neither would
+   * be reachable individually to stop.
+   *
+   * Asserted as "unchanged from after the first call" rather than "equals 1":
+   * under Jest's modern fake timers, `getTimerCount()` also counts an internal
+   * `setImmediate` Winston's Logger schedules on `logger.info(...)` even when
+   * silent — a real count, just not evidence about THIS guard, and coupling
+   * the assertion to that incidental number would make the test fail on a
+   * logging-library upgrade for a reason that has nothing to do with the code
+   * under test. The guard itself is what must hold: the second call adds
+   * nothing.
+   */
+  it('does not schedule a second interval on a second call while one is already running', () => {
+    isEmailConfigured.mockReturnValue(true);
+    const pool = poolWith(makeConn([]));
+
+    startOutboxWorker(pool, 10);
+    const countAfterFirstCall = jest.getTimerCount();
+
+    startOutboxWorker(pool, 10);
+    expect(jest.getTimerCount()).toBe(countAfterFirstCall);
+  });
+
+  /**
+   * The guard in startOutboxWorker() is `if (!isEmailConfigured() || timer) return`
+   * — stopOutboxWorker() must null out `timer`, or a legitimate restart (e.g.
+   * after a config reload) would be silently refused by that same guard,
+   * indistinguishable from "already running".
+   */
+  it('lets a stopped worker be restarted, and it polls again', () => {
+    isEmailConfigured.mockReturnValue(true);
+    const pool = poolWith(makeConn([]));
+
+    startOutboxWorker(pool, 10);
+    jest.advanceTimersByTime(25);
+    const callsAfterFirstRun = (pool as { getConnection: jest.Mock }).getConnection.mock.calls.length;
+    expect(callsAfterFirstRun).toBeGreaterThan(0);
+
+    stopOutboxWorker();
+    startOutboxWorker(pool, 10);
+    jest.advanceTimersByTime(25);
+
+    expect((pool as { getConnection: jest.Mock }).getConnection.mock.calls.length).toBeGreaterThan(
+      callsAfterFirstRun
+    );
+  });
+});
+
+/**
+ * Real timers, deliberately: this is the one property fake timers cannot
+ * observe, since `jest.useFakeTimers()` replaces the timer implementation
+ * entirely and never exercises Node's real ref-counting. It is also the most
+ * direct regression pin for #394 — an interval that keeps its ref would (a)
+ * keep a bare `node index.js` process alive on its own with nothing left to
+ * do, and (b) is exactly the kind of handle that outlives its owning test and
+ * fires later, in whatever suite happens to be running under --runInBand.
+ */
+describe('startOutboxWorker (real timers)', () => {
+  afterEach(() => {
+    // Belt and suspenders: the interval is unref'd so it cannot keep the
+    // process alive by itself, but stopping it anyway is the same discipline
+    // every other describe block in this file already follows, and costs
+    // nothing.
+    stopOutboxWorker();
+  });
+
+  it('unrefs its interval, so it cannot keep the process alive by itself', () => {
+    isEmailConfigured.mockReturnValue(true);
+    const pool = poolWith(makeConn([]));
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+
+    startOutboxWorker(pool, 60_000);
+
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    const handle = setIntervalSpy.mock.results[0].value as ReturnType<typeof setInterval>;
+    expect(handle.hasRef()).toBe(false);
+
+    setIntervalSpy.mockRestore();
+  });
 });
