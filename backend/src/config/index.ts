@@ -69,6 +69,15 @@ export const config = {
   server: {
     port: parseInt(process.env.PORT || '3001'),
     env: process.env.NODE_ENV || 'development',
+    // How many reverse-proxy hops in front of this process to trust for
+    // X-Forwarded-For/-Proto (Express's `trust proxy`). Defaults to 0 (off):
+    // a directly-exposed instance (dev, or a single-instance deployment with
+    // no LB) must NOT trust this header, or any client could spoof its own
+    // req.ip and bypass IP-keyed rate limiting. Set to 1 only when actually
+    // running behind exactly one trusted proxy — the nginx load balancer
+    // ops/nginx/backend-lb.conf puts in front of the docker-compose.scale.yml
+    // overlay.
+    trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS || '0', 10),
   },
   database: {
     host: process.env.DB_HOST || 'localhost',
