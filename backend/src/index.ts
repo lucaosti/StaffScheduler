@@ -36,6 +36,18 @@ export async function startServer(): Promise<void> {
     } catch (error) {
       logger.error('Database connection test failed:', error);
       process.exit(1);
+      // `process.exit` never returns in production, but its declared type is
+      // merely `never`-as-a-hint: nothing stops execution from falling through
+      // here if `process.exit` is ever intercepted or mocked (exactly what a
+      // test doing `jest.spyOn(process, 'exit').mockImplementation(...)` does
+      // to assert on the call without killing the test runner). Without this
+      // `return`, that fallthrough went on to build the app and start the real
+      // outbox/optimization workers against the pool that had just failed its
+      // connectivity check — a `setInterval` in OutboxWorker with a real 30s
+      // period, unref'd but still alive, that fired long after the triggering
+      // test had finished and crashed whatever unrelated suite happened to be
+      // running under --runInBand at that moment (#394).
+      return;
     }
 
     const app = buildApp(pool);
