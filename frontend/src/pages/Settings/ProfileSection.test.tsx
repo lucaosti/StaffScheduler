@@ -7,9 +7,9 @@
 import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import ProfileSection from './ProfileSection';
+import ProfileSection, { type WorkSettings } from './ProfileSection';
 
-const defaultSettings = {
+const defaultSettings: WorkSettings = {
   maxHoursPerWeek: 40,
   maxConsecutiveDays: 5,
   minRestHours: 11,
