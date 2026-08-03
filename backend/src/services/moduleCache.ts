@@ -44,6 +44,8 @@ interface Entry {
 let globalEntry: Entry | null = null;
 const orgEntries = new Map<string, Entry>();
 let subscribed = false;
+/** The exact handler attached in initModuleCacheInvalidation, so a reset can detach it. */
+let messageListener: ((channel: string, message: string) => void) | null = null;
 
 const isFresh = (entry: Entry): boolean => Date.now() - entry.at < MODULE_CACHE_TTL_MS;
 
@@ -111,10 +113,11 @@ export async function initModuleCacheInvalidation(): Promise<void> {
   if (!sub) return;
   try {
     await sub.subscribe(CHANNEL);
-    sub.on('message', (channel: string, message: string) => {
+    messageListener = (channel: string, message: string) => {
       if (channel !== CHANNEL) return;
       clearModuleCaches(message === '*' ? undefined : message);
-    });
+    };
+    sub.on('message', messageListener);
     subscribed = true;
     logger.info('Module cache invalidation subscribed');
   } catch (err) {
@@ -124,9 +127,21 @@ export async function initModuleCacheInvalidation(): Promise<void> {
   }
 }
 
-/** Test hook: forget cached state and the subscription flag. */
+/**
+ * Test hook: forget cached state and the subscription flag.
+ *
+ * Detaches the listener a prior initModuleCacheInvalidation() call attached,
+ * not just the `subscribed` guard — the underlying subscriber (getRedisSubscriber)
+ * is a process-wide singleton that outlives this reset, so without this a
+ * reset-then-reinit cycle stacked a second 'message' listener on it, each
+ * real invalidation firing clearModuleCaches once per accumulated listener.
+ */
 export function resetModuleCacheForTests(): void {
   globalEntry = null;
   orgEntries.clear();
+  if (messageListener) {
+    getRedisSubscriber()?.off('message', messageListener);
+    messageListener = null;
+  }
   subscribed = false;
 }
