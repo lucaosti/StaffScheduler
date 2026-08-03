@@ -4,11 +4,12 @@
  * @author Luca Ostinelli
  */
 
+import { useState } from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import ProfileSection from './ProfileSection';
+import ProfileSection, { type WorkSettings } from './ProfileSection';
 
-const defaultSettings = {
+const defaultSettings: WorkSettings = {
   maxHoursPerWeek: 40,
   maxConsecutiveDays: 5,
   minRestHours: 11,
@@ -91,6 +92,48 @@ describe('<ProfileSection />', () => {
     fireEvent.change(screen.getByLabelText(/min rest hours/i), { target: { value: '12' } });
     expect(onChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ minRestHours: 12 })
+    );
+  });
+
+  /**
+   * The controlled-input anti-pattern already fixed once in FieldPolicySection
+   * (#554): binding the input directly to a value the parser could turn into
+   * NaN meant clearing the field to retype a value fought the user's typing.
+   * A stateful wrapper is required here, not a fixed `settings` prop, because
+   * that is what makes the original bug's symptom (the displayed value
+   * reverting/blanking on the very next render) observable at all — a static
+   * prop never round-trips onChange's argument back into what the input shows.
+   */
+  it('lets minRestHours be cleared and retyped without reverting or propagating NaN', async () => {
+    const onChangeSpy = jest.fn();
+    const Wrapper = () => {
+      const [settings, setSettings] = useState(defaultSettings);
+      return (
+        <ProfileSection
+          settings={settings}
+          onChange={(updated) => {
+            onChangeSpy(updated);
+            setSettings(updated);
+          }}
+          onSave={jest.fn().mockResolvedValue(undefined)}
+        />
+      );
+    };
+    render(<Wrapper />);
+
+    const field = screen.getByLabelText(/min rest hours/i) as HTMLInputElement;
+    expect(field.value).toBe('11');
+
+    await userEvent.clear(field);
+    expect(field.value).toBe('');
+    expect(onChangeSpy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ minRestHours: NaN })
+    );
+
+    await userEvent.type(field, '9');
+    expect(field.value).toBe('9');
+    expect(onChangeSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ minRestHours: 9 })
     );
   });
 
