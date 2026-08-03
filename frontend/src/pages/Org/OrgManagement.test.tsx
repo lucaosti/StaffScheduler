@@ -1,6 +1,8 @@
-import { screen, within } from '@testing-library/react';
+import { screen, within, render as rtlRender, waitFor } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { orgKeys } from '../../hooks/useOrg';
 
 const mockListUnits = jest.fn();
 const mockGetTree = jest.fn();
@@ -150,5 +152,37 @@ describe('<OrgManagement />', () => {
     expect(mockRejectLoan).toHaveBeenCalled();
     await userEvent.click(await screen.findByRole('button', { name: /cancel/i }));
     expect(mockCancelLoan).toHaveBeenCalled();
+  });
+
+  /**
+   * #561: OrgManagement's own cache (orgKeys.units) and the OrgChart page's
+   * cache (orgKeys.tree) both hold the unit hierarchy, independently keyed.
+   * Editing the structure here used to invalidate only orgKeys.units, leaving
+   * OrgChart showing the pre-edit tree. Spies directly on invalidateQueries
+   * rather than on a refetch, since the page under test never mounts
+   * useOrgTreeQuery itself — the two hooks share `getTree()` as part of their
+   * queryFn, so watching refetch counts would not distinguish "the cache
+   * OrgChart reads was invalidated" from "orgKeys.units' own queryFn happens
+   * to also call getTree()".
+   */
+  it('invalidates the OrgChart page cache (orgKeys.tree) as well as its own when a unit is created', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidateSpy = jest.spyOn(client, 'invalidateQueries');
+
+    rtlRender(
+      <QueryClientProvider client={client}>
+        <OrgManagement />
+      </QueryClientProvider>
+    );
+    expect(await screen.findByRole('heading', { name: /^organization$/i })).toBeInTheDocument();
+
+    await userEvent.type(screen.getByPlaceholderText(/unit name/i), 'ICU');
+    await userEvent.click(screen.getByRole('button', { name: /create/i }));
+
+    await waitFor(() => expect(mockCreateUnit).toHaveBeenCalled());
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalled());
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => call[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(orgKeys.units);
+    expect(invalidatedKeys).toContainEqual(orgKeys.tree);
   });
 });
