@@ -46,6 +46,12 @@ const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 let monthShiftFixture: Record<string, unknown>;
 
 describe('<Schedule />', () => {
+  afterEach(() => {
+    // A no-op when a test never installed fake timers, so this is safe to run
+    // unconditionally rather than duplicated per test that needs it.
+    jest.useRealTimers();
+  });
+
   beforeEach(() => {
     const today = new Date();
     const todayIso = today.toISOString().slice(0, 10);
@@ -166,6 +172,54 @@ describe('<Schedule />', () => {
     const dialog = screen.getByRole('dialog');
     await userEvent.click(within(dialog).getByRole('button', { name: /^generate$/i }));
     expect(mockGenerateSchedule).toHaveBeenCalled();
+  });
+
+  /**
+   * #559: the week view's assignment lookup used to key on
+   * `date.toISOString()` (the UTC calendar day of a Date object that still
+   * carries a real time-of-day) while the column header showed the same
+   * Date's LOCAL calendar day — a real Date at 00:30 in Rome landing an
+   * assignment on the wrong column near local midnight. The fix routes both
+   * through the same local-day helper, `toLocalDateString`, already covered
+   * for the UTC/local disagreement case directly in format.test.ts. This
+   * test instead pins the general per-day wiring the bug was symptomatic
+   * of — an assignment for a day other than "today" must land under its OWN
+   * column, not merely render somewhere in the week — at a fixed midday UTC
+   * instant so it is deterministic in every timezone CI might run in.
+   */
+  it('shows an assignment under its own day-of-week column, not merely somewhere in the week', async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T12:00:00.000Z')); // Wednesday, midday UTC
+
+    mockGetScheduleWithShifts.mockResolvedValue(
+      ok({
+        id: 1,
+        shifts: [
+          {
+            id: 100,
+            assignments: [
+              { id: 501, shiftId: 100, userId: 1, shiftDate: '2026-08-06', status: 'pending' }, // Thursday
+            ],
+          },
+        ],
+      })
+    );
+
+    render(<Schedule />);
+    await screen.findByRole('heading', { name: /schedule management/i });
+
+    const table = await screen.findByRole('table');
+    const rows = within(table).getAllByRole('row');
+    const headerCells = within(rows[0]).getAllByRole('columnheader');
+    const thursdayIndex = headerCells.findIndex((th) => /thu/i.test(th.textContent ?? ''));
+    const sundayIndex = headerCells.findIndex((th) => /sun/i.test(th.textContent ?? ''));
+    expect(thursdayIndex).toBeGreaterThan(0);
+    expect(sundayIndex).toBeGreaterThan(0);
+
+    const shiftRow = rows[1];
+    const cells = within(shiftRow).getAllByRole('cell');
+    expect(within(cells[thursdayIndex]).getByText('Ada Lovelace')).toBeInTheDocument();
+    expect(within(cells[sundayIndex]).queryByText('Ada Lovelace')).not.toBeInTheDocument();
   });
 
   const findChevron = (className: string): HTMLElement => {
