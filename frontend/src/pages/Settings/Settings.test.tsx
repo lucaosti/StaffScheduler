@@ -48,6 +48,15 @@ jest.mock('../../services/moduleService', () => ({
   removeModuleOrgOverride: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+jest.mock('../../services/fieldPolicyService', () => ({
+  listFieldPolicies: jest.fn().mockResolvedValue({
+    success: true,
+    data: { policies: [], governableCoreFields: ['email', 'phone'] },
+  }),
+  saveFieldPolicy: jest.fn().mockResolvedValue({ success: true }),
+  deleteFieldPolicy: jest.fn().mockResolvedValue({ success: true }),
+}));
+
 import Settings from './Settings';
 
 describe('<Settings />', () => {
@@ -186,5 +195,32 @@ describe('<Settings />', () => {
     render(<Settings />);
     await userEvent.click(screen.getByRole('button', { name: /^Modules$/ }));
     expect(screen.getByText(/Global Modules/i)).toBeInTheDocument();
+  });
+
+  it('shows the Employee Fields tab for admin users', () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
+    });
+
+    render(<Settings />);
+    expect(screen.getByRole('button', { name: /^Employee Fields$/ })).toBeInTheDocument();
+  });
+
+  it('hides the Employee Fields tab for non-admin users', () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 2, email: 'mgr@x', role: 'manager' },
+    });
+    render(<Settings />);
+    expect(screen.queryByRole('button', { name: /^Employee Fields$/ })).not.toBeInTheDocument();
+  });
+
+  it('renders FieldPolicySection when admin clicks the Employee Fields tab', async () => {
+    mockUseAuth.mockReturnValue({
+      user: { id: 1, email: 'admin@x', permissions: ['settings.manage'], organizationName: 'Acme' },
+    });
+
+    render(<Settings />);
+    await userEvent.click(screen.getByRole('button', { name: /^Employee Fields$/ }));
+    expect(await screen.findByText(/Employee field rules/i)).toBeInTheDocument();
   });
 });

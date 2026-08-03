@@ -14,6 +14,7 @@ import ProfileSection from '../Settings/ProfileSection';
 import SystemSection from '../Settings/SystemSection';
 import ModulesSection from '../Settings/ModulesSection';
 import CalendarSection from '../Settings/CalendarSection';
+import FieldPolicySection from '../Settings/FieldPolicySection';
 import TwoFactorSection from '../Settings/TwoFactorSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
@@ -45,7 +46,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -192,6 +193,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {isAdmin && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'fields' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('fields')}
+                >
+                  <i className="bi bi-input-cursor-text me-2"></i>Employee Fields
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -223,6 +234,10 @@ const Settings: React.FC = () => {
       {activeTab === 'system' && isAdmin && <SystemSection />}
 
       {activeTab === 'modules' && isAdmin && <ModulesSection />}
+
+      {activeTab === 'fields' && isAdmin && (
+        <FieldPolicySection organizationName={user?.organizationName ?? null} />
+      )}
     </div>
   );
 };
