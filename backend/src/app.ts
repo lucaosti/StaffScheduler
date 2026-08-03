@@ -73,6 +73,18 @@ interface BuildAppOptions {
 export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Express {
   const app = express();
 
+  // Trust exactly N reverse-proxy hops for X-Forwarded-For/-Proto, so req.ip
+  // reflects the real client rather than the load balancer's own address —
+  // both IP-keyed rate limiting (middleware/rateLimit.ts) and the audit-log
+  // IP (middleware/requestContext.ts) depend on this. 0 (the default) leaves
+  // Express's own default of trusting nothing, which is what a directly
+  // exposed instance (dev, or an unscaled deployment with no LB) needs: with
+  // no proxy in front, "trust" a hop is trusting the client to set its own
+  // X-Forwarded-For header.
+  if (config.server.trustProxyHops > 0) {
+    app.set('trust proxy', config.server.trustProxyHops);
+  }
+
   // HTTPS redirect for production deployments behind a reverse proxy.
   if (config.server.env === 'production') {
     app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
