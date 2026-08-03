@@ -10,7 +10,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface WorkSettings {
   maxHoursPerWeek: number;
@@ -33,6 +33,19 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Raw draft string for the one editable numeric field, mirroring the
+  // Draft-string pattern in FieldPolicySection: binding the input directly to
+  // `settings.minRestHours` meant clearing the field to retype a value made
+  // `parseInt('')` a NaN that immediately round-tripped back as the
+  // controlled `value`, reading as the field misbehaving mid-edit. Synced
+  // from the prop (not just seeded once) so an external settings reload is
+  // still reflected — safe to run on every valid keystroke too, since a
+  // round-tripped valid number renders back to the same string the user typed.
+  const [minRestHoursDraft, setMinRestHoursDraft] = useState(String(settings.minRestHours));
+  useEffect(() => {
+    setMinRestHoursDraft(String(settings.minRestHours));
+  }, [settings.minRestHours]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,10 +136,14 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
                     max="48"
                     className="form-control"
                     id="minRestHours"
-                    value={settings.minRestHours}
-                    onChange={(e) =>
-                      onChange({ ...settings, minRestHours: parseInt(e.target.value) })
-                    }
+                    value={minRestHoursDraft}
+                    onChange={(e) => {
+                      setMinRestHoursDraft(e.target.value);
+                      const parsed = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(parsed)) {
+                        onChange({ ...settings, minRestHours: parsed });
+                      }
+                    }}
                   />
                 </div>
               </div>
