@@ -2253,7 +2253,7 @@
     "/assignments/{id}/swap-candidates": {
       "get": {
         "summary": "Shifts this assignment could be swapped for",
-        "description": "Deliberately **not** gated on `assignment.manage`. Proposing a swap is something an ordinary employee does, and every other endpoint listing someone else's assignments requires that permission \u2014 which left the swap feature reachable only by a caller who already knew a colleague's numeric assignment id.\n\nTwo things make it safe: the caller must **own** the assignment, and the answer is bounded by the organization units they belong to, resolved server-side from their memberships and narrowed further by a scoped role. Someone attached to no unit gets an empty list rather than everyone.\n\nExcluded: the caller's own assignments, anything on the same shift, shifts that have already run or fall beyond a 60-day horizon, and any exchange that would leave either person holding two overlapping shifts \u2014 checked through the same overnight-aware overlap rule assignment creation uses.\n\n`truncated` is true when more assignments matched than were examined for conflicts, so a partial list is never presented as the whole answer.",
+        "description": "Deliberately **not** gated on `assignment.manage`. Proposing a swap is something an ordinary employee does, and every other endpoint listing someone else's assignments requires that permission — which left the swap feature reachable only by a caller who already knew a colleague's numeric assignment id.\n\nTwo things make it safe: the caller must **own** the assignment, and the answer is bounded by the organization units they belong to, resolved server-side from their memberships and narrowed further by a scoped role. Someone attached to no unit gets an empty list rather than everyone.\n\nExcluded: the caller's own assignments, anything on the same shift, shifts that have already run or fall beyond a 60-day horizon, and any exchange that would leave either person holding two overlapping shifts — checked through the same overnight-aware overlap rule assignment creation uses.\n\n`truncated` is true when more assignments matched than were examined for conflicts, so a partial list is never presented as the whole answer.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -2719,7 +2719,7 @@
           "Auth"
         ],
         "summary": "Confirm and enable 2FA",
-        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes \u2014 store them safely.",
+        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2900,7 +2900,7 @@
             "description": "Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TOTP_REQUIRED`), or wrong 2FA code (`TOTP_INVALID`)."
           },
           "429": {
-            "description": "Login throttled \u2014 too many failed attempts."
+            "description": "Login throttled — too many failed attempts."
           }
         }
       }
@@ -3091,7 +3091,7 @@
           "Calendar"
         ],
         "summary": "Personal iCalendar feed",
-        "description": "Returns an iCal feed for the user identified by `token`. No JWT required \u2014 pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
+        "description": "Returns an iCal feed for the user identified by `token`. No JWT required — pass the token as a query parameter. Emits ETag for conditional requests. Lists colleagues working the same shift in DESCRIPTION.",
         "security": [],
         "parameters": [
           {
@@ -3134,7 +3134,7 @@
     "/calendar/tokens": {
       "get": {
         "summary": "List one's own calendar feed tokens",
-        "description": "Newest first, revoked ones included \u2014 a feed that vanished from the list would be indistinguishable from one that was never created. The raw token is never here: only its SHA-256 digest is stored, so the value exists exactly once, in the response that created it. Authentication alone; these are the caller's own subscriptions.",
+        "description": "Newest first, revoked ones included — a feed that vanished from the list would be indistinguishable from one that was never created. The raw token is never here: only its SHA-256 digest is stored, so the value exists exactly once, in the response that created it. Authentication alone; these are the caller's own subscriptions.",
         "responses": {
           "200": {
             "description": "The caller's tokens."
@@ -3183,7 +3183,7 @@
     "/calendar/tokens/{id}": {
       "delete": {
         "summary": "Revoke one calendar feed token",
-        "description": "Leaves the others working. The row is kept with a `revoked_at` timestamp rather than deleted, so the history stays visible and the hash stays reserved.\n\nAnswers 404 for an unknown id, someone else's, or one already revoked \u2014 deliberately one answer, so a caller cannot learn whether another person's token id exists. Ownership is enforced inside the statement rather than checked first, leaving no window between the check and the write.",
+        "description": "Leaves the others working. The row is kept with a `revoked_at` timestamp rather than deleted, so the history stays visible and the hash stays reserved.\n\nAnswers 404 for an unknown id, someone else's, or one already revoked — deliberately one answer, so a caller cannot learn whether another person's token id exists. Ownership is enforced inside the statement rather than checked first, leaving no window between the check and the write.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -3715,7 +3715,7 @@
           "Delegations"
         ],
         "summary": "Create delegation",
-        "description": "Creates a delegation of the CALLER's own permissions \u2014 the endpoint has never accepted a delegator other than the authenticated user, and the service refuses any code the delegator does not currently hold. Admitted by either `delegation.manage` (delegation as an administered act) or `delegation.self` (each person may pass on their own authority); the two are alternatives rather than a hierarchy, and neither changes what may be delegated. Returns 422 `DELEGATION_INVALID` when a code is not held, when the delegatee is the delegator, or when a delegation rule is otherwise violated.",
+        "description": "Creates a delegation of the CALLER's own permissions — the endpoint has never accepted a delegator other than the authenticated user, and the service refuses any code the delegator does not currently hold. Admitted by either `delegation.manage` (delegation as an administered act) or `delegation.self` (each person may pass on their own authority); the two are alternatives rather than a hierarchy, and neither changes what may be delegated. Returns 422 `DELEGATION_INVALID` when a code is not held, when the delegatee is the delegator, or when a delegation rule is otherwise violated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3830,7 +3830,7 @@
             }
           }
         },
-        "description": "Revokes a delegation. Authenticated only: the service refuses anyone who is not the delegator, which is stricter than any permission could express. It deliberately carries no permission gate \u2014 one used to sit here, and it meant that someone who created a delegation and later lost `delegation.manage` could no longer revoke it, so a delegation they granted outlived their ability to withdraw it."
+        "description": "Revokes a delegation. Authenticated only: the service refuses anyone who is not the delegator, which is stricter than any permission could express. It deliberately carries no permission gate — one used to sit here, and it meant that someone who created a delegation and later lost `delegation.manage` could no longer revoke it, so a delegation they granted outlived their ability to withdraw it."
       }
     },
     "/departments": {
@@ -5155,7 +5155,7 @@
           "Import"
         ],
         "summary": "Bulk import employees from CSV/JSON",
-        "description": "Admin only. Idempotent by email \u2014 existing employees are updated.",
+        "description": "Admin only. Idempotent by email — existing employees are updated.",
         "requestBody": {
           "required": true,
           "content": {
@@ -6525,7 +6525,7 @@
           "Org Units"
         ],
         "summary": "List members of an org unit with display details",
-        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position \u2014 used by the org-chart view and the structure-decision delegate picker.",
+        "description": "Same membership as GET /org/units/{id}/members, enriched with each member's name, email, and position — used by the org-chart view and the structure-decision delegate picker.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -8866,7 +8866,7 @@
           "Schedules"
         ],
         "summary": "Auto-generate assignments",
-        "description": "Runs the scheduling optimizer to create pending assignments. Uses the optimal OR-Tools CP-SAT engine by default; if it is unavailable the run degrades to the greedy draft engine and the result reports engine='greedy' with degraded=true (the fallback is always signalled, never silent). Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id \u2014 poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.",
+        "description": "Runs the scheduling optimizer to create pending assignments. Uses the optimal OR-Tools CP-SAT engine by default; if it is unavailable the run degrades to the greedy draft engine and the result reports engine='greedy' with degraded=true (the fallback is always signalled, never silent). Asynchronous by default: when the job queue is enabled (Redis) it returns 202 with a job id — poll GET /schedules/{id}/optimization for progress/result. Without Redis it runs synchronously and returns 200 with the result. Requires schedule.optimize.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -8960,7 +8960,7 @@
     "/schedules/{id}/predecessor-candidates": {
       "get": {
         "summary": "List the schedules that could precede this one",
-        "description": "A monthly schedule continues from the one before it \u2014 rest between shifts, consecutive days worked and weekly hours all run across the boundary. When several generations cover the same period, which one actually happened is a manager's judgement rather than something the system can infer, and this is the list to choose from; `PUT /schedules/{id}` records the choice as `previousScheduleId`. Same department, starting no later than this one, newest first. Archived schedules are included on purpose \u2014 an abandoned generation for the period is precisely what the choice may be between. Each entry is flagged `isCurrent` (the recorded choice) and `isDefault` (what would be used if nothing is chosen: the most recent published schedule ending before this one starts). Requires `schedule.read`.",
+        "description": "A monthly schedule continues from the one before it — rest between shifts, consecutive days worked and weekly hours all run across the boundary. When several generations cover the same period, which one actually happened is a manager's judgement rather than something the system can infer, and this is the list to choose from; `PUT /schedules/{id}` records the choice as `previousScheduleId`. Same department, starting no later than this one, newest first. Archived schedules are included on purpose — an abandoned generation for the period is precisely what the choice may be between. Each entry is flagged `isCurrent` (the recorded choice) and `isDefault` (what would be used if nothing is chosen: the most recent published schedule ending before this one starts). Requires `schedule.read`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -9007,7 +9007,7 @@
     "/schedules/{id}/replan-proposals/{proposalId}/apply": {
       "post": {
         "summary": "Apply a replanning proposal",
-        "description": "The schedule becomes exactly what was proposed: assignments the plan leaves out are removed, and the ones it adds are written pinned. Verified against live data first and refused as a whole if any shift or person it names has changed \u2014 what is applied is exactly what was approved, or nothing. Requires `schedule.publish`, deliberately stronger than the permission to run the optimizer: applying a plan changes commitments people have already been told about.",
+        "description": "The schedule becomes exactly what was proposed: assignments the plan leaves out are removed, and the ones it adds are written pinned. Verified against live data first and refused as a whole if any shift or person it names has changed — what is applied is exactly what was approved, or nothing. Requires `schedule.publish`, deliberately stronger than the permission to run the optimizer: applying a plan changes commitments people have already been told about.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -11867,7 +11867,7 @@
           "Pending Approvals"
         ],
         "summary": "Structure head keeps a decision for themselves",
-        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent \u2014 a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
+        "description": "For a decision assigned to an org unit as a whole, the unit head decides to keep and decide it personally instead of delegating or opening it to the team. Idempotent — a second call is a no-op if already kept. 403 if the caller is not the unit's head.",
         "security": [
           {
             "bearerAuth": []
@@ -12004,7 +12004,7 @@
           "Pending Approvals"
         ],
         "summary": "Chain of command for a decision",
-        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure \u2014 not just whoever is authorized to decide it.",
+        "description": "Who this decision was assigned to (structure and head, if applicable), the full history of keep/delegate/open-to-structure actions, and who ultimately decided it. Visible to the original proposer, the current assignee, whoever decided it, and any member of the assigned structure — not just whoever is authorized to decide it.",
         "security": [
           {
             "bearerAuth": []
@@ -12465,7 +12465,7 @@
     "/employment-contracts/users/{userId}": {
       "get": {
         "summary": "List a user's contract history",
-        "description": "Which contract applied, and over which period \u2014 the question the previous model could not answer, because a change overwrote the value. Requires `employee.read`.",
+        "description": "Which contract applied, and over which period — the question the previous model could not answer, because a change overwrote the value. Requires `employee.read`.",
         "parameters": [
           {
             "name": "userId",
@@ -12584,7 +12584,7 @@
       },
       "post": {
         "summary": "Create a pairing rule",
-        "description": "`apart` \u2014 these two must not share a shift. `requires` \u2014 the first person may only work a shift the second also works, directional on purpose (a trainee must not work unsupervised; the supervisor works alone perfectly well). Rejected: a rule between someone and themself, a duplicate, and the opposite rule between the same two people, which together would leave them unschedulable. Requires `employee.manage`.",
+        "description": "`apart` — these two must not share a shift. `requires` — the first person may only work a shift the second also works, directional on purpose (a trainee must not work unsupervised; the supervisor works alone perfectly well). Rejected: a rule between someone and themself, a duplicate, and the opposite rule between the same two people, which together would leave them unschedulable. Requires `employee.manage`.",
         "responses": {
           "201": {
             "description": "Pairing rule created."
@@ -12674,7 +12674,7 @@
       },
       "put": {
         "summary": "Update a pairing rule's reason",
-        "description": "Only the reason is editable. Changing who a rule is about, or which way it runs, is a different rule \u2014 an update would let an `apart` become a `requires` in place, keeping the row's identity while inverting its meaning. Requires `employee.manage`.",
+        "description": "Only the reason is editable. Changing who a rule is about, or which way it runs, is a different rule — an update would let an `apart` become a `requires` in place, keeping the row's identity while inverting its meaning. Requires `employee.manage`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -12751,7 +12751,7 @@
     "/timeline": {
       "get": {
         "summary": "Timeline (Gantt) data for a date range",
-        "description": "Lanes, bars and a scope \u2014 the data behind a Gantt view, deliberately smaller than scheduling so it can represent things that are not shifts. A lane is something time is booked against, a bar is a half-open interval on one lane. Bars carry absolute instants, so an overnight interval is one bar ending the next morning rather than two fragments.\n\nDraws on the sources named in `sources` (comma-separated; all of them when omitted) \u2014 see `GET /timeline/sources`.\n\n**Scope is resolved server-side and cannot be requested.** `timeline.read` shows the caller's own organization units and their subtrees, computed from their memberships and narrowed further by their role scope if they have one; `timeline.read_all` lifts the restriction. Someone attached to no unit sees an empty timeline rather than everything.\n\n**The projection is narrow on purpose**: name, activity, start, end and status. Never pay, never the reason for an absence, never assignment notes \u2014 and absences do not appear at all, because showing who is away on the covered days makes leave and sickness deducible.\n\nA request may span at most 92 days.",
+        "description": "Lanes, bars and a scope — the data behind a Gantt view, deliberately smaller than scheduling so it can represent things that are not shifts. A lane is something time is booked against, a bar is a half-open interval on one lane. Bars carry absolute instants, so an overnight interval is one bar ending the next morning rather than two fragments.\n\nDraws on the sources named in `sources` (comma-separated; all of them when omitted) — see `GET /timeline/sources`.\n\n**Scope is resolved server-side and cannot be requested.** `timeline.read` shows the caller's own organization units and their subtrees, computed from their memberships and narrowed further by their role scope if they have one; `timeline.read_all` lifts the restriction. Someone attached to no unit sees an empty timeline rather than everything.\n\n**The projection is narrow on purpose**: name, activity, start, end and status. Never pay, never the reason for an absence, never assignment notes — and absences do not appear at all, because showing who is away on the covered days makes leave and sickness deducible.\n\nA request may span at most 92 days.",
         "responses": {
           "200": {
             "description": "Lanes and bars for the range."
@@ -12816,7 +12816,7 @@
     "/skills": {
       "get": {
         "summary": "List the skills catalogue",
-        "description": "Every skill, with how many employees hold it and how many shift requirements name it. The counts travel with the read rather than living behind a separate statistics call, because they are what make retiring a skill an informed decision and a caller who must ask for them separately will decide without them. Requires `employee.read` \u2014 skill names already reach anyone who can see a staff record.",
+        "description": "Every skill, with how many employees hold it and how many shift requirements name it. The counts travel with the read rather than living behind a separate statistics call, because they are what make retiring a skill an informed decision and a caller who must ask for them separately will decide without them. Requires `employee.read` — skill names already reach anyone who can see a staff record.",
         "responses": {
           "200": {
             "description": "Catalogue."
@@ -12983,7 +12983,7 @@
       },
       "delete": {
         "summary": "Delete an unused skill",
-        "description": "Refused when anything references it. All three tables that reference a skill do so `ON DELETE CASCADE`, so deleting one in use would silently strip it from every employee holding it and every shift requiring it \u2014 and the second half changes what a legal schedule is without anyone deciding to. Deactivate instead. A skill nothing references can be deleted outright, so a typo does not become permanent. Requires `employee.manage`.",
+        "description": "Refused when anything references it. All three tables that reference a skill do so `ON DELETE CASCADE`, so deleting one in use would silently strip it from every employee holding it and every shift requiring it — and the second half changes what a legal schedule is without anyone deciding to. Deactivate instead. A skill nothing references can be deleted outright, so a typo does not become permanent. Requires `employee.manage`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -13014,7 +13014,7 @@
           "Reports"
         ],
         "summary": "Export the hours-worked report as CSV",
-        "description": "Requires `report.read`. Same range and department filters as `GET /reports/hours-worked`, and the same underlying query \u2014 the file and the screen cannot disagree. Unpaginated. The export is recorded in the audit log with the filters that produced it.",
+        "description": "Requires `report.read`. Same range and department filters as `GET /reports/hours-worked`, and the same underlying query — the file and the screen cannot disagree. Unpaginated. The export is recorded in the audit log with the filters that produced it.",
         "responses": {
           "200": {
             "description": "The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings).",
@@ -13160,7 +13160,7 @@
           "Reports"
         ],
         "summary": "Export a schedule fairness breakdown as CSV",
-        "description": "Requires `report.read`. Exports the per-employee hours breakdown, not the summary statistics \u2014 the reason to open a spreadsheet is to sort people by hours. Audited.",
+        "description": "Requires `report.read`. Exports the per-employee hours breakdown, not the summary statistics — the reason to open a spreadsheet is to sort people by hours. Audited.",
         "responses": {
           "200": {
             "description": "The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings).",
@@ -13381,7 +13381,7 @@
           "Assignments"
         ],
         "summary": "Export shift assignments as CSV",
-        "description": "Requires `assignment.manage`. Same filters as `GET /assignments`, unpaginated \u2014 an oversized result is refused rather than truncated, because a truncated file is a wrong answer that looks complete. Audited.",
+        "description": "Requires `assignment.manage`. Same filters as `GET /assignments`, unpaginated — an oversized result is refused rather than truncated, because a truncated file is a wrong answer that looks complete. Audited.",
         "responses": {
           "200": {
             "description": "The matching rows as a UTF-8 CSV attachment (BOM included, CRLF line endings).",
@@ -13612,7 +13612,7 @@
           "Org Units"
         ],
         "summary": "Authority profile for a person",
-        "description": "Who has authority over this person: their manager chain, who may grant or revoke their roles (labelled by whether that comes from a responsibility rule or from holding `role.manage` outright), and \u2014 for every configured approval workflow \u2014 who would decide each step for them. Defaults to the caller. Reading someone else's profile requires `org_unit.read`, the same gate the rest of the org tree carries; reading your own needs nothing beyond being authenticated, because knowing who decides your requests is what you need in order to use the system. Every name is resolved by the component that would actually take the decision, so this cannot drift from what would really happen. A step that resolves to nobody is reported with `unresolved: true` rather than omitted \u2014 it means requests of that kind currently have no one who can decide them.",
+        "description": "Who has authority over this person: their manager chain, who may grant or revoke their roles (labelled by whether that comes from a responsibility rule or from holding `role.manage` outright), and — for every configured approval workflow — who would decide each step for them. Defaults to the caller. Reading someone else's profile requires `org_unit.read`, the same gate the rest of the org tree carries; reading your own needs nothing beyond being authenticated, because knowing who decides your requests is what you need in order to use the system. Every name is resolved by the component that would actually take the decision, so this cannot drift from what would really happen. A step that resolves to nobody is reported with `unresolved: true` rather than omitted — it means requests of that kind currently have no one who can decide them.",
         "parameters": [
           {
             "name": "userId",
@@ -13655,7 +13655,7 @@
           "Org Units"
         ],
         "summary": "Authority profile for the authenticated user",
-        "description": "The caller's own profile: their manager chain, who may grant or revoke their roles, and who would decide each step of every kind of request they can file. Needs no permission beyond authentication \u2014 knowing who decides your own requests is what you need in order to use the system. See `/org/authority/{userId}` for someone else's, which requires `org_unit.read`.",
+        "description": "The caller's own profile: their manager chain, who may grant or revoke their roles, and who would decide each step of every kind of request they can file. Needs no permission beyond authentication — knowing who decides your own requests is what you need in order to use the system. See `/org/authority/{userId}` for someone else's, which requires `org_unit.read`.",
         "responses": {
           "200": {
             "description": "The authority profile.",
@@ -13682,7 +13682,7 @@
           "RBAC"
         ],
         "summary": "Role assignment timeline for one person",
-        "description": "Everything that happened to this person's roles, and what they hold now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed \u2014 so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story.",
+        "description": "Everything that happened to this person's roles, and what they hold now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed — so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story.",
         "parameters": [
           {
             "name": "userId",
@@ -13731,7 +13731,7 @@
           "RBAC"
         ],
         "summary": "Role assignment timeline for one role",
-        "description": "Everyone who has ever held this role, and who holds it now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed \u2014 so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story. The role id lives inside the audit snapshot's JSON, which no index covers, so this query is a bounded scan \u2014 use `since` to narrow it.",
+        "description": "Everyone who has ever held this role, and who holds it now. Requires `role.manage`. Returns `current` (the grants held now, authoritative, read from `user_roles`) alongside `entries` (the grant and revoke events from the audit log). Neither is derivable from the other: a grant made before auditing existed has no event, and a grant that reached its `expires_at` produced no event when it lapsed — so each current grant carries `hasHistory`, and a lapsed grant gets a synthesised `expired` entry marked `derived: true`. `truncated` is true when the event cap was reached, so a window is never presented as the whole story. The role id lives inside the audit snapshot's JSON, which no index covers, so this query is a bounded scan — use `since` to narrow it.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -13774,7 +13774,7 @@
           "Calendar"
         ],
         "summary": "Filtered aggregate iCal feed",
-        "description": "A calendar aggregation across departments, roles and people, over a range that reaches into the PAST as well as the future \u2014 the per-department feed started at today, so a subscribed calendar could not answer \"who was on that Tuesday\" once Tuesday had passed. Authenticated by the `token` query parameter, like the other feeds.\n\nThe caller must hold `timeline.read` or `timeline.read_all`: this feed makes the same disclosure the timeline does \u2014 when a named colleague is at work \u2014 and reusing those codes avoids two rules for one disclosure. **The org-unit scope is resolved from the token owner on every fetch and intersected with the filters**, so a feed cannot widen its own reach and stops publishing a unit as soon as its owner's authority over that unit ends. A caller whose scope resolves to nothing gets an empty calendar, not an unfiltered one.\n\nShows shifts and their assignees only. Absences are excluded: publishing who is away on covered days makes leave and sickness deducible from a calendar anyone with the URL can read.",
+        "description": "A calendar aggregation across departments, roles and people, over a range that reaches into the PAST as well as the future — the per-department feed started at today, so a subscribed calendar could not answer \"who was on that Tuesday\" once Tuesday had passed. Authenticated by the `token` query parameter, like the other feeds.\n\nThe caller must hold `timeline.read` or `timeline.read_all`: this feed makes the same disclosure the timeline does — when a named colleague is at work — and reusing those codes avoids two rules for one disclosure. **The org-unit scope is resolved from the token owner on every fetch and intersected with the filters**, so a feed cannot widen its own reach and stops publishing a unit as soon as its owner's authority over that unit ends. A caller whose scope resolves to nothing gets an empty calendar, not an unfiltered one.\n\nShows shifts and their assignees only. Absences are excluded: publishing who is away on covered days makes leave and sickness deducible from a calendar anyone with the URL can read.",
         "responses": {
           "200": {
             "description": "The filtered calendar, as text/calendar. Carries an ETag; honours If-None-Match.",
@@ -13857,7 +13857,7 @@
           "Settings"
         ],
         "summary": "Employee field policies in force",
-        "description": "Readable by any authenticated caller: a form has to know which fields are required before someone fills one in, or the only way to discover a rule is to break it, and the policies describe the shape of a record rather than anything about a person. Defaults to the caller's own organization. The response also carries `governableCoreFields`, so an admin UI offers the allowlist rather than keeping a copy that goes stale. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY \u2014 switching on a required field must never make reading an existing incomplete record fail.",
+        "description": "Readable by any authenticated caller: a form has to know which fields are required before someone fills one in, or the only way to discover a rule is to break it, and the policies describe the shape of a record rather than anything about a person. Defaults to the caller's own organization. The response also carries `governableCoreFields`, so an admin UI offers the allowlist rather than keeping a copy that goes stale. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
         "responses": {
           "200": {
             "description": "Success.",
@@ -13896,7 +13896,7 @@
           "Settings"
         ],
         "summary": "Create or replace one field's policy",
-        "description": "Requires `settings.manage`, NOT `employee.manage`: editing an employee and deciding what an employee record must contain are different acts, and the second can make a field visible. `fieldKey` must be a governable core field or `custom:<key>` \u2014 a policy that could name any column would let a configuration change make `password_hash` a visible directory field, which is why the allowlist lives in code rather than in this document. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY \u2014 switching on a required field must never make reading an existing incomplete record fail.",
+        "description": "Requires `settings.manage`, NOT `employee.manage`: editing an employee and deciding what an employee record must contain are different acts, and the second can make a field visible. `fieldKey` must be a governable core field or `custom:<key>` — a policy that could name any column would let a configuration change make `password_hash` a visible directory field, which is why the allowlist lives in code rather than in this document. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
         "responses": {
           "200": {
             "description": "Success.",
@@ -14067,7 +14067,7 @@
           "Settings"
         ],
         "summary": "Remove one field's policy",
-        "description": "Requires `settings.manage`. Removing an organization's row falls back to the global policy for that field, if one exists. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY \u2014 switching on a required field must never make reading an existing incomplete record fail.",
+        "description": "Requires `settings.manage`. Removing an organization's row falls back to the global policy for that field, if one exists. A field policy is per-deployment CONFIGURATION, not contract: the Zod schemas define what this API accepts and generate this document, while a policy defines what one organization requires. The two are checked in sequence, and a policy refusal carries `FIELD_POLICY_VIOLATION` precisely because it is not a contract violation. Enforcement is WRITE-ONLY — switching on a required field must never make reading an existing incomplete record fail.",
         "responses": {
           "200": {
             "description": "Success.",
@@ -14143,7 +14143,7 @@
           "Departments"
         ],
         "summary": "Register a kiosk device for a department",
-        "description": "Returns the raw device token in plaintext \u2014 the only time it is ever exposed, since only its hash is stored afterward. The caller must display it once and cannot retrieve it again.",
+        "description": "Returns the raw device token in plaintext — the only time it is ever exposed, since only its hash is stored afterward. The caller must display it once and cannot retrieve it again.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -14220,7 +14220,7 @@
           "Attendance"
         ],
         "summary": "Punch a clock-in or clock-out from a shared kiosk device",
-        "description": "Authenticated by an `X-Kiosk-Token` device header, not a user session \u2014 there is no signed-in user at a shared kiosk. Toggles: clocks the resolved employee in if they have no open record, otherwise clocks them out.",
+        "description": "Authenticated by an `X-Kiosk-Token` device header, not a user session — there is no signed-in user at a shared kiosk. Toggles: clocks the resolved employee in if they have no open record, otherwise clocks them out.",
         "responses": {
           "200": {
             "description": "Punch recorded; `action` is `clocked_in` or `clocked_out`."
