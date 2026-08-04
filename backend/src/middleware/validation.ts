@@ -28,10 +28,9 @@
  *
  * WHY THEY RETURN THE ENVELOPE DIRECTLY INSTEAD OF THROWING `ValidationError`.
  * Services throw typed errors and the central `errorHandler` renders them, and
- * that is the right shape for anything inside a route handler. Middleware is
- * not: it runs outside `asyncHandler`, so a throw escapes Express 4's
- * synchronous error path. `UnauthorizedError` is documented as carrying the
- * same exception for the same reason.
+ * that is the right shape for anything inside a route handler. These are
+ * synchronous middleware, not route handlers — consistent with the same
+ * reasoning `UnauthorizedError` is documented as carrying.
  *
  * COERCION IS THE SCHEMA'S JOB, NOT THIS FILE'S. Path and query values arrive
  * as strings, always — `?page=2` is `"2"` and `/shifts/5` is `"5"`. The schemas

@@ -37,7 +37,6 @@ import { assignmentColumns } from '../services/exportColumns';
 import { SwapCandidateService } from '../services/SwapCandidateService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -69,7 +68,7 @@ const exporter = new ExportService(new AuditLogService(pool));
 // request for one user's assignments returned everyone's. They are now parsed
 // from a schema, and the listing is bounded — see AssignmentService for why an
 // oversized unpaginated request is refused rather than truncated.
-router.get('/', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), async (req: Request, res: Response) => {
   // page/pageSize belong to the pagination envelope, not to the SQL filters.
   const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
   const pagination = parsePagination(req);
@@ -84,10 +83,10 @@ router.get('/', authenticate, requirePermission('assignment.manage'), validateQu
 
   const assignments = await assignmentService.getAllAssignments(filters);
   res.json({ success: true, data: assignments });
-}));
+});
 
 // Before `/:id`, so "export" is not read as an assignment id.
-router.get('/export', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), asyncHandler(async (req: Request, res: Response) => {
+router.get('/export', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), async (req: Request, res: Response) => {
   const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
   // The unpaginated listing refuses an oversized result rather than truncating
   // it (see AssignmentService); the export inherits that, which is the right
@@ -100,10 +99,10 @@ router.get('/export', authenticate, requirePermission('assignment.manage'), vali
     columns: assignmentColumns,
     filters,
   });
-}));
+});
 
 // Allowed when: the caller holds assignment.manage OR the assignment belongs to the caller.
-router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const actor = req.user as User;
 
@@ -115,9 +114,9 @@ router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (re
   if (!canManage && !isOwn) throw new ForbiddenError();
 
   res.json({ success: true, data: assignment });
-}));
+});
 
-router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), async (req: Request, res: Response) => {
   const assignment = await assignmentService.createAssignment({
     ...res.locals.body,
     actorId: req.user?.id,
@@ -128,9 +127,9 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
     data: assignment,
     message: 'Assignment created successfully'
   });
-}));
+});
 
-router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), asyncHandler(async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const assignment = await assignmentService.updateAssignment(id, {
@@ -142,9 +141,9 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), validat
     data: assignment,
     message: 'Assignment updated successfully'
   });
-}));
+});
 
-router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const reason = res.locals.body.reason;
 
@@ -153,10 +152,10 @@ router.delete('/:id', authenticate, requirePermission('assignment.manage'), vali
     success: true,
     message: 'Assignment deleted successfully'
   });
-}));
+});
 
 // Allowed when: the caller holds assignment.manage OR is requesting their own assignments.
-router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
   const { userId } = res.locals.params;
   const actor = req.user as User;
 
@@ -165,7 +164,7 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHand
 
   const assignments = await assignmentService.getAssignmentsByUser(userId);
   res.json({ success: true, data: assignments });
-}));
+});
 
 // Which of other people's shifts this one could be swapped for.
 //
@@ -176,7 +175,7 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHand
 // id. The service enforces the two things that make this safe: the caller must
 // own the assignment, and the answer is bounded by the org units they belong
 // to, resolved here rather than accepted from the request.
-router.get('/:id/swap-candidates', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/swap-candidates', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const actor = req.user as User;
 
@@ -195,16 +194,16 @@ router.get('/:id/swap-candidates', authenticate, validateParams(idParam), asyncH
 
   const result = await new SwapCandidateService(pool).forAssignment(id, actor.id, orgUnitIds);
   res.json({ success: true, data: result });
-}));
+});
 
-router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
   const assignments = await assignmentService.getAssignmentsByShift(shiftId);
   res.json({ success: true, data: assignments });
-}));
+});
 
-router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
   // The allowed statuses used to be a literal array checked inline here; the
   // schema now owns them, so the enum cannot drift from the documented one.
@@ -213,9 +212,9 @@ router.get('/department/:departmentId', authenticate, requirePermission('assignm
     res.locals.query.status
   );
   res.json({ success: true, data: assignments });
-}));
+});
 
-router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), asyncHandler(async (_req: Request, res: Response) => {
+router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), async (_req: Request, res: Response) => {
   const { assignments } = res.locals.body;
 
   const createdAssignments = await assignmentService.bulkCreateAssignments(assignments);
@@ -225,14 +224,14 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
     data: { assignments: createdAssignments, count: createdAssignments.length },
     message: `${createdAssignments.length} assignments created successfully`
   });
-}));
+});
 
 // Distinct from `/bulk` above on purpose (#316): `/bulk` predates this and
 // exists for internal callers that create what they can and discard the rest
 // (see `AssignmentService.bulkCreateAssignments`'s header). A high-volume
 // integration needs the opposite — one outcome per input row, so it can tell
 // exactly which of 200 rows failed and retry only those.
-router.post('/batch', authenticate, requirePermission('assignment.manage'), validateBody(batchCreateAssignmentsBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/batch', authenticate, requirePermission('assignment.manage'), validateBody(batchCreateAssignmentsBody), async (req: Request, res: Response) => {
   const { assignments } = res.locals.body as z.infer<typeof batchCreateAssignmentsBody>;
   const result = await runBatch(assignments, (assignmentData) =>
     assignmentService.createAssignment({ ...assignmentData, actorId: req.user?.id })
@@ -243,10 +242,10 @@ router.post('/batch', authenticate, requirePermission('assignment.manage'), vali
     data: result,
     message: `${result.succeeded} of ${result.succeeded + result.failed} assignments created successfully`
   });
-}));
+});
 
 // Only the assigned user or a manager (assignment.manage) may confirm.
-router.patch('/:id/confirm', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/confirm', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const actor = req.user as User;
 
@@ -263,10 +262,10 @@ router.patch('/:id/confirm', authenticate, validateParams(idParam), asyncHandler
     data: assignment,
     message: 'Assignment confirmed successfully'
   });
-}));
+});
 
 // Only the assigned user or a manager (assignment.manage) may decline.
-router.patch('/:id/decline', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const actor = req.user as User;
 
@@ -284,10 +283,10 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), asyncHandler
     data: assignment,
     message: 'Assignment declined successfully'
   });
-}));
+});
 
 // Only a manager (assignment.manage) may mark an assignment complete.
-router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const assignment = await assignmentService.completeAssignment(id, req.user?.id);
@@ -296,14 +295,14 @@ router.patch('/:id/complete', authenticate, requirePermission('assignment.manage
     data: assignment,
     message: 'Assignment completed successfully'
   });
-}));
+});
 
-router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
   const employees = await assignmentService.getAvailableEmployeesForShift(shiftId);
   res.json({ success: true, data: employees });
-}));
+});
 
   return router;
 };

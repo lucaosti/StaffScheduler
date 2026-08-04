@@ -19,7 +19,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateQuery } from '../middleware/validation';
 import {
   employeeFieldPolicyBody,
@@ -45,7 +44,7 @@ export const createEmployeeFieldPolicyRouter = (pool: Pool): Router => {
    * parameter: asking a client to name its own organization invites it to name
    * a different one, and the answer it needs is almost always its own.
    */
-  router.get('/', validateQuery(employeeFieldPolicyQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(employeeFieldPolicyQuery), async (req: Request, res: Response) => {
     const organizationName = res.locals.query.organizationName ?? req.user?.organizationName ?? null;
     const policies = await service.listForOrganization(organizationName);
     res.json({
@@ -58,9 +57,9 @@ export const createEmployeeFieldPolicyRouter = (pool: Pool): Router => {
         governableCoreFields: GOVERNABLE_CORE_FIELDS,
       },
     });
-  }));
+  });
 
-  router.put('/', requirePermission('settings.manage'), validateBody(employeeFieldPolicyBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.put('/', requirePermission('settings.manage'), validateBody(employeeFieldPolicyBody), async (_req: Request, res: Response) => {
     const body = res.locals.body;
     await service.upsert({
       organizationName: body.organizationName ?? null,
@@ -77,16 +76,16 @@ export const createEmployeeFieldPolicyRouter = (pool: Pool): Router => {
       helpText: body.helpText ?? null,
     });
     res.json({ success: true, message: 'Field policy saved' });
-  }));
+  });
 
-  router.delete('/', requirePermission('settings.manage'), validateQuery(employeeFieldPolicyDeleteQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.delete('/', requirePermission('settings.manage'), validateQuery(employeeFieldPolicyDeleteQuery), async (_req: Request, res: Response) => {
     const removed = await service.remove(
       res.locals.query.organizationName ?? null,
       res.locals.query.fieldKey
     );
     if (!removed) throw new NotFoundError('Field policy not found');
     res.json({ success: true, message: 'Field policy removed' });
-  }));
+  });
 
   return router;
 };

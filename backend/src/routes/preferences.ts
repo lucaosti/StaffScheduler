@@ -12,7 +12,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { userIdParam, upsertPreferencesBody, upsertOwnPreferencesBody } from '../schemas';
 import { PreferencesService } from '../services/PreferencesService';
@@ -23,31 +22,31 @@ export const createPreferencesRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.get('/me', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/me', async (req: Request, res: Response) => {
     const data = await service.getByUserId(req.user!.id);
     res.json({ success: true, data });
-  }));
+  });
 
   // Self-service, so no permission gate — and therefore a NARROWER body than
   // the manager route below. The working-time limits are hard constraints the
   // optimizer enforces; accepting them here let any employee raise their own
   // legal maximums. See upsertOwnPreferencesBody.
-  router.put('/me', validateBody(upsertOwnPreferencesBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.put('/me', validateBody(upsertOwnPreferencesBody), async (_req: Request, res: Response) => {
     const data = await service.upsert(_req.user!.id, res.locals.body);
     res.json({ success: true, data });
-  }));
+  });
 
-  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), async (_req: Request, res: Response) => {
     const userId = res.locals.params.userId;
     const data = await service.getByUserId(userId);
     res.json({ success: true, data });
-  }));
+  });
 
-  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
     const userId = res.locals.params.userId;
     const data = await service.upsert(userId, res.locals.body);
     res.json({ success: true, data });
-  }));
+  });
 
   return router;
 };

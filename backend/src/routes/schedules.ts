@@ -42,7 +42,6 @@ import {
   cancelOptimization,
 } from '../services/OptimizationQueue';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
@@ -65,7 +64,7 @@ export const createSchedulesRouter = (pool: Pool) => {
 // departmentId/startDate/endDate were documented but never read: the handler
 // applied only the caller's org-unit scope, so a filtered request returned
 // every schedule the caller could see.
-router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(scheduleListQuery), asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(scheduleListQuery), async (req: Request, res: Response) => {
   const scope = req.user?.allowedOrgUnitIds;
   const { page: _page, pageSize: _pageSize, ...queryFilters } = res.locals.query;
   const filters = {
@@ -82,9 +81,9 @@ router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(
   }
   const schedules = await scheduleService.getAllSchedules(filters);
   res.json({ success: true, data: schedules });
-}));
+});
 
-router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.getScheduleById(id);
@@ -107,9 +106,9 @@ router.get('/:id', authenticate, requirePermission('schedule.read'), validatePar
   }
 
   res.json({ success: true, data: schedule });
-}));
+});
 
-router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.getScheduleWithShifts(id);
@@ -133,9 +132,9 @@ router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), vali
   }
 
   res.json({ success: true, data: schedule });
-}));
+});
 
-router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), async (req: Request, res: Response) => {
   // Guaranteed by authenticate, as on every protected route.
   const user = req.user!;
 
@@ -146,9 +145,9 @@ router.post('/', authenticate, requirePermission('schedule.manage'), validateBod
     data: schedule,
     message: 'Schedule created successfully'
   });
-}));
+});
 
-router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), asyncHandler(async (_req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.updateSchedule(id, res.locals.body);
@@ -157,9 +156,9 @@ router.put('/:id', authenticate, requirePermission('schedule.manage'), validateP
     data: schedule,
     message: 'Schedule updated successfully'
   });
-}));
+});
 
-router.delete('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   await scheduleService.deleteSchedule(id);
@@ -167,17 +166,17 @@ router.delete('/:id', authenticate, requirePermission('schedule.manage'), valida
     success: true,
     message: 'Schedule deleted successfully'
   });
-}));
+});
 
-router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
   const schedules = await scheduleService.getSchedulesByDepartment(departmentId);
   res.json({ success: true, data: schedules });
-}));
+});
 
 // Allowed when: the caller holds schedule.manage OR is querying their own schedules.
-router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHandler(async (req: Request, res: Response) => {
+router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
   const { userId } = res.locals.params;
   const actor = req.user;
 
@@ -191,9 +190,9 @@ router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHand
 
   const schedules = await scheduleService.getSchedulesByUser(userId);
   res.json({ success: true, data: schedules });
-}));
+});
 
-router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const reason = res.locals.body.reason;
@@ -203,9 +202,9 @@ router.patch('/:id/publish', authenticate, requirePermission('schedule.publish')
     data: schedule,
     message: 'Schedule published successfully'
   });
-}));
+});
 
-router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.archiveSchedule(id, req.user!.id);
@@ -214,9 +213,9 @@ router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'),
     data: schedule,
     message: 'Schedule archived successfully'
   });
-}));
+});
 
-router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), asyncHandler(async (_req: Request, res: Response) => {
+router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const { name, startDate, endDate } = res.locals.body;
 
@@ -227,7 +226,7 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
     data: newSchedule,
     message: 'Schedule duplicated successfully'
   });
-}));
+});
 
 // Generate an optimized schedule.
 //
@@ -237,7 +236,7 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
 // cancel — instead of holding the request open for minutes. Without Redis it
 // falls back to running synchronously and returns 200 with the result, so a
 // zero-Redis deployment still works (at the cost of a long request).
-router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const user = req.user!;
 
@@ -265,7 +264,7 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
     data: result,
     message: 'Schedule generated successfully'
   });
-}));
+});
 
 // Which schedules could precede this one.
 //
@@ -274,9 +273,9 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
 // cover the same period, which one actually happened is a manager's judgement
 // rather than something the system can infer. This is the list to choose from;
 // `PUT /schedules/:id` records the choice as `previousScheduleId`.
-router.get('/:id/predecessor-candidates', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/:id/predecessor-candidates', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   res.json({ success: true, data: await scheduleService.getPredecessorCandidates(res.locals.params.id) });
-}));
+});
 
 // Replanning proposals.
 //
@@ -292,9 +291,9 @@ router.get('/:id/predecessor-candidates', authenticate, requirePermission('sched
 // Gating it on `schedule.optimize` would let anyone who can press "generate"
 // rearrange a live schedule, which is exactly the hole this whole mechanism
 // exists to close.
-router.get('/:id/replan-proposals', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/:id/replan-proposals', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
   res.json({ success: true, data: await replanProposals.listForSchedule(res.locals.params.id) });
-}));
+});
 
 // The proposal must belong to the schedule in the path. Without this check the
 // schedule segment would be decoration, and a proposal for another schedule
@@ -307,7 +306,7 @@ const proposalOfSchedule = async (scheduleId: number, proposalId: number) => {
   return proposal;
 };
 
-router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
   const { id, proposalId } = res.locals.params;
   await proposalOfSchedule(id, proposalId);
   const applied = await replanProposals.apply(proposalId, req.user!.id, res.locals.body.reason ?? null);
@@ -316,16 +315,16 @@ router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePerm
     data: applied,
     message: `Plan applied: ${applied.inserted} assignment(s) added, ${applied.removed} removed`,
   });
-}));
+});
 
-router.post('/:id/replan-proposals/:proposalId/reject', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/:id/replan-proposals/:proposalId/reject', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
   const { id, proposalId } = res.locals.params;
   await proposalOfSchedule(id, proposalId);
   const rejected = await replanProposals.reject(proposalId, req.user!.id, res.locals.body.reason ?? null);
   res.json({ success: true, data: rejected, message: 'Plan rejected; the schedule is unchanged' });
-}));
+});
 
-router.get('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const status = await getOptimizationStatus(id);
   if (!status) {
@@ -335,9 +334,9 @@ router.get('/:id/optimization', authenticate, requirePermission('schedule.optimi
     });
   }
   res.json({ success: true, data: status });
-}));
+});
 
-router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const cancelled = await cancelOptimization(id);
   if (!cancelled) {
@@ -347,7 +346,7 @@ router.delete('/:id/optimization', authenticate, requirePermission('schedule.opt
     });
   }
   res.json({ success: true, message: 'Optimization cancelled' });
-}));
+});
 
   return router;
 };

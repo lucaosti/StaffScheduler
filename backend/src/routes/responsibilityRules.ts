@@ -17,7 +17,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -37,13 +36,13 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   // List rules
-  router.get('/', requirePermission('responsibility.read'), validateQuery(responsibilityRuleListQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/', requirePermission('responsibility.read'), validateQuery(responsibilityRuleListQuery), async (_req: Request, res: Response) => {
     const rules = await svc.list(res.locals.query);
     res.json({ success: true, data: rules });
-  }));
+  });
 
   // Resolve responsible users for a given subject + permission
-  router.get('/resolve', requirePermission('responsibility.read'), validateQuery(responsibilityRuleResolveQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/resolve', requirePermission('responsibility.read'), validateQuery(responsibilityRuleResolveQuery), async (_req: Request, res: Response) => {
     const { permissionCode, orgUnitId, departmentIds: rawDepartmentIds, roleIds: rawRoleIds } = res.locals.query;
     const idList = (raw?: string) =>
       raw ? String(raw).split(',').map(Number).filter(Boolean) : [];
@@ -56,23 +55,23 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
     });
 
     res.json({ success: true, data: { userIds } });
-  }));
+  });
 
   // GET /matrix — pivot view: rules grouped by (subject, permission)
-  router.get('/matrix', requirePermission('responsibility.read'), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/matrix', requirePermission('responsibility.read'), async (_req: Request, res: Response) => {
     const matrix = await svc.getMatrix();
     res.json({ success: true, data: { matrix } });
-  }));
+  });
 
   // GET /my-responsibilities — rules for which the current user is a responsible party
-  router.get('/my-responsibilities', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  router.get('/my-responsibilities', authenticate, async (req: Request, res: Response) => {
     const actor = req.user as User;
     const rules = await svc.getMyResponsibilities(actor.id);
     res.json({ success: true, data: rules });
-  }));
+  });
 
   // POST /bulk — create N rules in one transaction
-  router.post('/bulk', requirePermission('responsibility.manage'), validateBody(bulkBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/bulk', requirePermission('responsibility.manage'), validateBody(bulkBody), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const body = res.locals.body;
     const rules = await svc.bulkCreate(
@@ -87,43 +86,43 @@ export const createResponsibilityRulesRouter = (pool: Pool): Router => {
       actor.id
     );
     res.status(201).json({ success: true, data: rules, message: `${rules.length} responsibility rules created` });
-  }));
+  });
 
   // Get by ID
-  router.get('/:id', requirePermission('responsibility.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:id', requirePermission('responsibility.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     const rule = await svc.getById(res.locals.params.id);
     if (!rule) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Responsibility rule not found' } });
     }
     res.json({ success: true, data: rule });
-  }));
+  });
 
   // Create
-  router.post('/', requirePermission('responsibility.manage'), validateBody(createRuleBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/', requirePermission('responsibility.manage'), validateBody(createRuleBody), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const rule = await svc.create(res.locals.body, actor.id);
     res.status(201).json({ success: true, data: rule, message: 'Responsibility rule created' });
-  }));
+  });
 
   // GET /:id/conflicts — detect overlapping rules for the same subject+permission
-  router.get('/:id/conflicts', requirePermission('responsibility.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:id/conflicts', requirePermission('responsibility.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     const conflicts = await svc.getConflicts(res.locals.params.id);
     res.json({ success: true, data: { conflicts, hasConflicts: conflicts.length > 0 } });
-  }));
+  });
 
   // Update
-  router.put('/:id', requirePermission('responsibility.manage'), validateParams(idParam), validateBody(updateRuleBody), asyncHandler(async (req: Request, res: Response) => {
+  router.put('/:id', requirePermission('responsibility.manage'), validateParams(idParam), validateBody(updateRuleBody), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const rule = await svc.update(res.locals.params.id, res.locals.body, actor.id);
     res.json({ success: true, data: rule, message: 'Responsibility rule updated' });
-  }));
+  });
 
   // Delete
-  router.delete('/:id', requirePermission('responsibility.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/:id', requirePermission('responsibility.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     const actor = req.user as User;
     await svc.delete(res.locals.params.id, actor.id);
     res.json({ success: true, message: 'Responsibility rule deleted' });
-  }));
+  });
 
   return router;
 };

@@ -14,7 +14,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { createTimeOffBody, optionalNotesBody, idParam, timeOffListQuery } from '../schemas';
 import { TimeOffService } from '../services/TimeOffService';
@@ -49,7 +48,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.post('/', validateBody(createTimeOffBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/', validateBody(createTimeOffBody), async (req: Request, res: Response) => {
     const created = await service.create({
       userId: req.user!.id,
       startDate: res.locals.body.startDate,
@@ -58,16 +57,16 @@ export const createTimeOffRouter = (pool: Pool): Router => {
       reason: res.locals.body.reason,
     });
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.get('/', validateQuery(timeOffListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(timeOffListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const list = await service.list(filters);
     res.json({ success: true, data: list });
-  }));
+  });
 
   // Before `/:id`, so "export" is not read as a request id.
-  router.get('/export', validateQuery(timeOffListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/export', validateQuery(timeOffListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const rows = await service.list(filters);
     await exporter.sendCsv(res, {
@@ -77,9 +76,9 @@ export const createTimeOffRouter = (pool: Pool): Router => {
       columns: timeOffColumns,
       filters,
     });
-  }));
+  });
 
-  router.get('/:id', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const item = await service.getById(id);
     if (!item) return respondError(res, 404, 'NOT_FOUND', 'Time-off request not found');
@@ -87,25 +86,25 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     const isManager = userHasPermission(req.user, 'timeoff.approve');
     if (!isOwn && !isManager) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
     res.json({ success: true, data: item });
-  }));
+  });
 
-  router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/:id/cancel', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.cancel(id, req.user!.id);
     res.json({ success: true, data: updated });
-  }));
+  });
 
   return router;
 };
