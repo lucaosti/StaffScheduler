@@ -2027,6 +2027,21 @@ describe('directory router (extended)', () => {
       .send({ vcf: 'BEGIN:VCARD\nEND:VCARD', defaultPassword: 'initial-password-1' });
     expect(ok.status).toBe(200);
   });
+
+  it('POST /import-vcard/preview 400 on missing body, 200 with the per-card outcomes on success', async () => {
+    const bad = await request(app()).post('/api/directory/import-vcard/preview').send({});
+    expect(bad.status).toBe(400);
+
+    (UserDirectoryService.prototype.previewImportVcf as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ rows: [{ email: 'x@y.com', name: 'X', outcome: 'create' }] });
+    const ok = await request(app())
+      .post('/api/directory/import-vcard/preview')
+      .set('Content-Type', 'application/json')
+      .send({ vcf: 'BEGIN:VCARD\nEND:VCARD' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.rows).toEqual([{ email: 'x@y.com', name: 'X', outcome: 'create' }]);
+  });
 });
 
 describe('events router', () => {

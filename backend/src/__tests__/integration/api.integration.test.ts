@@ -1137,6 +1137,9 @@ describe('shift-swap and import run against the real schema', () => {
     { name: 'POST /import/shifts', run: async () => drive('post', '/import/shifts', {
       csv: `scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n${scheduleId},${departmentId},2033-01-02,09:00,17:00,1,2`,
     }) },
+    { name: 'POST /directory/import-vcard/preview', run: async () => drive('post', '/directory/import-vcard/preview', {
+      vcf: `BEGIN:VCARD\nVERSION:3.0\nFN:Imp Ort\nEMAIL:vc-preview-${tag()}@example.com\nEND:VCARD`,
+    }) },
     { name: 'POST /directory/import-vcard', run: async () => drive('post', '/directory/import-vcard', {
       vcf: `BEGIN:VCARD\nVERSION:3.0\nFN:Imp Ort\nEMAIL:vc-${tag()}@example.com\nEND:VCARD`,
       defaultPassword: 'Password1!',

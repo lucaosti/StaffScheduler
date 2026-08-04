@@ -183,3 +183,42 @@ describe('UserDirectoryService.importVcf', () => {
     expect(out.skipped[0].reason).toBe('missing email');
   });
 });
+
+describe('UserDirectoryService.previewImportVcf', () => {
+  it('reports create for a new email, skip for one already in the database, and writes nothing', async () => {
+    const { pool, execute, conn } = makePool();
+    execute.mockResolvedValueOnce([[{ email: 'dup@x.com' }], null]); // bulk existing-email lookup
+    const service = new UserDirectoryService(pool);
+    const out = await service.previewImportVcf(
+      'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bruno Demo\r\nEMAIL:bruno@example.local\r\nEND:VCARD\r\n' +
+        'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nEMAIL:dup@x.com\r\nEND:VCARD\r\n'
+    );
+    expect(out.rows).toEqual([
+      { email: 'bruno@example.local', name: 'Bruno Demo', outcome: 'create' },
+      { email: 'dup@x.com', name: 'X', outcome: 'skip', reason: 'email already exists' },
+    ]);
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('reports skip for a card with no email, without querying the database', async () => {
+    const { pool, execute } = makePool();
+    const service = new UserDirectoryService(pool);
+    const out = await service.previewImportVcf('BEGIN:VCARD\r\nVERSION:4.0\r\nFN:No Email\r\nEND:VCARD\r\n');
+    expect(out.rows).toEqual([{ email: '', name: 'No Email', outcome: 'skip', reason: 'missing email' }]);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('treats a second occurrence of the same email within the file as a duplicate, matching what the real import would do', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]); // neither email exists yet
+    const service = new UserDirectoryService(pool);
+    const out = await service.previewImportVcf(
+      'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:First\r\nEMAIL:same@x.com\r\nEND:VCARD\r\n' +
+        'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Second\r\nEMAIL:same@x.com\r\nEND:VCARD\r\n'
+    );
+    expect(out.rows).toEqual([
+      { email: 'same@x.com', name: 'First', outcome: 'create' },
+      { email: 'same@x.com', name: 'Second', outcome: 'skip', reason: 'email already exists' },
+    ]);
+  });
+});
