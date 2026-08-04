@@ -7,7 +7,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModuleForUser } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateQuery } from '../middleware/validation';
 import { idParam, auditLogListQuery, auditLogExportQuery } from '../schemas';
 import { AuditLogService, AuditLogFilters } from '../services/AuditLogService';
@@ -18,7 +17,7 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requireModuleForUser('audit'), requirePermission('audit.read'));
 
-  router.get('/', validateQuery(auditLogListQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/', validateQuery(auditLogListQuery), async (_req: Request, res: Response) => {
     // Both the legacy ?limit/offset pairing and the ?page/pageSize convention
     // are accepted; page/pageSize wins when both are supplied.
     const { page: rawPage, pageSize: rawSize, limit: rawLimit, offset: rawOffset, ...filters } = res.locals.query;
@@ -42,11 +41,11 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
     } else {
       res.json({ success: true, data: result });
     }
-  }));
+  });
 
   // /export must be registered before /:id to prevent Express from matching
   // the literal string "export" as a numeric ID parameter.
-  router.get('/export', validateQuery(auditLogExportQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/export', validateQuery(auditLogExportQuery), async (_req: Request, res: Response) => {
     const { format = 'json', ...rest } = res.locals.query;
     const filters: Omit<AuditLogFilters, 'limit' | 'offset'> = rest;
 
@@ -60,16 +59,16 @@ export const createAuditLogsRouter = (pool: Pool): Router => {
     }
 
     res.json({ success: true, data: entries, meta: { total: entries.length } });
-  }));
+  });
 
-  router.get('/:id', validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:id', validateParams(idParam), async (_req: Request, res: Response) => {
     const id = res.locals.params.id;
     const item = await service.getById(id);
     if (!item) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Audit log entry not found' } });
     }
     res.json({ success: true, data: item });
-  }));
+  });
 
   return router;
 };

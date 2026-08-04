@@ -17,7 +17,6 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { SystemSettingsService } from '../services/SystemSettingsService';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
 import { updateCurrencyBody, updateTimePeriodBody, updateSettingValueBody, categoryParam, categoryKeyParam } from '../schemas';
 
@@ -28,17 +27,17 @@ export const createSystemSettingsRouter = (pool: Pool) => {
   // Get all system settings. Full-catalog reads are for the admin settings
   // screen; regular users only need the dedicated /currency and /time-period
   // reads below, which stay open to any authenticated user.
-  router.get('/', authenticate, requirePermission('settings.manage'), asyncHandler(async (_req, res) => {
+  router.get('/', authenticate, requirePermission('settings.manage'), async (_req, res) => {
     const settings = await settingsService.getAllSettings();
 
     res.json({
       success: true,
       data: settings
     });
-  }));
+  });
 
   // Get settings by category
-  router.get('/category/:category', authenticate, requirePermission('settings.manage'), validateParams(categoryParam), asyncHandler(async (_req, res) => {
+  router.get('/category/:category', authenticate, requirePermission('settings.manage'), validateParams(categoryParam), async (_req, res) => {
     const { category } = res.locals.params;
     const settings = await settingsService.getSettingsByCategory(category);
 
@@ -46,19 +45,19 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       success: true,
       data: settings
     });
-  }));
+  });
 
   // Get current currency
-  router.get('/currency', authenticate, asyncHandler(async (_req, res) => {
+  router.get('/currency', authenticate, async (_req, res) => {
     const currency = await settingsService.getCurrency();
     res.json({
       success: true,
       data: { currency }
     });
-  }));
+  });
 
   // Update currency (admin only)
-  router.put('/currency', authenticate, validateBody(updateCurrencyBody), asyncHandler(async (req, res) => {
+  router.put('/currency', authenticate, validateBody(updateCurrencyBody), async (req, res) => {
     const user = req.user!;
 
     if (!userHasPermission(user, 'settings.manage')) {
@@ -77,19 +76,19 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       message: 'Currency updated successfully',
       data: { currency }
     });
-  }));
+  });
 
   // Get current time period
-  router.get('/time-period', authenticate, asyncHandler(async (_req, res) => {
+  router.get('/time-period', authenticate, async (_req, res) => {
     const timePeriod = await settingsService.getTimePeriod();
     res.json({
       success: true,
       data: { timePeriod }
     });
-  }));
+  });
 
   // Update time period (admin only)
-  router.put('/time-period', authenticate, validateBody(updateTimePeriodBody), asyncHandler(async (req, res) => {
+  router.put('/time-period', authenticate, validateBody(updateTimePeriodBody), async (req, res) => {
     const user = req.user!;
 
     if (!userHasPermission(user, 'settings.manage')) {
@@ -108,10 +107,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       message: 'Time period updated successfully',
       data: { timePeriod }
     });
-  }));
+  });
 
   // Get specific setting value
-  router.get('/:category/:key', authenticate, requirePermission('settings.manage'), validateParams(categoryKeyParam), asyncHandler(async (_req, res) => {
+  router.get('/:category/:key', authenticate, requirePermission('settings.manage'), validateParams(categoryKeyParam), async (_req, res) => {
     const { category, key } = res.locals.params;
     const value = await settingsService.getSetting(category, key);
 
@@ -126,10 +125,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       success: true,
       data: { category, key, value }
     });
-  }));
+  });
 
   // Update setting value (admin only)
-  router.put('/:category/:key', authenticate, validateParams(categoryKeyParam), validateBody(updateSettingValueBody), asyncHandler(async (req, res) => {
+  router.put('/:category/:key', authenticate, validateParams(categoryKeyParam), validateBody(updateSettingValueBody), async (req, res) => {
     const user = req.user!;
 
     // Only admin can modify system settings
@@ -176,10 +175,10 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       message: 'Setting updated successfully',
       data: { category, key, value }
     });
-  }));
+  });
 
   // Reset setting to default value (admin only)
-  router.post('/:category/:key/reset', authenticate, validateParams(categoryKeyParam), asyncHandler(async (req, res) => {
+  router.post('/:category/:key/reset', authenticate, validateParams(categoryKeyParam), async (req, res) => {
     const user = req.user!;
 
     // Only admin can reset system settings
@@ -204,7 +203,7 @@ export const createSystemSettingsRouter = (pool: Pool) => {
       success: true,
       message: 'Setting reset to default value successfully'
     });
-  }));
+  });
 
   return router;
 };

@@ -21,7 +21,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { idParam, createSkillBody, updateSkillBody, skillListQuery } from '../schemas';
 import { SkillService } from '../services/SkillService';
@@ -35,10 +34,10 @@ export const createSkillsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.read'),
     validateQuery(skillListQuery),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const activeOnly = res.locals.query.activeOnly as boolean | undefined;
       res.json({ success: true, data: await service.list({ activeOnly }) });
-    })
+    }
   );
 
   router.get(
@@ -46,9 +45,9 @@ export const createSkillsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.read'),
     validateParams(idParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       res.json({ success: true, data: await service.getById(res.locals.params.id) });
-    })
+    }
   );
 
   router.post(
@@ -56,10 +55,10 @@ export const createSkillsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateBody(createSkillBody),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const created = await service.create(res.locals.body);
       res.status(201).json({ success: true, data: created, message: 'Skill created' });
-    })
+    }
   );
 
   router.put(
@@ -68,10 +67,10 @@ export const createSkillsRouter = (pool: Pool) => {
     requirePermission('employee.manage'),
     validateParams(idParam),
     validateBody(updateSkillBody),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const updated = await service.update(res.locals.params.id, res.locals.body);
       res.json({ success: true, data: updated, message: 'Skill updated' });
-    })
+    }
   );
 
   router.delete(
@@ -79,10 +78,10 @@ export const createSkillsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateParams(idParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       await service.remove(res.locals.params.id);
       res.json({ success: true, message: 'Skill deleted' });
-    })
+    }
   );
 
   return router;

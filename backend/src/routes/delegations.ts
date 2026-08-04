@@ -13,7 +13,6 @@ import { Pool } from 'mysql2/promise';
 import { DelegationService } from '../services/DelegationService';
 import { ConflictError } from '../errors';
 import { authenticate, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody } from '../middleware/validation';
 import { idParam, createDelegationBody, auditJustificationBody } from '../schemas';
 
@@ -33,7 +32,7 @@ export const createDelegationsRouter = (pool: Pool): Router => {
    * WHAT could be delegated, only on WHO was allowed to delegate at all — which
    * is exactly the question the new code answers with the right meaning.
    */
-  router.post('/', authenticate, validateBody(createDelegationBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/', authenticate, validateBody(createDelegationBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user!;
       if (!userHasPermission(actor, 'delegation.manage') && !userHasPermission(actor, 'delegation.self')) {
@@ -63,13 +62,13 @@ export const createDelegationsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
-  }));
+  });
 
   // List delegations for the current user
-  router.get('/', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', authenticate, async (req: Request, res: Response) => {
     const delegations = await delegationService.listForUser(req.user!.id);
     res.json({ success: true, data: delegations });
-  }));
+  });
 
   /**
    * Revokes a delegation. Authenticated only — the SERVICE is the authority.
@@ -82,13 +81,13 @@ export const createDelegationsRouter = (pool: Pool): Router => {
    * their ability to withdraw it. Being able to take back authority you handed
    * out must not depend on a permission you might lose.
    */
-  router.delete('/:id', authenticate, validateParams(idParam), validateBody(auditJustificationBody), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/:id', authenticate, validateParams(idParam), validateBody(auditJustificationBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
 
     const justification = res.locals.body.justification ?? null;
     await delegationService.revokeDelegation(id, req.user!.id, justification);
     res.json({ success: true, message: 'Delegation revoked' });
-  }));
+  });
 
   return router;
 };

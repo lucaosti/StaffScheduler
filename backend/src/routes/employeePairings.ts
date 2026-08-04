@@ -32,7 +32,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -51,10 +50,10 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateQuery(employeePairingListQuery),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const userId = res.locals.query.userId as number | undefined;
       res.json({ success: true, data: await service.list(userId) });
-    })
+    }
   );
 
   router.get(
@@ -62,9 +61,9 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateParams(idParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       res.json({ success: true, data: await service.getById(res.locals.params.id) });
-    })
+    }
   );
 
   router.post(
@@ -72,10 +71,10 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateBody(createEmployeePairingBody),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const created = await service.create(res.locals.body);
       res.status(201).json({ success: true, data: created, message: 'Pairing rule created' });
-    })
+    }
   );
 
   router.put(
@@ -84,10 +83,10 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     requirePermission('employee.manage'),
     validateParams(idParam),
     validateBody(updateEmployeePairingBody),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const updated = await service.updateReason(res.locals.params.id, res.locals.body.reason);
       res.json({ success: true, data: updated, message: 'Pairing rule updated' });
-    })
+    }
   );
 
   router.delete(
@@ -95,10 +94,10 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateParams(idParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       await service.remove(res.locals.params.id);
       res.json({ success: true, message: 'Pairing rule deleted' });
-    })
+    }
   );
 
   return router;
