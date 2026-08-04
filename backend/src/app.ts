@@ -258,7 +258,12 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     res.redirect(308, target);
   });
 
-  app.use('*', (_req: express.Request, res: express.Response) => {
+  // No path argument, not `'*'`: Express 5's router (path-to-regexp v8) no
+  // longer accepts a bare wildcard as a path string — it requires a named
+  // segment (`/*splat`). A path-less `app.use` middleware already matches
+  // every request that reaches it, which is exactly the catch-all this is,
+  // so there is no pattern to get wrong here at all.
+  app.use((_req: express.Request, res: express.Response) => {
     res.status(404).json({
       success: false,
       error: { code: 'NOT_FOUND', message: 'Endpoint not found' },

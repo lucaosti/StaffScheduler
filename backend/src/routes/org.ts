@@ -108,7 +108,9 @@ export const createOrgRouter = (pool: Pool): Router => {
   // Chain of superiors for a user, from their own unit's manager up to the top
   // of the tree. Defaults to the caller; open to any authenticated user, same
   // visibility as the rest of the org tree (org_unit.read).
-  router.get('/manager-chain/:userId?', asyncHandler(async (req: Request, res: Response) => {
+  // `{/:userId}` — path-to-regexp v8's syntax for an optional segment
+  // (Express 5 dropped the old bare `:name?` suffix modifier).
+  router.get('/manager-chain{/:userId}', asyncHandler(async (req: Request, res: Response) => {
     const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
     if (!Number.isInteger(targetId) || targetId <= 0) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
@@ -128,7 +130,8 @@ export const createOrgRouter = (pool: Pool): Router => {
    * department it maps the org chart's authority, so it needs `org_unit.read`,
    * the same gate the rest of the tree carries.
    */
-  router.get('/authority/:userId?', asyncHandler(async (req: Request, res: Response) => {
+  // `{/:userId}` — same optional-segment syntax as `/manager-chain` above.
+  router.get('/authority{/:userId}', asyncHandler(async (req: Request, res: Response) => {
     const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
     if (!Number.isInteger(targetId) || targetId <= 0) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');

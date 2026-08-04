@@ -500,7 +500,7 @@ npm run test:e2e
 
 - Monorepo: npm workspaces — `backend`, `frontend`, `packages/shared` (the canonical
   Zod contract both sides import).
-- Backend: Node.js, Express 4, TypeScript 5, MySQL 8 (`mysql2/promise`) with dbmate
+- Backend: Node.js, Express 5, TypeScript 5, MySQL 8 (`mysql2/promise`) with dbmate
   migrations, Redis (`ioredis`) for shared caches and SSE fan-out, BullMQ for
   optimization jobs, JWT (`jsonwebtoken`), bcrypt, Winston, Zod, nodemailer,
   Jest, Supertest.
