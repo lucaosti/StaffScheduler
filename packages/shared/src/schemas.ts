@@ -222,6 +222,25 @@ export const addUserToDepartmentBody = z.object({
   userId: z.number().int().positive(),
 });
 
+const geoPointBody = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+export const createGeofenceBody = z.object({
+  name: z.string().min(1).max(100),
+  polygon: z.array(geoPointBody).min(3, 'A polygon needs at least 3 points'),
+  isActive: z.boolean().optional(),
+});
+
+export const updateGeofenceBody = z.object({
+  name: z.string().min(1).max(100).optional(),
+  polygon: z.array(geoPointBody).min(3, 'A polygon needs at least 3 points').optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const idAndGeofenceIdParam = z.object({ id: positiveInt, geofenceId: positiveInt });
+
 export const updateUserBody = z.object({
   email: z.string().email().optional(),
   password: z.string().min(8).optional(),
@@ -688,6 +707,13 @@ export const createTimeOffBody = z.object({
 
 export const clockInBody = z.object({
   notes: z.string().max(2000).optional(),
+  // Present only when the device provided geolocation. Geofence enforcement
+  // (see AttendanceService.clockIn) is per-caller: it activates only when the
+  // caller's departments have at least one active geofence, so a deployment
+  // that never configures one sees no change in behavior with or without
+  // these fields.
+  latitude: z.number().min(-90).max(90).optional(),
+  longitude: z.number().min(-180).max(180).optional(),
 });
 
 export const createShiftSwapBody = z.object({

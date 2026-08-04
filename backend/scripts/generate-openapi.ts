@@ -275,6 +275,7 @@ const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
   AuditLogEntry: sharedSchemas.auditLogEntrySchema,
   Assignment: sharedSchemas.shiftAssignmentSchema,
   PaginationMeta: sharedSchemas.paginationMetaSchema,
+  Geofence: sharedSchemas.geofenceSchema,
 };
 
 const main = (): void => {

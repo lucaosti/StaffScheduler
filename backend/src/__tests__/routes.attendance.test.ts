@@ -50,7 +50,7 @@ jest.mock('../services/AttendanceService');
 
 import { AttendanceService } from '../services/AttendanceService';
 import { createAttendanceRouter } from '../routes/attendance';
-import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
 
 const fakePool = {} as never;
@@ -69,7 +69,7 @@ describe('POST /api/attendance/clock-in', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({ id: 5, userId: 1 });
-    expect(AttendanceService.prototype.clockIn).toHaveBeenCalledWith(1, 'shift start');
+    expect(AttendanceService.prototype.clockIn).toHaveBeenCalledWith(1, 'shift start', null);
   });
 
   it('defaults notes to null when omitted', async () => {
@@ -77,7 +77,25 @@ describe('POST /api/attendance/clock-in', () => {
 
     await request(app()).post('/api/attendance/clock-in').send({});
 
-    expect(AttendanceService.prototype.clockIn).toHaveBeenCalledWith(1, null);
+    expect(AttendanceService.prototype.clockIn).toHaveBeenCalledWith(1, null, null);
+  });
+
+  it('passes the location through when the device provided coordinates', async () => {
+    (AttendanceService.prototype.clockIn as jest.Mock).mockResolvedValue({ id: 5 });
+
+    await request(app()).post('/api/attendance/clock-in').send({ latitude: 45.07, longitude: 7.68 });
+
+    expect(AttendanceService.prototype.clockIn).toHaveBeenCalledWith(1, null, { lat: 45.07, lng: 7.68 });
+  });
+
+  it('renders a rejected-by-geofence validation error as 400', async () => {
+    (AttendanceService.prototype.clockIn as jest.Mock).mockRejectedValue(
+      new ValidationError('Clock-in location is outside the allowed area for your department.')
+    );
+
+    const res = await request(app()).post('/api/attendance/clock-in').send({ latitude: 0, longitude: 0 });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
   it('renders a typed conflict (already clocked in) as 409', async () => {

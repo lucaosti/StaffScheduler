@@ -19,9 +19,11 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { GeofenceService } from './GeofenceService';
+import type { GeoPoint } from '../utils/geo';
 
 type AttendanceStatus = 'pending' | 'approved' | 'rejected';
 
@@ -31,6 +33,8 @@ interface AttendanceRecord {
   shiftAssignmentId: number | null;
   clockIn: string;
   clockOut: string | null;
+  latitude: number | null;
+  longitude: number | null;
   status: AttendanceStatus;
   reviewerId: number | null;
   reviewedAt: string | null;
@@ -76,6 +80,8 @@ const mapRow = (row: RowDataPacket): AttendanceRecord => ({
   shiftAssignmentId: (row.shift_assignment_id as number | null) ?? null,
   clockIn: row.clock_in as string,
   clockOut: (row.clock_out as string | null) ?? null,
+  latitude: row.latitude != null ? Number(row.latitude) : null,
+  longitude: row.longitude != null ? Number(row.longitude) : null,
   status: row.status as AttendanceStatus,
   reviewerId: (row.reviewer_id as number | null) ?? null,
   reviewedAt: (row.reviewed_at as string | null) ?? null,
@@ -87,8 +93,10 @@ const mapRow = (row: RowDataPacket): AttendanceRecord => ({
 
 export class AttendanceService {
   private audit: AuditLogService;
+  private geofence: GeofenceService;
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
+    this.geofence = new GeofenceService(pool);
   }
 
   async getById(id: number): Promise<AttendanceRecord | null> {
@@ -112,7 +120,7 @@ export class AttendanceService {
     return rows.length === 1 ? (rows[0].id as number) : null;
   }
 
-  async clockIn(userId: number, notes: string | null = null): Promise<AttendanceRecord> {
+  async clockIn(userId: number, notes: string | null = null, location: GeoPoint | null = null): Promise<AttendanceRecord> {
     const [open] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id FROM attendance_records WHERE user_id = ? AND clock_out IS NULL LIMIT 1`,
       [userId]
@@ -121,11 +129,29 @@ export class AttendanceService {
       throw new ConflictError('An open attendance record already exists for this user');
     }
 
+    // Enforcement is per-caller: `required` is false (and this is a no-op)
+    // unless at least one of the caller's departments has an active fence —
+    // see GeofenceService.isCallerWithinAllowedGeofence.
+    const geoCheck = await this.geofence.isCallerWithinAllowedGeofence(userId, location);
+    if (geoCheck.required && !geoCheck.allowed) {
+      await this.audit.write({
+        actorId: userId,
+        action: 'attendance.clock_in_rejected_geofence',
+        entityType: 'attendance_record',
+        entityId: userId,
+        description: location
+          ? 'Clock-in rejected: outside every geofence configured for this user\'s departments'
+          : 'Clock-in rejected: a geofence is configured but no location was provided',
+        after: location ? { latitude: location.lat, longitude: location.lng } : {},
+      });
+      throw new ValidationError('Clock-in location is outside the allowed area for your department.');
+    }
+
     const shiftAssignmentId = await this.findTodaysAssignment(userId);
     const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO attendance_records (user_id, shift_assignment_id, clock_in, notes, status)
-       VALUES (?, ?, CURRENT_TIMESTAMP, ?, 'pending')`,
-      [userId, shiftAssignmentId, notes]
+      `INSERT INTO attendance_records (user_id, shift_assignment_id, clock_in, latitude, longitude, notes, status)
+       VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'pending')`,
+      [userId, shiftAssignmentId, location?.lat ?? null, location?.lng ?? null, notes]
     );
     const created = await this.getById(result.insertId);
     if (!created) throw new Error('Failed to retrieve created attendance record');

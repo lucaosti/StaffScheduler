@@ -34,9 +34,14 @@ type NotesBody = NonNullable<
   paths['/attendance/clock-in']['post']['requestBody']
 >['content']['application/json'];
 
-export const clockIn = (notes?: string): Promise<ApiResponse<AttendanceRecord>> =>
+export const clockIn = (
+  notes?: string,
+  location?: { latitude: number; longitude: number }
+): Promise<ApiResponse<AttendanceRecord>> =>
   apiClient.post<AttendanceRecord, '/attendance/clock-in'>('/attendance/clock-in', {
     notes,
+    latitude: location?.latitude,
+    longitude: location?.longitude,
   } satisfies NotesBody);
 
 export const clockOut = (

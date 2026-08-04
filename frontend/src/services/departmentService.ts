@@ -25,7 +25,7 @@
  * @author Luca Ostinelli
  */
 
-import type { ApiResponse, Department } from '../types';
+import type { ApiResponse, Department, Geofence } from '../types';
 import type { paths } from '../api/schema';
 import { apiClient } from '../api/client';
 
@@ -68,3 +68,37 @@ export const deleteDepartment = (id: number | string) =>
   apiClient.delete<unknown, '/departments/{id}'>('/departments/{id}', {
     params: { id: Number(id) },
   });
+
+// ── Geofences ──────────────────────────────────────────────────────────────
+
+export type CreateGeofenceData =
+  paths['/departments/{id}/geofences']['post']['requestBody']['content']['application/json'];
+export type UpdateGeofenceData =
+  NonNullable<paths['/departments/{id}/geofences/{geofenceId}']['put']['requestBody']>['content']['application/json'];
+
+export const getGeofences = (departmentId: number | string) =>
+  apiClient.get<Geofence[], '/departments/{id}/geofences'>('/departments/{id}/geofences', {
+    params: { id: Number(departmentId) },
+  });
+
+export const createGeofence = (departmentId: number | string, data: CreateGeofenceData) =>
+  apiClient.post<Geofence, '/departments/{id}/geofences'>('/departments/{id}/geofences', data, {
+    params: { id: Number(departmentId) },
+  });
+
+export const updateGeofence = (
+  departmentId: number | string,
+  geofenceId: number | string,
+  data: UpdateGeofenceData
+) =>
+  apiClient.put<Geofence, '/departments/{id}/geofences/{geofenceId}'>(
+    '/departments/{id}/geofences/{geofenceId}',
+    data,
+    { params: { id: Number(departmentId), geofenceId: Number(geofenceId) } }
+  );
+
+export const deleteGeofence = (departmentId: number | string, geofenceId: number | string) =>
+  apiClient.delete<unknown, '/departments/{id}/geofences/{geofenceId}'>(
+    '/departments/{id}/geofences/{geofenceId}',
+    { params: { id: Number(departmentId), geofenceId: Number(geofenceId) } }
+  );
