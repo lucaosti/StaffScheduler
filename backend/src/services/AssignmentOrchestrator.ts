@@ -31,9 +31,16 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ShiftAssignment } from '../types';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
+import { EmployeeLoanService } from './EmployeeLoanService';
+import { inClause } from '../utils/sql';
+import { DateUtils } from '../utils';
 
 export class AssignmentOrchestrator {
-  constructor(private pool: Pool) {}
+  private loans: EmployeeLoanService;
+
+  constructor(private pool: Pool) {
+    this.loans = new EmployeeLoanService(pool);
+  }
 
   private async fetchById(id: number): Promise<ShiftAssignment | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -214,17 +221,35 @@ export class AssignmentOrchestrator {
     const connection = await this.pool.getConnection();
     try {
       const [shiftRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id, date, start_time, end_time, department_id FROM shifts WHERE id = ?',
+        `SELECT s.id, s.date, s.start_time, s.end_time, s.department_id, d.org_unit_id
+           FROM shifts s
+           JOIN departments d ON d.id = s.department_id
+          WHERE s.id = ?`,
         [shiftId]
       );
       if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
       const shift = shiftRows[0];
+      const shiftDate = DateUtils.toDateString(shift.date as string | Date);
+
+      // Department members, PLUS anyone on an approved loan into the
+      // department's org unit for this shift's date — see
+      // EmployeeLoanService and issue #602. A department with no
+      // `org_unit_id` bridge has no loan pool to add.
+      const orgUnitId = shift.org_unit_id as number | null;
+      const loanedInUserIds = orgUnitId
+        ? await this.loans.listLoanedInUserIds(orgUnitId, shiftDate, shiftDate)
+        : [];
+      const loanedInCondition =
+        loanedInUserIds.length > 0
+          ? `(ud.department_id IS NOT NULL OR u.id IN (${inClause(loanedInUserIds)}))`
+          : `ud.department_id IS NOT NULL`;
+
       const [userRows] = await connection.execute<RowDataPacket[]>(
         `SELECT DISTINCT u.id AS userId, u.first_name AS firstName, u.last_name AS lastName, u.email
         FROM users u
-        INNER JOIN user_departments ud ON u.id = ud.user_id
+        LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
         WHERE u.is_active = 1
-        AND ud.department_id = ?
+        AND ${loanedInCondition}
         AND NOT EXISTS (
           SELECT 1 FROM shift_assignments sa
           INNER JOIN shifts s ON sa.shift_id = s.id

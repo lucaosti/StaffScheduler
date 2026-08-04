@@ -35,6 +35,7 @@ import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import { config } from '../config';
 import { EmploymentContractService } from './EmploymentContractService';
+import { EmployeeLoanService } from './EmployeeLoanService';
 import { ReplanProposalService } from './ReplanProposalService';
 import { isWeekendDay, isNightWork } from '../optimization/constraintValidator';
 import { inClause } from '../utils/sql';
@@ -190,7 +191,11 @@ const carriedLoads = (
 };
 
 export class AutoScheduleService {
-  constructor(private pool: Pool) {}
+  private loans: EmployeeLoanService;
+
+  constructor(private pool: Pool) {
+    this.loans = new EmployeeLoanService(pool);
+  }
 
   /**
    * The schedule this one continues from.
@@ -280,7 +285,34 @@ export class AutoScheduleService {
       };
     }
 
-    // 2. Employees in the department.
+    // 2. Employees in the department, PLUS anyone on an approved loan into
+    // it for this schedule's period.
+    //
+    // Loans are scoped to `org_units`, scheduling to `departments` — two
+    // separate hierarchies bridged only by `departments.org_unit_id`. Without
+    // this, approving a loan changed nothing but the loan's own status: the
+    // borrowed person never became a candidate for the borrowing department's
+    // shifts (issue #602). A department with no `org_unit_id` set simply has
+    // no bridge yet, so it degrades to its previous department-only pool.
+    const [deptRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT org_unit_id FROM departments WHERE id = ? LIMIT 1`,
+      [schedule.department_id]
+    );
+    const deptOrgUnitId = deptRows.length > 0 ? (deptRows[0].org_unit_id as number | null) : null;
+    const scheduleStartDate = String(schedule.start_date).slice(0, 10);
+    const scheduleEndDate = String(schedule.end_date).slice(0, 10);
+    const loanedInUserIds = deptOrgUnitId
+      ? await this.loans.listLoanedInUserIds(deptOrgUnitId, scheduleStartDate, scheduleEndDate)
+      : [];
+
+    // LEFT JOIN (rather than the previous INNER JOIN) so a loaned-in user with
+    // no `user_departments` row still survives to the WHERE clause; the OR
+    // branch is what actually admits them. `inClause` throws on an empty list,
+    // so it is only reached when there is something to include.
+    const loanedInCondition =
+      loanedInUserIds.length > 0
+        ? `(ud.department_id IS NOT NULL OR u.id IN (${inClause(loanedInUserIds)}))`
+        : `ud.department_id IS NOT NULL`;
     const [empRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT u.id,
               GROUP_CONCAT(DISTINCT sk.name) AS skill_names,
@@ -292,11 +324,11 @@ export class AutoScheduleService {
               COALESCE(up.min_hours_per_week, 0)  AS min_hours_per_week,
               COALESCE(up.max_consecutive_days, 5) AS max_consecutive_days
          FROM users u
-         JOIN user_departments ud ON u.id = ud.user_id
+         LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
          LEFT JOIN user_skills us ON u.id = us.user_id
          LEFT JOIN skills sk ON us.skill_id = sk.id
          LEFT JOIN user_preferences up ON up.user_id = u.id
-        WHERE ud.department_id = ? AND u.is_active = 1
+        WHERE u.is_active = 1 AND ${loanedInCondition}
         GROUP BY u.id`,
       [schedule.department_id]
     );
@@ -385,12 +417,16 @@ export class AutoScheduleService {
       String(schedule.end_date).slice(0, 10)
     );
 
-    const [unavailRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT user_id, start_date, end_date FROM user_unavailability WHERE user_id IN (
-         SELECT user_id FROM user_departments WHERE department_id = ?
-       )`,
-      [schedule.department_id]
-    );
+    // Filtered against `employeeIds`, not a fresh `user_departments` lookup —
+    // that set already includes anyone admitted via a loan above, and a
+    // loaned-in person's unavailability has to count exactly like a
+    // permanent member's.
+    const [unavailRows] = employeeIds.length === 0
+      ? [[] as RowDataPacket[]]
+      : await this.pool.execute<RowDataPacket[]>(
+          `SELECT user_id, start_date, end_date FROM user_unavailability
+            WHERE user_id IN (${inClause(employeeIds)})`
+        );
     const unavailableByUser = new Map<number, string[]>();
     for (const row of unavailRows) {
       const dates: string[] = [];
@@ -425,27 +461,31 @@ export class AutoScheduleService {
     // chosen predecessor whatever its status — a planner who names a draft as
     // the schedule this one continues from means it.
     const predecessorId = await this.resolvePredecessorId(scheduleId, schedule);
-    const [externalRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT sa.user_id, s.date, s.start_time, s.end_time
-         FROM shift_assignments sa
-         JOIN shifts s ON s.id = sa.shift_id
-         JOIN schedules sc ON sc.id = s.schedule_id
-        WHERE s.schedule_id != ?
-          AND (sc.status = 'published' OR sc.id = ?)
-          AND sa.status IN ('pending', 'confirmed')
-          AND sa.user_id IN (SELECT user_id FROM user_departments WHERE department_id = ?)
-          AND s.date BETWEEN DATE_SUB(?, INTERVAL 14 DAY) AND DATE_ADD(?, INTERVAL 14 DAY)`,
-      [
-        scheduleId,
-        // 0 matches nothing, which is what "no predecessor" has to mean here.
-        // A NULL would make the comparison NULL and silently drop the whole
-        // OR branch — the same result by accident rather than by intent.
-        predecessorId ?? 0,
-        schedule.department_id,
-        schedule.start_date,
-        schedule.end_date,
-      ]
-    );
+    // Same reasoning as `unavailRows`: `employeeIds` is the actual candidate
+    // set (department members plus loaned-in staff), not a fresh
+    // `user_departments`-only lookup.
+    const [externalRows] = employeeIds.length === 0
+      ? [[] as RowDataPacket[]]
+      : await this.pool.execute<RowDataPacket[]>(
+          `SELECT sa.user_id, s.date, s.start_time, s.end_time
+             FROM shift_assignments sa
+             JOIN shifts s ON s.id = sa.shift_id
+             JOIN schedules sc ON sc.id = s.schedule_id
+            WHERE s.schedule_id != ?
+              AND (sc.status = 'published' OR sc.id = ?)
+              AND sa.status IN ('pending', 'confirmed')
+              AND sa.user_id IN (${inClause(employeeIds)})
+              AND s.date BETWEEN DATE_SUB(?, INTERVAL 14 DAY) AND DATE_ADD(?, INTERVAL 14 DAY)`,
+          [
+            scheduleId,
+            // 0 matches nothing, which is what "no predecessor" has to mean here.
+            // A NULL would make the comparison NULL and silently drop the whole
+            // OR branch — the same result by accident rather than by intent.
+            predecessorId ?? 0,
+            schedule.start_date,
+            schedule.end_date,
+          ]
+        );
     const externalAssignmentsByUser = new Map<number, Array<{ date: string; start_time: string; end_time: string }>>();
     for (const row of externalRows) {
       const userId = row.user_id as number;

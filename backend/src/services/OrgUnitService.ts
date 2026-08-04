@@ -12,6 +12,7 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
+import { EmployeeLoanService } from './EmployeeLoanService';
 
 interface OrgUnit {
   id: number;
@@ -43,6 +44,13 @@ interface OrgUnitMemberDetail {
   email: string;
   position: string | null;
   isPrimary: boolean;
+  /**
+   * True when this person is not a `user_org_units` member of the unit but is
+   * here on an approved loan active today (see EmployeeLoanService and issue
+   * #602). Never true together with `isPrimary`, which only ever describes
+   * real membership.
+   */
+  onLoan: boolean;
 }
 
 interface ManagerRef {
@@ -97,8 +105,10 @@ const mapMembership = (row: RowDataPacket): UserOrgUnit => ({
 
 export class OrgUnitService {
   private audit: AuditLogService;
+  private loans: EmployeeLoanService;
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
+    this.loans = new EmployeeLoanService(pool);
   }
 
   async list(): Promise<OrgUnit[]> {
@@ -272,7 +282,16 @@ export class OrgUnitService {
     return rows.length === 0 ? null : mapUnit(rows[0]);
   }
 
-  /** Members of a unit, with display-ready user details (name/email/position). */
+  /**
+   * Members of a unit, with display-ready user details (name/email/position).
+   *
+   * Includes anyone on an approved loan into this unit active today,
+   * appended after real members and flagged `onLoan` — a manager borrowing a
+   * person for two weeks wants to see them on the roster, not just have them
+   * pass eligibility checks invisibly (issue #602). A membership row always
+   * wins over a loan for the same user, since real membership is the more
+   * specific fact.
+   */
   async listMembersDetailed(orgUnitId: number): Promise<OrgUnitMemberDetail[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT u.id AS user_id, u.first_name, u.last_name, u.email, u.position, uou.is_primary
@@ -282,14 +301,43 @@ export class OrgUnitService {
         ORDER BY uou.is_primary DESC, u.last_name ASC, u.first_name ASC`,
       [orgUnitId]
     );
-    return rows.map((r: any) => ({
+    const members: OrgUnitMemberDetail[] = rows.map((r: any) => ({
       userId: r.user_id,
       firstName: r.first_name,
       lastName: r.last_name,
       email: r.email,
       position: r.position ?? null,
       isPrimary: Boolean(r.is_primary),
+      onLoan: false,
     }));
+
+    const memberIds = new Set(members.map((m) => m.userId));
+    const activeLoans = await this.loans.listActiveLoansInto(orgUnitId);
+    const loanedUserIds = [...new Set(activeLoans.map((l) => l.userId))].filter(
+      (id) => !memberIds.has(id)
+    );
+    if (loanedUserIds.length > 0) {
+      const placeholders = loanedUserIds.map(() => '?').join(', ');
+      const [loanedRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT id AS user_id, first_name, last_name, email, position
+           FROM users WHERE id IN (${placeholders})
+          ORDER BY last_name ASC, first_name ASC`,
+        loanedUserIds
+      );
+      for (const r of loanedRows as any[]) {
+        members.push({
+          userId: r.user_id,
+          firstName: r.first_name,
+          lastName: r.last_name,
+          email: r.email,
+          position: r.position ?? null,
+          isPrimary: false,
+          onLoan: true,
+        });
+      }
+    }
+
+    return members;
   }
 
   /**
