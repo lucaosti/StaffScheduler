@@ -21,7 +21,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -42,21 +41,21 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   router.use(authenticate);
 
   // List (reviewers only)
-  router.get('/', requirePermission('change_request.review'), validateQuery(changeRequestListQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/', requirePermission('change_request.review'), validateQuery(changeRequestListQuery), async (_req: Request, res: Response) => {
     const { status, ...rest } = res.locals.query;
     const page = await svc.list({ ...rest, status: status as never });
     res.json({ success: true, data: page });
-  }));
+  });
 
   // Create (any authenticated user with permission)
-  router.post('/', validateBody(createBody), requirePermission('change_request.create'), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/', validateBody(createBody), requirePermission('change_request.create'), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const cr = await svc.create(res.locals.body, actor.id);
     res.status(201).json({ success: true, data: cr, message: 'Change request submitted' });
-  }));
+  });
 
   // Get by ID (reviewers OR the proposer themselves)
-  router.get('/:id', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const cr = await svc.getById(res.locals.params.id);
     if (!cr) {
@@ -67,10 +66,10 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Access denied' } });
     }
     res.json({ success: true, data: cr });
-  }));
+  });
 
   // Approve
-  router.post('/:id/approve', requirePermission('change_request.review'), validateParams(idParam), validateBody(approveBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('change_request.review'), validateParams(idParam), validateBody(approveBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.approve(res.locals.params.id, actor.id, res.locals.body.justification);
@@ -83,10 +82,10 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
-  }));
+  });
 
   // Reject
-  router.post('/:id/reject', requirePermission('change_request.review'), validateParams(idParam), validateBody(rejectBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('change_request.review'), validateParams(idParam), validateBody(rejectBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.reject(res.locals.params.id, actor.id, res.locals.body.rejectionReason);
@@ -99,10 +98,10 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
-  }));
+  });
 
   // Apply (marks applied; caller is responsible for executing the actual business logic)
-  router.post('/:id/apply', requirePermission('change_request.review'), validateParams(idParam), validateBody(applyBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/apply', requirePermission('change_request.review'), validateParams(idParam), validateBody(applyBody), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.apply(res.locals.params.id, actor.id, res.locals.body.justification);
@@ -115,10 +114,10 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
-  }));
+  });
 
   // Cancel (proposer only, while pending)
-  router.post('/:id/cancel', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.getById(res.locals.params.id);
@@ -138,7 +137,7 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
-  }));
+  });
 
   return router;
 };

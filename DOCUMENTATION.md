@@ -45,7 +45,7 @@ The frontend is a React SPA. The backend is an Express REST API. Durable state l
 backend/src/
 ├── config/           # env vars, database pool factory, Redis client, Winston logger
 ├── errors/           # AppError hierarchy (NotFound/Conflict/Forbidden/Validation/Unauthorized)
-├── middleware/       # authenticate, requirePermission, requireModule, validation, asyncHandler,
+├── middleware/       # authenticate, requirePermission, requireModule, validation,
 │                     #   errorHandler, requestContext
 ├── observability/    # Prometheus metrics + OpenTelemetry tracing bootstrap
 ├── schemas/          # re-exports the canonical Zod schemas from @staff-scheduler/shared
@@ -1139,9 +1139,11 @@ Route tests mock `../middleware/auth` with `authenticate`, `requirePermission`, 
    the canonical contract; `backend/src/schemas` re-exports it.
 2. Add the business logic to an existing service or create a new one in `backend/src/services/`.
    Services throw typed errors from `src/errors`; they never format HTTP responses.
-3. Add the route handler in `backend/src/routes/`, wrapped in `asyncHandler`, using
-   `validateBody`/`validateParams` with the shared schema. Mount new routers in
-   `backend/src/app.ts` (under both the `/api` and `/api/v1` prefixes).
+3. Add the route handler in `backend/src/routes/` as a plain `async` function (Express 5
+   forwards a rejected handler's promise to `errorHandler` on its own — no wrapper needed),
+   using `validateBody`/`validateParams` with the shared schema. Mount new routers in
+   `backend/src/app.ts` under `/api/v1` — the legacy `/api` prefix redirects there rather
+   than being a second mount (#319).
 4. Regenerate the contract: `npm run openapi:generate` (backend) — request bodies in
    `backend/openapi/openapi.json` are **generated** from the Zod schemas and CI fails on
    drift. Only curated prose (summaries, response descriptions) is edited by hand.

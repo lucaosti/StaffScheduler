@@ -24,7 +24,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateQuery } from '../middleware/validation';
 import { timelineQuery } from '../schemas';
 import { TimelineService, TIMELINE_SOURCE_KEYS } from '../services/TimelineService';
@@ -41,7 +40,7 @@ export const createTimelineRouter = (pool: Pool) => {
     authenticate,
     requirePermission('timeline.read'),
     validateQuery(timelineQuery),
-    asyncHandler(async (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const user = req.user!;
       const { from, to, sources } = res.locals.query as {
         from: string;
@@ -66,7 +65,7 @@ export const createTimelineRouter = (pool: Pool) => {
         sources: sources ? sources.split(',').map((s) => s.trim()).filter(Boolean) : undefined,
       });
       res.json({ success: true, data });
-    })
+    }
   );
 
   // The sources a client may ask for, so a legend or a filter list is read
@@ -76,9 +75,9 @@ export const createTimelineRouter = (pool: Pool) => {
     '/sources',
     authenticate,
     requirePermission('timeline.read'),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       res.json({ success: true, data: TIMELINE_SOURCE_KEYS });
-    })
+    }
   );
 
   return router;

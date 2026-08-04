@@ -23,7 +23,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody, employeeLoanListQuery } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
@@ -46,21 +45,21 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Org units -------------
 
-  router.get('/units', requirePermission('org_unit.read'), asyncHandler(async (_req, res: Response) => {
+  router.get('/units', requirePermission('org_unit.read'), async (_req, res: Response) => {
     res.json({ success: true, data: await units.list() });
-  }));
+  });
 
-  router.get('/units/tree', requirePermission('org_unit.read'), asyncHandler(async (_req, res: Response) => {
+  router.get('/units/tree', requirePermission('org_unit.read'), async (_req, res: Response) => {
     res.json({ success: true, data: await units.tree() });
-  }));
+  });
 
-  router.get('/units/:id', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/units/:id', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     const u = await units.getById(res.locals.params.id);
     if (!u) return respondError(res, 404, 'NOT_FOUND', 'Org unit not found');
     res.json({ success: true, data: u });
-  }));
+  });
 
-  router.post('/units', requirePermission('org_unit.manage'), validateBody(createOrgUnitBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/units', requirePermission('org_unit.manage'), validateBody(createOrgUnitBody), async (req: Request, res: Response) => {
     const created = await units.create({
       name: res.locals.body.name,
       description: res.locals.body.description,
@@ -73,9 +72,9 @@ export const createOrgRouter = (pool: Pool): Router => {
       after: { name: created.name, parentId: created.parentId },
     });
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), asyncHandler(async (req: Request, res: Response) => {
+  router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), async (req: Request, res: Response) => {
     const updated = await units.update(res.locals.params.id, res.locals.body);
     await audit.write({
       actorId: req.user!.id, action: 'org_unit.update',
@@ -83,40 +82,40 @@ export const createOrgRouter = (pool: Pool): Router => {
       after: res.locals.body,
     });
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.delete('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     await units.remove(res.locals.params.id);
     await audit.write({
       actorId: req.user!.id, action: 'org_unit.delete',
       entityType: 'org_unit', entityId: res.locals.params.id,
     });
     res.json({ success: true });
-  }));
+  });
 
   // ------------- Memberships -------------
 
-  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
-  }));
+  });
 
   // Display-ready member list (name/email/position) for the "browse offices" view.
-  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
-  }));
+  });
 
   // Chain of superiors for a user, from their own unit's manager up to the top
   // of the tree. Defaults to the caller; open to any authenticated user, same
   // visibility as the rest of the org tree (org_unit.read).
   // `{/:userId}` — path-to-regexp v8's syntax for an optional segment
   // (Express 5 dropped the old bare `:name?` suffix modifier).
-  router.get('/manager-chain{/:userId}', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/manager-chain{/:userId}', async (req: Request, res: Response) => {
     const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
     if (!Number.isInteger(targetId) || targetId <= 0) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
     }
     res.json({ success: true, data: await units.getManagerChain(targetId) });
-  }));
+  });
 
   /**
    * Who has authority over one person: superiors, role administrators, and who
@@ -131,7 +130,7 @@ export const createOrgRouter = (pool: Pool): Router => {
    * the same gate the rest of the tree carries.
    */
   // `{/:userId}` — same optional-segment syntax as `/manager-chain` above.
-  router.get('/authority{/:userId}', asyncHandler(async (req: Request, res: Response) => {
+  router.get('/authority{/:userId}', async (req: Request, res: Response) => {
     const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
     if (!Number.isInteger(targetId) || targetId <= 0) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
@@ -142,42 +141,42 @@ export const createOrgRouter = (pool: Pool): Router => {
     const profile = await authority.getAuthorityProfile(targetId);
     if (!profile) return respondError(res, 404, 'NOT_FOUND', 'User not found');
     res.json({ success: true, data: profile });
-  }));
+  });
 
-  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
     const created = await units.addMember(
       res.locals.body.userId,
       res.locals.params.id,
       Boolean(res.locals.body.isPrimary)
     );
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
   router.patch(
     '/units/:id/members/:userId/primary',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const { id, userId } = res.locals.params;
       await units.setPrimary(userId, id);
       res.json({ success: true });
-  })
+  }
   );
 
   router.delete(
     '/units/:id/members/:userId',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       const { id, userId } = res.locals.params;
       await units.removeMember(userId, id);
       res.json({ success: true });
-  })
+  }
   );
 
   // ------------- Loans -------------
 
-  router.get('/loans', validateQuery(employeeLoanListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/loans', validateQuery(employeeLoanListQuery), async (req: Request, res: Response) => {
     const { userId, toOrgUnitId, fromOrgUnitId, status } = res.locals.query;
     // Approvers may list any loan; everyone else sees only their own, so the
     // org-unit and userId filters are dropped rather than obeyed for them.
@@ -186,9 +185,9 @@ export const createOrgRouter = (pool: Pool): Router => {
       ? { userId, toOrgUnitId, fromOrgUnitId, status: status as never }
       : { userId: req.user!.id, status: status as never };
     res.json({ success: true, data: await loans.list(filters) });
-  }));
+  });
 
-  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), async (req: Request, res: Response) => {
     const created = await loans.create({
       userId: res.locals.body.userId,
       fromOrgUnitId: res.locals.body.fromOrgUnitId,
@@ -199,22 +198,22 @@ export const createOrgRouter = (pool: Pool): Router => {
       requestedBy: req.user!.id,
     });
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/loans/:id/cancel', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/loans/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     const updated = await loans.cancel(res.locals.params.id, req.user!.id);
     res.json({ success: true, data: updated });
-  }));
+  });
 
   return router;
 };

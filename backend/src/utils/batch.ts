@@ -2,11 +2,11 @@
  * Runs an async operation once per input row, collecting one outcome per row
  * instead of aborting the whole batch on the first failure (#316).
  *
- * A row's own error is caught here rather than left to `asyncHandler`: an
- * `AppError` reports its stable code/message, and anything else — a bug, not
- * an expected domain outcome — is logged and folded into a generic
- * `INTERNAL_ERROR` per row, the same distinction `errorHandler` draws for the
- * response as a whole.
+ * A row's own error is caught here rather than left to reach `errorHandler`
+ * (which would fail the whole batch on the first row): an `AppError` reports
+ * its stable code/message, and anything else — a bug, not an expected domain
+ * outcome — is logged and folded into a generic `INTERNAL_ERROR` per row, the
+ * same distinction `errorHandler` draws for the response as a whole.
  *
  * @author Luca Ostinelli
  */

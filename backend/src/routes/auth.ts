@@ -22,7 +22,6 @@ import { TwoFactorService } from '../services/TwoFactorService';
 import { RefreshTokenService } from '../services/RefreshTokenService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
 import { createLoginLimiter } from '../middleware/rateLimit';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { loginBody } from '../schemas';
 import jwt, { SignOptions } from 'jsonwebtoken';
@@ -271,7 +270,7 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
  * @returns {Object} `{ success, data: { user } }`; 401 with a cleared cookie
  *          when the refresh token is missing, expired, revoked or reused.
  */
-router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
+router.post('/refresh', async (req: Request, res: Response) => {
   const presented = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
   const clearAndReject = () => {
     clearRefreshCookie(req, res);
@@ -315,7 +314,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
       },
     },
   });
-}));
+});
 
 /**
  * User logout endpoint.
@@ -328,7 +327,7 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
  * @middleware authenticate
  * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, asyncHandler(async (req: Request, res: Response) => {
+router.post('/logout', authenticate, async (req: Request, res: Response) => {
   // Await the revocation before confirming logout: the access token must be
   // blacklisted (in shared Redis) by the time the client is told it is logged
   // out, so an immediate replay on any instance is already rejected.
@@ -347,7 +346,7 @@ router.post('/logout', authenticate, asyncHandler(async (req: Request, res: Resp
     success: true,
     message: 'Logged out successfully'
   });
-}));
+});
 
   return router;
 };

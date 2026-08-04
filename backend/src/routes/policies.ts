@@ -22,7 +22,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam, policyExceptionListQuery } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
@@ -47,28 +46,28 @@ export const createPoliciesRouter = (pool: Pool): Router => {
 
   // ------------- Validation -------------
 
-  router.post('/validate/assignment', validateBody(validateAssignmentBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.post('/validate/assignment', validateBody(validateAssignmentBody), async (_req: Request, res: Response) => {
     const result = await validator.validateAssignment({
       userId: res.locals.body.userId,
       shiftId: res.locals.body.shiftId,
     });
     res.json({ success: true, data: result });
-  }));
+  });
 
   // ------------- Approval matrix (must be declared before /:id) -------------
 
-  router.get('/approval-matrix', asyncHandler(async (_req, res: Response) => {
+  router.get('/approval-matrix', async (_req, res: Response) => {
     res.json({ success: true, data: await matrix.list() });
-  }));
+  });
 
-  router.put('/approval-matrix/:changeType', requirePermission('approval.manage'), validateParams(changeTypeParam), validateBody(updateApprovalMatrixBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.put('/approval-matrix/:changeType', requirePermission('approval.manage'), validateParams(changeTypeParam), validateBody(updateApprovalMatrixBody), async (_req: Request, res: Response) => {
     const updated = await matrix.update(res.locals.params.changeType, res.locals.body);
     res.json({ success: true, data: updated });
-  }));
+  });
 
   // ------------- Exceptions (declared before /:id) -------------
 
-  router.get('/exceptions', validateQuery(policyExceptionListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/exceptions', validateQuery(policyExceptionListQuery), async (req: Request, res: Response) => {
     const { requestedByUserId, status, ...rest } = res.locals.query;
     // Approvers may list anyone's exception requests; everyone else is pinned
     // to their own, so a requestedByUserId filter from them is ignored.
@@ -79,9 +78,9 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       requestedByUserId: isManager ? requestedByUserId : req.user!.id,
     };
     res.json({ success: true, data: await exceptions.list(filters) });
-  }));
+  });
 
-  router.post('/exceptions', validateBody(createPolicyExceptionBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/exceptions', validateBody(createPolicyExceptionBody), async (req: Request, res: Response) => {
     const created = await exceptions.create({
       policyId: res.locals.body.policyId,
       targetType: res.locals.body.targetType,
@@ -90,44 +89,44 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       requestedByUserId: req.user!.id,
     });
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const updated = await exceptions.approve(
       res.locals.params.id,
       req.user!.id,
       (res.locals.body.notes as string | null | undefined) ?? null
     );
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const updated = await exceptions.reject(
       res.locals.params.id,
       req.user!.id,
       (res.locals.body.notes as string | null | undefined) ?? null
     );
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/exceptions/:id/cancel', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     const updated = await exceptions.cancel(res.locals.params.id, req.user!.id);
     res.json({ success: true, data: updated });
-  }));
+  });
 
   // ------------- Policies CRUD -------------
 
-  router.get('/', requirePermission('policy.read'), asyncHandler(async (_req, res: Response) => {
+  router.get('/', requirePermission('policy.read'), async (_req, res: Response) => {
     res.json({ success: true, data: await policies.list() });
-  }));
+  });
 
-  router.get('/:id', requirePermission('policy.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:id', requirePermission('policy.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     const p = await policies.getById(res.locals.params.id);
     if (!p) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
     res.json({ success: true, data: p });
-  }));
+  });
 
-  router.post('/', requirePermission('policy.manage'), validateBody(createPolicyBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/', requirePermission('policy.manage'), validateBody(createPolicyBody), async (req: Request, res: Response) => {
     const created = await policies.create({
       scopeType: res.locals.body.scopeType,
       scopeId: res.locals.body.scopeId ?? null,
@@ -142,9 +141,9 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       after: { key: created.policyKey, value: created.policyValue },
     });
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.put('/:id', requirePermission('policy.manage'), validateParams(idParam), validateBody(updatePolicyBody), asyncHandler(async (req: Request, res: Response) => {
+  router.put('/:id', requirePermission('policy.manage'), validateParams(idParam), validateBody(updatePolicyBody), async (req: Request, res: Response) => {
     const existing = await policies.getById(res.locals.params.id);
     if (!existing) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
     // Only the owner or a full administrator may edit a policy directly.
@@ -159,9 +158,9 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       after: { key: updated.policyKey, value: updated.policyValue },
     });
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.delete('/:id', requirePermission('policy.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/:id', requirePermission('policy.manage'), validateParams(idParam), async (req: Request, res: Response) => {
     const existing = await policies.getById(res.locals.params.id);
     if (!existing) return respondError(res, 404, 'NOT_FOUND', 'Policy not found');
     if (existing.imposedByUserId !== req.user!.id && !userHasPermission(req.user, 'settings.manage')) {
@@ -174,7 +173,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
       before: { key: existing.policyKey, value: existing.policyValue },
     });
     res.json({ success: true });
-  }));
+  });
 
   return router;
 };

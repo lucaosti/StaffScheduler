@@ -17,7 +17,6 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { idParam, calendarFeedQuery, calendarAggregateQuery, createCalendarTokenBody } from '../schemas';
 import { NotFoundError } from '../errors';
@@ -50,23 +49,23 @@ export const createCalendarRouter = (pool: Pool): Router => {
 
   // A person's own feed tokens. Authentication alone: these are theirs, and no
   // permission gates seeing your own subscriptions.
-  router.get('/tokens', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  router.get('/tokens', authenticate, async (req: Request, res: Response) => {
     res.json({ success: true, data: await service.listTokens(req.user!.id) });
-  }));
+  });
 
   // Creating one is ADDITIVE: existing subscriptions keep working, which is the
   // whole point of the change. The raw token is in this response and nowhere
   // else, ever — only its digest is stored.
-  router.post('/tokens', authenticate, validateBody(createCalendarTokenBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/tokens', authenticate, validateBody(createCalendarTokenBody), async (req: Request, res: Response) => {
     const created = await service.createToken(req.user!.id, res.locals.body.label);
     res.status(201).json({
       success: true,
       data: created,
       message: 'Token created. Copy it now — it cannot be shown again.',
     });
-  }));
+  });
 
-  router.delete('/tokens/:id', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.delete('/tokens/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
     const revoked = await service.revokeToken(req.user!.id, res.locals.params.id);
     if (!revoked) {
       // Unknown id, someone else's, or already revoked — all the same answer
@@ -75,9 +74,9 @@ export const createCalendarRouter = (pool: Pool): Router => {
       throw new NotFoundError('Token not found');
     }
     res.json({ success: true, message: 'Token revoked' });
-  }));
+  });
 
-  router.get('/feed.ics', validateQuery(calendarFeedQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/feed.ics', validateQuery(calendarFeedQuery), async (req: Request, res: Response) => {
     const { token } = res.locals.query;
     if (!token) {
       res.status(401).type('text/plain').send('token query parameter required');
@@ -90,7 +89,7 @@ export const createCalendarRouter = (pool: Pool): Router => {
     }
     const { body, etag } = await service.buildUserFeed(userId);
     writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
-  }));
+  });
 
   /**
    * A filtered aggregation: departments, roles, people, over a range that
@@ -110,7 +109,7 @@ export const createCalendarRouter = (pool: Pool): Router => {
    * department feed's older admin-or-department-manager check stays where it is
    * so existing subscriptions keep working; this endpoint is the general form.
    */
-  router.get('/aggregate.ics', validateQuery(calendarAggregateQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/aggregate.ics', validateQuery(calendarAggregateQuery), async (req: Request, res: Response) => {
     const { token, departmentId, roleId, userId, pastDays, futureDays } = res.locals.query;
     if (!token) {
       res.status(401).type('text/plain').send('token query parameter required');
@@ -145,9 +144,9 @@ export const createCalendarRouter = (pool: Pool): Router => {
       ...(futureDays !== undefined ? { futureDays } : {}),
     });
     writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
-  }));
+  });
 
-  router.get('/department/:id.ics', validateParams(idParam), validateQuery(calendarFeedQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/department/:id.ics', validateParams(idParam), validateQuery(calendarFeedQuery), async (req: Request, res: Response) => {
       const { token } = res.locals.query;
       if (!token) {
         res.status(401).type('text/plain').send('token query parameter required');
@@ -182,7 +181,7 @@ export const createCalendarRouter = (pool: Pool): Router => {
 
       const { body, etag } = await service.buildDepartmentFeed(departmentId);
       writeIcsResponse(res, body, etag, req.headers['if-none-match'] as string | undefined);
-  }));
+  });
 
   return router;
 };

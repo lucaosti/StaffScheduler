@@ -3,9 +3,10 @@
  *
  * Services throw these instead of plain `Error` so that HTTP status codes and
  * stable error codes are carried by the error type itself, not divined from
- * message substrings in every route. Routes forward errors with `next(err)`
- * (or the `asyncHandler` wrapper) and the central error middleware in
- * `src/app.ts` renders the standard envelope:
+ * message substrings in every route. A thrown error reaches the central
+ * error middleware — via `next(err)` for a synchronous throw, or on its own
+ * for a rejected `async` route handler's promise (Express 5 forwards those
+ * natively) — which renders the standard envelope:
  *
  *   { success: false, error: { code, message } }
  *
@@ -37,12 +38,13 @@ export class ValidationError extends AppError {
  * 401 — missing or invalid authentication.
  *
  * No service throws this today, and that is deliberate rather than an
- * oversight: authentication is decided in `authenticate`, which is middleware
- * and not a route handler, so it is not wrapped in `asyncHandler` and a throw
- * would escape Express 4's synchronous error path. It also needs codes this
- * class cannot express — `MISSING_TOKEN`, `INVALID_TOKEN`, `TOKEN_REVOKED` —
- * which the frontend's refresh logic distinguishes, so it returns its envelope
- * directly. The class stays for any service that genuinely needs a 401.
+ * oversight: authentication is decided in `authenticate` middleware, which
+ * returns its envelope directly rather than throwing — not to dodge a
+ * missing error path (Express 5 forwards a rejected middleware's promise the
+ * same as a route handler's), but because it needs codes this class cannot
+ * express — `MISSING_TOKEN`, `INVALID_TOKEN`, `TOKEN_REVOKED` — which the
+ * frontend's refresh logic distinguishes. The class stays for any service
+ * that genuinely needs a plain 401.
  */
 export class UnauthorizedError extends AppError {
   constructor(message = 'Authentication required') {

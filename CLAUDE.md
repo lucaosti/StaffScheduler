@@ -85,7 +85,6 @@ backend/src/
 ├── middleware/
 │   ├── auth.ts                # JWT verification → req.user; authenticate, requirePermission, requireModule
 │   ├── validation.ts          # Zod-based validateBody / validateParams helpers
-│   ├── asyncHandler.ts        # Wraps route handlers; errors go to the central errorHandler
 │   └── requestContext.ts      # AsyncLocalStorage request IDs; X-Request-Id response header; getRequestId()
 ├── observability/
 │   ├── metrics.ts             # Prometheus registry, HTTP histogram, DB-pool + queue gauges
@@ -133,7 +132,7 @@ request handler.
 
 **Password reset**: implemented in `UserService`; the relevant route is wired through `createAuthRouter`.
 
-**Error handling**: Services throw typed errors from `src/errors` (`NotFoundError` 404, `ConflictError` 409, `ForbiddenError` 403, `ValidationError` 400, `UnauthorizedError` 401); plain `Error` is reserved for internal faults (500). Route handlers are wrapped in `asyncHandler` (from `src/middleware/asyncHandler`) and do not catch errors — the central `errorHandler` middleware in `src/middleware/errorHandler.ts` renders the envelope. On Express 5 a rejected promise reaches `errorHandler` on its own, which makes `asyncHandler` redundant rather than load-bearing; it stays until a dedicated follow-up removes it from all call sites at once (#318 tracked the version bump itself, not that cleanup). Never dispatch on `error.message` substrings (an ESLint rule enforces this in `src/routes`). Custom error codes (e.g. `TOTP_REQUIRED`, `INVALID_STATUS`, `DELEGATION_INVALID`) are preserved by catching the typed error in the route and re-rendering with the custom code.
+**Error handling**: Services throw typed errors from `src/errors` (`NotFoundError` 404, `ConflictError` 409, `ForbiddenError` 403, `ValidationError` 400, `UnauthorizedError` 401); plain `Error` is reserved for internal faults (500). Route handlers do not catch errors — a rejected `async` handler's promise reaches the central `errorHandler` middleware (`src/middleware/errorHandler.ts`) on its own, which renders the envelope. (Express 4 needed every route handler wrapped in an `asyncHandler` helper to get this; Express 5 forwards it natively, so that wrapper was removed — #580.) Never dispatch on `error.message` substrings (an ESLint rule enforces this in `src/routes`). Custom error codes (e.g. `TOTP_REQUIRED`, `INVALID_STATUS`, `DELEGATION_INVALID`) are preserved by catching the typed error in the route and re-rendering with the custom code.
 
 `UnauthorizedError` is the one member of the hierarchy no service throws: authentication is decided in `authenticate` middleware, which returns its envelope directly rather than throwing — not because a throw would be lost (Express 5 forwards a rejected middleware the same way it forwards a rejected route handler), but because the class cannot express the codes this path needs (`MISSING_TOKEN`, `INVALID_TOKEN`, `TOKEN_REVOKED`), which the frontend's refresh logic distinguishes. The class stays available for any service that genuinely needs a plain 401.
 

@@ -29,7 +29,6 @@ import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { EmployeeService } from '../services/EmployeeService';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { z } from 'zod';
@@ -105,7 +104,7 @@ const listFilters = (req: Request, query: z.infer<typeof employeeListQuery>) => 
   return Object.keys(filters).length > 0 ? filters : undefined;
 };
 
-router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
+router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), async (req: Request, res: Response) => {
   const activeFilters = listFilters(req, res.locals.query);
   const pagination = parsePagination(req);
   if (pagination) {
@@ -117,10 +116,10 @@ router.get('/', authenticate, requirePermission('employee.read'), validateQuery(
   }
   const employees = await employeeService.getAllEmployees(activeFilters);
   res.json({ success: true, data: employees });
-}));
+});
 
 // `/export` is declared before `/:id` so Express does not read "export" as an id.
-router.get('/export', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
+router.get('/export', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), async (req: Request, res: Response) => {
   const filters = listFilters(req, res.locals.query);
   // Unpaginated on purpose: a file is the one place where "all of it" is the
   // point, and the caller's scope still bounds it.
@@ -132,9 +131,9 @@ router.get('/export', authenticate, requirePermission('employee.read'), validate
     columns: employeeColumns,
     filters: filters ?? {},
   });
-}));
+});
 
-router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const employee = await employeeService.getEmployeeById(id);
@@ -146,9 +145,9 @@ router.get('/:id', authenticate, requirePermission('employee.read'), validatePar
   }
 
   res.json({ success: true, data: employee });
-}));
+});
 
-router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (req: Request, res: Response) => {
   await enforceFieldPolicy(req, res.locals.body, false);
   const employee = await employeeService.createEmployee(res.locals.body);
 
@@ -157,13 +156,13 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
     data: employee,
     message: 'Employee created successfully'
   });
-}));
+});
 
 // One outcome per row (#316) — a high-volume integration needs to know which
 // of 200 rows failed and why, not just that the batch as a whole did or didn't
 // go through. Field policy is enforced per row too: it depends on the actor,
 // not the batch, so one row failing it must not fail its neighbors.
-router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), asyncHandler(async (req: Request, res: Response) => {
+router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), async (req: Request, res: Response) => {
   const { employees } = res.locals.body as z.infer<typeof batchCreateEmployeesBody>;
   const result = await runBatch(employees, async (employeeData) => {
     await enforceFieldPolicy(req, employeeData, false);
@@ -175,9 +174,9 @@ router.post('/batch', authenticate, requirePermission('employee.manage'), valida
     data: result,
     message: `${result.succeeded} of ${result.succeeded + result.failed} employees created successfully`
   });
-}));
+});
 
-router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), asyncHandler(async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   // Partial: a field absent from an update is not being cleared, so a
@@ -190,9 +189,9 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), validateP
     data: employee,
     message: 'Employee updated successfully'
   });
-}));
+});
 
-router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   await employeeService.deleteEmployee(id, req.user?.id ?? null);
@@ -200,23 +199,23 @@ router.delete('/:id', authenticate, requirePermission('employee.manage'), valida
     success: true,
     message: 'Employee deleted successfully'
   });
-}));
+});
 
-router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
   const employees = await employeeService.getEmployeesByDepartment(departmentId);
   res.json({ success: true, data: employees });
-}));
+});
 
-router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const skills = await employeeService.getEmployeeSkills(id);
   res.json({ success: true, data: skills });
-}));
+});
 
-router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), asyncHandler(async (_req: Request, res: Response) => {
+router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const { skillId, proficiencyLevel } = res.locals.body;
 
@@ -226,9 +225,9 @@ router.post('/:id/skills', authenticate, requirePermission('employee.manage'), v
     success: true,
     message: 'Skill added to employee successfully'
   });
-}));
+});
 
-router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), asyncHandler(async (_req: Request, res: Response) => {
+router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), async (_req: Request, res: Response) => {
   const { id, skillId } = res.locals.params;
 
   await employeeService.removeEmployeeSkill(id, skillId);
@@ -237,7 +236,7 @@ router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.
     success: true,
     message: 'Skill removed from employee successfully'
   });
-}));
+});
 
   return router;
 };
