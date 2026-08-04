@@ -206,16 +206,17 @@ describe('PendingApprovalService.listForUser', () => {
   it('degrades safely on a row with no entity id at all (defensive fall-through)', async () => {
     // Exactly one *_id column is set per row by construction, but the mapper
     // must not crash if a corrupt row slips through: it falls through to the
-    // shift-swap branch with a null target id and null assignee.
+    // last branch (policy exception, the fifth and final entity kind) with a
+    // null target id and null assignee.
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[{ ...baseRow, assigned_to_user_id: null }]]);
 
     const [item] = await new PendingApprovalService(pool).listForUser(7);
 
-    expect(item.targetEntityType).toBe('shift_swap_request');
+    expect(item.targetEntityType).toBe('policy_exception');
     expect(item.targetEntityId).toBeNull();
     expect(item.assignedToUserId).toBeNull();
-    expect(item.changeType).toBe('ShiftSwap.Request');
+    expect(item.changeType).toBe('Policy.Exception');
   });
 });
 
