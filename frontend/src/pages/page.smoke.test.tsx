@@ -87,6 +87,17 @@ jest.mock('../services/policyService', () => ({
   updateMatrix: jest.fn(() => okResponse({ id: 1 })),
 }));
 
+jest.mock('../services/attendanceService', () => ({
+  __esModule: true,
+  getAttendanceRecords: jest.fn(() => okResponse([])),
+  getPendingApprovals: jest.fn(() => okResponse([])),
+  getCostEstimate: jest.fn(() => okResponse(null)),
+  clockIn: jest.fn(() => okResponse({ id: 1 })),
+  clockOut: jest.fn(() => okResponse({ id: 1 })),
+  approveAttendance: jest.fn(() => okResponse({ id: 1 })),
+  rejectAttendance: jest.fn(() => okResponse({ id: 1 })),
+}));
+
 jest.mock('../contexts/AuthContext', () => ({
   useAuth: () => ({
     user: { id: 1, email: 'admin@x', role: 'admin' },
@@ -140,6 +151,16 @@ describe('Page smoke tests', () => {
     await waitFor(() =>
       expect(
         screen.getAllByText(/polic(y|ies)/i).length
+      ).toBeGreaterThan(0)
+    );
+  });
+
+  it('Attendance renders without throwing', async () => {
+    const { default: Attendance } = await import('./Attendance/Attendance');
+    render(<Attendance />);
+    await waitFor(() =>
+      expect(
+        screen.getAllByText(/attendance/i).length
       ).toBeGreaterThan(0)
     );
   });
