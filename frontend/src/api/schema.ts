@@ -2445,6 +2445,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/departments/{id}/geofences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a department's geofences */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Geofences for this department. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        /**
+         * Create a geofence for a department
+         * @description The polygon is an ordered list of at least 3 {lat, lng} vertices. Clock-in is validated against every active geofence configured for the caller's departments; if none exist, geofencing has no effect.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        name: string;
+                        polygon: {
+                            lat: number;
+                            lng: number;
+                        }[];
+                        isActive?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Geofence created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/departments/{id}/geofences/{geofenceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Update a department geofence */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                    geofenceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        name?: string;
+                        polygon?: {
+                            lat: number;
+                            lng: number;
+                        }[];
+                        isActive?: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Geofence updated. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        post?: never;
+        /** Delete a department geofence */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                    geofenceId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Geofence deleted. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/departments/{id}/users": {
         parameters: {
             query?: never;
@@ -8098,6 +8247,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         notes?: string;
+                        latitude?: number;
+                        longitude?: number;
                     };
                 };
             };
@@ -10832,6 +10983,20 @@ export interface components {
                     message?: string;
                 }[];
             };
+        };
+        Geofence: {
+            id: number;
+            departmentId: number;
+            name: string;
+            polygon: {
+                lat: number;
+                lng: number;
+            }[];
+            isActive: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
         };
         PaginationMeta: {
             total: number;

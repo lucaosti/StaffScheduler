@@ -33,9 +33,11 @@ jest.mock('../middleware/auth', () => ({
 
 jest.mock('../services/DepartmentService');
 jest.mock('../services/UserService');
+jest.mock('../services/GeofenceService');
 
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
+import { GeofenceService } from '../services/GeofenceService';
 import { createDepartmentsRouter } from '../routes/departments';
 import { ConflictError } from '../errors';
 import { errorHandler } from '../middleware/errorHandler';
@@ -467,5 +469,97 @@ describe('departments router GET /:id/stats', () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
+  });
+});
+
+// ── Geofences ────────────────────────────────────────────────────────────────
+
+describe('departments router geofence endpoints', () => {
+  const fence = {
+    id: 1,
+    departmentId: 3,
+    name: 'Main office',
+    polygon: [{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }, { lat: 1, lng: 1 }],
+    isActive: true,
+    createdAt: 'x',
+    updatedAt: 'x',
+  };
+
+  it('GET /:id/geofences returns 200 for an admin', async () => {
+    (GeofenceService.prototype.listForDepartment as jest.Mock) = jest.fn().mockResolvedValue([fence]);
+
+    const res = await request(mountApp()).get('/api/departments/3/geofences');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([fence]);
+  });
+
+  it('GET /:id/geofences returns 403 for an employee not in the department', async () => {
+    currentUser = { id: 5, role: 'employee', email: 'e@x.com' };
+
+    const res = await request(mountApp()).get('/api/departments/3/geofences');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('POST /:id/geofences creates a fence for an admin', async () => {
+    (GeofenceService.prototype.create as jest.Mock) = jest.fn().mockResolvedValue(fence);
+
+    const res = await request(mountApp())
+      .post('/api/departments/3/geofences')
+      .send({ name: 'Main office', polygon: fence.polygon });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data).toEqual(fence);
+  });
+
+  it('POST /:id/geofences returns 400 for a polygon with fewer than 3 points', async () => {
+    const res = await request(mountApp())
+      .post('/api/departments/3/geofences')
+      .send({ name: 'Too small', polygon: [{ lat: 0, lng: 0 }] });
+
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /:id/geofences returns 403 for a manager of a different department', async () => {
+    currentUser = { id: 5, role: 'manager', email: 'm@x.com' };
+    (DepartmentService.prototype.getDepartmentsForUser as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ id: 2, managerId: 5 }]);
+
+    const res = await request(mountApp())
+      .post('/api/departments/3/geofences')
+      .send({ name: 'Main office', polygon: fence.polygon });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('PUT /:id/geofences/:geofenceId updates a fence for an admin', async () => {
+    (GeofenceService.prototype.update as jest.Mock) = jest.fn().mockResolvedValue({ ...fence, name: 'Renamed' });
+
+    const res = await request(mountApp())
+      .put('/api/departments/3/geofences/1')
+      .send({ name: 'Renamed' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.name).toBe('Renamed');
+  });
+
+  it('DELETE /:id/geofences/:geofenceId deletes a fence for an admin', async () => {
+    (GeofenceService.prototype.delete as jest.Mock) = jest.fn().mockResolvedValue(true);
+
+    const res = await request(mountApp()).delete('/api/departments/3/geofences/1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('DELETE /:id/geofences/:geofenceId returns 403 for an employee', async () => {
+    currentUser = { id: 5, role: 'employee', email: 'e@x.com' };
+
+    const res = await request(mountApp()).delete('/api/departments/3/geofences/1');
+
+    expect(res.status).toBe(403);
   });
 });

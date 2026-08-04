@@ -42,6 +42,7 @@ describe('AttendanceService.clockIn', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[], null] as Tuple) // open-record check: none
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: no fences configured
       .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment: no unambiguous match
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[buildRow({ id: 10 })], null] as Tuple); // getById
@@ -51,7 +52,79 @@ describe('AttendanceService.clockIn', () => {
 
     expect(created.id).toBe(10);
     expect(created.status).toBe('pending');
-    expect(execute.mock.calls[2][0]).toMatch(/INSERT INTO attendance_records/);
+    expect(execute.mock.calls[3][0]).toMatch(/INSERT INTO attendance_records/);
+  });
+});
+
+describe('AttendanceService.clockIn — geofencing', () => {
+  const geofenceRow = (polygon: unknown) => ({ polygon: JSON.stringify(polygon) });
+  const square = [{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }, { lat: 1, lng: 1 }, { lat: 1, lng: 0 }];
+
+  it('proceeds without a location when the caller has no active geofence', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: none configured
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ id: 10 })], null] as Tuple);
+
+    const created = await new AttendanceService(pool).clockIn(5, null, null);
+    expect(created.id).toBe(10);
+  });
+
+  it('rejects a clock-in with no location when a geofence is configured', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[geofenceRow(square)], null] as Tuple) // geofence check: one active fence
+      .mockResolvedValue([{ insertId: 1 }, null] as Tuple); // audit insert
+
+    await expect(new AttendanceService(pool).clockIn(5, null, null)).rejects.toThrow(
+      /outside the allowed area/
+    );
+    // Never reaches the INSERT.
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO attendance_records'))).toBe(false);
+  });
+
+  it('rejects a clock-in from a point outside every configured fence', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[geofenceRow(square)], null] as Tuple)
+      .mockResolvedValue([{ insertId: 1 }, null] as Tuple);
+
+    await expect(
+      new AttendanceService(pool).clockIn(5, null, { lat: 50, lng: 50 })
+    ).rejects.toThrow(/outside the allowed area/);
+  });
+
+  it('allows a clock-in from a point inside a configured fence', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[geofenceRow(square)], null] as Tuple) // geofence check
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockResolvedValueOnce([{ insertId: 12 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ id: 12, latitude: 0.5, longitude: 0.5 })], null] as Tuple);
+
+    const created = await new AttendanceService(pool).clockIn(5, null, { lat: 0.5, lng: 0.5 });
+    expect(created.id).toBe(12);
+    expect(execute.mock.calls[3][1]).toEqual([5, null, 0.5, 0.5, null]);
+  });
+
+  it('is satisfied by any one of several configured fences (multi-department caller)', async () => {
+    const other = [{ lat: 10, lng: 10 }, { lat: 10, lng: 11 }, { lat: 11, lng: 11 }, { lat: 11, lng: 10 }];
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[geofenceRow(square), geofenceRow(other)], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([{ insertId: 13 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ id: 13 })], null] as Tuple);
+
+    const created = await new AttendanceService(pool).clockIn(5, null, { lat: 10.5, lng: 10.5 });
+    expect(created.id).toBe(13);
   });
 });
 
@@ -161,6 +234,7 @@ describe('AttendanceService.clockIn — failure diagnosis', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: no fences configured
       .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[], null] as Tuple); // getById: gone
@@ -174,6 +248,7 @@ describe('AttendanceService.clockIn — failure diagnosis', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: no fences configured
       .mockResolvedValueOnce([[{ id: 77 }], null] as Tuple) // one assignment today
       .mockResolvedValueOnce([{ insertId: 11 }, null] as Tuple)
       .mockResolvedValueOnce([[buildRow({ id: 11, shift_assignment_id: 77 })], null] as Tuple)
@@ -182,7 +257,7 @@ describe('AttendanceService.clockIn — failure diagnosis', () => {
     const created = await new AttendanceService(pool).clockIn(5, 'note');
 
     expect(created.shiftAssignmentId).toBe(77);
-    expect(execute.mock.calls[2][1]).toEqual([5, 77, 'note']);
+    expect(execute.mock.calls[3][1]).toEqual([5, 77, null, null, 'note']);
   });
 });
 

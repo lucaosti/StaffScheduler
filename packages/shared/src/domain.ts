@@ -246,6 +246,23 @@ export const departmentSchema = z.object({
 });
 export type Department = z.infer<typeof departmentSchema>;
 
+export const geoPointSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+export type GeoPoint = z.infer<typeof geoPointSchema>;
+
+export const geofenceSchema = z.object({
+  id: z.number().int(),
+  departmentId: z.number().int(),
+  name: z.string(),
+  polygon: z.array(geoPointSchema),
+  isActive: z.boolean(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type Geofence = z.infer<typeof geofenceSchema>;
+
 /**
  * A scoped business policy.
  *
