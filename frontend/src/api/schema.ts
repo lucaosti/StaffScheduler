@@ -1011,7 +1011,7 @@ export interface paths {
         put?: never;
         /**
          * Request a fresh 2FA challenge
-         * @description For a method that must generate/deliver a code before it can be verified (email: sends a fresh code; WebAuthn: returns fresh assertion options for `navigator.credentials.get()`). TOTP has no challenge step and answers 400 `TWO_FACTOR_CHALLENGE_FAILED` if asked for one.
+         * @description For a method that must generate/deliver a code before it can be verified (email: sends a fresh code; WebAuthn: returns fresh assertion options for `navigator.credentials.get()`). TOTP has no challenge step and answers 409 `CONFLICT` if asked for one.
          */
         post: {
             parameters: {
@@ -1036,14 +1036,14 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description The method is not enabled, or does not use a requested challenge. */
-                400: {
+                401: components["responses"]["Unauthorized"];
+                /** @description The method is not enabled, or does not use a requested challenge (`CONFLICT`). */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
-                401: components["responses"]["Unauthorized"];
             };
         };
         delete?: never;
@@ -1388,15 +1388,15 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description The method is not enabled, or does not use a requested challenge. */
-                400: {
+                /** @description Invalid credentials (`LOGIN_FAILED`). */
+                401: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
                 };
-                /** @description Invalid credentials (`LOGIN_FAILED`). */
-                401: {
+                /** @description The method is not enabled, or does not use a requested challenge (`CONFLICT`). */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
