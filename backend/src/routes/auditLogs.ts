@@ -11,9 +11,9 @@ import { validateParams, validateQuery } from '../middleware/validation';
 import { idParam, auditLogListQuery, auditLogExportQuery } from '../schemas';
 import { AuditLogService, AuditLogFilters } from '../services/AuditLogService';
 
-export const createAuditLogsRouter = (pool: Pool): Router => {
+export const createAuditLogsRouter = (pool: Pool, readPool: Pool = pool): Router => {
   const router = Router();
-  const service = new AuditLogService(pool);
+  const service = new AuditLogService(pool, readPool);
 
   router.use(authenticate, requireModuleForUser('audit'), requirePermission('audit.read'));
 

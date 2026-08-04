@@ -188,8 +188,35 @@ class Database {
 
 /**
  * Database Instance Export
- * 
+ *
  * Exports a singleton instance of the Database class for
  * consistent usage across the application.
  */
 export const database = new Database();
+
+/**
+ * The read-pool selection seam for #323: routes analytical SELECTs (reports,
+ * calendar feed generation, audit log listing/export) to a MySQL read
+ * replica when one is configured.
+ *
+ * Returns the SAME pool object, not a second pool pointed at the same host,
+ * when `DB_REPLICA_HOST` is unset — so a single-instance deployment is
+ * genuinely unaffected, not just "configured to point at itself": there is
+ * no extra connection budget, no extra pool to close on shutdown, and every
+ * read-replica-aware service falls back to querying the primary through the
+ * exact same pool instance it always has.
+ */
+export function createReadPool(primaryPool: mysql.Pool): mysql.Pool {
+  if (!config.database.replicaHost) return primaryPool;
+  return mysql.createPool({
+    host: config.database.replicaHost,
+    port: config.database.replicaPort,
+    user: config.database.replicaUser,
+    password: config.database.replicaPassword,
+    database: config.database.replicaDatabase,
+    waitForConnections: true,
+    connectionLimit: config.database.replicaConnectionLimit,
+    queueLimit: config.database.queueLimit,
+    connectTimeout: config.database.connectTimeout,
+  });
+}

@@ -88,6 +88,19 @@ export const config = {
     connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '30'),
     queueLimit:      parseInt(process.env.DB_QUEUE_LIMIT || '100'),
     connectTimeout:  10_000,
+    // Optional read replica for analytical SELECTs (reports, calendar feeds,
+    // audit log listing/export — see config/database.ts's createReadPool).
+    // Unset in a single-instance deployment, which is the point: those
+    // services then keep querying the primary, byte-for-byte the same as
+    // before this existed. Credentials/database default to the primary's own
+    // when not given explicitly, since a replica is normally the same
+    // schema/user under a different host.
+    replicaHost: process.env.DB_REPLICA_HOST || null,
+    replicaPort: parseInt(process.env.DB_REPLICA_PORT || String(parseInt(process.env.DB_PORT || '3306'))),
+    replicaDatabase: process.env.DB_REPLICA_NAME || process.env.DB_NAME || 'staff_scheduler',
+    replicaUser: process.env.DB_REPLICA_USER || process.env.DB_USER || 'scheduler_user',
+    replicaPassword: process.env.DB_REPLICA_PASSWORD || requireProductionSecret('DB_PASSWORD', 'scheduler_password'),
+    replicaConnectionLimit: parseInt(process.env.DB_REPLICA_POOL_LIMIT || process.env.DB_POOL_LIMIT || '30'),
   },
   jwt: {
     secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),

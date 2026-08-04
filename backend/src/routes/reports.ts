@@ -19,9 +19,9 @@ const respondError = (res: Response, status: number, code: string, message: stri
 };
 
 
-export const createReportsRouter = (pool: Pool): Router => {
+export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router => {
   const router = Router();
-  const service = new ReportsService(pool);
+  const service = new ReportsService(readPool);
   const exporter = new ExportService(new AuditLogService(pool));
 
   /**
