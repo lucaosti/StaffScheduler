@@ -1,12 +1,12 @@
 /**
  * Pending Approval Service
  *
- * Read-side queries for the pending_approvals table. Covers all four entity
+ * Read-side queries for the pending_approvals table. Covers all five entity
  * types a decision can be about (change request, time-off, loan, shift
- * swap) — exactly one of the corresponding *_id columns is set per row.
- * Write-side mutations (approve / reject / advance / delegate) live in
- * ApprovalEngineService and the per-entity services so the full entity
- * lifecycle stays with its owner.
+ * swap, policy exception) — exactly one of the corresponding *_id columns is
+ * set per row. Write-side mutations (approve / reject / advance / delegate)
+ * live in ApprovalEngineService and the per-entity services so the full
+ * entity lifecycle stays with its owner.
  *
  * @author Luca Ostinelli
  */
@@ -21,7 +21,9 @@ const mapRow = (r: any): PendingApprovalWithContext => {
       ? 'time_off_request'
       : r.employee_loan_id
         ? 'employee_loan'
-        : 'shift_swap_request';
+        : r.shift_swap_request_id
+          ? 'shift_swap_request'
+          : 'policy_exception';
 
   const changeType =
     r.cr_change_type ??
@@ -29,14 +31,17 @@ const mapRow = (r: any): PendingApprovalWithContext => {
       ? 'TimeOff.Request'
       : targetEntityType === 'employee_loan'
         ? 'Loan.Request'
-        : 'ShiftSwap.Request');
+        : targetEntityType === 'shift_swap_request'
+          ? 'ShiftSwap.Request'
+          : 'Policy.Exception');
 
-  const targetEntityId = r.change_request_id ?? r.time_off_request_id ?? r.employee_loan_id ?? r.shift_swap_request_id ?? null;
+  const targetEntityId =
+    r.change_request_id ?? r.time_off_request_id ?? r.employee_loan_id ?? r.shift_swap_request_id ?? r.policy_exception_id ?? null;
 
   const proposerUserId =
-    r.cr_proposer_user_id ?? r.tor_user_id ?? r.el_user_id ?? r.ssr_requester_user_id;
+    r.cr_proposer_user_id ?? r.tor_user_id ?? r.el_user_id ?? r.ssr_requester_user_id ?? r.pe_requested_by_user_id;
 
-  const justification = r.cr_justification ?? r.tor_reason ?? r.el_reason ?? r.ssr_notes ?? null;
+  const justification = r.cr_justification ?? r.tor_reason ?? r.el_reason ?? r.ssr_notes ?? r.pe_reason ?? null;
 
   let proposedPayload: Record<string, unknown>;
   if (targetEntityType === 'change_request') {
@@ -50,8 +55,10 @@ const mapRow = (r: any): PendingApprovalWithContext => {
     proposedPayload = { startDate: r.tor_start_date, endDate: r.tor_end_date, type: r.tor_type };
   } else if (targetEntityType === 'employee_loan') {
     proposedPayload = { fromOrgUnitId: r.el_from_org_unit_id, toOrgUnitId: r.el_to_org_unit_id, startDate: r.el_start_date, endDate: r.el_end_date };
-  } else {
+  } else if (targetEntityType === 'shift_swap_request') {
     proposedPayload = { requesterAssignmentId: r.ssr_requester_assignment_id, targetAssignmentId: r.ssr_target_assignment_id };
+  } else {
+    proposedPayload = { policyId: r.pe_policy_id, targetType: r.pe_target_type, targetId: r.pe_target_id };
   }
 
   return {
@@ -60,6 +67,7 @@ const mapRow = (r: any): PendingApprovalWithContext => {
     timeOffRequestId: r.time_off_request_id ?? null,
     employeeLoanId: r.employee_loan_id ?? null,
     shiftSwapRequestId: r.shift_swap_request_id ?? null,
+    policyExceptionId: r.policy_exception_id ?? null,
     workflowId: r.workflow_id,
     stepId: r.step_id,
     stepOrder: r.step_order,
@@ -108,12 +116,15 @@ export class PendingApprovalService {
               el.end_date AS el_end_date, el.reason AS el_reason,
               ssr.requester_user_id AS ssr_requester_user_id,
               ssr.requester_assignment_id AS ssr_requester_assignment_id,
-              ssr.target_assignment_id AS ssr_target_assignment_id, ssr.notes AS ssr_notes
+              ssr.target_assignment_id AS ssr_target_assignment_id, ssr.notes AS ssr_notes,
+              pe.requested_by_user_id AS pe_requested_by_user_id, pe.policy_id AS pe_policy_id,
+              pe.target_type AS pe_target_type, pe.target_id AS pe_target_id, pe.reason AS pe_reason
          FROM pending_approvals pa
          LEFT JOIN change_requests cr ON cr.id = pa.change_request_id
          LEFT JOIN time_off_requests tor ON tor.id = pa.time_off_request_id
          LEFT JOIN employee_loans el ON el.id = pa.employee_loan_id
          LEFT JOIN shift_swap_requests ssr ON ssr.id = pa.shift_swap_request_id
+         LEFT JOIN policy_exception_requests pe ON pe.id = pa.policy_exception_id
          LEFT JOIN user_org_units member_check
            ON member_check.org_unit_id = pa.assigned_to_org_unit_id AND member_check.user_id = ?
         WHERE (pa.assigned_to_user_id = ? OR (pa.open_to_structure = TRUE AND member_check.user_id IS NOT NULL))
