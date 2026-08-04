@@ -1061,6 +1061,40 @@ than asserted.
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.
 
+### MySQL read-replica routing for analytical reads
+
+Distinct from the backend-instance replicas above: this is a **MySQL** read
+replica, optional, for offloading the heaviest analytical SELECTs
+(`ReportsService`, `CalendarService`'s feed generation, `AuditLogService`'s
+listing/export) from the primary. Configured with `DB_REPLICA_HOST` (see
+`.env.example`); every other `DB_REPLICA_*` variable falls back to its
+primary `DB_*` counterpart when unset, since a replica is normally the same
+schema/user under a different host.
+
+**The pool-selection seam** (`config/database.ts`'s `createReadPool`) returns
+the exact same pool object passed in — not a second pool pointed at the same
+host — when `DB_REPLICA_HOST` is unset, so a single-instance deployment is
+genuinely unaffected: no extra connection budget, nothing extra to close on
+shutdown, and every read-replica-aware service falls back to querying the
+primary through the identical pool instance it always has. `buildApp`'s
+`readPool` option threads this pool into `createReportsRouter`,
+`createCalendarRouter`, and `createAuditLogsRouter`, each of which pass it to
+their service's constructor.
+
+**Split at the service, not the route**: `ReportsService` is entirely
+read-only and takes a single pool (the read one). `CalendarService` and
+`AuditLogService` take two — a primary `pool` for their few writes (calendar
+token create/revoke; the audit log's own `write()`) and a `readPool`
+(defaulting to `pool`) for everything else. A replica lags the primary by
+design, so routing a write through it would be a correctness bug, not just a
+missed optimization — this is why the split is per-method inside the
+service, not a blanket "route reads to X" at the transport layer.
+
+`AuditLogService` instances constructed elsewhere in the codebase for
+`write()`-only use (every other service's audit trail) are unaffected: they
+still take a single `pool` argument, and `readPool` inside that instance
+simply defaults to it, unused.
+
 ---
 
 ## 11. Extension points

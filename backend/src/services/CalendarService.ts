@@ -117,7 +117,11 @@ export interface CalendarToken {
 }
 
 export class CalendarService {
-  constructor(private pool: Pool) {}
+  // listTokens/resolveToken/the feed builders/loadColleagues are read-only
+  // and go through readPool (a replica when #323 configures one, otherwise
+  // the same pool as always — see config/database.ts's createReadPool);
+  // createToken/revokeToken always use the primary pool.
+  constructor(private pool: Pool, private readPool: Pool = pool) {}
 
   private sha256(raw: string): string {
     return createHash('sha256').update(raw).digest('hex');
@@ -132,7 +136,7 @@ export class CalendarService {
    * otherwise hand over every live subscription.
    */
   async listTokens(userId: number): Promise<CalendarToken[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT id, label, created_at, revoked_at
          FROM calendar_tokens WHERE user_id = ? ORDER BY id DESC`,
       [userId]
@@ -189,7 +193,7 @@ export class CalendarService {
    * still exists and the feed still works.
    */
   async resolveToken(token: string): Promise<number | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT user_id FROM calendar_tokens
         WHERE token_hash = ? AND revoked_at IS NULL LIMIT 1`,
       [this.sha256(token)]
@@ -199,7 +203,7 @@ export class CalendarService {
 
   /** Per-user feed with colleagues listed in each event description. */
   async buildUserFeed(userId: number): Promise<FeedResult> {
-    const [shiftRows] = await this.pool.execute<RowDataPacket[]>(
+    const [shiftRows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT sa.id AS assignment_id, sa.status,
               s.id AS shift_id, s.date, s.start_time, s.end_time, s.notes,
               sch.name AS schedule_name,
@@ -218,7 +222,7 @@ export class CalendarService {
     const shiftIds = shiftRows.map((r) => r.shift_id as number);
     const colleaguesByShift = await this.loadColleagues(shiftIds, userId);
 
-    const [onCallRows] = await this.pool.execute<RowDataPacket[]>(
+    const [onCallRows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT a.id AS assignment_id, p.id AS period_id,
               p.date, p.start_time, p.end_time, p.notes,
               d.name AS department_name,
@@ -353,7 +357,7 @@ export class CalendarService {
       params.push(...options.roleIds);
     }
 
-    const [shiftRows] = await this.pool.query<RowDataPacket[]>(
+    const [shiftRows] = await this.readPool.query<RowDataPacket[]>(
       `SELECT s.id AS shift_id, s.date, s.start_time, s.end_time, s.notes,
               sch.name AS schedule_name,
               d.name AS department_name,
@@ -414,7 +418,7 @@ export class CalendarService {
   /** Aggregated feed for an entire department. Manager / admin only. */
   async buildDepartmentFeed(departmentId: number, options: { rangeDays?: number } = {}): Promise<FeedResult> {
     const days = options.rangeDays ?? 30;
-    const [shiftRows] = await this.pool.execute<RowDataPacket[]>(
+    const [shiftRows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT s.id AS shift_id, s.date, s.start_time, s.end_time, s.notes,
               sch.name AS schedule_name,
               d.name AS department_name,
@@ -471,7 +475,7 @@ export class CalendarService {
     const out = new Map<number, string[]>();
     if (shiftIds.length === 0) return out;
     const placeholders = shiftIds.map(() => '?').join(',');
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT sa.shift_id, CONCAT_WS(' ', u.first_name, u.last_name) AS full_name
          FROM shift_assignments sa
          JOIN users u ON sa.user_id = u.id
