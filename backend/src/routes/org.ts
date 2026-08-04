@@ -7,6 +7,7 @@
  * - POST   /api/org/units                    create (admin)
  * - PUT    /api/org/units/:id                update (admin)
  * - DELETE /api/org/units/:id                delete (admin)
+ * - GET    /api/org/history{/:userId}        as-of-a-past-date roles/membership/headship
  * - GET    /api/org/units/:id/members        list members
  * - POST   /api/org/units/:id/members        add member (admin/manager)
  * - PATCH  /api/org/units/:id/members/:userId/primary  set primary (admin/manager)
@@ -24,9 +25,10 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
-import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody, employeeLoanListQuery } from '../schemas';
+import { idParam, idAndUserIdParam, createOrgUnitBody, updateOrgUnitBody, addOrgMemberBody, createLoanBody, optionalNotesBody, employeeLoanListQuery, personHistoryQuery } from '../schemas';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { AuthorityService } from '../services/AuthorityService';
+import { PersonHistoryService } from '../services/PersonHistoryService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
 
@@ -38,6 +40,7 @@ export const createOrgRouter = (pool: Pool): Router => {
   const router = Router();
   const units = new OrgUnitService(pool);
   const authority = new AuthorityService(pool);
+  const history = new PersonHistoryService(pool);
   const loans = new EmployeeLoanService(pool);
   const audit = new AuditLogService(pool);
 
@@ -138,6 +141,30 @@ export const createOrgRouter = (pool: Pool): Router => {
     const profile = await authority.getAuthorityProfile(targetId);
     if (!profile) return respondError(res, 404, 'NOT_FOUND', 'User not found');
     res.json({ success: true, data: profile });
+  });
+
+  /**
+   * "As of a past date, what was true about this person" — roles held, org
+   * units belonged to (with primary), and org units headed — projected from
+   * the audit trail. See PersonHistoryService for why this is a projection
+   * rather than a dedicated temporal schema (#600).
+   *
+   * Same visibility rule as `/authority`: your own history is not privileged
+   * information, someone else's is gated behind `org_unit.read`.
+   */
+  router.get('/history{/:userId}', validateQuery(personHistoryQuery), async (req: Request, res: Response) => {
+    const targetId = req.params.userId ? Number(req.params.userId) : req.user!.id;
+    if (!Number.isInteger(targetId) || targetId <= 0) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'userId must be a positive integer');
+    }
+    if (targetId !== req.user!.id && !userHasPermission(req.user, 'org_unit.read')) {
+      return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
+    }
+    // Whole-day granularity: "as of a date" reads as "through the end of
+    // that day", not its first instant — the only reading someone picking a
+    // day from a calendar picker actually means.
+    const snapshot = await history.getSnapshot(targetId, `${res.locals.query.asOf} 23:59:59`);
+    res.json({ success: true, data: snapshot });
   });
 
   router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
