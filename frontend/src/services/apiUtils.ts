@@ -25,10 +25,18 @@ export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api/v1';
  * Custom error class for API-related errors.
  * Carries the HTTP status code and the backend error code alongside the
  * message so callers can distinguish 401 / 403 / 404 / 5xx — and specific
- * conditions such as TOTP_REQUIRED — without parsing strings.
+ * conditions such as TWO_FACTOR_REQUIRED — without parsing strings.
  */
 export class ApiError extends Error {
-  constructor(message: string, public status?: number, public code?: string) {
+  constructor(
+    message: string,
+    public status?: number,
+    public code?: string,
+    // The response envelope's top-level `data`, when a non-2xx response carries
+    // one alongside `error` — e.g. TWO_FACTOR_REQUIRED's `{ methods: [...] }`,
+    // which the caller needs to render without a second round trip.
+    public data?: unknown
+  ) {
     super(message);
     this.name = 'ApiError';
     // TypeScript + target:es5 breaks the prototype chain for subclasses of
@@ -55,6 +63,7 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
   if (!response.ok) {
     let errorMessage = `HTTP error! status: ${response.status}`;
     let errorCode: string | undefined;
+    let errorData: unknown;
     if (data !== null && typeof data === 'object') {
       const dataObj = data as Record<string, unknown>;
       const errField = dataObj['error'];
@@ -63,11 +72,12 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
         if (typeof msg === 'string') errorMessage = msg;
         const code = (errField as Record<string, unknown>)['code'];
         if (typeof code === 'string') errorCode = code;
+        errorData = dataObj['data'];
       } else if (typeof dataObj['message'] === 'string') {
         errorMessage = dataObj['message'];
       }
     }
-    throw new ApiError(errorMessage, response.status, errorCode);
+    throw new ApiError(errorMessage, response.status, errorCode, errorData);
   }
 
   return data as ApiResponse<T>;

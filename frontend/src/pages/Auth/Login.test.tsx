@@ -66,9 +66,9 @@ describe('<Login />', () => {
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
-  it('reveals the 2FA field on TOTP_REQUIRED and resubmits with the code', async () => {
+  it('reveals the 2FA field on TWO_FACTOR_REQUIRED and resubmits with the code', async () => {
     mockLogin.mockRejectedValueOnce(
-      new ApiError('Two-factor authentication code required', 401, 'TOTP_REQUIRED')
+      new ApiError('Two-factor authentication code required', 401, 'TWO_FACTOR_REQUIRED')
     );
     render(<Login />);
     await userEvent.type(
@@ -90,7 +90,7 @@ describe('<Login />', () => {
       expect(mockLogin).toHaveBeenLastCalledWith({
         email: 'a@x.com',
         password: 'pw',
-        totpCode: '123456',
+        code: '123456',
       })
     );
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });

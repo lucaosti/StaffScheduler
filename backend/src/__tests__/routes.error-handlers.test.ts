@@ -45,6 +45,9 @@ jest.mock('../services/TwoFactorService');
 jest.mock('../services/PreferencesService');
 jest.mock('../services/EmployeeService');
 jest.mock('../services/AuditLogService');
+jest.mock('../services/UserService');
+jest.mock('../services/RbacService');
+jest.mock('../services/RefreshTokenService');
 
 import { OnCallService } from '../services/OnCallService';
 import { NotificationService } from '../services/NotificationService';
@@ -52,6 +55,7 @@ import { ReportsService } from '../services/ReportsService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { PreferencesService } from '../services/PreferencesService';
 import { EmployeeService } from '../services/EmployeeService';
+import { UserService } from '../services/UserService';
 
 import { createOnCallRouter } from '../routes/onCall';
 import { createNotificationsRouter } from '../routes/notifications';
@@ -59,7 +63,9 @@ import { createReportsRouter } from '../routes/reports';
 import { createTwoFactorRouter } from '../routes/twoFactor';
 import { createPreferencesRouter } from '../routes/preferences';
 import { createEmployeesRouter } from '../routes/employees';
+import { createAuthRouter } from '../routes/auth';
 import { errorHandler } from '../middleware/errorHandler';
+import { ConflictError } from '../errors';
 
 const fakePool = {} as never;
 
@@ -195,7 +201,7 @@ describe('twoFactor route error handlers', () => {
     (TwoFactorService.prototype.consumeRecoveryCode as jest.Mock).mockResolvedValueOnce(false);
     const res = await request(app()).post('/api/auth/2fa/disable').send({ code: '000000' });
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('TOTP_INVALID');
+    expect(res.body.error.code).toBe('TWO_FACTOR_INVALID');
   });
 
   it('POST /disable 500 when service throws', async () => {
@@ -208,6 +214,70 @@ describe('twoFactor route error handlers', () => {
   it('POST /verify 500 when service throws', async () => {
     (TwoFactorService.prototype.verifyCode as jest.Mock).mockRejectedValueOnce(new Error('db'));
     const res = await request(app()).post('/api/auth/2fa/verify').send({ code: '123456' });
+    expect(res.status).toBe(500);
+  });
+
+  it('GET /methods 500 when service throws', async () => {
+    (TwoFactorService.prototype.listEnabledMethods as jest.Mock).mockRejectedValueOnce(new Error('db'));
+    const res = await request(app()).get('/api/auth/2fa/methods');
+    expect(res.status).toBe(500);
+  });
+
+  it('POST /challenge renders a ConflictError from the provider as 409, not a flattened 400', async () => {
+    (TwoFactorService.prototype.requestChallenge as jest.Mock).mockRejectedValueOnce(
+      new ConflictError('Email 2FA is not enabled for this account')
+    );
+    const res = await request(app()).post('/api/auth/2fa/challenge').send({ methodType: 'email' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+
+  it('POST /challenge 500 when service throws an unexpected error', async () => {
+    (TwoFactorService.prototype.requestChallenge as jest.Mock).mockRejectedValueOnce(new Error('db'));
+    const res = await request(app()).post('/api/auth/2fa/challenge').send({ methodType: 'email' });
+    expect(res.status).toBe(500);
+  });
+});
+
+// ─── routes/auth.ts ──────────────────────────────────────────────────────────
+
+describe('auth route error handlers', () => {
+  const authApp = () => {
+    const app = express();
+    app.use(express.json());
+    app.use('/api/auth', createAuthRouter(fakePool));
+    app.use(errorHandler);
+    return app;
+  };
+
+  it('POST /login/challenge renders a ConflictError from the provider as 409', async () => {
+    (UserService.prototype.validatePassword as jest.Mock).mockResolvedValueOnce({
+      id: 1,
+      email: 'a@x',
+      firstName: 'A',
+      lastName: 'B',
+    });
+    (TwoFactorService.prototype.requestChallenge as jest.Mock).mockRejectedValueOnce(
+      new ConflictError('Email 2FA is not enabled for this account')
+    );
+    const res = await request(authApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x', password: 'pw', methodType: 'email' });
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+
+  it('POST /login/challenge 500 when the provider throws an unexpected error', async () => {
+    (UserService.prototype.validatePassword as jest.Mock).mockResolvedValueOnce({
+      id: 1,
+      email: 'a@x',
+      firstName: 'A',
+      lastName: 'B',
+    });
+    (TwoFactorService.prototype.requestChallenge as jest.Mock).mockRejectedValueOnce(new Error('db'));
+    const res = await request(authApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x', password: 'pw', methodType: 'email' });
     expect(res.status).toBe(500);
   });
 });

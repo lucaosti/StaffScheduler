@@ -23,7 +23,8 @@ export const login = (credentials: LoginRequest): Promise<ApiResponse<LoginRespo
   apiClient.post<LoginResponse, '/auth/login'>('/auth/login', {
     email: credentials.email,
     password: credentials.password,
-    totpCode: credentials.totpCode,
+    code: credentials.code,
+    methodType: credentials.methodType,
   });
 
 export const verifyToken = (): Promise<ApiResponse<User>> =>
