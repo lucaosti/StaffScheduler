@@ -50,13 +50,18 @@ export interface TwoFactorMethodProvider {
   isEnabled(userId: number): Promise<boolean>;
 
   /**
-   * Generates and delivers a fresh challenge code/assertion request for an
-   * already-enabled method. Optional: TOTP has no equivalent (its code is
-   * computed from a shared secret, never delivered), but any method whose
-   * code must be PUSHED to the user first (email #588, SMS #589) implements
-   * this. Providers that don't need it simply omit it — `TwoFactorService`
-   * treats a missing implementation as "this method needs no challenge
-   * request," not an error.
+   * Generates a fresh challenge for an already-enabled method. Optional:
+   * TOTP has no equivalent (its code is computed from a shared secret,
+   * never delivered), but any method whose code/assertion request must be
+   * PUSHED to the user first implements this. Providers that don't need it
+   * simply omit it — `TwoFactorService` treats a missing implementation as
+   * "this method needs no challenge request," not an error.
+   *
+   * Return value is provider-specific: email (#588) delivers the code out
+   * of band and returns nothing; WebAuthn (#587) has no delivery channel at
+   * all — the challenge itself (a `PublicKeyCredentialRequestOptionsJSON`)
+   * IS what the client needs to run `navigator.credentials.get()`, so it is
+   * returned rather than sent.
    */
-  requestChallenge?(userId: number): Promise<void>;
+  requestChallenge?(userId: number): Promise<Record<string, unknown> | void>;
 }
