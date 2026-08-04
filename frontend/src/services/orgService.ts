@@ -47,6 +47,8 @@ export interface OrgUnitMemberDetail {
   email: string;
   position: string | null;
   isPrimary: boolean;
+  /** True when present via an approved loan rather than real membership. */
+  onLoan: boolean;
 }
 
 interface ManagerRef {
