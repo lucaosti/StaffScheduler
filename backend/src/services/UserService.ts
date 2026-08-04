@@ -1,8 +1,28 @@
 /**
- * User Service
- * 
- * Handles all user-related business logic including user management,
- * authentication, permissions, and profile operations.
+ * User CRUD, credential verification, and manager-scoped listings.
+ *
+ * `getUserById` fetches departments and skills as two parallel queries
+ * rather than a single JOIN: either relation is many-to-many, so a join
+ * would fan out the row set and need de-duplication in application code for
+ * a result that is already cheap as two indexed round trips.
+ *
+ * `deleteUser` is a soft delete (`is_active = 0`): users are referenced by
+ * assignments, audit entries and approval history, so a real DELETE would
+ * either cascade through data that must stay for the record or leave
+ * orphaned foreign keys.
+ *
+ * Every mutation writes an `AuditLogService` entry — this service owns user
+ * accounts, so create/update/delete here always change something worth being
+ * able to answer "who did this and when" about later.
+ *
+ * `getUsersForManager`/`countUsersForManager` are a second, narrower listing
+ * next to `getAllUsers`: a caller without `settings.manage` sees only users
+ * in departments they manage, resolved in SQL (a `JOIN` on `departments.manager_id`)
+ * rather than fetched-then-filtered, so the result stays bounded regardless
+ * of headcount. Full hierarchical org-subtree scoping is a known follow-up;
+ * this only covers direct department management.
+ *
+ * @author Luca Ostinelli
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
