@@ -20,6 +20,7 @@ import { eventBus } from './services/EventBus';
 import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
 import { startOutboxWorker, stopOutboxWorker } from './services/OutboxWorker';
 import { startPushWorker, stopPushWorker } from './services/PushWorker';
+import { startWebhookWorker, stopWebhookWorker } from './services/WebhookWorker';
 import { initModuleCacheInvalidation } from './services/moduleCache';
 import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
@@ -71,6 +72,11 @@ export async function startServer(): Promise<void> {
     // Start the Web Push outbox delivery worker (no-op unless VAPID keys are configured).
     startPushWorker(pool);
 
+    // Start the webhook delivery worker. No config gate: it only ever has
+    // rows to find once an organization creates a subscription, so an
+    // unused deployment just polls an empty table.
+    startWebhookWorker(pool);
+
     const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
       logger.info(`Health check: http://localhost:${port}/api/health`);
@@ -82,6 +88,7 @@ export async function startServer(): Promise<void> {
       server.close(async () => {
         try { stopOutboxWorker(); } catch { /* ignore */ }
         try { stopPushWorker(); } catch { /* ignore */ }
+        try { stopWebhookWorker(); } catch { /* ignore */ }
         try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
         try { await closeRedis(); } catch { /* ignore */ }

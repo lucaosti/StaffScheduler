@@ -121,6 +121,52 @@ describe('ScheduleService.publishSchedule', () => {
     expect(conn.commit).toHaveBeenCalled();
   });
 
+  it('dispatches a schedule.published webhook event when the actor resolves to an organization (#315)', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ shift_count: 5 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit.write's INSERT
+      .mockResolvedValueOnce([[], null]) // assigned users for the publish notification fan-out
+      .mockResolvedValueOnce([[{ organization_name: 'Acme' }], null]) // resolveOrganization(actorId)
+      .mockResolvedValueOnce([[{ id: 1, event_types: 'schedule.published' }], null]) // WebhookService.dispatch: matching subscriptions
+      .mockResolvedValueOnce([{ insertId: 1 }, null]); // INSERT webhook_deliveries
+
+    await new ScheduleService(pool).publishSchedule(1, 9);
+    // Dispatch is fire-and-forget (.catch, not awaited) — flush microtasks.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dispatchInsert = execute.mock.calls.find((c) => /INSERT INTO webhook_deliveries/.test(c[0]));
+    expect(dispatchInsert).toBeDefined();
+    expect(dispatchInsert![1][1]).toBe('schedule.published');
+    expect(JSON.parse(dispatchInsert![1][2])).toMatchObject({ scheduleId: 1 });
+  });
+
+  it('does not let a webhook dispatch failure surface — publishSchedule already resolved (#315)', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ shift_count: 5 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[buildScheduleRow({ status: 'published' })], null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit.write's INSERT
+      .mockResolvedValueOnce([[], null]) // assigned users for the publish notification fan-out
+      .mockResolvedValueOnce([[{ organization_name: 'Acme' }], null]) // resolveOrganization(actorId)
+      .mockRejectedValueOnce(new Error('subscriptions table unavailable')); // WebhookService.dispatch's own SELECT
+
+    const result = await new ScheduleService(pool).publishSchedule(1, 9);
+    // Dispatch is fire-and-forget (.catch, not awaited) — flush microtasks so
+    // the rejection is observed by dispatch's own .catch, not by Jest as an
+    // unhandled rejection.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.status).toBe('published');
+  });
+
   /**
    * Publishing is what makes an assignment a COMMITMENT. The pin column was
    * added for this write and never got it: the migration backfilled schedules

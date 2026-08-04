@@ -238,7 +238,8 @@ export class TimeOffService {
   async approve(
     id: number,
     reviewerId: number,
-    notes: string | null = null
+    notes: string | null = null,
+    organizationName: string | null = null
   ): Promise<TimeOffRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Time-off request not found');
@@ -259,7 +260,8 @@ export class TimeOffService {
         reviewerId,
         'approved',
         notes,
-        async () => ({ actorUserId: reviewerId })
+        async () => ({ actorUserId: reviewerId }),
+        organizationName
       );
       const refreshed = await this.getById(id);
       if (!refreshed) throw new Error('Failed to retrieve time-off request');
@@ -303,7 +305,8 @@ export class TimeOffService {
         reviewerId,
         'approved',
         notes,
-        async () => ({ actorUserId: reviewerId })
+        async () => ({ actorUserId: reviewerId }),
+        organizationName
       );
 
       await conn.execute(
@@ -348,7 +351,8 @@ export class TimeOffService {
   async reject(
     id: number,
     reviewerId: number,
-    notes: string | null = null
+    notes: string | null = null,
+    organizationName: string | null = null
   ): Promise<TimeOffRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Time-off request not found');
@@ -366,7 +370,8 @@ export class TimeOffService {
       reviewerId,
       'rejected',
       notes,
-      async () => ({ actorUserId: reviewerId })
+      async () => ({ actorUserId: reviewerId }),
+      organizationName
     );
     void decision;
 

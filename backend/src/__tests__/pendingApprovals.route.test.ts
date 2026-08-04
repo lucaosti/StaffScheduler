@@ -134,7 +134,7 @@ describe('POST /api/pending-approvals/:id/approve', () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(ChangeRequestService.prototype.advancePendingApproval).toHaveBeenCalledWith(
-      1, 20, 'approved', 'Looks good'
+      1, 20, 'approved', 'Looks good', null
     );
   });
 
@@ -182,7 +182,7 @@ describe('POST /api/pending-approvals/:id/reject', () => {
     const res = await request(app).post('/api/pending-approvals/1/reject').send({ note: 'Not justified' });
     expect(res.status).toBe(200);
     expect(ChangeRequestService.prototype.advancePendingApproval).toHaveBeenCalledWith(
-      1, 20, 'rejected', 'Not justified'
+      1, 20, 'rejected', 'Not justified', null
     );
   });
 
@@ -220,7 +220,7 @@ describe('POST /api/pending-approvals/:id/reject', () => {
 
     const res = await request(app).post('/api/pending-approvals/2/reject').send({ note: 'no' });
     expect(res.status).toBe(200);
-    expect(TimeOffService.prototype.reject).toHaveBeenCalledWith(55, 20, 'no');
+    expect(TimeOffService.prototype.reject).toHaveBeenCalledWith(55, 20, 'no', null);
   });
 
   it('dispatches to ShiftSwapService.decline (not reject) when the decision is swap-linked', async () => {
@@ -231,7 +231,7 @@ describe('POST /api/pending-approvals/:id/reject', () => {
 
     const res = await request(app).post('/api/pending-approvals/3/reject').send({});
     expect(res.status).toBe(200);
-    expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(77, 20, null);
+    expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(77, 20, null, null);
   });
 });
 
