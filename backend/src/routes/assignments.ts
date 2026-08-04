@@ -99,7 +99,6 @@ router.get('/export', authenticate, requirePermission('assignment.manage'), vali
   });
 }));
 
-// Get assignment by ID
 // Allowed when: the caller holds assignment.manage OR the assignment belongs to the caller.
 router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
@@ -115,7 +114,6 @@ router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (re
   res.json({ success: true, data: assignment });
 }));
 
-// Create new assignment
 router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), asyncHandler(async (req: Request, res: Response) => {
   const assignment = await assignmentService.createAssignment({
     ...res.locals.body,
@@ -129,7 +127,6 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
   });
 }));
 
-// Update assignment
 router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -144,7 +141,6 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), validat
   });
 }));
 
-// Delete assignment
 router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const reason = res.locals.body.reason;
@@ -156,7 +152,6 @@ router.delete('/:id', authenticate, requirePermission('assignment.manage'), vali
   });
 }));
 
-// Get assignments by user
 // Allowed when: the caller holds assignment.manage OR is requesting their own assignments.
 router.get('/user/:userId', authenticate, validateParams(userIdParam), asyncHandler(async (req: Request, res: Response) => {
   const { userId } = res.locals.params;
@@ -199,7 +194,6 @@ router.get('/:id/swap-candidates', authenticate, validateParams(idParam), asyncH
   res.json({ success: true, data: result });
 }));
 
-// Get assignments by shift
 router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
@@ -207,7 +201,6 @@ router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage
   res.json({ success: true, data: assignments });
 }));
 
-// Get assignments by department
 router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), asyncHandler(async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
   // The allowed statuses used to be a literal array checked inline here; the
@@ -219,7 +212,6 @@ router.get('/department/:departmentId', authenticate, requirePermission('assignm
   res.json({ success: true, data: assignments });
 }));
 
-// Bulk create assignments
 router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), asyncHandler(async (_req: Request, res: Response) => {
   const { assignments } = res.locals.body;
 
@@ -232,7 +224,6 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
   });
 }));
 
-// Confirm assignment
 // Only the assigned user or a manager (assignment.manage) may confirm.
 router.patch('/:id/confirm', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
@@ -253,7 +244,6 @@ router.patch('/:id/confirm', authenticate, validateParams(idParam), asyncHandler
   });
 }));
 
-// Decline assignment
 // Only the assigned user or a manager (assignment.manage) may decline.
 router.patch('/:id/decline', authenticate, validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
@@ -275,7 +265,6 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), asyncHandler
   });
 }));
 
-// Complete assignment
 // Only a manager (assignment.manage) may mark an assignment complete.
 router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
@@ -288,7 +277,6 @@ router.patch('/:id/complete', authenticate, requirePermission('assignment.manage
   });
 }));
 
-// Get available employees for shift
 router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
