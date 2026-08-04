@@ -36,7 +36,7 @@ describe('buildApp CORS callback', () => {
   it('allows requests with no origin (e.g. server-to-server)', async () => {
     const app = buildApp(fakePool, { silent: true });
     // Supertest sends no Origin header by default.
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/v1/health');
     expect([200, 503]).toContain(res.status);
     // When no Origin header is sent, the cors middleware does not add
     // Access-Control-Allow-Origin, which is the correct CORS behaviour.
@@ -48,7 +48,7 @@ describe('buildApp CORS callback', () => {
     (config.server as any).env = 'production';
     try {
       const app = buildApp(fakePool, { silent: true });
-      const res = await request(app).get('/api/health');
+      const res = await request(app).get('/api/v1/health');
       expect([200, 503]).toContain(res.status);
     } finally {
       (config.server as any).env = original;
@@ -57,7 +57,7 @@ describe('buildApp CORS callback', () => {
 
   it('allows the configured CORS_ORIGIN', async () => {
     const app = buildApp(fakePool, { silent: true });
-    const res = await request(app).get('/api/health').set('Origin', config.cors.origin);
+    const res = await request(app).get('/api/v1/health').set('Origin', config.cors.origin);
     expect([200, 503]).toContain(res.status);
     expect(res.headers['access-control-allow-origin']).toBe(config.cors.origin);
   });
@@ -68,7 +68,7 @@ describe('buildApp CORS callback', () => {
     (config.server as any).env = 'production';
     try {
       const app = buildApp(fakePool, { silent: true });
-      const res = await request(app).get('/api/health').set('Origin', foreignOrigin);
+      const res = await request(app).get('/api/v1/health').set('Origin', foreignOrigin);
       // Express/cors send a 500 when the callback passes an Error (the body
       // is the masked production envelope), or just omit the Allow-Origin header.
       expect([500, 200, 503]).toContain(res.status);
@@ -90,7 +90,7 @@ describe('buildApp CORS callback', () => {
     (config.server as any).env = 'development';
     try {
       const app = buildApp(fakePool, { silent: true });
-      const res = await request(app).get('/api/health').set('Origin', 'http://localhost:4000');
+      const res = await request(app).get('/api/v1/health').set('Origin', 'http://localhost:4000');
       expect([200, 503]).toContain(res.status);
       expect(res.headers['access-control-allow-origin']).toBe('http://localhost:4000');
     } finally {
@@ -104,7 +104,7 @@ describe('buildApp non-silent mode', () => {
     // Simply constructing the app and making one request should succeed —
     // this exercises the limiter + morgan setup paths.
     const app = buildApp(fakePool, { silent: false });
-    const res = await request(app).get('/api/health');
+    const res = await request(app).get('/api/v1/health');
     expect([200, 503]).toContain(res.status);
   });
 });

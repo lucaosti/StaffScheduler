@@ -55,7 +55,7 @@ export default defineConfig({
         env: {
           BROWSER: 'none',
           PORT: String(PORT),
-          REACT_APP_API_URL: process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api',
+          REACT_APP_API_URL: process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1',
         },
       },
 });
