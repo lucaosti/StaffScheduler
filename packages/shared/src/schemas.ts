@@ -621,6 +621,25 @@ export const pushUnsubscribeBody = z.object({
   endpoint: z.string().url(),
 });
 
+// ── Outbound webhooks (#315) ─────────────────────────────────────────────────
+
+const webhookEventType = z.enum(['schedule.published', 'assignment.confirmed', 'approval.decided']);
+
+export const createWebhookSubscriptionBody = z.object({
+  url: z.string().url(),
+  eventTypes: z.array(webhookEventType).min(1, 'At least one event type is required'),
+});
+
+export const updateWebhookSubscriptionBody = z.object({
+  url: z.string().url().optional(),
+  eventTypes: z.array(webhookEventType).min(1).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const webhookDeliveriesQuery = z.object({
+  limit: z.coerce.number().int().positive().max(200).optional(),
+});
+
 export const employeeLoanListQuery = z.object({
   userId: positiveInt.optional(),
   toOrgUnitId: positiveInt.optional(),

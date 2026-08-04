@@ -301,7 +301,8 @@ export class ShiftSwapService {
   async approve(
     id: number,
     reviewerId: number,
-    notes: string | null = null
+    notes: string | null = null,
+    organizationName: string | null = null
   ): Promise<ShiftSwapRequest> {
     const existingForAuth = await this.getById(id);
     if (!existingForAuth) throw new NotFoundError('Shift swap request not found');
@@ -323,7 +324,8 @@ export class ShiftSwapService {
         async () => {
           const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
           return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
-        }
+        },
+        organizationName
       );
       const refreshed = await this.getById(id);
       if (!refreshed) throw new Error('Failed to retrieve shift swap request');
@@ -386,7 +388,8 @@ export class ShiftSwapService {
         async () => {
           const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(swap.requesterUserId);
           return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
-        }
+        },
+        organizationName
       );
 
       await conn.execute(
@@ -435,7 +438,8 @@ export class ShiftSwapService {
   async decline(
     id: number,
     reviewerId: number,
-    notes: string | null = null
+    notes: string | null = null,
+    organizationName: string | null = null
   ): Promise<ShiftSwapRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Shift swap request not found');
@@ -452,7 +456,8 @@ export class ShiftSwapService {
       async () => {
         const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
         return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
-      }
+      },
+      organizationName
     );
 
     const [result] = await this.pool.execute<ResultSetHeader>(

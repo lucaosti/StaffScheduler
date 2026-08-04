@@ -428,7 +428,7 @@ describe('ShiftSwapService.approve — non-final step', () => {
     const result = await service.approve(1, 99, 'first sign-off');
 
     expect(result.status).toBe('pending');
-    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'first sign-off', expect.any(Function));
+    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'first sign-off', expect.any(Function), null);
     // No transaction, no assignment rewrites for a non-final decision.
     expect(conn.beginTransaction).not.toHaveBeenCalled();
   });

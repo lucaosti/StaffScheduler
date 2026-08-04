@@ -47,6 +47,7 @@ import { PolicyValidator } from './PolicyValidator';
 import { AssignmentValidator } from './AssignmentValidator';
 import { AssignmentOrchestrator } from './AssignmentOrchestrator';
 import { AuditLogService } from './AuditLogService';
+import { WebhookService } from './WebhookService';
 import { DateUtils } from '../utils';
 
 /** Filters accepted by the assignment listing, mirrored by the route's query schema. */
@@ -96,12 +97,24 @@ export class AssignmentService {
   private validator: AssignmentValidator;
   private orchestrator: AssignmentOrchestrator;
   private audit: AuditLogService;
+  private webhooks: WebhookService;
 
   constructor(private pool: Pool) {
     this.policyValidator = new PolicyValidator(pool);
     this.validator = new AssignmentValidator(pool);
     this.orchestrator = new AssignmentOrchestrator(pool);
     this.audit = new AuditLogService(pool);
+    this.webhooks = new WebhookService(pool);
+  }
+
+  /** See ScheduleService.resolveOrganization — same best-effort lookup, same reasoning. */
+  private async resolveOrganization(actorId?: number | null): Promise<string | null> {
+    if (!actorId) return null;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT organization_name FROM users WHERE id = ? LIMIT 1`,
+      [actorId]
+    );
+    return (rows[0]?.organization_name as string | null) ?? null;
   }
 
   async createAssignment(assignmentData: CreateAssignmentRequest): Promise<ShiftAssignment> {
@@ -531,6 +544,16 @@ export class AssignmentService {
       description: `Assignment confirmed by user`,
       after: { status: 'confirmed' },
     });
+    const organizationName = await this.resolveOrganization(actorId);
+    if (organizationName) {
+      this.webhooks
+        .dispatch(organizationName, 'assignment.confirmed', {
+          assignmentId: id,
+          shiftId: result.shiftId,
+          userId: result.userId,
+        })
+        .catch((err) => logger.warn('Webhook dispatch failed for assignment.confirmed', { error: err }));
+    }
     return result;
   }
 

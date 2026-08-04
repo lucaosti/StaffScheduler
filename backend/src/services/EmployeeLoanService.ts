@@ -241,7 +241,12 @@ export class EmployeeLoanService {
     return rows.length === 0 ? null : ((rows[0] as any).id as number);
   }
 
-  async approve(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
+  async approve(
+    id: number,
+    reviewerId: number,
+    notes: string | null = null,
+    organizationName: string | null = null
+  ): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Loan not found');
     if (existing.status !== 'pending') {
@@ -254,7 +259,8 @@ export class EmployeeLoanService {
       reviewerId,
       'approved',
       notes,
-      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId })
+      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId }),
+      organizationName
     );
     if (!decision.isFinalStep) {
       const refreshed = await this.getById(id);
@@ -294,7 +300,12 @@ export class EmployeeLoanService {
     return refreshed;
   }
 
-  async reject(id: number, reviewerId: number, notes: string | null = null): Promise<EmployeeLoan> {
+  async reject(
+    id: number,
+    reviewerId: number,
+    notes: string | null = null,
+    organizationName: string | null = null
+  ): Promise<EmployeeLoan> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Loan not found');
     if (existing.status !== 'pending') {
@@ -307,7 +318,8 @@ export class EmployeeLoanService {
       reviewerId,
       'rejected',
       notes,
-      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId })
+      async () => ({ actorUserId: reviewerId, orgUnitId: existing.toOrgUnitId }),
+      organizationName
     );
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE employee_loans

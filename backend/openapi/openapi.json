@@ -1263,6 +1263,49 @@
           "lastUsedAt"
         ],
         "additionalProperties": false
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "organizationName": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "eventTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "schedule.published",
+                "assignment.confirmed",
+                "approval.decided"
+              ]
+            }
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "organizationName",
+          "url",
+          "eventTypes",
+          "isActive",
+          "createdAt"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -14540,6 +14583,201 @@
             }
           }
         }
+      }
+    },
+    "/webhooks": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "List the caller's organization's webhook subscriptions",
+        "responses": {
+          "200": {
+            "description": "Subscriptions for the caller's organization."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Create a webhook subscription",
+        "description": "Returns the raw HMAC-SHA256 signing secret in plaintext — the only time it is ever exposed, since only the secret itself is stored server-side and used to sign each delivery's `X-Webhook-Signature` header.",
+        "responses": {
+          "201": {
+            "description": "Subscription created, including the one-time plaintext secret."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "eventTypes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "schedule.published",
+                        "assignment.confirmed",
+                        "approval.decided"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "url",
+                  "eventTypes"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/webhooks/{id}": {
+      "put": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Update a webhook subscription",
+        "responses": {
+          "200": {
+            "description": "Updated subscription."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Not found, or belongs to a different organization."
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "eventTypes": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "schedule.published",
+                        "assignment.confirmed",
+                        "approval.decided"
+                      ]
+                    }
+                  },
+                  "isActive": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delete a webhook subscription",
+        "responses": {
+          "200": {
+            "description": "Deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Not found, or belongs to a different organization."
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ]
+      }
+    },
+    "/webhooks/{id}/deliveries": {
+      "get": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "Delivery log for a webhook subscription",
+        "description": "Most recent first. A delivered row and a logged delivery are the same fact — this doubles as the outbox's own record, not a separate log kept in sync with it.",
+        "responses": {
+          "200": {
+            "description": "Recent deliveries, newest first."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "Not found, or belongs to a different organization."
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 200
+            }
+          }
+        ]
       }
     }
   }

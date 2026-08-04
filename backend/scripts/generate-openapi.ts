@@ -113,6 +113,7 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'skillGap.ts', variable: 'router', prefix: '/skill-gap' },
   { file: 'reports.ts', variable: 'router', prefix: '/reports' },
   { file: 'notifications.ts', variable: 'router', prefix: '/notifications' },
+  { file: 'webhooks.ts', variable: 'router', prefix: '/webhooks' },
   { file: 'bulkImport.ts', variable: 'router', prefix: '/import' },
   { file: 'events.ts', variable: 'router', prefix: '/events' },
   { file: 'org.ts', variable: 'router', prefix: '/org' },
@@ -283,6 +284,7 @@ const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
   PaginationMeta: sharedSchemas.paginationMetaSchema,
   Geofence: sharedSchemas.geofenceSchema,
   KioskDevice: sharedSchemas.kioskDeviceSchema,
+  WebhookSubscription: sharedSchemas.webhookSubscriptionSchema,
 };
 
 const main = (): void => {

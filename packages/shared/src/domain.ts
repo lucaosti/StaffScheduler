@@ -435,3 +435,13 @@ export const paginationMetaSchema = z.object({
   pages: z.number().int(),
 });
 export type PaginationMeta = z.infer<typeof paginationMetaSchema>;
+
+export const webhookSubscriptionSchema = z.object({
+  id: z.number().int(),
+  organizationName: z.string(),
+  url: z.string(),
+  eventTypes: z.array(z.enum(['schedule.published', 'assignment.confirmed', 'approval.decided'])),
+  isActive: z.boolean(),
+  createdAt: timestamp,
+});
+export type WebhookSubscription = z.infer<typeof webhookSubscriptionSchema>;
