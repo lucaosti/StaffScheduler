@@ -4,6 +4,8 @@
  * the JSON-parse failure path in consumeRecoveryCode.
  */
 
+jest.mock('../services/MailerService', () => ({ isEmailConfigured: () => true }));
+
 import { TwoFactorService } from '../services/TwoFactorService';
 
 const makePool = () => {
@@ -159,6 +161,34 @@ describe('TwoFactorService.confirmEnable — not-found path', () => {
   });
 });
 
+describe('TwoFactorService.requestChallenge', () => {
+  it('delegates to a provider that implements it', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 1 }], null]) // EmailCodeProvider.requestChallenge: enabled check
+      .mockResolvedValueOnce([[{ email: 'jane@example.com' }], null]) // sendCode: lookup recipient
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // sendCode: INSERT email_outbox
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE secret_data
+
+    const service = new TwoFactorService(pool);
+    await expect(service.requestChallenge(7, 'email')).resolves.toBeUndefined();
+  });
+
+  it('rejects a method whose provider has no requestChallenge (TOTP)', async () => {
+    const { pool } = makePool();
+    const service = new TwoFactorService(pool);
+    await expect(service.requestChallenge(7, 'totp')).rejects.toThrow(
+      "Two-factor method 'totp' does not use a requested challenge"
+    );
+  });
+
+  it('rejects an unregistered method type', async () => {
+    const { pool } = makePool();
+    const service = new TwoFactorService(pool);
+    await expect(service.requestChallenge(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
+  });
+});
+
 describe('TwoFactorService — unregistered method type', () => {
   it('rejects verifyCode/isEnabled/disable/confirmEnable for a method with no registered provider', async () => {
     const { pool } = makePool();
@@ -166,7 +196,7 @@ describe('TwoFactorService — unregistered method type', () => {
     await expect(service.verifyCode(7, '000000', 'webauthn')).rejects.toThrow(
       "Two-factor method 'webauthn' is not available"
     );
-    await expect(service.isEnabled(7, 'email')).rejects.toThrow("Two-factor method 'email' is not available");
+    await expect(service.isEnabled(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
     await expect(service.disable(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
     await expect(service.confirmEnable(7, '000000', 'webauthn')).rejects.toThrow(
       "Two-factor method 'webauthn' is not available"
