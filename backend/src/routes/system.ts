@@ -13,7 +13,6 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { Router } from 'express';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { logger } from '../config/logger';
 
 type RuntimeMode = 'production' | 'demo' | 'development';
@@ -21,7 +20,7 @@ type RuntimeMode = 'production' | 'demo' | 'development';
 export const createSystemRouter = (pool: Pool): Router => {
   const router = Router();
 
-  router.get('/info', asyncHandler(async (_req, res) => {
+  router.get('/info', async (_req, res) => {
     let mode: RuntimeMode = 'production';
     try {
       const [rows] = await pool.execute<RowDataPacket[]>(
@@ -37,7 +36,7 @@ export const createSystemRouter = (pool: Pool): Router => {
       success: true,
       data: { mode },
     });
-  }));
+  });
 
   return router;
 };

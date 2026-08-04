@@ -26,7 +26,6 @@ import {
   requireModuleForUser,
   userHasPermission,
 } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateQuery } from '../middleware/validation';
 import { SHIFT_HOURS_SQL } from '../utils/sql';
 import { dashboardActivitiesQuery } from '../schemas';
@@ -61,7 +60,7 @@ export const createDashboardRouter = (pool: Pool) => {
    * @route GET /api/dashboard/stats
    * @returns {Object} Dashboard statistics and KPIs
    */
-  router.get('/stats', authenticate, asyncHandler(async (req: Request, res: Response) => {
+  router.get('/stats', authenticate, async (req: Request, res: Response) => {
       // Every active user is schedulable staff, so the headcount is the count
       // of active users.
       const totalEmployeesQuery =
@@ -175,7 +174,7 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: stats
       });
-  }));
+  });
 
   // Get recent activities. Reads audit_logs, so it carries the same guards as
   // /api/audit-logs: audit module enabled for the caller's org + audit.read.
@@ -185,7 +184,7 @@ export const createDashboardRouter = (pool: Pool) => {
     requireModuleForUser('audit'),
     requirePermission('audit.read'),
     validateQuery(dashboardActivitiesQuery),
-    asyncHandler(async (_req: Request, res: Response) => {
+    async (_req: Request, res: Response) => {
       // The schema has already clamped this to a positive integer <= 50, and
       // it is inlined rather than bound: MySQL's binary prepared-statement
       // protocol rejects placeholders in LIMIT with ER_WRONG_ARGUMENTS, which
@@ -226,10 +225,10 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: formattedActivities
       });
-  }));
+  });
 
   // Get upcoming shifts
-  router.get('/upcoming-shifts', authenticate, asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
       // Query upcoming shifts with assignment information (using correct schema)
       const query = `
         SELECT
@@ -276,10 +275,10 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: upcomingShifts
       });
-  }));
+  });
 
   // Get department overview
-  router.get('/departments', authenticate, asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/departments', authenticate, async (_req: Request, res: Response) => {
       // Query department statistics using correct schema (departments + users + user_departments)
       const query = `
         SELECT
@@ -320,7 +319,7 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: departments
       });
-  }));
+  });
 
   return router;
 };

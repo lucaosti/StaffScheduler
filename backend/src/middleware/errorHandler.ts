@@ -1,8 +1,9 @@
 /**
  * Central Express error middleware.
  *
- * Terminal handler for everything forwarded with `next(err)` (routes use the
- * `asyncHandler` wrapper so rejected async handlers land here too):
+ * Terminal handler for everything forwarded with `next(err)` — including a
+ * rejected `async` route handler's promise, which Express 5 forwards here
+ * on its own (no wrapper needed, unlike Express 4):
  *
  * - `AppError` subtypes are expected domain outcomes: rendered with their
  *   status and stable code, not logged as errors.

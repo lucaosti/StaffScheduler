@@ -1,10 +1,13 @@
 /**
  * Typed error hierarchy + central error middleware tests.
  *
- * Exercises the AppError subtypes and the errorHandler/asyncHandler pair
- * through a scratch Express app, asserting the standard error envelope,
- * the HTTP status carried by each error type, and the logging contract
- * (domain errors are not logged as errors; internal faults are).
+ * Exercises the AppError subtypes and errorHandler through a scratch Express
+ * app, asserting the standard error envelope, the HTTP status carried by
+ * each error type, and the logging contract (domain errors are not logged
+ * as errors; internal faults are). The async routes below are plain
+ * `async` handlers, not wrapped in the now-removed `asyncHandler` (#580) —
+ * this is exactly what proves Express 5 forwards a rejected handler's
+ * promise to `errorHandler` on its own.
  */
 
 import express from 'express';
@@ -17,7 +20,6 @@ import {
   UnauthorizedError,
   ValidationError,
 } from '../errors';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { errorHandler } from '../middleware/errorHandler';
 import { logger } from '../config/logger';
 
@@ -47,18 +49,12 @@ describe('AppError hierarchy', () => {
 describe('errorHandler middleware', () => {
   const buildScratchApp = () => {
     const app = express();
-    app.get(
-      '/typed',
-      asyncHandler(async () => {
-        throw new ConflictError('Shift is already at maximum capacity');
-      })
-    );
-    app.get(
-      '/untyped',
-      asyncHandler(async () => {
-        throw new Error('database exploded');
-      })
-    );
+    app.get('/typed', async () => {
+      throw new ConflictError('Shift is already at maximum capacity');
+    });
+    app.get('/untyped', async () => {
+      throw new Error('database exploded');
+    });
     app.get('/sync-typed', () => {
       throw new NotFoundError('Assignment not found');
     });

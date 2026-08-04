@@ -25,7 +25,6 @@ import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { idParam, createUserBody, updateUserBody, userListQuery } from '../schemas';
@@ -56,7 +55,7 @@ export const createUsersRouter = (pool: Pool) => {
   };
 
   // Get all users (scoped by the caller's permissions)
-  router.get('/', authenticate, validateQuery(userListQuery), asyncHandler(async (req, res) => {
+  router.get('/', authenticate, validateQuery(userListQuery), async (req, res) => {
     const user = req.user as User;
     const { search, department, roleId, isActive } = res.locals.query;
 
@@ -94,10 +93,10 @@ export const createUsersRouter = (pool: Pool) => {
     }
     const users = await userService.getUsersForManager(user, managerFilters);
     res.json({ success: true, data: users });
-  }));
+  });
 
   // Create new user
-  router.post('/', authenticate, validateBody(createUserBody), asyncHandler(async (req, res) => {
+  router.post('/', authenticate, validateBody(createUserBody), async (req, res) => {
     const user = req.user as User;
 
     if (!userHasPermission(user, 'user.manage')) {
@@ -121,10 +120,10 @@ export const createUsersRouter = (pool: Pool) => {
     const createdUser = await userService.createUser(userData, user.id);
 
     res.status(201).json({ success: true, data: createdUser });
-  }));
+  });
 
   // Get user by ID
-  router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
     const user = req.user as User;
     const userId = res.locals.params.id;
 
@@ -146,10 +145,10 @@ export const createUsersRouter = (pool: Pool) => {
     }
 
     res.json({ success: true, data: targetUser });
-  }));
+  });
 
   // Update user
-  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateUserBody), asyncHandler(async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateUserBody), async (req, res) => {
     const user = req.user as User;
     const userId = res.locals.params.id;
 
@@ -211,10 +210,10 @@ export const createUsersRouter = (pool: Pool) => {
     }
 
     res.json({ success: true, data: updatedUser });
-  }));
+  });
 
   // Delete user
-  router.delete('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
     const user = req.user as User;
     const userId = res.locals.params.id;
 
@@ -245,7 +244,7 @@ export const createUsersRouter = (pool: Pool) => {
       }
       throw deleteError;
     }
-  }));
+  });
 
   return router;
 };

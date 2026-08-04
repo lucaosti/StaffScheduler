@@ -18,7 +18,6 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, requireModule, requireModuleForUser, userHasPermission } from '../middleware/auth';
 import { authenticateKiosk } from '../middleware/kioskAuth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import { clockInBody, optionalNotesBody, idParam, costEstimateQuery, attendanceListQuery, kioskPunchBody } from '../schemas';
 import { AttendanceService } from '../services/AttendanceService';
@@ -52,14 +51,14 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     requireModule('attendance'),
     authenticateKiosk,
     validateBody(kioskPunchBody),
-    asyncHandler(async (req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
       const employee = await kioskService.resolveEmployee(res.locals.body.employeeId, req.kiosk!.departmentId);
       if (!employee) {
         return respondError(res, 404, 'NOT_FOUND', 'No matching employee in this device\'s department');
       }
       const { action, record } = await service.punch(employee.id);
       res.json({ success: true, data: { action, employeeName: employee.name, record } });
-    })
+    }
   );
 
   /**
@@ -82,33 +81,33 @@ export const createAttendanceRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requireModuleForUser('attendance'));
 
-  router.post('/clock-in', validateBody(clockInBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/clock-in', validateBody(clockInBody), async (req: Request, res: Response) => {
     const { notes, latitude, longitude } = res.locals.body;
     const location = latitude !== undefined && longitude !== undefined ? { lat: latitude, lng: longitude } : null;
     const created = await service.clockIn(req.user!.id, notes ?? null, location);
     res.status(201).json({ success: true, data: created });
-  }));
+  });
 
-  router.post('/:id/clock-out', validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/clock-out', validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.clockOut(req.user!.id, id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), validateQuery(costEstimateQuery), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), validateQuery(costEstimateQuery), async (_req: Request, res: Response) => {
     const { startDate, endDate, departmentId } = res.locals.query;
     const estimate = await service.getCostEstimate({ startDate, endDate, departmentId });
     res.json({ success: true, data: estimate });
-  }));
+  });
 
-  router.get('/', validateQuery(attendanceListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/', validateQuery(attendanceListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const list = await service.list(filters);
     res.json({ success: true, data: list });
-  }));
+  });
 
   // Before `/:id`, so "export" is not read as a record id.
-  router.get('/export', validateQuery(attendanceListQuery), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/export', validateQuery(attendanceListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const rows = await service.list(filters);
     await exporter.sendCsv(res, {
@@ -118,9 +117,9 @@ export const createAttendanceRouter = (pool: Pool): Router => {
       columns: attendanceColumns,
       filters,
     });
-  }));
+  });
 
-  router.get('/:id', validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
+  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const item = await service.getById(id);
     if (!item) return respondError(res, 404, 'NOT_FOUND', 'Attendance record not found');
@@ -128,19 +127,19 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
     if (!isOwn && !isApprover) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
     res.json({ success: true, data: item });
-  }));
+  });
 
-  router.post('/:id/approve', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
-  router.post('/:id/reject', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
-  }));
+  });
 
   return router;
 };

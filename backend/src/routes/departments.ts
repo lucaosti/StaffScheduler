@@ -3,9 +3,9 @@
  *
  * Follows the standard route shape: validate with a Zod schema from
  * `@staff-scheduler/shared`, construct the service, call one method, return the
- * envelope. Errors are never caught here — `asyncHandler` forwards them to the
- * central `errorHandler`, which is what keeps the error contract in one place
- * instead of re-derived per route.
+ * envelope. Errors are never caught here — a rejected handler's promise
+ * reaches the central `errorHandler` on its own, which is what keeps the
+ * error contract in one place instead of re-derived per route.
  *
  * WHY THIS IS A FACTORY (`createDepartmentsRouter(pool)`) RATHER THAN A
  * MODULE-LEVEL ROUTER. The pool is created once in `index.ts` and injected.
@@ -35,7 +35,6 @@ import { UserService } from '../services/UserService';
 import { GeofenceService } from '../services/GeofenceService';
 import { KioskService } from '../services/KioskService';
 import { authenticate, userHasPermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -62,7 +61,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   // The isActive/orgUnitId filters were documented but never read; they now
   // apply to the unrestricted listing. The scoped listing stays unfiltered:
   // it already returns only the caller's own departments.
-  router.get('/', authenticate, validateQuery(departmentListQuery), asyncHandler(async (req, res) => {
+  router.get('/', authenticate, validateQuery(departmentListQuery), async (req, res) => {
     const user = req.user!;
 
     let departments;
@@ -73,9 +72,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     }
 
     res.json({ success: true, data: departments });
-  }));
+  });
 
-  router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
 
@@ -100,9 +99,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     }
 
     res.json({ success: true, data: department });
-  }));
+  });
 
-  router.post('/', authenticate, validateBody(createDepartmentBody), asyncHandler(async (req, res) => {
+  router.post('/', authenticate, validateBody(createDepartmentBody), async (req, res) => {
     const user = req.user!;
 
     if (!userHasPermission(user, 'department.manage')) {
@@ -127,9 +126,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     const createdDepartment = await departmentService.createDepartment(departmentData);
 
     res.status(201).json({ success: true, data: createdDepartment });
-  }));
+  });
 
-  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), asyncHandler(async (req, res) => {
+  router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
     const departmentData: UpdateDepartmentRequest = res.locals.body;
@@ -166,9 +165,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     const updatedDepartment = await departmentService.updateDepartment(departmentId, departmentData);
 
     res.json({ success: true, data: updatedDepartment });
-  }));
+  });
 
-  router.delete('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.delete('/:id', authenticate, validateParams(idParam), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
 
@@ -182,9 +181,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     await departmentService.deleteDepartment(departmentId);
 
     res.json({ success: true, data: { message: 'Department deleted successfully' } });
-  }));
+  });
 
-  router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), asyncHandler(async (req, res) => {
+  router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
     const { userId } = res.locals.body;
@@ -227,9 +226,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     await departmentService.addUserToDepartment(departmentId, userId);
 
     res.status(201).json({ success: true, data: { message: 'User added to department successfully' } });
-  }));
+  });
 
-  router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), asyncHandler(async (req, res) => {
+  router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
     const targetUserId = res.locals.params.userId;
@@ -256,9 +255,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
     await departmentService.removeUserFromDepartment(targetUserId, departmentId);
 
     res.json({ success: true, data: { message: 'User removed from department successfully' } });
-  }));
+  });
 
-  router.get('/:id/stats', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.get('/:id/stats', authenticate, validateParams(idParam), async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
 
@@ -277,7 +276,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
     const stats = await departmentService.getDepartmentStatsByDepartment(departmentId);
 
     res.json({ success: true, data: stats });
-  }));
+  });
 
   /**
    * Same access rule as every other department sub-resource in this file:
@@ -291,71 +290,71 @@ export const createDepartmentsRouter = (pool: Pool) => {
     return managed.some((d) => d.id === departmentId && d.managerId === actor.id);
   };
 
-  router.get('/:id/geofences', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.get('/:id/geofences', authenticate, validateParams(idParam), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     const geofences = await geofenceService.listForDepartment(departmentId);
     res.json({ success: true, data: geofences });
-  }));
+  });
 
-  router.post('/:id/geofences', authenticate, validateParams(idParam), validateBody(createGeofenceBody), asyncHandler(async (req, res) => {
+  router.post('/:id/geofences', authenticate, validateParams(idParam), validateBody(createGeofenceBody), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     const geofence = await geofenceService.create(departmentId, res.locals.body);
     res.status(201).json({ success: true, data: geofence });
-  }));
+  });
 
-  router.put('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), validateBody(updateGeofenceBody), asyncHandler(async (req, res) => {
+  router.put('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), validateBody(updateGeofenceBody), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     const geofence = await geofenceService.update(res.locals.params.geofenceId, res.locals.body);
     res.json({ success: true, data: geofence });
-  }));
+  });
 
-  router.delete('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), asyncHandler(async (req, res) => {
+  router.delete('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     await geofenceService.delete(res.locals.params.geofenceId);
     res.json({ success: true, data: { message: 'Geofence deleted successfully' } });
-  }));
+  });
 
-  router.get('/:id/kiosks', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+  router.get('/:id/kiosks', authenticate, validateParams(idParam), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     const devices = await kioskService.listForDepartment(departmentId);
     res.json({ success: true, data: devices });
-  }));
+  });
 
   // Response carries `token` in plaintext — the ONLY time it exists outside
   // the hash in kiosk_devices; the admin UI must show it once and not offer
   // to display it again, since it genuinely cannot be recovered afterward.
-  router.post('/:id/kiosks', authenticate, validateParams(idParam), validateBody(createKioskDeviceBody), asyncHandler(async (req, res) => {
+  router.post('/:id/kiosks', authenticate, validateParams(idParam), validateBody(createKioskDeviceBody), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     const { device, token } = await kioskService.create(departmentId, res.locals.body.name, req.user!.id);
     res.status(201).json({ success: true, data: { ...device, token } });
-  }));
+  });
 
-  router.delete('/:id/kiosks/:kioskId', authenticate, validateParams(idAndKioskIdParam), asyncHandler(async (req, res) => {
+  router.delete('/:id/kiosks/:kioskId', authenticate, validateParams(idAndKioskIdParam), async (req, res) => {
     const departmentId = res.locals.params.id;
     if (!(await canManageDepartment(req.user!, departmentId))) {
       return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
     }
     await kioskService.revoke(res.locals.params.kioskId);
     res.json({ success: true, data: { message: 'Kiosk device revoked successfully' } });
-  }));
+  });
 
   return router;
 };

@@ -12,7 +12,6 @@
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, invalidateAuthContext } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody } from '../middleware/validation';
 import { twoFactorCodeBody } from '../schemas';
 import { TwoFactorService } from '../services/TwoFactorService';
@@ -27,10 +26,10 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
 
   router.use(authenticate);
 
-  router.post('/setup', asyncHandler(async (req: Request, res: Response) => {
+  router.post('/setup', async (req: Request, res: Response) => {
     const data = await service.beginSetup(req.user!.id, req.user!.email);
     res.json({ success: true, data });
-  }));
+  });
 
   router.post('/enable', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
     try {
@@ -47,7 +46,7 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     }
   });
 
-  router.post('/disable', validateBody(twoFactorCodeBody), asyncHandler(async (req: Request, res: Response) => {
+  router.post('/disable', validateBody(twoFactorCodeBody), async (req: Request, res: Response) => {
     const code = res.locals.body.code as string;
     const userId = req.user!.id;
     // Disabling 2FA weakens the account, so it demands the same proof of
@@ -64,13 +63,13 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
     // no longer has a secret for.
     await invalidateAuthContext(userId);
     res.json({ success: true });
-  }));
+  });
 
-  router.post('/verify', validateBody(twoFactorCodeBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.post('/verify', validateBody(twoFactorCodeBody), async (_req: Request, res: Response) => {
     const code = res.locals.body.code as string;
     const ok = await service.verifyCode(_req.user!.id, code);
     res.json({ success: true, data: { valid: ok } });
-  }));
+  });
 
   return router;
 };

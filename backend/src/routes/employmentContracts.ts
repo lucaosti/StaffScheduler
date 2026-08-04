@@ -22,7 +22,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
-import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams } from '../middleware/validation';
 import {
   idParam,
@@ -37,37 +36,37 @@ export const createEmploymentContractsRouter = (pool: Pool) => {
   const router = Router();
   const service = new EmploymentContractService(pool);
 
-  router.get('/', authenticate, requirePermission('employee.read'), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/', authenticate, requirePermission('employee.read'), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await service.list() });
-  }));
+  });
 
   // Registered before `/:id` so the literal segment is not matched as an id —
   // see shifts.ts, where the same ordering is load-bearing.
-  router.get('/users/:userId', authenticate, requirePermission('employee.read'), validateParams(userIdParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/users/:userId', authenticate, requirePermission('employee.read'), validateParams(userIdParam), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await service.assignmentsForUser(res.locals.params.userId) });
-  }));
+  });
 
-  router.post('/users/:userId', authenticate, requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(assignEmploymentContractBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.post('/users/:userId', authenticate, requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(assignEmploymentContractBody), async (_req: Request, res: Response) => {
     const assigned = await service.assign({
       userId: res.locals.params.userId,
       ...res.locals.body,
     });
     res.status(201).json({ success: true, data: assigned, message: 'Contract assigned' });
-  }));
+  });
 
-  router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
+  router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await service.getById(res.locals.params.id) });
-  }));
+  });
 
-  router.post('/', authenticate, requirePermission('preferences.manage'), validateBody(createEmploymentContractBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.post('/', authenticate, requirePermission('preferences.manage'), validateBody(createEmploymentContractBody), async (_req: Request, res: Response) => {
     const created = await service.create(res.locals.body);
     res.status(201).json({ success: true, data: created, message: 'Employment contract created' });
-  }));
+  });
 
-  router.put('/:id', authenticate, requirePermission('preferences.manage'), validateParams(idParam), validateBody(updateEmploymentContractBody), asyncHandler(async (_req: Request, res: Response) => {
+  router.put('/:id', authenticate, requirePermission('preferences.manage'), validateParams(idParam), validateBody(updateEmploymentContractBody), async (_req: Request, res: Response) => {
     const updated = await service.update(res.locals.params.id, res.locals.body);
     res.json({ success: true, data: updated, message: 'Employment contract updated' });
-  }));
+  });
 
   return router;
 };
