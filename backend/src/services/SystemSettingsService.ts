@@ -1,12 +1,20 @@
 /**
- * System Settings Service
- * 
- * Manages application-wide configuration settings including:
- * - Currency settings (EUR/USD)
- * - Time period defaults (Monthly)
- * - Other system preferences
- * 
- * @module services/SystemSettingsService
+ * Application-wide settings: a generic (category, key) → value store, plus
+ * typed convenience wrappers (currency, time period) over it.
+ *
+ * Every row carries its own `default_value` and a `type` tag alongside the
+ * current `value` — both stored as strings — so `resetSetting` can restore a
+ * known-good value without a separate defaults table, and the frontend can
+ * render the right input control without hardcoding per-setting knowledge
+ * here. `is_editable` gates `updateSetting`/`resetSetting` with a
+ * `ForbiddenError`: some rows describe fixed system behavior that must be
+ * visible but must not be changed from this generic path.
+ *
+ * `getCurrency`/`setCurrency` and their time-period equivalents are thin
+ * wrappers over `getSetting`/`updateSetting` for the two settings read
+ * frequently enough elsewhere in the codebase to deserve a typed accessor,
+ * rather than a special case in the generic path.
+ *
  * @author Luca Ostinelli
  */
 
