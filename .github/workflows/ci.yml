@@ -334,7 +334,7 @@ jobs:
           for i in {1..60}; do
             # Require the health endpoint to report redis connected, proving the
             # backend is exercising the real shared-cache path, not the fallback.
-            if curl -fsS http://127.0.0.1:3001/api/health | grep -q '"redis":"connected"'; then
+            if curl -fsS http://127.0.0.1:3001/api/v1/health | grep -q '"redis":"connected"'; then
               echo "backend up with redis"; exit 0
             fi
             sleep 2
@@ -346,7 +346,7 @@ jobs:
       - name: Run Playwright tests
         working-directory: frontend
         env:
-          REACT_APP_API_URL: http://127.0.0.1:3001/api
+          REACT_APP_API_URL: http://127.0.0.1:3001/api/v1
           E2E_BASE_URL: http://127.0.0.1:3000
           CI: 'true'
         run: npm run test:e2e

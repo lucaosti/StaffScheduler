@@ -3,7 +3,7 @@
   "info": {
     "title": "Staff Scheduler API",
     "version": "1.0.0",
-    "description": "Open-source workforce management REST API.\n\nAll non-public endpoints require a JWT obtained via `POST /api/v1/auth/login`, presented either as the httpOnly `token` cookie (set automatically at login) or as `Authorization: Bearer <token>`.\n\nBase URLs:\n- Canonical: `http://localhost:3001/api/v1`\n- Legacy (will be removed): `http://localhost:3001/api`\n\nEvery response follows the envelope format:\n- Success: `{ \"success\": true, \"data\": <T> }`\n- Error:   `{ \"success\": false, \"error\": { \"code\": \"ERROR_CODE\", \"message\": \"...\" } }`\n\nValidation errors return `VALIDATION_ERROR` with a `details` array of field-level messages.\nRate-limit errors return HTTP 429 with code `RATE_LIMIT_EXCEEDED`.",
+    "description": "Open-source workforce management REST API.\n\nAll non-public endpoints require a JWT obtained via `POST /api/v1/auth/login`, presented either as the httpOnly `token` cookie (set automatically at login) or as `Authorization: Bearer <token>`.\n\nBase URL: `http://localhost:3001/api/v1`. The legacy unversioned `/api` prefix is retired as a live mount; a request there gets a 308 redirect to the equivalent `/api/v1` path.\n\nEvery response follows the envelope format:\n- Success: `{ \"success\": true, \"data\": <T> }`\n- Error:   `{ \"success\": false, \"error\": { \"code\": \"ERROR_CODE\", \"message\": \"...\" } }`\n\nValidation errors return `VALIDATION_ERROR` with a `details` array of field-level messages.\nRate-limit errors return HTTP 429 with code `RATE_LIMIT_EXCEEDED`.",
     "contact": {
       "name": "Luca Ostinelli",
       "email": "ostinelliluca2@gmail.com",
@@ -16,11 +16,7 @@
   "servers": [
     {
       "url": "http://localhost:3001/api/v1",
-      "description": "Local development (canonical)"
-    },
-    {
-      "url": "http://localhost:3001/api",
-      "description": "Local development (legacy — will be removed)"
+      "description": "Local development"
     }
   ],
   "components": {

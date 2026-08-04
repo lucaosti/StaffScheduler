@@ -154,7 +154,7 @@ wait_for_services() {
     # Wait for backend API
     print_info "  Waiting for Backend API..."
     for i in {1..30}; do
-        if docker-compose -f "$DOCKER_COMPOSE_FILE" exec -T backend wget -q -O- http://localhost:3001/api/health >/dev/null 2>&1; then
+        if docker-compose -f "$DOCKER_COMPOSE_FILE" exec -T backend wget -q -O- http://localhost:3001/api/v1/health >/dev/null 2>&1; then
             print_success "  Backend API is ready"
             break
         fi
@@ -179,8 +179,8 @@ display_access_info() {
     print_info "Access the application at the following URLs:"
     echo ""
     echo "  🌐 Frontend Application:  ${BLUE}http://localhost:3000${NC}"
-    echo "  📡 Backend API:            ${BLUE}http://localhost:3001/api${NC}"
-    echo "  🔍 API Health Check:       ${BLUE}http://localhost:3001/api/health${NC}"
+    echo "  📡 Backend API:            ${BLUE}http://localhost:3001/api/v1${NC}"
+    echo "  🔍 API Health Check:       ${BLUE}http://localhost:3001/api/v1/health${NC}"
     echo "  💾 Database Management:    ${BLUE}http://localhost:8080${NC} (phpMyAdmin)"
     echo ""
     print_info "Default login credentials:"

@@ -29,7 +29,7 @@
 
 import { http, HttpResponse } from 'msw';
 
-const apiUrl = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api';
+const apiUrl = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1';
 
 const ok = <T>(data: T) =>
   () => HttpResponse.json({ success: true, data });
