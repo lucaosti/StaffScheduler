@@ -193,7 +193,7 @@ describe('buildApp — HTTPS redirect in production', () => {
     const app = buildApp(fakePool, { silent: true });
 
     const res = await request(app)
-      .get('/api/health')
+      .get('/api/v1/health')
       .set('x-forwarded-proto', 'https');
 
     expect([200, 503]).toContain(res.status);
@@ -205,7 +205,7 @@ describe('buildApp — HTTPS redirect in production', () => {
     const app = buildApp(fakePool, { silent: true });
 
     const res = await request(app)
-      .get('/api/health')
+      .get('/api/v1/health')
       .set('x-forwarded-proto', 'http');
 
     expect([200, 503]).toContain(res.status);
@@ -228,10 +228,10 @@ describe('buildApp — rate limiter returns 429 RATE_LIMIT_EXCEEDED', () => {
       const app = buildApp(fakePool, { silent: false });
 
       // First request — should pass through (200 or 503, not 429)
-      await request(app).get('/api/health');
+      await request(app).get('/api/v1/health');
 
       // Second request — should be rate-limited
-      const res = await request(app).get('/api/health');
+      const res = await request(app).get('/api/v1/health');
       expect(res.status).toBe(429);
       expect(res.body.error.code).toBe('RATE_LIMIT_EXCEEDED');
     } finally {

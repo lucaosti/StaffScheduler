@@ -235,8 +235,28 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/pending-approvals`, createPendingApprovalsRouter(pool));
   };
   mountRoutes('/api/v1');
-  mountRoutes('/api');
   app.use('/api', createOpenApiRouter());
+
+  // Legacy prefix retirement (#319): `/api` is no longer a second, fully
+  // duplicated mount of every router — that meant every route existed twice,
+  // and the refresh cookie's path derivation (see `routes/auth.ts`) had to
+  // stay correct for both simultaneously forever. A caller still on `/api`
+  // gets a 308 (method- and body-preserving, unlike 301/302) to the
+  // equivalent `/api/v1` path instead. `openapi.json`'s `servers` entry and
+  // DOCUMENTATION.md record `/api/v1` as the only prefix to build against.
+  //
+  // Placed AFTER `createOpenApiRouter()` above so `/api/openapi.json`,
+  // `/api/docs` and `/api/docs-assets/*` — documentation, not versioned API
+  // surface — keep working unredirected; only requests that fall through
+  // reach this middleware.
+  app.use('/api', (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.originalUrl === '/api/v1' || req.originalUrl.startsWith('/api/v1/') || req.originalUrl.startsWith('/api/v1?')) {
+      next();
+      return;
+    }
+    const target = `/api/v1${req.originalUrl.slice('/api'.length)}`;
+    res.redirect(308, target);
+  });
 
   app.use('*', (_req: express.Request, res: express.Response) => {
     res.status(404).json({

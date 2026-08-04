@@ -16,7 +16,7 @@
 #   3. wait until the load balancer is healthy and answering
 #   4. scale back DOWN to N — Compose removes the oldest containers, i.e. the
 #      ones running the previous image
-# A poller hits /api/health throughout and fails the deploy if any request is
+# A poller hits /api/v1/health throughout and fails the deploy if any request is
 # dropped, so "zero downtime" is verified rather than assumed.
 #
 # Usage: ops/deploy/rolling-deploy.sh [replicas]   (default 2)
@@ -24,7 +24,7 @@ set -euo pipefail
 
 REPLICAS="${1:-2}"
 COMPOSE=(docker compose -f docker-compose.yml -f docker-compose.scale.yml)
-HEALTH_URL="${HEALTH_URL:-http://localhost:${BACKEND_PORT:-3001}/api/health}"
+HEALTH_URL="${HEALTH_URL:-http://localhost:${BACKEND_PORT:-3001}/api/v1/health}"
 
 echo "[deploy] building the backend image"
 "${COMPOSE[@]}" build backend

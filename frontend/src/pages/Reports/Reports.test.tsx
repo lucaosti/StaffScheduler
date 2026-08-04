@@ -5,7 +5,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../../mocks/server';
 import Reports from './Reports';
 
-const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api';
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => server.resetHandlers());
