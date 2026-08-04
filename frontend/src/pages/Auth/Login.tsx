@@ -1,12 +1,17 @@
 /**
  * Login Page Component for Staff Scheduler
- * 
+ *
  * Provides user authentication interface with form validation,
  * error handling, and post-login redirection functionality.
- * 
+ *
  * Features:
  * - Email/password authentication form
- * - Two-factor (TOTP / recovery code) step when the account has 2FA enabled
+ * - Method-aware two-factor step (#594, part of #331): when the account has
+ *   more than one method enabled, the person picks which to use; a method
+ *   that needs a server-generated challenge (email, WebAuthn) requests one
+ *   via `POST /auth/login/challenge` before a code can be produced — TOTP
+ *   needs none, since its code is computed from a secret the account
+ *   already has.
  * - Real-time form validation
  * - Loading states during authentication
  * - Error message display
@@ -22,6 +27,9 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../services/apiUtils';
 import { internalPathOr } from '../../utils/internalPath';
+import { TwoFactorMethodType, requestLoginChallenge } from '../../services/twoFactorService';
+import { runWebAuthnAuthentication } from '../../services/webAuthnClient';
+import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 
 /**
  * Interface for location state with redirect information
@@ -31,6 +39,16 @@ interface LocationState {
     pathname: string;
   };
 }
+
+const METHOD_LABELS: Record<TwoFactorMethodType, string> = {
+  totp: 'Authenticator app',
+  webauthn: 'Passkey',
+  email: 'Email code',
+  sms: 'SMS',
+};
+
+/** Methods whose code must be requested from the server before it can be entered/produced. TOTP computes its own. */
+const NEEDS_CHALLENGE: Partial<Record<TwoFactorMethodType, boolean>> = { email: true, webauthn: true };
 
 /**
  * Login page component providing user authentication
@@ -44,7 +62,9 @@ const Login: React.FC = () => {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
+  const [availableMethods, setAvailableMethods] = useState<TwoFactorMethodType[] | null>(null);
+  const [selectedMethod, setSelectedMethod] = useState<TwoFactorMethodType | null>(null);
+  const [challengeRequested, setChallengeRequested] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -56,29 +76,60 @@ const Login: React.FC = () => {
   // the router accepts and the browser reads as a host.
   const from = internalPathOr((location.state as LocationState)?.from?.pathname);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitLogin = async (code?: string, methodType?: TwoFactorMethodType) => {
     setIsLoading(true);
     setError('');
-
     try {
       await login({
         email: credentials.email,
         password: credentials.password,
-        // methodType omitted — defaults to 'totp' server-side. Picking among
-        // multiple enrolled methods is #594 (frontend multi-method UI); today
-        // this form only exercises the TOTP/recovery-code path.
-        ...(credentials.code ? { code: credentials.code } : {}),
+        ...(code ? { code, methodType: methodType ?? 'totp' } : {}),
       });
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'TWO_FACTOR_REQUIRED') {
-        // Credentials are valid but the account has 2FA enabled:
-        // reveal the code field instead of surfacing an error.
-        setTwoFactorRequired(true);
+        // Credentials are valid but the account has 2FA enabled: reveal the
+        // method picker (or go straight to the code field for a single
+        // TOTP-only account) instead of surfacing an error.
+        const methods = (err.data as { methods?: TwoFactorMethodType[] } | undefined)?.methods ?? ['totp'];
+        setAvailableMethods(methods);
+        setSelectedMethod(methods.includes('totp') ? 'totp' : methods[0]);
       } else {
         setError(err instanceof Error ? err.message : 'Login failed');
       }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!availableMethods) {
+      await submitLogin();
+    } else if (selectedMethod && (!NEEDS_CHALLENGE[selectedMethod] || (selectedMethod === 'email' && challengeRequested))) {
+      // TOTP needs no challenge; email reaches here only once its code has
+      // been requested and typed in. WebAuthn submits from its own button
+      // (the ceremony itself produces the code — see requestChallenge).
+      await submitLogin(credentials.code, selectedMethod);
+    }
+  };
+
+  const requestChallenge = async (methodType: TwoFactorMethodType) => {
+    setIsLoading(true);
+    setError('');
+    try {
+      const res = await requestLoginChallenge(credentials.email, credentials.password, methodType);
+      if (methodType === 'webauthn' && res.data) {
+        const responseCode = await runWebAuthnAuthentication(
+          res.data as unknown as PublicKeyCredentialRequestOptionsJSON
+        );
+        await submitLogin(responseCode, 'webauthn');
+        return;
+      }
+      // Email: the server just sent the code. Reveal the input.
+      setChallengeRequested(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not request a two-factor challenge');
     } finally {
       setIsLoading(false);
     }
@@ -90,6 +141,13 @@ const Login: React.FC = () => {
       ...prev,
       [name]: value,
     }));
+  };
+
+  const handleSelectMethod = (methodType: TwoFactorMethodType) => {
+    setSelectedMethod(methodType);
+    setChallengeRequested(false);
+    setCredentials((prev) => ({ ...prev, code: '' }));
+    setError('');
   };
 
   return (
@@ -125,6 +183,7 @@ const Login: React.FC = () => {
                       onChange={handleChange}
                       required
                       autoFocus
+                      disabled={Boolean(availableMethods)}
                     />
                   </div>
 
@@ -140,10 +199,29 @@ const Login: React.FC = () => {
                       value={credentials.password}
                       onChange={handleChange}
                       required
+                      disabled={Boolean(availableMethods)}
                     />
                   </div>
 
-                  {twoFactorRequired && (
+                  {availableMethods && availableMethods.length > 1 && (
+                    <div className="mb-3">
+                      <label className="form-label">Two-factor method</label>
+                      <div className="btn-group w-100" role="group">
+                        {availableMethods.map((m) => (
+                          <button
+                            key={m}
+                            type="button"
+                            className={`btn btn-sm ${selectedMethod === m ? 'btn-primary' : 'btn-outline-primary'}`}
+                            onClick={() => handleSelectMethod(m)}
+                          >
+                            {METHOD_LABELS[m]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {availableMethods && selectedMethod && !NEEDS_CHALLENGE[selectedMethod] && (
                     <div className="mb-4">
                       <label htmlFor="code" className="form-label">
                         Two-factor code
@@ -166,20 +244,70 @@ const Login: React.FC = () => {
                     </div>
                   )}
 
-                  <button
-                    type="submit"
-                    className="btn btn-primary w-100"
-                    disabled={isLoading}
-                  >
-                    {isLoading ? (
-                      <>
-                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                        Signing in...
-                      </>
-                    ) : (
-                      'Sign In'
-                    )}
-                  </button>
+                  {availableMethods && selectedMethod === 'email' && !challengeRequested && (
+                    <div className="mb-4">
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary w-100"
+                        onClick={() => void requestChallenge('email')}
+                        disabled={isLoading}
+                      >
+                        Send code to my email
+                      </button>
+                    </div>
+                  )}
+
+                  {availableMethods && selectedMethod === 'email' && challengeRequested && (
+                    <div className="mb-4">
+                      <label htmlFor="code" className="form-label">
+                        Code from your email
+                      </label>
+                      <input
+                        type="text"
+                        id="code"
+                        name="code"
+                        className="form-control"
+                        value={credentials.code}
+                        onChange={handleChange}
+                        autoComplete="one-time-code"
+                        inputMode="numeric"
+                        required
+                        autoFocus
+                      />
+                    </div>
+                  )}
+
+                  {availableMethods && selectedMethod === 'webauthn' && (
+                    <div className="mb-4">
+                      <button
+                        type="button"
+                        className="btn btn-outline-primary w-100"
+                        onClick={() => void requestChallenge('webauthn')}
+                        disabled={isLoading}
+                      >
+                        Continue with passkey
+                      </button>
+                    </div>
+                  )}
+
+                  {(!availableMethods ||
+                    (selectedMethod && !NEEDS_CHALLENGE[selectedMethod]) ||
+                    (selectedMethod === 'email' && challengeRequested)) && (
+                    <button
+                      type="submit"
+                      className="btn btn-primary w-100"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          Signing in...
+                        </>
+                      ) : (
+                        'Sign In'
+                      )}
+                    </button>
+                  )}
                 </form>
               </div>
             </div>

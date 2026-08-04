@@ -13,6 +13,7 @@ import userEvent from '@testing-library/user-event';
 // under test so the mocks are in place.
 const mockNavigate = jest.fn();
 const mockLogin = jest.fn();
+const mockRequestLoginChallenge = jest.fn();
 
 jest.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
@@ -23,6 +24,11 @@ jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ login: mockLogin }),
 }));
 
+jest.mock('../../services/twoFactorService', () => ({
+  ...jest.requireActual('../../services/twoFactorService'),
+  requestLoginChallenge: (...args: unknown[]) => mockRequestLoginChallenge(...args),
+}));
+
 import Login from './Login';
 import { ApiError } from '../../services/apiUtils';
 
@@ -30,6 +36,7 @@ describe('<Login />', () => {
   beforeEach(() => {
     mockNavigate.mockReset();
     mockLogin.mockReset();
+    mockRequestLoginChallenge.mockReset();
   });
 
   it('renders the email + password fields', () => {
@@ -91,8 +98,43 @@ describe('<Login />', () => {
         email: 'a@x.com',
         password: 'pw',
         code: '123456',
+        methodType: 'totp',
       })
     );
     expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+  });
+
+  it('offers a method picker and requests an email challenge before revealing the code field', async () => {
+    mockLogin.mockRejectedValueOnce(
+      new ApiError('Two-factor authentication code required', 401, 'TWO_FACTOR_REQUIRED', {
+        methods: ['email', 'webauthn'],
+      })
+    );
+    mockRequestLoginChallenge.mockResolvedValueOnce({ success: true, data: null });
+    render(<Login />);
+    await userEvent.type(screen.getByRole('textbox', { name: /email/i }), 'a@x.com');
+    await userEvent.type(screen.getByLabelText(/^password/i), 'pw');
+    await userEvent.click(screen.getByRole('button', { name: /sign in|login|submit/i }));
+
+    // No TOTP among the methods, so 'email' becomes the default selection.
+    expect(await screen.findByRole('button', { name: /send code to my email/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /passkey/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /send code to my email/i }));
+    expect(mockRequestLoginChallenge).toHaveBeenCalledWith('a@x.com', 'pw', 'email');
+
+    const codeField = await screen.findByLabelText(/code from your email/i);
+    mockLogin.mockResolvedValueOnce(undefined);
+    await userEvent.type(codeField, '654321');
+    await userEvent.click(screen.getByRole('button', { name: /sign in|login|submit/i }));
+
+    await waitFor(() =>
+      expect(mockLogin).toHaveBeenLastCalledWith({
+        email: 'a@x.com',
+        password: 'pw',
+        code: '654321',
+        methodType: 'email',
+      })
+    );
   });
 });
