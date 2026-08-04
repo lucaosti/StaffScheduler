@@ -69,7 +69,7 @@ describe('POST /api/auth/login', () => {
       firstName: 'A',
       lastName: 'B',
     });
-    (TwoFactorService.prototype.isEnabled as jest.Mock) = jest.fn().mockResolvedValue(false);
+    (TwoFactorService.prototype.hasAnyEnabled as jest.Mock) = jest.fn().mockResolvedValue(false);
     (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest
       .fn()
       .mockResolvedValue(['schedule.manage', 'schedule.read']);
@@ -106,28 +106,30 @@ describe('POST /api/auth/login — two-factor enforcement', () => {
     });
     (RbacService.prototype.getEffectivePermissions as jest.Mock) = jest.fn().mockResolvedValue([]);
     (RbacService.prototype.getUserRoles as jest.Mock) = jest.fn().mockResolvedValue([]);
-    (TwoFactorService.prototype.isEnabled as jest.Mock) = jest.fn().mockResolvedValue(true);
+    (TwoFactorService.prototype.hasAnyEnabled as jest.Mock) = jest.fn().mockResolvedValue(true);
+    (TwoFactorService.prototype.listEnabledMethods as jest.Mock) = jest.fn().mockResolvedValue(['totp']);
   });
 
-  it('returns 401 TOTP_REQUIRED when 2FA is enabled and no code is supplied', async () => {
+  it('returns 401 TWO_FACTOR_REQUIRED with the enabled methods when no code is supplied', async () => {
     const res = await request(buildApp())
       .post('/api/auth/login')
       .send({ email: 'a@x.com', password: 'pw' });
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('TOTP_REQUIRED');
+    expect(res.body.error.code).toBe('TWO_FACTOR_REQUIRED');
+    expect(res.body.data.methods).toEqual(['totp']);
     expect(res.headers['set-cookie']).toBeUndefined();
   });
 
-  it('returns 401 TOTP_INVALID when the code is wrong', async () => {
+  it('returns 401 TWO_FACTOR_INVALID when the code is wrong', async () => {
     (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(false);
     (TwoFactorService.prototype.consumeRecoveryCode as jest.Mock) = jest
       .fn()
       .mockResolvedValue(false);
     const res = await request(buildApp())
       .post('/api/auth/login')
-      .send({ email: 'a@x.com', password: 'pw', totpCode: '000000' });
+      .send({ email: 'a@x.com', password: 'pw', code: '000000' });
     expect(res.status).toBe(401);
-    expect(res.body.error.code).toBe('TOTP_INVALID');
+    expect(res.body.error.code).toBe('TWO_FACTOR_INVALID');
     expect(res.headers['set-cookie']).toBeUndefined();
   });
 
@@ -135,7 +137,7 @@ describe('POST /api/auth/login — two-factor enforcement', () => {
     (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
     const res = await request(buildApp())
       .post('/api/auth/login')
-      .send({ email: 'a@x.com', password: 'pw', totpCode: '123456' });
+      .send({ email: 'a@x.com', password: 'pw', code: '123456' });
     expect(res.status).toBe(200);
     const cookies = res.headers['set-cookie'] as unknown as string[];
     expect(cookies?.some((c: string) => c.startsWith('token='))).toBe(true);
@@ -148,8 +150,72 @@ describe('POST /api/auth/login — two-factor enforcement', () => {
       .mockResolvedValue(true);
     const res = await request(buildApp())
       .post('/api/auth/login')
-      .send({ email: 'a@x.com', password: 'pw', totpCode: 'RECOVERY-1234' });
+      .send({ email: 'a@x.com', password: 'pw', code: 'RECOVERY-1234' });
     expect(res.status).toBe(200);
+  });
+
+  it('verifies against the method named by methodType', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
+    const res = await request(buildApp())
+      .post('/api/auth/login')
+      .send({ email: 'a@x.com', password: 'pw', code: '654321', methodType: 'email' });
+    expect(res.status).toBe(200);
+    expect(TwoFactorService.prototype.verifyCode).toHaveBeenCalledWith(7, '654321', 'email');
+  });
+});
+
+describe('POST /api/auth/login/challenge', () => {
+  beforeEach(() => {
+    jest.resetAllMocks();
+  });
+
+  it('returns 401 without revealing anything when credentials are invalid', async () => {
+    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue(null);
+    const res = await request(buildApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x.com', password: 'wrong', methodType: 'email' });
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('LOGIN_FAILED');
+  });
+
+  it('returns the challenge payload for a valid request', async () => {
+    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 7,
+      email: 'a@x.com',
+      firstName: 'A',
+      lastName: 'B',
+    });
+    (TwoFactorService.prototype.requestChallenge as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ challenge: 'abc' });
+    const res = await request(buildApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x.com', password: 'pw', methodType: 'webauthn' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ challenge: 'abc' });
+    expect(TwoFactorService.prototype.requestChallenge).toHaveBeenCalledWith(7, 'webauthn');
+  });
+
+  it('returns null data for a method that delivers out of band', async () => {
+    (UserService.prototype.validatePassword as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 7,
+      email: 'a@x.com',
+      firstName: 'A',
+      lastName: 'B',
+    });
+    (TwoFactorService.prototype.requestChallenge as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+    const res = await request(buildApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x.com', password: 'pw', methodType: 'email' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeNull();
+  });
+
+  it('returns 400 when methodType is missing', async () => {
+    const res = await request(buildApp())
+      .post('/api/auth/login/challenge')
+      .send({ email: 'a@x.com', password: 'pw' });
+    expect(res.status).toBe(400);
   });
 });
 

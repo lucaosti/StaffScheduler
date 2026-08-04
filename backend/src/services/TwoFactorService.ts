@@ -131,6 +131,21 @@ export class TwoFactorService {
   }
 
   /**
+   * Every enabled method type for the user, in no particular order — what
+   * the login challenge screen and the Settings page both need to know
+   * which method(s) to present (#591). Reads `two_factor_methods` directly
+   * rather than calling each provider's `isEnabled`, since that would be
+   * one query per registered provider instead of one query total.
+   */
+  async listEnabledMethods(userId: number): Promise<TwoFactorMethodType[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT method_type FROM two_factor_methods WHERE user_id = ? AND enabled = 1`,
+      [userId]
+    );
+    return rows.map((row) => row.method_type as TwoFactorMethodType);
+  }
+
+  /**
    * Tries `code` against the stored hashed recovery codes; on match,
    * removes that code from the list (single-use) and returns true.
    */

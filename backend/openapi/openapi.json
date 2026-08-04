@@ -2717,13 +2717,57 @@
         }
       }
     },
+    "/auth/2fa/challenge": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request a fresh 2FA challenge",
+        "description": "For a method that must generate/deliver a code before it can be verified (email: sends a fresh code; WebAuthn: returns fresh assertion options for `navigator.credentials.get()`). TOTP has no challenge step and answers 409 `CONFLICT` if asked for one.",
+        "responses": {
+          "200": {
+            "description": "Challenge issued. `data` is the provider's challenge payload, or `null` for a method that delivers out of band."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The method is not enabled, or does not use a requested challenge (`CONFLICT`)."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
+                  }
+                },
+                "required": [
+                  "methodType"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/2fa/disable": {
       "post": {
         "tags": [
           "Auth"
         ],
-        "summary": "Disable two-factor authentication",
-        "description": "Requires a valid current TOTP code or an unused recovery code; answers 401 `TOTP_INVALID` otherwise.",
+        "summary": "Disable one enrolled 2FA method",
+        "description": "`methodType` selects which enrolled method to remove (defaults to `totp`). Requires a valid current code for THAT method, or an unused recovery code; answers 401 `TWO_FACTOR_INVALID` otherwise. Recovery codes are cleared once no method remains enabled.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2734,6 +2778,15 @@
                   "code": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
                   }
                 },
                 "required": [
@@ -2761,8 +2814,8 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Confirm and enable 2FA",
-        "description": "Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.",
+        "summary": "Confirm and enable a 2FA method",
+        "description": "`methodType` selects which method to confirm (defaults to `totp`). Verifies the code/response from `/auth/2fa/setup` and enables that method. Recovery codes are returned only the first time ANY method is enabled for the account — a second method reuses the existing set — so store them safely when they arrive.",
         "requestBody": {
           "required": true,
           "content": {
@@ -2773,6 +2826,15 @@
                   "code": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
                   }
                 },
                 "required": [
@@ -2795,37 +2857,56 @@
         }
       }
     },
+    "/auth/2fa/methods": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "List the caller's enabled 2FA methods",
+        "responses": {
+          "200": {
+            "description": "Enabled method types, e.g. `{ methods: [\"totp\", \"email\"] }`."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/auth/2fa/setup": {
       "post": {
         "tags": [
           "Auth"
         ],
-        "summary": "Begin TOTP 2FA setup",
-        "description": "Generates a TOTP secret and returns it plus an `otpauth://` URI. The caller must confirm the code via `/auth/2fa/enable` before 2FA is active.",
+        "summary": "Begin 2FA setup for a method",
+        "description": "`methodType` selects which method to enroll (defaults to `totp`). Returns provider-specific setup data the client needs to complete enrollment: TOTP returns a secret plus an `otpauth://` URI; WebAuthn returns `PublicKeyCredentialCreationOptionsJSON` for `navigator.credentials.create()`; email needs no client-side data (it sends the verification code directly) and returns an empty object. The caller must confirm via `/auth/2fa/enable` before the method is active.",
         "responses": {
           "200": {
-            "description": "TOTP setup payload.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "secret": {
-                      "type": "string"
-                    },
-                    "otpauthUrl": {
-                      "type": "string"
-                    },
-                    "qrCodeUrl": {
-                      "type": "string"
-                    }
+            "description": "Provider-specific setup payload."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
                   }
                 }
               }
             }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
@@ -2835,26 +2916,8 @@
         "tags": [
           "Auth"
         ],
-        "summary": "Verify a TOTP code",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "code": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "code"
-                ]
-              }
-            }
-          }
-        },
+        "summary": "Verify a code against one enrolled method",
+        "description": "`methodType` selects which method to verify against (defaults to `totp`). Diagnostic / step-up use — does not consume a login attempt.",
         "responses": {
           "200": {
             "description": "Verification result in `data.valid`."
@@ -2865,6 +2928,34 @@
           "401": {
             "$ref": "#/components/responses/Unauthorized"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
+                  }
+                },
+                "required": [
+                  "code"
+                ]
+              }
+            }
+          }
         }
       }
     },
@@ -2874,36 +2965,8 @@
           "Auth"
         ],
         "summary": "Login",
-        "description": "Authenticate with email and password. On success the signed JWT (valid for the period configured in `JWT_EXPIRES_IN`, default 24 h) is set as an httpOnly `token` cookie; it is never returned in the response body. Subsequent requests authenticate via that cookie, or alternatively via `Authorization: Bearer <token>`. When the account has two-factor authentication enabled, `totpCode` (a TOTP or single-use recovery code) is required: the endpoint answers 401 `TOTP_REQUIRED` when it is missing and 401 `TOTP_INVALID` when it is wrong.",
+        "description": "Authenticate with email and password. On success the signed JWT (valid for the period configured in `JWT_EXPIRES_IN`, default 24 h) is set as an httpOnly `token` cookie; it is never returned in the response body. Subsequent requests authenticate via that cookie, or alternatively via `Authorization: Bearer <token>`. When the account has two-factor authentication enabled on any method, `code` (that method's code/assertion, or a single-use recovery code) is required, with `methodType` selecting which enrolled method `code` is for (defaults to `totp`): the endpoint answers 401 `TWO_FACTOR_REQUIRED` when `code` is missing — the response's `data.methods` lists the account's enabled method types — and 401 `TWO_FACTOR_INVALID` when it is wrong. A method that needs a server-generated challenge before it can be verified (email, WebAuthn) requires a prior call to `POST /auth/login/challenge`.",
         "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "email": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "password": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "totpCode": {
-                    "type": "string",
-                    "minLength": 1
-                  }
-                },
-                "required": [
-                  "email",
-                  "password"
-                ]
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "Authenticated. The JWT is delivered as an httpOnly `token` cookie.",
@@ -2940,10 +3003,105 @@
             "$ref": "#/components/responses/ValidationError"
           },
           "401": {
-            "description": "Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TOTP_REQUIRED`), or wrong 2FA code (`TOTP_INVALID`)."
+            "description": "Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TWO_FACTOR_REQUIRED`), or wrong 2FA code (`TWO_FACTOR_INVALID`)."
           },
           "429": {
             "description": "Login throttled — too many failed attempts."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "code": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "password"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/login/challenge": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request a 2FA challenge before a session exists",
+        "description": "The pre-session equivalent of `POST /auth/2fa/challenge`, for use during login: re-verifies email+password (an unauthenticated caller must not be able to trigger an email send, or learn a WebAuthn credential exists, for an arbitrary address by guessing it), then issues a fresh challenge for `methodType`.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Challenge issued. `data` is the provider's challenge payload, or `null` for a method that delivers out of band."
+          },
+          "401": {
+            "description": "Invalid credentials (`LOGIN_FAILED`)."
+          },
+          "409": {
+            "description": "The method is not enabled, or does not use a requested challenge (`CONFLICT`)."
+          },
+          "429": {
+            "description": "Throttled — shares the login rate limiter."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "password": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "methodType": {
+                    "type": "string",
+                    "enum": [
+                      "totp",
+                      "webauthn",
+                      "email",
+                      "sms"
+                    ]
+                  }
+                },
+                "required": [
+                  "email",
+                  "password",
+                  "methodType"
+                ]
+              }
+            }
           }
         }
       }
