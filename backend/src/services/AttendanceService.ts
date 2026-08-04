@@ -167,6 +167,27 @@ export class AttendanceService {
     return created;
   }
 
+  /**
+   * Clock in if the user has no open record, clock out if they do. Exists for
+   * the kiosk flow (#309): a shared tablet identifies a person by employee id
+   * and has no notion of "which button to show" the way a self-service caller
+   * does from their own page state, so the toggle decision has to be made
+   * server-side, atomically with the same query clockIn already runs to
+   * detect this case.
+   */
+  async punch(userId: number): Promise<{ action: 'clocked_in' | 'clocked_out'; record: AttendanceRecord }> {
+    const [open] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM attendance_records WHERE user_id = ? AND clock_out IS NULL LIMIT 1`,
+      [userId]
+    );
+    if (open.length > 0) {
+      const record = await this.clockOut(userId, open[0].id as number);
+      return { action: 'clocked_out', record };
+    }
+    const record = await this.clockIn(userId);
+    return { action: 'clocked_in', record };
+  }
+
   async clockOut(userId: number, id: number, notes: string | null = null): Promise<AttendanceRecord> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE attendance_records

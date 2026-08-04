@@ -128,6 +128,37 @@ describe('AttendanceService.clockIn — geofencing', () => {
   });
 });
 
+describe('AttendanceService.punch', () => {
+  it('clocks in when the user has no open record', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // punch's own open-record check: none
+      .mockResolvedValueOnce([[], null] as Tuple) // clockIn's open-record check
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: none configured
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple) // INSERT
+      .mockResolvedValueOnce([[buildRow({ id: 10 })], null] as Tuple); // getById
+
+    const result = await new AttendanceService(pool).punch(5);
+
+    expect(result.action).toBe('clocked_in');
+    expect(result.record.id).toBe(10);
+  });
+
+  it('clocks out the open record when one already exists', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 7 }], null] as Tuple) // punch's own open-record check: one open
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // clockOut's UPDATE
+      .mockResolvedValueOnce([[buildRow({ id: 7, clock_out: '2026-07-10T16:00:00.000Z' })], null] as Tuple); // getById
+
+    const result = await new AttendanceService(pool).punch(5);
+
+    expect(result.action).toBe('clocked_out');
+    expect(result.record.id).toBe(7);
+  });
+});
+
 describe('AttendanceService.clockOut', () => {
   it('refuses when the record belongs to another user', async () => {
     const { pool, execute } = makePool();
