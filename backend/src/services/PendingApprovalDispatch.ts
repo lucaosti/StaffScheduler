@@ -2,11 +2,12 @@
  * Entity-agnostic dispatch for deciding a pending_approvals row.
  *
  * A pending_approvals row may belong to a change request, a time-off
- * request, a loan, or a shift swap, and each of those owns its own side
- * effects (advancing a workflow step, inserting an unavailability block,
- * swapping assignments, ...). Shared by the `/pending-approvals/:id/approve`
- * and `/reject` routes and by the simulation harness (`scripts/simulation`),
- * so both exercise the exact same code path.
+ * request, a loan, a shift swap, or a policy exception, and each of those
+ * owns its own side effects (advancing a workflow step, inserting an
+ * unavailability block, swapping assignments, ...). Shared by the
+ * `/pending-approvals/:id/approve` and `/reject` routes and by the
+ * simulation harness (`scripts/simulation`), so both exercise the exact same
+ * code path.
  *
  * @author Luca Ostinelli
  */
@@ -18,6 +19,7 @@ import { ChangeRequestService } from './ChangeRequestService';
 import { TimeOffService } from './TimeOffService';
 import { EmployeeLoanService } from './EmployeeLoanService';
 import { ShiftSwapService } from './ShiftSwapService';
+import { PolicyExceptionService } from './PolicyExceptionService';
 
 export async function dispatchPendingApprovalDecision(
   pool: Pool,
@@ -52,6 +54,12 @@ export async function dispatchPendingApprovalDecision(
     return decision === 'approved'
       ? svc.approve(pa.shiftSwapRequestId, userId, note, organizationName)
       : svc.decline(pa.shiftSwapRequestId, userId, note, organizationName);
+  }
+  if (pa.policyExceptionId !== null) {
+    const svc = new PolicyExceptionService(pool);
+    return decision === 'approved'
+      ? svc.approve(pa.policyExceptionId, userId, note, organizationName)
+      : svc.reject(pa.policyExceptionId, userId, note, organizationName);
   }
   throw new ConflictError('Pending approval has no linked entity');
 }

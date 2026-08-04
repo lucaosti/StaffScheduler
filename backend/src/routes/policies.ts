@@ -95,7 +95,8 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     const updated = await exceptions.approve(
       res.locals.params.id,
       req.user!.id,
-      (res.locals.body.notes as string | null | undefined) ?? null
+      (res.locals.body.notes as string | null | undefined) ?? null,
+      req.user!.organizationName ?? null
     );
     res.json({ success: true, data: updated });
   });
@@ -104,7 +105,8 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     const updated = await exceptions.reject(
       res.locals.params.id,
       req.user!.id,
-      (res.locals.body.notes as string | null | undefined) ?? null
+      (res.locals.body.notes as string | null | undefined) ?? null,
+      req.user!.organizationName ?? null
     );
     res.json({ success: true, data: updated });
   });

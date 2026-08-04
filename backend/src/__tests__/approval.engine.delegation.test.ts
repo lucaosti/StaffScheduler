@@ -486,11 +486,13 @@ describe('read-side helpers', () => {
     };
     const base = {
       changeRequestId: null, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+      policyExceptionId: null,
     };
     expect(svc.entityRefFromPendingApproval({ ...base, changeRequestId: 1 })).toEqual({ changeRequestId: 1 });
     expect(svc.entityRefFromPendingApproval({ ...base, timeOffRequestId: 2 })).toEqual({ timeOffRequestId: 2 });
     expect(svc.entityRefFromPendingApproval({ ...base, employeeLoanId: 3 })).toEqual({ employeeLoanId: 3 });
     expect(svc.entityRefFromPendingApproval({ ...base, shiftSwapRequestId: 4 })).toEqual({ shiftSwapRequestId: 4 });
+    expect(svc.entityRefFromPendingApproval({ ...base, policyExceptionId: 5 })).toEqual({ policyExceptionId: 5 });
     expect(() => svc.entityRefFromPendingApproval(base)).toThrow('Pending approval has no linked entity');
   });
 
@@ -594,6 +596,7 @@ describe('missing pending approval guards', () => {
     await expect(
       svc.getProposerUserId({
         changeRequestId: null, timeOffRequestId: null, employeeLoanId: null, shiftSwapRequestId: null,
+        policyExceptionId: null,
       })
     ).resolves.toBeNull();
   });

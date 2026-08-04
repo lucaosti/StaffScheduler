@@ -41,32 +41,6 @@ const makePool = () => {
   };
 };
 
-// Minimal exception row for mocking
-const exceptionRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 1, policy_id: 1, target_type: 't', target_id: 1,
-  reason: null, status: 'pending', requested_by_user_id: 7,
-  reviewer_user_id: null, reviewed_at: null, review_notes: null,
-  created_at: 't', updated_at: 't',
-  ...overrides,
-});
-
-// Minimal policy row
-const policyRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 1, scope_type: 'global', scope_id: null,
-  policy_key: 'max_hours', policy_value: '40',
-  description: null, imposed_by_user_id: 8, is_active: 1,
-  created_at: 't', updated_at: 't',
-  ...overrides,
-});
-
-// Minimal approval matrix row (policy_owner scope, actorUserId=8 matches)
-const matrixRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 1, change_type: 'Policy.Exception',
-  approver_scope: 'policy_owner', approver_role_id: null, approver_user_id: null,
-  auto_approve_for_owner: 0, description: null,
-  ...overrides,
-});
-
 // Minimal loan row
 const loanRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1, user_id: 5, from_org_unit_id: 1, to_org_unit_id: 2,
@@ -109,101 +83,14 @@ const loanPendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PolicyExceptionService — uncovered null paths
+//
+// create/approve/reject's workflow-engine branches (post-insert null,
+// notification catch, policy-not-found, refresh-null-after-decide) moved to
+// the spy-based suite in services.extended.test.ts, alongside the workflow
+// attachment/decision-arm tests they now share instance-boundary spying
+// with — see PolicyExceptionService.approve/reject's engine.decidePendingApproval
+// call. Only `cancel`, which the #603 migration left untouched, stays here.
 // ─────────────────────────────────────────────────────────────────────────────
-
-describe('PolicyExceptionService.create — post-insert null', () => {
-  it('throws Failed to create exception request when getById returns null after insert', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[policyRow()], null] as Tuple)    // policies.getById
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple)    // approvals.getByChangeType
-      .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
-      .mockResolvedValueOnce([[], null] as Tuple);              // getById → null
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.create({
-      policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 7,
-    })).rejects.toThrow('Failed to create exception request');
-  });
-});
-
-describe('PolicyExceptionService.create — notification catch', () => {
-  it('calls logger.warn when notifyAsync throws during pending create', async () => {
-    const { pool, execute } = makePool();
-    // Matrix resolves approver=8, actor=7 → not auto-approved → status=pending + notify
-    execute
-      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policies.getById
-      .mockResolvedValueOnce([[matrixRow({ approver_scope: 'company_user', approver_user_id: 8 })], null] as Tuple) // matrix
-      .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple)              // INSERT
-      .mockResolvedValueOnce([[exceptionRow({ id: 9, status: 'pending' })], null] as Tuple) // getById
-      .mockRejectedValueOnce(new Error('notify-fail'));                      // notifyAsync INSERT fails
-    const svc = new PolicyExceptionService(pool);
-    // Should NOT throw — notification error is swallowed
-    const result = await svc.create({
-      policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 7,
-    });
-    expect(result.status).toBe('pending');
-  });
-});
-
-describe('PolicyExceptionService.approve — null paths', () => {
-  it('throws Exception request not found when getById returns null', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null] as Tuple); // getById → null
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.approve(1, 8)).rejects.toThrow('Exception request not found');
-  });
-
-  it('throws Policy not found when policies.getById returns null', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow()], null] as Tuple) // getById existing
-      .mockResolvedValueOnce([[], null] as Tuple);              // policies.getById → null
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.approve(1, 8)).rejects.toThrow('Policy not found');
-  });
-
-  it('throws Failed to refresh exception when getById returns null after UPDATE', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow()], null] as Tuple)          // getById existing
-      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policies.getById
-      .mockResolvedValueOnce([[matrixRow({ approver_scope: 'policy_owner' })], null] as Tuple) // approvals
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)       // UPDATE
-      .mockResolvedValueOnce([[], null] as Tuple);                        // getById refresh → null
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.approve(1, 8)).rejects.toThrow('Failed to refresh exception');
-  });
-});
-
-describe('PolicyExceptionService.reject — null paths', () => {
-  it('throws Exception request not found when getById returns null', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.reject(1, 8)).rejects.toThrow('Exception request not found');
-  });
-
-  it('throws Policy not found when policies.getById returns null', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow()], null] as Tuple)
-      .mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.reject(1, 8)).rejects.toThrow('Policy not found');
-  });
-
-  it('throws Failed to refresh exception when getById returns null after reject UPDATE', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow()], null] as Tuple)          // getById existing
-      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
-      .mockResolvedValueOnce([[matrixRow({ approver_scope: 'policy_owner' })], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)       // UPDATE
-      .mockResolvedValueOnce([[], null] as Tuple);                        // getById refresh → null
-    const svc = new PolicyExceptionService(pool);
-    await expect(svc.reject(1, 8)).rejects.toThrow('Failed to refresh exception');
-  });
-});
 
 describe('PolicyExceptionService.cancel — null refresh', () => {
   it('throws Failed to refresh exception when getById returns null after cancel UPDATE', async () => {
