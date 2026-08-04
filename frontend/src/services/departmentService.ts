@@ -25,7 +25,7 @@
  * @author Luca Ostinelli
  */
 
-import type { ApiResponse, Department, Geofence } from '../types';
+import type { ApiResponse, Department, Geofence, KioskDevice } from '../types';
 import type { paths } from '../api/schema';
 import { apiClient } from '../api/client';
 
@@ -101,4 +101,29 @@ export const deleteGeofence = (departmentId: number | string, geofenceId: number
   apiClient.delete<unknown, '/departments/{id}/geofences/{geofenceId}'>(
     '/departments/{id}/geofences/{geofenceId}',
     { params: { id: Number(departmentId), geofenceId: Number(geofenceId) } }
+  );
+
+// ── Kiosk devices ──────────────────────────────────────────────────────────
+
+export type CreateKioskDeviceData =
+  paths['/departments/{id}/kiosks']['post']['requestBody']['content']['application/json'];
+
+// The plaintext token exists only in this one response — it is never
+// returned again, since only its hash is stored server-side.
+export type CreatedKioskDevice = KioskDevice & { token: string };
+
+export const getKioskDevices = (departmentId: number | string) =>
+  apiClient.get<KioskDevice[], '/departments/{id}/kiosks'>('/departments/{id}/kiosks', {
+    params: { id: Number(departmentId) },
+  });
+
+export const createKioskDevice = (departmentId: number | string, data: CreateKioskDeviceData) =>
+  apiClient.post<CreatedKioskDevice, '/departments/{id}/kiosks'>('/departments/{id}/kiosks', data, {
+    params: { id: Number(departmentId) },
+  });
+
+export const deleteKioskDevice = (departmentId: number | string, kioskId: number | string) =>
+  apiClient.delete<unknown, '/departments/{id}/kiosks/{kioskId}'>(
+    '/departments/{id}/kiosks/{kioskId}',
+    { params: { id: Number(departmentId), kioskId: Number(kioskId) } }
   );
