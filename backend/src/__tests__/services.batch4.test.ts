@@ -223,7 +223,7 @@ describe('RbacService.createRole — null after insert', () => {
 describe('TwoFactorService.consumeRecoveryCode — invalid JSON returns false', () => {
   it('returns false when stored recovery codes are not valid JSON', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[{ totp_recovery_codes: '{not-json' }], null] as Tuple);
+    execute.mockResolvedValueOnce([[{ two_factor_recovery_codes: '{not-json' }], null] as Tuple);
     const svc = new TwoFactorService(pool);
     const result = await svc.consumeRecoveryCode(1, 'abc123');
     expect(result).toBe(false);
