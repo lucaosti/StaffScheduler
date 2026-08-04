@@ -149,14 +149,63 @@ describe('OrgUnitService.listMembersDetailed', () => {
       ],
       null,
     ] as Tuple);
+    execute.mockResolvedValueOnce([[], null] as Tuple); // listActiveLoansInto: none
 
     const service = new OrgUnitService(pool);
     const members = await service.listMembersDetailed(11);
 
     expect(members).toEqual([
-      { userId: 7, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Nurse', isPrimary: true },
+      { userId: 7, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Nurse', isPrimary: true, onLoan: false },
     ]);
     expect(execute.mock.calls[0][0]).toMatch(/JOIN users u ON u\.id = uou\.user_id/);
+  });
+
+  it('appends loaned-in staff, flagged onLoan, after real members', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        { user_id: 7, first_name: 'Mario', last_name: 'Rossi', email: 'mario@demo.local', position: 'Nurse', is_primary: 1 },
+      ],
+      null,
+    ] as Tuple); // real membership
+    execute.mockResolvedValueOnce([
+      [{ user_id: 9, start_date: '2026-08-01', end_date: '2026-08-14' }],
+      null,
+    ] as Tuple); // listActiveLoansInto
+    execute.mockResolvedValueOnce([
+      [{ user_id: 9, first_name: 'Anna', last_name: 'Bianchi', email: 'anna@demo.local', position: null }],
+      null,
+    ] as Tuple); // user lookup for the loaned-in id
+
+    const service = new OrgUnitService(pool);
+    const members = await service.listMembersDetailed(11);
+
+    expect(members).toEqual([
+      { userId: 7, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Nurse', isPrimary: true, onLoan: false },
+      { userId: 9, firstName: 'Anna', lastName: 'Bianchi', email: 'anna@demo.local', position: null, isPrimary: false, onLoan: true },
+    ]);
+  });
+
+  it('does not duplicate a user who is both a real member and on loan', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        { user_id: 7, first_name: 'Mario', last_name: 'Rossi', email: 'mario@demo.local', position: 'Nurse', is_primary: 1 },
+      ],
+      null,
+    ] as Tuple);
+    execute.mockResolvedValueOnce([
+      [{ user_id: 7, start_date: '2026-08-01', end_date: '2026-08-14' }],
+      null,
+    ] as Tuple); // same user id already a member — should be filtered out before the user lookup
+
+    const service = new OrgUnitService(pool);
+    const members = await service.listMembersDetailed(11);
+
+    expect(members).toEqual([
+      { userId: 7, firstName: 'Mario', lastName: 'Rossi', email: 'mario@demo.local', position: 'Nurse', isPrimary: true, onLoan: false },
+    ]);
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 });
 

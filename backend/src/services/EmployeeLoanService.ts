@@ -11,7 +11,14 @@
  * and delegation, not just a single hardcoded approver.
  *
  * Querying for "is user X eligible in unit Y on date D" is done via
- * `isOnLoan()`, used by schedule validation.
+ * `isOnLoan()`. Its range counterpart, `listLoanedInUserIds()`, is what
+ * `AutoScheduleService` and `AssignmentOrchestrator.getAvailableEmployeesForShift`
+ * consult to extend a department's scheduling candidate pool to staff on an
+ * approved loan into it — `departments.org_unit_id` is the bridge from a
+ * loan's org-unit scope to a shift's department scope. Approving a loan is
+ * what actually makes the person schedulable in the destination unit; see
+ * issue #602 for the gap this closed (the methods previously had no callers
+ * at all).
  *
  * @author Luca Ostinelli
  */
@@ -231,6 +238,47 @@ export class EmployeeLoanService {
       [userId, orgUnitId, date, date]
     );
     return ((rows[0] as { c: number }).c) > 0;
+  }
+
+  /**
+   * User ids on an approved loan INTO `orgUnitId`, overlapping
+   * [startDate, endDate]. Used to extend a department's scheduling candidate
+   * pool to loaned-in staff — see `AutoScheduleService.generate` and
+   * `AssignmentOrchestrator.getAvailableEmployeesForShift`.
+   */
+  async listLoanedInUserIds(orgUnitId: number, startDate: string, endDate: string): Promise<number[]> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT user_id FROM employee_loans
+        WHERE to_org_unit_id = ?
+          AND status = 'approved'
+          AND start_date <= ?
+          AND end_date >= ?`,
+      [orgUnitId, endDate, startDate]
+    );
+    return rows.map((r: any) => r.user_id as number);
+  }
+
+  /**
+   * Approved loans INTO `orgUnitId` active today — used to flag loaned-in
+   * members on the destination unit's roster (`OrgUnitService.listMembersDetailed`)
+   * without conflating them with actual `user_org_units` membership rows.
+   */
+  async listActiveLoansInto(
+    orgUnitId: number
+  ): Promise<Array<{ userId: number; startDate: string; endDate: string }>> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT user_id, start_date, end_date FROM employee_loans
+        WHERE to_org_unit_id = ?
+          AND status = 'approved'
+          AND start_date <= CURDATE()
+          AND end_date >= CURDATE()`,
+      [orgUnitId]
+    );
+    return rows.map((r: any) => ({
+      userId: r.user_id as number,
+      startDate: typeof r.start_date === 'string' ? r.start_date : DateUtils.fromMySQLDate(r.start_date),
+      endDate: typeof r.end_date === 'string' ? r.end_date : DateUtils.fromMySQLDate(r.end_date),
+    }));
   }
 
   private async findPendingApprovalId(employeeLoanId: number): Promise<number | null> {
