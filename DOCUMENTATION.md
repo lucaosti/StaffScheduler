@@ -178,7 +178,9 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 
 ### Base URL
 
-`http://localhost:3001/api` (development)
+`http://localhost:3001/api/v1` (development). Every endpoint in this document is written relative to this base — `POST /auth/login` means `POST /api/v1/auth/login`.
+
+**Legacy `/api` prefix (#319)**: retired as a live mount. A request to the bare `/api/...` prefix now gets a 308 redirect to the equivalent `/api/v1/...` path — method and body are preserved, but a client still depending on the old prefix should move to `/api/v1` directly rather than relying on the redirect indefinitely.
 
 ### Authentication
 
@@ -936,7 +938,7 @@ a good backup.
 4. Bring the backend back up and verify:
    ```bash
    docker compose start backend
-   curl -fsS http://localhost:3001/api/health
+   curl -fsS http://localhost:3001/api/v1/health
    ```
 
 To validate a backup **without** touching production data, point `DB_NAME` at a

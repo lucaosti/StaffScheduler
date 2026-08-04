@@ -6,7 +6,7 @@ import { http, HttpResponse } from 'msw';
 import { server } from '../../mocks/server';
 import { defaultDashboardStats } from '../../mocks/handlers';
 
-const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api';
+const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1';
 
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { email: 'admin@demo.staffscheduler.local' } }),

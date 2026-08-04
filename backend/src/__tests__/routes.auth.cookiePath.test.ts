@@ -8,8 +8,11 @@
  * died at the first access-token expiry, fifteen minutes in. `/api/v1` was
  * documented as the prefix to migrate to while its refresh flow did not work.
  *
- * These tests mount the router under both prefixes, the way `app.ts` does,
- * because a test that mounts only one cannot see the bug at all.
+ * Since #319, `/api/v1` is the ONLY prefix this router is actually mounted
+ * at — `app.ts` 308-redirects the legacy `/api` there rather than mounting
+ * the router a second time — so these tests exercise that one mount, kept
+ * deriving the path from `req.baseUrl` rather than hardcoding it so this
+ * stays correct if the mount point ever changes again.
  *
  * @author Luca Ostinelli
  */
@@ -42,14 +45,12 @@ jest.mock('../middleware/auth', () => ({
   invalidateAuthContext: jest.fn(),
 }));
 
-const mountBothPrefixes = () => {
+const mountCanonicalPrefix = () => {
   const { createAuthRouter } = require('../routes/auth');
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
-  // The same order app.ts uses: canonical first, legacy second.
   app.use('/api/v1/auth', createAuthRouter({} as never));
-  app.use('/api/auth', createAuthRouter({} as never));
   return app;
 };
 
@@ -73,7 +74,7 @@ beforeEach(() => {
 
 describe('the refresh cookie path', () => {
   it('is scoped to the canonical prefix when the request arrives there', async () => {
-    const res = await request(mountBothPrefixes())
+    const res = await request(mountCanonicalPrefix())
       .post('/api/v1/auth/logout')
       .set('Cookie', 'refresh_token=old');
 
@@ -87,33 +88,30 @@ describe('the refresh cookie path', () => {
     expect(cleared.some((c) => c.includes('Path=/api/v1/auth/refresh'))).toBe(true);
   });
 
-  it('clears the cookie on both prefixes, whichever one logged out', async () => {
-    const res = await request(mountBothPrefixes())
-      .post('/api/auth/logout')
+  it('also clears the legacy hardcoded path, as one-time migration hygiene', async () => {
+    const res = await request(mountCanonicalPrefix())
+      .post('/api/v1/auth/logout')
       .set('Cookie', 'refresh_token=old');
 
     const cleared = (res.headers['set-cookie'] as unknown as string[]).filter((c) =>
       c.startsWith('refresh_token=')
     );
-    // A session started on one prefix and ended on the other would otherwise
-    // leave the cookie in place, so the browser keeps presenting a credential
-    // the server has already revoked.
+    // A session whose cookie was set before #319 retired the legacy mount
+    // still has it stored at the old hardcoded path; clearing it here means
+    // that stale cookie doesn't linger forever.
     expect(cleared.some((c) => c.includes('Path=/api/auth/refresh'))).toBe(true);
-    expect(cleared.some((c) => c.includes('Path=/api/v1/auth/refresh'))).toBe(true);
   });
 
-  it('revokes the presented token server-side regardless of prefix', async () => {
-    await request(mountBothPrefixes())
+  it('revokes the presented token server-side', async () => {
+    await request(mountCanonicalPrefix())
       .post('/api/v1/auth/logout')
       .set('Cookie', 'refresh_token=old');
 
-    // The cookie clear is hygiene; this is the part that actually ends the
-    // session, and it must not depend on which prefix was used.
     expect(revoke).toHaveBeenCalledWith('old');
   });
 
   it('rejects a refresh with no cookie on the canonical prefix', async () => {
-    const res = await request(mountBothPrefixes()).post('/api/v1/auth/refresh');
+    const res = await request(mountCanonicalPrefix()).post('/api/v1/auth/refresh');
     expect(res.status).toBe(401);
     // The path the rejection clears is derived too, so a stale cookie on the
     // canonical prefix is actually removed rather than left behind.

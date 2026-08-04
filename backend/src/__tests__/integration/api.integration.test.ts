@@ -60,7 +60,7 @@ let scheduleId: number;
 let orgUnitId: number;
 
 const loginCookie = async (email: string, password: string): Promise<string> => {
-  const res = await request(app).post('/api/auth/login').send({ email, password });
+  const res = await request(app).post('/api/v1/auth/login').send({ email, password });
   expect(res.status).toBe(200);
   const setCookie = res.headers['set-cookie'];
   expect(setCookie).toBeDefined();
@@ -150,7 +150,7 @@ afterAll(async () => {
 describe('auth (real DB)', () => {
   it('rejects a wrong password with 401', async () => {
     const res = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ADMIN_EMAIL, password: 'wrong-password' });
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('LOGIN_FAILED');
@@ -161,17 +161,17 @@ describe('auth (real DB)', () => {
   it('logs in, serves an authenticated request, and revokes on logout', async () => {
     const cookie = await authCookie();
 
-    const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    const me = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
     expect(me.status).toBe(200);
     // Contract: a real success response must carry the { success, data } envelope.
     expectSuccessEnvelope(me.body);
     expect(me.body.data.email).toBe(ADMIN_EMAIL);
     expect(me.body.data.permissions).toContain('assignment.manage');
 
-    const out = await request(app).post('/api/auth/logout').set('Cookie', cookie);
+    const out = await request(app).post('/api/v1/auth/logout').set('Cookie', cookie);
     expect(out.status).toBe(200);
 
-    const afterLogout = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    const afterLogout = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
     expect(afterLogout.status).toBe(401);
   });
 
@@ -185,14 +185,14 @@ describe('auth (real DB)', () => {
 
   it('rotates the refresh token and detects reuse of a spent one', async () => {
     const login = await request(app)
-      .post('/api/auth/login')
+      .post('/api/v1/auth/login')
       .send({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
     expect(login.status).toBe(200);
     const firstRefresh = extractCookie(login, 'refresh_token');
     expect(firstRefresh).toBeDefined();
 
     // A valid refresh rotates: it succeeds and returns a new refresh cookie.
-    const refresh1 = await request(app).post('/api/auth/refresh').set('Cookie', firstRefresh!);
+    const refresh1 = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
     expect(refresh1.status).toBe(200);
     expect(refresh1.body.data.user.email).toBe(ADMIN_EMAIL);
     const secondRefresh = extractCookie(refresh1, 'refresh_token');
@@ -201,11 +201,11 @@ describe('auth (real DB)', () => {
 
     // Replaying the now-spent first token is reuse: it is rejected AND revokes
     // the whole family, so the legitimately-rotated second token stops working.
-    const reuse = await request(app).post('/api/auth/refresh').set('Cookie', firstRefresh!);
+    const reuse = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
     expect(reuse.status).toBe(401);
     expect(reuse.body.error.code).toBe('REFRESH_INVALID');
 
-    const afterReuse = await request(app).post('/api/auth/refresh').set('Cookie', secondRefresh!);
+    const afterReuse = await request(app).post('/api/v1/auth/refresh').set('Cookie', secondRefresh!);
     expect(afterReuse.status).toBe(401);
   });
 });
@@ -214,7 +214,7 @@ describe('assignments (real DB) — regression for the users.role column drift',
   it('POST /api/assignments creates an assignment end-to-end', async () => {
     const cookie = await authCookie();
     const res = await request(app)
-      .post('/api/assignments')
+      .post('/api/v1/assignments')
       .set('Cookie', cookie)
       .send({ shiftId, userId });
     expect(res.status).toBe(201);
@@ -232,7 +232,7 @@ describe('assignments (real DB) — regression for the users.role column drift',
   it('rejects a duplicate assignment for the same shift and user', async () => {
     const cookie = await authCookie();
     const res = await request(app)
-      .post('/api/assignments')
+      .post('/api/v1/assignments')
       .set('Cookie', cookie)
       .send({ shiftId, userId });
     expect(res.status).toBeGreaterThanOrEqual(400);
@@ -250,7 +250,7 @@ describe('delegations (real DB) — regression for the missing delegation.manage
       .slice(0, 19)
       .replace('T', ' ');
     const res = await request(app)
-      .post('/api/delegations')
+      .post('/api/v1/delegations')
       .set('Cookie', cookie)
       .send({ delegateeId, permissionCodes: ['schedule.read'], expiresAt });
     expect(res.status).toBe(201);
@@ -259,7 +259,7 @@ describe('delegations (real DB) — regression for the missing delegation.manage
 
   it('the delegatee holds the delegated permission at authentication time', async () => {
     const cookie = await loginCookie(DELEGATEE_EMAIL, DELEGATEE_PASSWORD);
-    const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    const me = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
     expect(me.status).toBe(200);
     expect(me.body.data.permissions).toContain('schedule.read');
   });
@@ -272,7 +272,7 @@ describe('delegations (real DB) — regression for the missing delegation.manage
     expect(del.status).toBe(200);
 
     const cookie = await loginCookie(DELEGATEE_EMAIL, DELEGATEE_PASSWORD);
-    const me = await request(app).get('/api/auth/verify').set('Cookie', cookie);
+    const me = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
     expect(me.status).toBe(200);
     expect(me.body.data.permissions).not.toContain('schedule.read');
   });
@@ -281,7 +281,7 @@ describe('delegations (real DB) — regression for the missing delegation.manage
 describe('directory and dashboard (real DB)', () => {
   it('GET /api/users returns the seeded admin via the unscoped path', async () => {
     const cookie = await authCookie();
-    const res = await request(app).get('/api/users').set('Cookie', cookie);
+    const res = await request(app).get('/api/v1/users').set('Cookie', cookie);
     expect(res.status).toBe(200);
     const emails = (res.body.data as Array<{ email: string }>).map((u) => u.email);
     expect(emails).toContain(ADMIN_EMAIL);
@@ -289,7 +289,7 @@ describe('directory and dashboard (real DB)', () => {
 
   it('GET /api/dashboard/stats executes all aggregates against the real schema', async () => {
     const cookie = await authCookie();
-    const res = await request(app).get('/api/dashboard/stats').set('Cookie', cookie);
+    const res = await request(app).get('/api/v1/dashboard/stats').set('Cookie', cookie);
     expect(res.status).toBe(200);
     expect(res.body.data.totalEmployees).toBeGreaterThanOrEqual(1);
     expect(res.body.data.monthlyCost).not.toBeUndefined();
@@ -1098,7 +1098,7 @@ describe('shift-swap and import run against the real schema', () => {
     const theirs = await makeAssignment(await makeShift(), delegateeId);
     const cookie = await authCookie();
     const res = await request(app)
-      .post('/api/shift-swap')
+      .post('/api/v1/shift-swap')
       .set('Cookie', cookie)
       .send({ requesterAssignmentId: mine, targetAssignmentId: theirs });
     if (res.status >= 400) {
@@ -1215,7 +1215,7 @@ describe('overnight shifts run against the real schema', () => {
     // "overnight shifts are not supported", while every downstream consumer
     // implemented them. A 400 here means that refusal came back.
     const res = await request(app)
-      .post('/api/shifts')
+      .post('/api/v1/shifts')
       .set('Cookie', cookie)
       .send({
         scheduleId: sc.insertId,
@@ -1232,7 +1232,7 @@ describe('overnight shifts run against the real schema', () => {
   it('still rejects a zero-length shift', async () => {
     const cookie = await authCookie();
     const res = await request(app)
-      .post('/api/shifts')
+      .post('/api/v1/shifts')
       .set('Cookie', cookie)
       .send({
         scheduleId,
@@ -1310,7 +1310,7 @@ describe('self-service preferences run against the real schema', () => {
   it('stores the genuine preferences sent to /me', async () => {
     const cookie = await authCookie();
     const res = await request(app)
-      .put('/api/preferences/me')
+      .put('/api/v1/preferences/me')
       .set('Cookie', cookie)
       .send({ notes: 'prefers mornings' });
     expect(res.status).toBeLessThan(400);
@@ -1321,7 +1321,7 @@ describe('self-service preferences run against the real schema', () => {
     const before = await readLimits();
 
     const res = await request(app)
-      .put('/api/preferences/me')
+      .put('/api/v1/preferences/me')
       .set('Cookie', cookie)
       .send({ maxHoursPerWeek: 80, maxConsecutiveDays: 14, notes: 'nice try' });
 
@@ -1361,7 +1361,7 @@ describe('skills catalogue runs against the real schema', () => {
   it('creates, reads back with usage counts, and deletes when unused', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/skills')
+      .post('/api/v1/skills')
       .set('Cookie', cookie)
       .send({ name: `Triage ${tag()}`, description: 'Assess and prioritise' });
     expect(created.status).toBe(201);
@@ -1377,15 +1377,15 @@ describe('skills catalogue runs against the real schema', () => {
   it('refuses a duplicate name rather than letting the unique key surface as a 500', async () => {
     const cookie = await authCookie();
     const name = `Duplicate ${tag()}`;
-    expect((await request(app).post('/api/skills').set('Cookie', cookie).send({ name })).status).toBe(201);
-    const again = await request(app).post('/api/skills').set('Cookie', cookie).send({ name });
+    expect((await request(app).post('/api/v1/skills').set('Cookie', cookie).send({ name })).status).toBe(201);
+    const again = await request(app).post('/api/v1/skills').set('Cookie', cookie).send({ name });
     expect(again.status).toBe(409);
   });
 
   it('refuses to delete a skill an employee holds, and counts it', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/skills')
+      .post('/api/v1/skills')
       .set('Cookie', cookie)
       .send({ name: `Held ${tag()}` });
     const skillId = created.body.data.id;
@@ -1403,7 +1403,7 @@ describe('skills catalogue runs against the real schema', () => {
   it('retires a skill and hides it from the active list', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/skills')
+      .post('/api/v1/skills')
       .set('Cookie', cookie)
       .send({ name: `Retired ${tag()}` });
     const skillId = created.body.data.id;
@@ -1415,9 +1415,9 @@ describe('skills catalogue runs against the real schema', () => {
     expect(retired.status).toBe(200);
     expect(retired.body.data.isActive).toBe(false);
 
-    const active = await request(app).get('/api/skills?activeOnly=true').set('Cookie', cookie);
+    const active = await request(app).get('/api/v1/skills?activeOnly=true').set('Cookie', cookie);
     expect(active.body.data.map((s: { id: number }) => s.id)).not.toContain(skillId);
-    const all = await request(app).get('/api/skills').set('Cookie', cookie);
+    const all = await request(app).get('/api/v1/skills').set('Cookie', cookie);
     // Still there, because existing requirements naming it stay meaningful.
     expect(all.body.data.map((s: { id: number }) => s.id)).toContain(skillId);
   });
@@ -1498,14 +1498,14 @@ describe('timeline runs against the real schema', () => {
   it('rejects a range longer than a quarter', async () => {
     const cookie = await authCookie();
     const res = await request(app)
-      .get('/api/timeline?from=2033-01-01&to=2033-12-31')
+      .get('/api/v1/timeline?from=2033-01-01&to=2033-12-31')
       .set('Cookie', cookie);
     expect(res.status).toBe(400);
   });
 
   it('lists the sources', async () => {
     const cookie = await authCookie();
-    const res = await request(app).get('/api/timeline/sources').set('Cookie', cookie);
+    const res = await request(app).get('/api/v1/timeline/sources').set('Cookie', cookie);
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual(expect.arrayContaining(['shifts', 'on-call']));
   });
@@ -1908,7 +1908,7 @@ describe('publishing commits the schedule', () => {
     await request(app).patch(`/api/schedules/${scheduleId}/publish`).set('Cookie', cookie);
 
     const added = await request(app)
-      .post('/api/assignments')
+      .post('/api/v1/assignments')
       .set('Cookie', cookie)
       .send({ shiftId, userId: await freshUser() });
     expect(added.status).toBe(201);
@@ -1924,7 +1924,7 @@ describe('publishing commits the schedule', () => {
     const { shiftId } = await draftWithAssignment();
 
     const added = await request(app)
-      .post('/api/assignments')
+      .post('/api/v1/assignments')
       .set('Cookie', cookie)
       .send({ shiftId, userId: await freshUser() });
     expect(added.status).toBe(201);
@@ -1954,7 +1954,7 @@ describe('pairing rules run against the real schema', () => {
   it('creates a rule and returns it with both people named', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'requires', reason: 'Supervision' });
 
@@ -1972,7 +1972,7 @@ describe('pairing rules run against the real schema', () => {
   it('finds a rule from either side of it', async () => {
     const cookie = await authCookie();
     await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'apart' });
 
@@ -1988,7 +1988,7 @@ describe('pairing rules run against the real schema', () => {
   it('rejects the same `apart` rule recorded in reverse', async () => {
     const cookie = await authCookie();
     const first = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'apart' });
     expect(first.status).toBe(201);
@@ -1997,7 +1997,7 @@ describe('pairing rules run against the real schema', () => {
     // store this. `apart` means the same thing read either way, and two rows
     // saying it is a duplicate the schema cannot express.
     const reversed = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId: delegateeId, otherUserId: userId, kind: 'apart' });
     expect(reversed.status).toBe(409);
@@ -2006,7 +2006,7 @@ describe('pairing rules run against the real schema', () => {
   it('allows a mutual `requires`, which is how a symmetric pairing is expressed', async () => {
     const cookie = await authCookie();
     const first = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'requires' });
     expect(first.status).toBe(201);
@@ -2015,7 +2015,7 @@ describe('pairing rules run against the real schema', () => {
     // `a == b`, so both work the shift or neither. The migration documents two
     // rows as the way to say "these two always work together".
     const back = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId: delegateeId, otherUserId: userId, kind: 'requires' });
     expect(back.status).toBe(201);
@@ -2024,14 +2024,14 @@ describe('pairing rules run against the real schema', () => {
   it('rejects the opposite rule between the same two people', async () => {
     const cookie = await authCookie();
     await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'requires' });
 
     // Together these say one person may only work shifts the other works and
     // may never share a shift with them: unschedulable, permanently.
     const contradiction = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId: delegateeId, otherUserId: userId, kind: 'apart' });
     expect(contradiction.status).toBe(409);
@@ -2041,7 +2041,7 @@ describe('pairing rules run against the real schema', () => {
     const cookie = await authCookie();
     // The foreign key would catch this too, as an unclassified 500.
     const res = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: 999999, kind: 'apart' });
     expect(res.status).toBe(400);
@@ -2050,7 +2050,7 @@ describe('pairing rules run against the real schema', () => {
   it('edits the reason and deletes the rule', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/employee-pairings')
+      .post('/api/v1/employee-pairings')
       .set('Cookie', cookie)
       .send({ userId, otherUserId: delegateeId, kind: 'apart', reason: 'Initial' });
     const id = created.body.data.id;
@@ -2085,7 +2085,7 @@ describe('employment contracts run against the real schema', () => {
     const cookie = await authCookie();
 
     const created = await request(app)
-      .post('/api/employment-contracts')
+      .post('/api/v1/employment-contracts')
       .set('Cookie', cookie)
       .send({
         name: `Part time ${tag()}`,
@@ -2113,7 +2113,7 @@ describe('employment contracts run against the real schema', () => {
   it('rejects an overlapping period rather than storing two contracts at once', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/employment-contracts')
+      .post('/api/v1/employment-contracts')
       .set('Cookie', cookie)
       .send({ name: `Overlap ${tag()}`, maxHoursPerWeek: 30 });
     const contractId = created.body.data.id;
@@ -2136,7 +2136,7 @@ describe('employment contracts run against the real schema', () => {
   it('treats an open-ended assignment as covering everything after it', async () => {
     const cookie = await authCookie();
     const created = await request(app)
-      .post('/api/employment-contracts')
+      .post('/api/v1/employment-contracts')
       .set('Cookie', cookie)
       .send({ name: `Open ended ${tag()}`, maxHoursPerWeek: 35 });
     const contractId = created.body.data.id;

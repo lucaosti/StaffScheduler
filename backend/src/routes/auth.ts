@@ -55,40 +55,41 @@ const JWT_COOKIE_OPTIONS = {
 // on ordinary API calls, shrinking its exposure. It lives for the full refresh
 // lifetime so the session survives many access-token expiries.
 //
-// Coupling to the API prefix: routes are mounted under both `/api` (legacy) and
-// `/api/v1` (canonical), and a browser sends a path-scoped cookie only to paths
-// that START WITH the cookie's path. A hardcoded `/api/auth/refresh` therefore
-// meant a client using the CANONICAL prefix exclusively could call
-// `/api/v1/auth/refresh` and never have the cookie sent to it — so its session
-// died at the first access-token expiry, fifteen minutes in. `/api/v1` was
-// documented as the prefix to migrate to while its refresh flow did not work.
+// Coupling to the API prefix: this router is mounted at `/api/v1/auth` only —
+// the legacy `/api` now 308-redirects to `/api/v1` rather than serving
+// requests itself (#319) — but the path is still DERIVED from `req.baseUrl`
+// rather than hardcoded. A hardcoded `/api/auth/refresh` was the whole reason
+// `/api/v1`'s refresh flow silently failed before that fix: a browser only
+// sends a path-scoped cookie to paths that START WITH the cookie's path, so a
+// client calling `/api/v1/auth/refresh` never had the cookie sent to it, and
+// its session died at the first access-token expiry. Deriving means this
+// stays correct if the mount point ever moves again, with nothing here to
+// remember to update.
 //
-// The path is now derived from the prefix the request arrived on, so both
-// prefixes are fully functional and retiring the legacy one (#319) no longer
-// requires editing this constant in lockstep with the mount table.
-//
-// Deriving it rather than widening it to `/api` is the point: a wide path would
-// attach the long-lived refresh token to EVERY api call, which is exactly the
-// exposure the narrow scope exists to prevent.
+// Deriving it rather than widening it to `/api` is the point: a wide path
+// would attach the long-lived refresh token to EVERY api call, which is
+// exactly the exposure the narrow scope exists to prevent.
 /**
- * Clears the refresh cookie on BOTH prefixes.
+ * Clears the refresh cookie.
  *
- * A session started on one prefix and ended on the other would otherwise leave
- * the cookie in place: `clearCookie` only matches a cookie whose path it names.
- * The token is revoked server-side either way, so what is left behind is a
- * browser repeatedly presenting a dead credential — harmless, and confusing to
- * anyone reading a request log.
+ * Also clears the legacy hardcoded path (`/api/auth/refresh`) as one-time
+ * migration hygiene: a session whose refresh cookie was set before #319
+ * retired that mount still has it stored there, and `clearCookie` only
+ * matches a cookie whose path it names exactly. The token is revoked
+ * server-side either way, so leaving that stale cookie in place would be
+ * harmless — a browser presenting a dead credential — but there is no reason
+ * not to clean it up while a caller is already logging out.
  */
 const clearRefreshCookie = (req: Request, res: Response): void => {
-  for (const path of new Set([`${req.baseUrl}/refresh`, '/api/auth/refresh', '/api/v1/auth/refresh'])) {
+  for (const path of new Set([`${req.baseUrl}/refresh`, '/api/auth/refresh'])) {
     res.clearCookie(REFRESH_COOKIE_NAME, { path });
   }
 };
 
 const refreshCookieOptions = (req: Request) => ({
   ...BASE_COOKIE_OPTIONS,
-  // Inside this router `req.baseUrl` is `/api/auth` or `/api/v1/auth`, so this
-  // is the endpoint's own absolute path and nothing else.
+  // Inside this router `req.baseUrl` is `/api/v1/auth` — the only prefix it
+  // is mounted at now — so this is the endpoint's own absolute path.
   path: `${req.baseUrl}/refresh`,
   maxAge: config.jwt.refreshExpiresInMs,
 });

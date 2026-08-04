@@ -17,10 +17,10 @@
 import '@testing-library/jest-dom';
 import { TextDecoder, TextEncoder } from 'util';
 
-// The app's runtime default API base is the relative '/api' (proxied by Vite
-// in dev and nginx in production). Node's fetch rejects relative URLs, so unit
-// tests pin an absolute base that the MSW handlers register against.
-process.env.REACT_APP_API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+// The app's runtime default API base is the relative '/api/v1' (proxied by
+// Vite in dev and nginx in production). Node's fetch rejects relative URLs,
+// so unit tests pin an absolute base that the MSW handlers register against.
+process.env.REACT_APP_API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api/v1';
 
 // The assignment targets are typed `unknown` on purpose: Node's util
 // TextEncoder/TextDecoder signatures drift between @types/node versions

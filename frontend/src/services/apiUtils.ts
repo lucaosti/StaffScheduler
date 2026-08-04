@@ -13,11 +13,13 @@
 
 import { ApiResponse } from '../types';
 
-// Default to the same-origin relative path: the Vite dev server and the
-// production nginx image both proxy /api to the backend, so this works on any
-// host without configuration. Set REACT_APP_API_URL only to point the SPA at
-// an API on a different origin.
-export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
+// Default to the same-origin relative path, on the canonical /api/v1 prefix
+// (#319 — the legacy unversioned /api now 308-redirects here rather than
+// serving requests itself, so a client should never target it directly). The
+// Vite dev server and the production nginx image both proxy /api to the
+// backend, so this works on any host without configuration. Set
+// REACT_APP_API_URL only to point the SPA at an API on a different origin.
+export const API_BASE_URL = process.env.REACT_APP_API_URL || '/api/v1';
 
 /**
  * Custom error class for API-related errors.
