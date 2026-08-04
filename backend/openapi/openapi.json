@@ -1222,6 +1222,51 @@
           "createdAt"
         ],
         "additionalProperties": false
+      },
+      "KioskDevice": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string"
+          },
+          "departmentId": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "departmentId",
+          "isActive",
+          "createdAt",
+          "lastUsedAt"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -14072,6 +14117,145 @@
             }
           }
         ]
+      }
+    },
+    "/departments/{id}/kiosks": {
+      "get": {
+        "tags": [
+          "Departments"
+        ],
+        "summary": "List a department's kiosk devices",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Kiosk devices for this department."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Departments"
+        ],
+        "summary": "Register a kiosk device for a department",
+        "description": "Returns the raw device token in plaintext — the only time it is ever exposed, since only its hash is stored afterward. The caller must display it once and cannot retrieve it again.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Kiosk device created, including the one-time plaintext token."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/departments/{id}/kiosks/{kioskId}": {
+      "delete": {
+        "tags": [
+          "Departments"
+        ],
+        "summary": "Revoke a kiosk device",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          },
+          {
+            "name": "kioskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Kiosk device revoked."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/attendance/kiosk/punch": {
+      "post": {
+        "tags": [
+          "Attendance"
+        ],
+        "summary": "Punch a clock-in or clock-out from a shared kiosk device",
+        "description": "Authenticated by an `X-Kiosk-Token` device header, not a user session — there is no signed-in user at a shared kiosk. Toggles: clocks the resolved employee in if they have no open record, otherwise clocks them out.",
+        "responses": {
+          "200": {
+            "description": "Punch recorded; `action` is `clocked_in` or `clocked_out`."
+          },
+          "401": {
+            "description": "Missing or invalid kiosk device token."
+          },
+          "404": {
+            "description": "No active employee with that id in this device's department."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "employeeId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  }
+                },
+                "required": [
+                  "employeeId"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   }

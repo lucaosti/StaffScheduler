@@ -33,6 +33,7 @@ import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { GeofenceService } from '../services/GeofenceService';
+import { KioskService } from '../services/KioskService';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
@@ -40,12 +41,14 @@ import {
   idParam,
   idAndUserIdParam,
   idAndGeofenceIdParam,
+  idAndKioskIdParam,
   createDepartmentBody,
   updateDepartmentBody,
   addUserToDepartmentBody,
   departmentListQuery,
   createGeofenceBody,
   updateGeofenceBody,
+  createKioskDeviceBody,
 } from '../schemas';
 import { UpdateDepartmentRequest, User } from '../types';
 
@@ -54,6 +57,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
   const departmentService = new DepartmentService(pool);
   const geofenceService = new GeofenceService(pool);
   const userService = new UserService(pool);
+  const kioskService = new KioskService(pool);
 
   // The isActive/orgUnitId filters were documented but never read; they now
   // apply to the unrestricted listing. The scoped listing stays unfiltered:
@@ -277,8 +281,8 @@ export const createDepartmentsRouter = (pool: Pool) => {
 
   /**
    * Same access rule as every other department sub-resource in this file:
-   * a full administrator (`settings.manage`) sees any department's fences; a
-   * department manager (`department.manage`) sees only their own department's.
+   * a full administrator (`settings.manage`) manages any department's fences
+   * or kiosk devices; a department manager (`department.manage`) only their own.
    */
   const canManageDepartment = async (actor: User, departmentId: number): Promise<boolean> => {
     if (userHasPermission(actor, 'settings.manage')) return true;
@@ -321,6 +325,36 @@ export const createDepartmentsRouter = (pool: Pool) => {
     }
     await geofenceService.delete(res.locals.params.geofenceId);
     res.json({ success: true, data: { message: 'Geofence deleted successfully' } });
+  }));
+
+  router.get('/:id/kiosks', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    const devices = await kioskService.listForDepartment(departmentId);
+    res.json({ success: true, data: devices });
+  }));
+
+  // Response carries `token` in plaintext — the ONLY time it exists outside
+  // the hash in kiosk_devices; the admin UI must show it once and not offer
+  // to display it again, since it genuinely cannot be recovered afterward.
+  router.post('/:id/kiosks', authenticate, validateParams(idParam), validateBody(createKioskDeviceBody), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    const { device, token } = await kioskService.create(departmentId, res.locals.body.name, req.user!.id);
+    res.status(201).json({ success: true, data: { ...device, token } });
+  }));
+
+  router.delete('/:id/kiosks/:kioskId', authenticate, validateParams(idAndKioskIdParam), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    await kioskService.revoke(res.locals.params.kioskId);
+    res.json({ success: true, data: { message: 'Kiosk device revoked successfully' } });
   }));
 
   return router;

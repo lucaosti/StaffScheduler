@@ -47,8 +47,26 @@ jest.mock('../middleware/auth', () => ({
 }));
 
 jest.mock('../services/AttendanceService');
+jest.mock('../services/KioskService');
+
+let currentKiosk: { id: number; name: string; departmentId: number } | null = {
+  id: 9,
+  name: 'Break room tablet',
+  departmentId: 3,
+};
+
+jest.mock('../middleware/kioskAuth', () => ({
+  authenticateKiosk: (req: any, res: any, next: any) => {
+    if (!currentKiosk) {
+      return res.status(401).json({ success: false, error: { code: 'INVALID_KIOSK_TOKEN', message: 'Invalid or revoked kiosk token' } });
+    }
+    req.kiosk = currentKiosk;
+    next();
+  },
+}));
 
 import { AttendanceService } from '../services/AttendanceService';
+import { KioskService } from '../services/KioskService';
 import { createAttendanceRouter } from '../routes/attendance';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
@@ -59,6 +77,54 @@ const app = () => mountRouter('/api/attendance', createAttendanceRouter(fakePool
 beforeEach(() => {
   jest.clearAllMocks();
   currentUser = { id: 1, role: 'manager', email: 'manager@example.com' };
+  currentKiosk = { id: 9, name: 'Break room tablet', departmentId: 3 };
+});
+
+describe('POST /api/attendance/kiosk/punch', () => {
+  it('clocks the resolved employee in and returns their name', async () => {
+    (KioskService.prototype.resolveEmployee as jest.Mock).mockResolvedValue({ id: 42, name: 'Ada Lovelace' });
+    (AttendanceService.prototype.punch as jest.Mock).mockResolvedValue({
+      action: 'clocked_in',
+      record: { id: 100, userId: 42 },
+    });
+
+    const res = await request(app()).post('/api/attendance/kiosk/punch').send({ employeeId: 'E-042' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({
+      action: 'clocked_in',
+      employeeName: 'Ada Lovelace',
+      record: { id: 100, userId: 42 },
+    });
+    expect(KioskService.prototype.resolveEmployee).toHaveBeenCalledWith('E-042', 3);
+    expect(AttendanceService.prototype.punch).toHaveBeenCalledWith(42);
+  });
+
+  it('returns 404 when the employee id does not resolve within the kiosk department', async () => {
+    (KioskService.prototype.resolveEmployee as jest.Mock).mockResolvedValue(null);
+
+    const res = await request(app()).post('/api/attendance/kiosk/punch').send({ employeeId: 'unknown' });
+
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+    expect(AttendanceService.prototype.punch).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 for an invalid or revoked kiosk token, without requiring a user session', async () => {
+    currentKiosk = null;
+
+    const res = await request(app()).post('/api/attendance/kiosk/punch').send({ employeeId: 'E-042' });
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.code).toBe('INVALID_KIOSK_TOKEN');
+  });
+
+  it('returns 400 for a missing employeeId', async () => {
+    const res = await request(app()).post('/api/attendance/kiosk/punch').send({});
+
+    expect(res.status).toBe(400);
+    expect(AttendanceService.prototype.punch).not.toHaveBeenCalled();
+  });
 });
 
 describe('POST /api/attendance/clock-in', () => {
