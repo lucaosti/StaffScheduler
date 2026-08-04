@@ -252,7 +252,7 @@ describe('ShiftService / TwoFactorService / UserService — residual arms', () =
   it('TOTP verification returns false when the code matches no time window', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([
-      [{ totp_secret: 'JBSWY3DPEHPK3PXP', totp_enabled: 1, totp_last_counter: null }],
+      [{ enabled: 1, secret_data: JSON.stringify({ secret: 'JBSWY3DPEHPK3PXP', lastCounter: null }) }],
       null,
     ]);
 
