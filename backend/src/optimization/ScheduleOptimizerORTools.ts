@@ -788,7 +788,11 @@ export class ScheduleOptimizer {
           hours,
         });
 
-        // Update tracking state
+        // Two different constraints, so two different indexes: employeeAssignments
+        // (which shifts this employee already holds) feeds the overlap check above,
+        // while dailyHoursMap (cumulative hours per employee per day) feeds the
+        // max-daily-hours check elsewhere in this loop — neither can be derived
+        // from the other without re-scanning `assignments`.
         employeeAssignments.get(emp.id)!.add(shift.id);
         const dailyKey = `${emp.id}|${shift.date}`;
         dailyHoursMap.set(dailyKey, (dailyHoursMap.get(dailyKey) ?? 0) + hours);
@@ -808,7 +812,6 @@ export class ScheduleOptimizer {
     for (const shiftId of assignedShiftIds) {
       const assignedShift = shiftsById.get(shiftId);
       if (assignedShift && assignedShift.date === shift.date) {
-        // Check time overlap
         if (
           this._timesOverlap(
             shift.start_time,

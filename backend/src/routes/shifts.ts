@@ -70,13 +70,11 @@ const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
 
 // Shift Template Routes
 
-// Get all shift templates
 router.get('/templates', authenticate, requirePermission('schedule.read'), asyncHandler(async (_req: Request, res: Response) => {
   const templates = await shiftService.getAllShiftTemplates();
   res.json({ success: true, data: templates });
 }));
 
-// Get shift template by ID
 router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -91,7 +89,6 @@ router.get('/templates/:id', authenticate, requirePermission('schedule.read'), v
   res.json({ success: true, data: template });
 }));
 
-// Create new shift template
 router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), asyncHandler(async (_req: Request, res: Response) => {
   const template = await shiftService.createShiftTemplate(res.locals.body);
 
@@ -102,7 +99,6 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), valid
   });
 }));
 
-// Update shift template
 router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -121,7 +117,6 @@ router.put('/templates/:id', authenticate, requirePermission('shift.manage'), va
   });
 }));
 
-// Delete shift template
 router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -141,7 +136,6 @@ router.delete('/templates/:id', authenticate, requirePermission('shift.manage'),
 
 // Shift Routes
 
-// Get all shifts
 router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(shiftListQuery), asyncHandler(async (req: Request, res: Response) => {
   const filters = listFilters(req, res.locals.query);
   const pagination = parsePagination(req);
@@ -169,7 +163,6 @@ router.get('/export', authenticate, requirePermission('schedule.read'), validate
   });
 }));
 
-// Get shift by ID
 router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -196,7 +189,6 @@ router.get('/:id', authenticate, requirePermission('schedule.read'), validatePar
   res.json({ success: true, data: shift });
 }));
 
-// Create new shift
 router.post('/', authenticate, requirePermission('shift.manage'), validateBody(createShiftBody), asyncHandler(async (_req: Request, res: Response) => {
   const shift = await shiftService.createShift(res.locals.body);
 
@@ -207,7 +199,6 @@ router.post('/', authenticate, requirePermission('shift.manage'), validateBody(c
   });
 }));
 
-// Update shift
 router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftBody), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -219,7 +210,6 @@ router.put('/:id', authenticate, requirePermission('shift.manage'), validatePara
   });
 }));
 
-// Delete shift
 router.delete('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -230,7 +220,6 @@ router.delete('/:id', authenticate, requirePermission('shift.manage'), validateP
   });
 }));
 
-// Get shifts by schedule
 router.get('/schedule/:scheduleId', authenticate, validateParams(scheduleIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { scheduleId } = res.locals.params;
 
@@ -238,7 +227,6 @@ router.get('/schedule/:scheduleId', authenticate, validateParams(scheduleIdParam
   res.json({ success: true, data: shifts });
 }));
 
-// Get shifts by department
 router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 

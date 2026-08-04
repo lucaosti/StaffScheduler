@@ -104,7 +104,6 @@ const listFilters = (req: Request, query: z.infer<typeof employeeListQuery>) => 
   return Object.keys(filters).length > 0 ? filters : undefined;
 };
 
-// Get all employees
 router.get('/', authenticate, requirePermission('employee.read'), validateQuery(employeeListQuery), asyncHandler(async (req: Request, res: Response) => {
   const activeFilters = listFilters(req, res.locals.query);
   const pagination = parsePagination(req);
@@ -134,7 +133,6 @@ router.get('/export', authenticate, requirePermission('employee.read'), validate
   });
 }));
 
-// Get employee by ID
 router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -149,7 +147,6 @@ router.get('/:id', authenticate, requirePermission('employee.read'), validatePar
   res.json({ success: true, data: employee });
 }));
 
-// Create new employee
 router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), asyncHandler(async (req: Request, res: Response) => {
   await enforceFieldPolicy(req, res.locals.body, false);
   const employee = await employeeService.createEmployee(res.locals.body);
@@ -161,7 +158,6 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
   });
 }));
 
-// Update employee
 router.put('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(updateUserBody), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -177,7 +173,6 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), validateP
   });
 }));
 
-// Delete employee (soft delete)
 router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), asyncHandler(async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -188,7 +183,6 @@ router.delete('/:id', authenticate, requirePermission('employee.manage'), valida
   });
 }));
 
-// Get employees by department
 router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
@@ -196,7 +190,6 @@ router.get('/department/:departmentId', authenticate, requirePermission('employe
   res.json({ success: true, data: employees });
 }));
 
-// Get employee skills
 router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
@@ -204,7 +197,6 @@ router.get('/:id/skills', authenticate, requirePermission('employee.read'), vali
   res.json({ success: true, data: skills });
 }));
 
-// Add skill to employee
 router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), asyncHandler(async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const { skillId, proficiencyLevel } = res.locals.body;
@@ -217,7 +209,6 @@ router.post('/:id/skills', authenticate, requirePermission('employee.manage'), v
   });
 }));
 
-// Remove skill from employee
 router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), asyncHandler(async (_req: Request, res: Response) => {
   const { id, skillId } = res.locals.params;
 
