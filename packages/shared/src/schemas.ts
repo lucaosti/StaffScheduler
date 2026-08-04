@@ -899,8 +899,33 @@ export const updatePolicyBody = z.object({
   isActive: z.boolean().optional(),
 });
 
+/**
+ * Every 2FA method type the registry can dispatch to (#586/#591) — kept in
+ * lockstep with `TwoFactorMethodType` in `backend/src/services/TwoFactorMethodProvider.ts`,
+ * which is the actual source of truth (a Zod-only definition here would be
+ * one more place the set of methods could drift from what's registered).
+ */
+export const twoFactorMethodType = z.enum(['totp', 'webauthn', 'email', 'sms']);
+
+export const twoFactorSetupBody = z.object({
+  methodType: twoFactorMethodType.optional(),
+});
+
 export const twoFactorCodeBody = z.object({
   code: z.string().min(1, 'code is required'),
+  methodType: twoFactorMethodType.optional(),
+});
+
+/** Requests a fresh challenge for an ALREADY-ENROLLED method, e.g. sending a new email code or issuing a WebAuthn assertion challenge. Authenticated — see twoFactorLoginChallengeBody for the pre-session equivalent used during login. */
+export const twoFactorChallengeBody = z.object({
+  methodType: twoFactorMethodType,
+});
+
+/** Same as twoFactorChallengeBody, but for a caller who hasn't finished logging in yet — carries credentials instead of relying on a session. */
+export const twoFactorLoginChallengeBody = z.object({
+  email: z.string().min(1, 'email is required'),
+  password: z.string().min(1, 'password is required'),
+  methodType: twoFactorMethodType,
 });
 
 /**
@@ -986,8 +1011,12 @@ export const updateSettingValueBody = z.object({
 export const loginBody = z.object({
   email: z.string().min(1, 'email is required'),
   password: z.string().min(1, 'password is required'),
-  // TOTP or recovery code; required only when the account has 2FA enabled.
-  totpCode: z.string().min(1).optional(),
+  // Second-factor code/assertion (or a recovery code); required only when
+  // the account has 2FA enabled. methodType selects which enrolled method
+  // `code` is being verified against — defaults to 'totp' when omitted, so
+  // a TOTP-only account never needs to send it.
+  code: z.string().min(1).optional(),
+  methodType: twoFactorMethodType.optional(),
 });
 
 export const optionalNotesBody = z.object({
