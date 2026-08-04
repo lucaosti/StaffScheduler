@@ -7560,6 +7560,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/shift-swap/{id}/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The target's response to a pending swap (#522)
+         * @description Only the target (whose own assignment would move) may respond, gated on identity rather than a permission code — accepting a swap of your own shift isn't a manager privilege. Accepting routes the request to the manager step; declining ends it immediately with no manager involved.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        accepted: boolean;
+                        notes?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Response recorded. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/shift-swap/{id}/approve": {
         parameters: {
             query?: never;
@@ -11898,7 +11948,8 @@ export interface components {
             targetUserId: number;
             targetAssignmentId: number;
             /** @enum {string} */
-            status: "pending" | "approved" | "rejected" | "cancelled";
+            status: "pending_target" | "pending" | "approved" | "declined" | "cancelled";
+            declinedBy: ("target" | "manager") | null;
             notes: string | null;
             reviewerId: number | null;
             reviewedAt: string | null;

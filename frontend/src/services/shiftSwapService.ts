@@ -21,6 +21,9 @@ type CreateSwapBody = NonNullable<
 type DecisionBody = NonNullable<
   paths['/shift-swap/{id}/approve']['post']['requestBody']
 >['content']['application/json'];
+type RespondBody = NonNullable<
+  paths['/shift-swap/{id}/respond']['post']['requestBody']
+>['content']['application/json'];
 
 export interface SwapCandidate {
   assignmentId: number;
@@ -48,6 +51,18 @@ export const createSwapRequest = (
   body: CreateSwapBody
 ): Promise<ApiResponse<ShiftSwapRequest>> =>
   apiClient.post<ShiftSwapRequest, '/shift-swap'>('/shift-swap', body);
+
+/** The target's own decision on a pending swap (#522) — accept routes it to the manager, decline ends it. */
+export const respondToSwap = (
+  id: number,
+  accepted: boolean,
+  notes?: string
+): Promise<ApiResponse<ShiftSwapRequest>> =>
+  apiClient.post<ShiftSwapRequest, '/shift-swap/{id}/respond'>(
+    '/shift-swap/{id}/respond',
+    { accepted, notes } satisfies RespondBody,
+    { params: { id } }
+  );
 
 export const approveSwap = (id: number, notes?: string): Promise<ApiResponse<ShiftSwapRequest>> =>
   apiClient.post<ShiftSwapRequest, '/shift-swap/{id}/approve'>(

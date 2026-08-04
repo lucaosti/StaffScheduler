@@ -886,6 +886,24 @@ Every keep/delegate/open-to-structure action appends one row to `decision_reassi
 
 ---
 
+## 9d. Shift swaps
+
+```
+GET    /api/shift-swap                    list requests, scoped to the caller unless shiftswap.approve (authenticated)
+POST   /api/shift-swap                    propose a swap (authenticated)
+GET    /api/shift-swap/candidates         eligible target assignments for one of the caller's own assignments (authenticated)
+POST   /api/shift-swap/:id/respond        the target accepts or declines (identity-gated: target only)
+POST   /api/shift-swap/:id/approve        manager approves (shiftswap.approve)
+POST   /api/shift-swap/:id/decline        manager declines (shiftswap.approve)
+POST   /api/shift-swap/:id/cancel         requester withdraws (own request only)
+```
+
+**Two gates, not one**: `pending_target → pending → approved | declined | cancelled`, with `declined` reachable from either gate. `pending_target` is the state before the target has responded — only they can accept or decline it, gated on identity (`respondAsTarget`) rather than a permission code, since agreeing to swap your own shift isn't a manager privilege. A target decline ends the request immediately, recording `declinedBy: 'target'`; there is nothing left for a manager to decide. Accepting moves the request to `pending`, which now means "target accepted, awaiting manager" rather than the request's original "just submitted" meaning — only then is the first `pending_approvals` row created (via `ApprovalEngineService`, change type `ShiftSwap.Request`) and `approve`/`decline` become available, recording `declinedBy: 'manager'` on a manager refusal. `cancel` is available to the requester at either gate.
+
+`ShiftSwapService.create()` still runs an approver dry run up front (as before #522) so a request that can never be routed fails immediately rather than stranding the target with something to accept that can never be approved; the real approval-step resolution happens again in `respondAsTarget`'s accept path, since the requester's org-unit membership (or the workflow itself) may have changed between request and response. If that later resolution fails, the swap reverts to `pending_target` rather than being left stuck in `pending` with no pending-approval row and nobody able to act on it — the target can simply retry their acceptance once the underlying issue (e.g. a missing org-unit manager) is fixed.
+
+---
+
 ## 10. Audit trail
 
 Every sensitive mutation writes an `audit_logs` row via `AuditLogService.write(input)`.
