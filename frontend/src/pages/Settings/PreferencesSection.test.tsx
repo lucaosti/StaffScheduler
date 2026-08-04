@@ -4,9 +4,19 @@
  * @author Luca Ostinelli
  */
 
-import { render, screen } from '@testing-library/react';
+import { render, screen } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 import PreferencesSection from './PreferencesSection';
+
+// PreferencesSection now renders WebPushToggle (#310), which calls this
+// service via a query hook — mocked here since this suite is about the
+// preferences form, not push subscription mechanics (see WebPushToggle.test.tsx).
+jest.mock('../../services/notificationService', () => ({
+  __esModule: true,
+  getPushPublicKey: jest.fn().mockResolvedValue({ success: true, data: { enabled: false, publicKey: null } }),
+  subscribePush: jest.fn(),
+  unsubscribePush: jest.fn(),
+}));
 
 const defaultSettings = {
   theme: 'light' as const,

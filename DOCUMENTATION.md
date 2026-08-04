@@ -704,6 +704,29 @@ Implication: an administrator who creates a `max_hours_week` (or `staffing_min` 
 
 ---
 
+## 7c. Notifications
+
+In-app notifications (`notifications` table) are the base layer — `NotificationService.notify()` writes one on any event a service decides is worth surfacing. Two delivery channels are transactional-outbox extensions on top of that same write, both optional and both gated on their own configuration so a deployment with neither accumulates no dead rows:
+
+- **Email**: `email_outbox` — see `MailerService`/`OutboxWorker`, gated by `isEmailConfigured()`.
+- **Web Push** (#310): `push_subscriptions` (per-device registration) + `push_outbox` (delivery queue) — `PushService`/`PushWorker`, gated by `isPushConfigured()` (`VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` both set; generate a pair with `npx web-push generate-vapid-keys`).
+
+`NotificationService.notifyWithin()` is the single seam: inside the SAME transaction as the notification row, it inserts one `email_outbox` row (if email is configured and the recipient has an address) and one `push_outbox` row **per active subscription** the recipient has registered (a person with push on two devices gets it on both). Either channel's write failing rolls back the whole notification — a notification that exists is a notification whose delivery intents are durably recorded, never a phantom promise.
+
+```
+GET    /api/notifications/push/public-key   VAPID public key + `enabled` flag (always 200, never 404 — an
+                                              unconfigured deployment answers `enabled: false` so the SPA can
+                                              hide the toggle rather than surface a broken feature)
+POST   /api/notifications/push/subscribe    register/reactivate a device's push subscription
+DELETE /api/notifications/push/subscribe    deactivate a device's push subscription
+```
+
+**Delivery**: `PushWorker` polls `push_outbox` the same way `OutboxWorker` polls `email_outbox` (interval poll, `FOR UPDATE SKIP LOCKED` batch claim so multiple backend replicas coexist safely, retries up to 5 attempts). The one real difference: a send failing with HTTP 404/410 means the push service has permanently discarded the subscription (uninstalled, permission revoked, endpoint rotated) — that subscription is deactivated immediately rather than retried, since retrying a permanently-gone endpoint would just burn attempts until the generic cap kicked in anyway.
+
+**Frontend**: `usePushNotifications()` (`frontend/src/hooks/usePushNotifications.ts`) resolves subscription state by asking the browser's `PushManager.getSubscription()` first — the server only knows which endpoints it has been told about, and a browser can silently drop a subscription without ever telling it, so the browser is the source of truth for "is this device currently subscribed," not the backend. The toggle lives in Settings → Personal (`WebPushToggle.tsx`), deliberately separate from the pre-existing "Push Notifications" preference checkbox: that checkbox is a stored preference ("do I want push at all"), this is the per-device subscription mechanic ("has this specific browser completed the one-time subscribe step") — the two can legitimately disagree. `public/service-worker.js` handles the `push` event (shows the notification the payload describes) and `notificationclick` (focuses an already-open tab rather than piling up duplicates, falling back to opening one).
+
+---
+
 ## 8. Delegation framework
 
 User A can grant User B a time-bounded subset of their own permissions.

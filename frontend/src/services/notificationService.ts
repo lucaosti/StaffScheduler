@@ -59,3 +59,24 @@ export const markAllNotificationsRead = (): Promise<ApiResponse<{ updated: numbe
     '/notifications/read-all',
     undefined
   );
+
+// ── Web Push (#310) ──────────────────────────────────────────────────────────
+
+export interface PushPublicKey {
+  enabled: boolean;
+  publicKey: string | null;
+}
+
+export const getPushPublicKey = (): Promise<ApiResponse<PushPublicKey>> =>
+  apiClient.get<PushPublicKey, '/notifications/push/public-key'>('/notifications/push/public-key');
+
+export type PushSubscribeData =
+  paths['/notifications/push/subscribe']['post']['requestBody']['content']['application/json'];
+
+export const subscribePush = (data: PushSubscribeData): Promise<ApiResponse<unknown>> =>
+  apiClient.post<unknown, '/notifications/push/subscribe'>('/notifications/push/subscribe', data);
+
+export const unsubscribePush = (endpoint: string): Promise<ApiResponse<unknown>> =>
+  apiClient.delete<unknown, '/notifications/push/subscribe'>('/notifications/push/subscribe', {
+    body: { endpoint },
+  });

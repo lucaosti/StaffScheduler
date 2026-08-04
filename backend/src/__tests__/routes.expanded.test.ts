@@ -60,6 +60,7 @@ jest.mock('../services/OnCallService');
 jest.mock('../services/UserDirectoryService');
 jest.mock('../services/BulkImportService');
 jest.mock('../services/NotificationService');
+jest.mock('../services/PushService');
 jest.mock('../services/RbacService');
 
 import { AssignmentService } from '../services/AssignmentService';
@@ -79,6 +80,7 @@ import { OnCallService } from '../services/OnCallService';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { BulkImportService } from '../services/BulkImportService';
 import { NotificationService } from '../services/NotificationService';
+import { PushService, isPushConfigured } from '../services/PushService';
 
 import { createAssignmentsRouter } from '../routes/assignments';
 import { createSchedulesRouter } from '../routes/schedules';
@@ -1826,6 +1828,50 @@ describe('notifications router (extended)', () => {
     (NotificationService.prototype.markRead as jest.Mock) = jest.fn().mockResolvedValue(true);
     const res = await request(app()).patch('/api/notifications/1/read');
     expect(res.status).toBe(200);
+  });
+
+  it('GET /push/public-key reports disabled with a null key when Web Push is not configured', async () => {
+    (isPushConfigured as jest.Mock).mockReturnValue(false);
+    const res = await request(app()).get('/api/notifications/push/public-key');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ enabled: false, publicKey: null });
+  });
+
+  it('GET /push/public-key reports enabled with the configured key', async () => {
+    (isPushConfigured as jest.Mock).mockReturnValue(true);
+    const res = await request(app()).get('/api/notifications/push/public-key');
+    expect(res.status).toBe(200);
+    expect(res.body.data.enabled).toBe(true);
+  });
+
+  it('POST /push/subscribe 201 registers the device', async () => {
+    (PushService.prototype.subscribe as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 1,
+      userId: 1,
+      endpoint: 'https://push.example/x',
+      isActive: true,
+      createdAt: 'x',
+      lastUsedAt: null,
+    });
+    const res = await request(app())
+      .post('/api/notifications/push/subscribe')
+      .send({ endpoint: 'https://push.example/x', keys: { p256dh: 'p', auth: 'a' } });
+    expect(res.status).toBe(201);
+    expect(res.body.data.endpoint).toBe('https://push.example/x');
+  });
+
+  it('POST /push/subscribe 400 on a malformed body', async () => {
+    const res = await request(app()).post('/api/notifications/push/subscribe').send({ endpoint: 'not-a-url' });
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE /push/subscribe 200 deactivates the device', async () => {
+    (PushService.prototype.unsubscribe as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+    const res = await request(app())
+      .delete('/api/notifications/push/subscribe')
+      .send({ endpoint: 'https://push.example/x' });
+    expect(res.status).toBe(200);
+    expect(PushService.prototype.unsubscribe).toHaveBeenCalledWith(1, 'https://push.example/x');
   });
 });
 
