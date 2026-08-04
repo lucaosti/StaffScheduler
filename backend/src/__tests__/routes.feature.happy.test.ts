@@ -287,6 +287,15 @@ describe('two-factor router', () => {
     expect(res.body.data.secret).toBe('X');
   });
 
+  it('POST /setup for a non-default method passes methodType through', async () => {
+    (TwoFactorService.prototype.beginSetup as jest.Mock) = jest.fn().mockResolvedValue({});
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/setup')
+      .send({ methodType: 'webauthn' });
+    expect(res.status).toBe(200);
+    expect(TwoFactorService.prototype.beginSetup).toHaveBeenCalledWith(1, 'admin@example', 'webauthn');
+  });
+
   it('POST /enable returns recovery codes', async () => {
     (TwoFactorService.prototype.confirmEnable as jest.Mock) = jest
       .fn()
@@ -295,6 +304,7 @@ describe('two-factor router', () => {
       .post('/api/auth/2fa/enable')
       .send({ code: '000000' });
     expect(res.status).toBe(200);
+    expect(TwoFactorService.prototype.confirmEnable).toHaveBeenCalledWith(1, '000000', 'totp');
   });
 
   it('POST /disable returns ok with a valid code', async () => {
@@ -306,6 +316,17 @@ describe('two-factor router', () => {
     expect(res.status).toBe(200);
   });
 
+  it('POST /disable for a non-default method disables that method specifically', async () => {
+    (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
+    (TwoFactorService.prototype.disable as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/disable')
+      .send({ code: '123456', methodType: 'email' });
+    expect(res.status).toBe(200);
+    expect(TwoFactorService.prototype.verifyCode).toHaveBeenCalledWith(1, '123456', 'email');
+    expect(TwoFactorService.prototype.disable).toHaveBeenCalledWith(1, 'email');
+  });
+
   it('POST /verify reports validity', async () => {
     (TwoFactorService.prototype.verifyCode as jest.Mock) = jest.fn().mockResolvedValue(true);
     const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
@@ -313,6 +334,44 @@ describe('two-factor router', () => {
       .send({ code: '123456' });
     expect(res.status).toBe(200);
     expect(res.body.data.valid).toBe(true);
+  });
+
+  it('GET /methods lists the caller\'s enabled methods', async () => {
+    (TwoFactorService.prototype.listEnabledMethods as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue(['totp', 'email']);
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool))).get(
+      '/api/auth/2fa/methods'
+    );
+    expect(res.status).toBe(200);
+    expect(res.body.data.methods).toEqual(['totp', 'email']);
+  });
+
+  it('POST /challenge returns the provider\'s challenge payload', async () => {
+    (TwoFactorService.prototype.requestChallenge as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ challenge: 'abc' });
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/challenge')
+      .send({ methodType: 'webauthn' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ challenge: 'abc' });
+  });
+
+  it('POST /challenge returns null data for a method that delivers out of band', async () => {
+    (TwoFactorService.prototype.requestChallenge as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/challenge')
+      .send({ methodType: 'email' });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toBeNull();
+  });
+
+  it('POST /challenge 400 when methodType is missing', async () => {
+    const res = await request(mountApp('/api/auth/2fa', createTwoFactorRouter(fakePool)))
+      .post('/api/auth/2fa/challenge')
+      .send({});
+    expect(res.status).toBe(400);
   });
 });
 

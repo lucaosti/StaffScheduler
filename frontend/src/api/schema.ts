@@ -1000,6 +1000,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/2fa/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a fresh 2FA challenge
+         * @description For a method that must generate/deliver a code before it can be verified (email: sends a fresh code; WebAuthn: returns fresh assertion options for `navigator.credentials.get()`). TOTP has no challenge step and answers 400 `TWO_FACTOR_CHALLENGE_FAILED` if asked for one.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        methodType: "totp" | "webauthn" | "email" | "sms";
+                    };
+                };
+            };
+            responses: {
+                /** @description Challenge issued. `data` is the provider's challenge payload, or `null` for a method that delivers out of band. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The method is not enabled, or does not use a requested challenge. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/2fa/disable": {
         parameters: {
             query?: never;
@@ -1010,8 +1062,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Disable two-factor authentication
-         * @description Requires a valid current TOTP code or an unused recovery code; answers 401 `TOTP_INVALID` otherwise.
+         * Disable one enrolled 2FA method
+         * @description `methodType` selects which enrolled method to remove (defaults to `totp`). Requires a valid current code for THAT method, or an unused recovery code; answers 401 `TWO_FACTOR_INVALID` otherwise. Recovery codes are cleared once no method remains enabled.
          */
         post: {
             parameters: {
@@ -1024,6 +1076,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         code: string;
+                        /** @enum {string} */
+                        methodType?: "totp" | "webauthn" | "email" | "sms";
                     };
                 };
             };
@@ -1055,8 +1109,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Confirm and enable 2FA
-         * @description Verifies the 6-digit TOTP code and enables 2FA for the current user. Returns one-time recovery codes — store them safely.
+         * Confirm and enable a 2FA method
+         * @description `methodType` selects which method to confirm (defaults to `totp`). Verifies the code/response from `/auth/2fa/setup` and enables that method. Recovery codes are returned only the first time ANY method is enabled for the account — a second method reuses the existing set — so store them safely when they arrive.
          */
         post: {
             parameters: {
@@ -1069,6 +1123,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         code: string;
+                        /** @enum {string} */
+                        methodType?: "totp" | "webauthn" | "email" | "sms";
                     };
                 };
             };
@@ -1096,6 +1152,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/2fa/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's enabled 2FA methods */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Enabled method types, e.g. `{ methods: ["totp", "email"] }`. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/2fa/setup": {
         parameters: {
             query?: never;
@@ -1106,8 +1197,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Begin TOTP 2FA setup
-         * @description Generates a TOTP secret and returns it plus an `otpauth://` URI. The caller must confirm the code via `/auth/2fa/enable` before 2FA is active.
+         * Begin 2FA setup for a method
+         * @description `methodType` selects which method to enroll (defaults to `totp`). Returns provider-specific setup data the client needs to complete enrollment: TOTP returns a secret plus an `otpauth://` URI; WebAuthn returns `PublicKeyCredentialCreationOptionsJSON` for `navigator.credentials.create()`; email needs no client-side data (it sends the verification code directly) and returns an empty object. The caller must confirm via `/auth/2fa/enable` before the method is active.
          */
         post: {
             parameters: {
@@ -1116,20 +1207,21 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        methodType?: "totp" | "webauthn" | "email" | "sms";
+                    };
+                };
+            };
             responses: {
-                /** @description TOTP setup payload. */
+                /** @description Provider-specific setup payload. */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content: {
-                        "application/json": {
-                            secret?: string;
-                            otpauthUrl?: string;
-                            qrCodeUrl?: string;
-                        };
-                    };
+                    content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
             };
@@ -1149,7 +1241,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Verify a TOTP code */
+        /**
+         * Verify a code against one enrolled method
+         * @description `methodType` selects which method to verify against (defaults to `totp`). Diagnostic / step-up use — does not consume a login attempt.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1161,6 +1256,8 @@ export interface paths {
                 content: {
                     "application/json": {
                         code: string;
+                        /** @enum {string} */
+                        methodType?: "totp" | "webauthn" | "email" | "sms";
                     };
                 };
             };
@@ -1193,7 +1290,7 @@ export interface paths {
         put?: never;
         /**
          * Login
-         * @description Authenticate with email and password. On success the signed JWT (valid for the period configured in `JWT_EXPIRES_IN`, default 24 h) is set as an httpOnly `token` cookie; it is never returned in the response body. Subsequent requests authenticate via that cookie, or alternatively via `Authorization: Bearer <token>`. When the account has two-factor authentication enabled, `totpCode` (a TOTP or single-use recovery code) is required: the endpoint answers 401 `TOTP_REQUIRED` when it is missing and 401 `TOTP_INVALID` when it is wrong.
+         * @description Authenticate with email and password. On success the signed JWT (valid for the period configured in `JWT_EXPIRES_IN`, default 24 h) is set as an httpOnly `token` cookie; it is never returned in the response body. Subsequent requests authenticate via that cookie, or alternatively via `Authorization: Bearer <token>`. When the account has two-factor authentication enabled on any method, `code` (that method's code/assertion, or a single-use recovery code) is required, with `methodType` selecting which enrolled method `code` is for (defaults to `totp`): the endpoint answers 401 `TWO_FACTOR_REQUIRED` when `code` is missing — the response's `data.methods` lists the account's enabled method types — and 401 `TWO_FACTOR_INVALID` when it is wrong. A method that needs a server-generated challenge before it can be verified (email, WebAuthn) requires a prior call to `POST /auth/login/challenge`.
          */
         post: {
             parameters: {
@@ -1207,7 +1304,9 @@ export interface paths {
                     "application/json": {
                         email: string;
                         password: string;
-                        totpCode?: string;
+                        code?: string;
+                        /** @enum {string} */
+                        methodType?: "totp" | "webauthn" | "email" | "sms";
                     };
                 };
             };
@@ -1229,7 +1328,7 @@ export interface paths {
                     };
                 };
                 400: components["responses"]["ValidationError"];
-                /** @description Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TOTP_REQUIRED`), or wrong 2FA code (`TOTP_INVALID`). */
+                /** @description Invalid credentials (`LOGIN_FAILED`), missing 2FA code (`TWO_FACTOR_REQUIRED`), or wrong 2FA code (`TWO_FACTOR_INVALID`). */
                 401: {
                     headers: {
                         [name: string]: unknown;
@@ -1237,6 +1336,73 @@ export interface paths {
                     content?: never;
                 };
                 /** @description Login throttled — too many failed attempts. */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/login/challenge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request a 2FA challenge before a session exists
+         * @description The pre-session equivalent of `POST /auth/2fa/challenge`, for use during login: re-verifies email+password (an unauthenticated caller must not be able to trigger an email send, or learn a WebAuthn credential exists, for an arbitrary address by guessing it), then issues a fresh challenge for `methodType`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        email: string;
+                        password: string;
+                        /** @enum {string} */
+                        methodType: "totp" | "webauthn" | "email" | "sms";
+                    };
+                };
+            };
+            responses: {
+                /** @description Challenge issued. `data` is the provider's challenge payload, or `null` for a method that delivers out of band. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The method is not enabled, or does not use a requested challenge. */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Invalid credentials (`LOGIN_FAILED`). */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Throttled — shares the login rate limiter. */
                 429: {
                     headers: {
                         [name: string]: unknown;

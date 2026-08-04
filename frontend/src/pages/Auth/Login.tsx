@@ -40,11 +40,11 @@ const Login: React.FC = () => {
   const [credentials, setCredentials] = useState({
     email: '',
     password: '',
-    totpCode: '',
+    code: '',
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
-  const [totpRequired, setTotpRequired] = useState(false);
+  const [twoFactorRequired, setTwoFactorRequired] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -65,14 +65,17 @@ const Login: React.FC = () => {
       await login({
         email: credentials.email,
         password: credentials.password,
-        ...(credentials.totpCode ? { totpCode: credentials.totpCode } : {}),
+        // methodType omitted — defaults to 'totp' server-side. Picking among
+        // multiple enrolled methods is #594 (frontend multi-method UI); today
+        // this form only exercises the TOTP/recovery-code path.
+        ...(credentials.code ? { code: credentials.code } : {}),
       });
       navigate(from, { replace: true });
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'TOTP_REQUIRED') {
+      if (err instanceof ApiError && err.code === 'TWO_FACTOR_REQUIRED') {
         // Credentials are valid but the account has 2FA enabled:
         // reveal the code field instead of surfacing an error.
-        setTotpRequired(true);
+        setTwoFactorRequired(true);
       } else {
         setError(err instanceof Error ? err.message : 'Login failed');
       }
@@ -140,17 +143,17 @@ const Login: React.FC = () => {
                     />
                   </div>
 
-                  {totpRequired && (
+                  {twoFactorRequired && (
                     <div className="mb-4">
-                      <label htmlFor="totpCode" className="form-label">
+                      <label htmlFor="code" className="form-label">
                         Two-factor code
                       </label>
                       <input
                         type="text"
-                        id="totpCode"
-                        name="totpCode"
+                        id="code"
+                        name="code"
                         className="form-control"
-                        value={credentials.totpCode}
+                        value={credentials.code}
                         onChange={handleChange}
                         autoComplete="one-time-code"
                         inputMode="numeric"

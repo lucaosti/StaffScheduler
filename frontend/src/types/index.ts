@@ -157,8 +157,10 @@ export interface ApiResponse<T = unknown> {
 export interface LoginRequest {
   email: string;
   password: string;
-  /** TOTP or recovery code; required when the account has 2FA enabled. */
-  totpCode?: string;
+  /** Second-factor code/assertion, or a recovery code; required when the account has 2FA enabled. */
+  code?: string;
+  /** Which enrolled method `code` is for. Defaults to 'totp' server-side when omitted. */
+  methodType?: 'totp' | 'webauthn' | 'email' | 'sms';
   rememberMe?: boolean;
 }
 

@@ -23,7 +23,8 @@ import { RefreshTokenService } from '../services/RefreshTokenService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
 import { createLoginLimiter } from '../middleware/rateLimit';
 import { validateBody } from '../middleware/validation';
-import { loginBody } from '../schemas';
+import { loginBody, twoFactorLoginChallengeBody } from '../schemas';
+import { TwoFactorMethodType } from '../services/TwoFactorMethodProvider';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { logger } from '../config/logger';
 
@@ -130,14 +131,22 @@ export const createAuthRouter = (pool: Pool) => {
  * User login endpoint.
  *
  * Authenticates a user with email + password credentials and returns a JWT.
- * When the account has two-factor authentication enabled, a valid TOTP code
- * (or single-use recovery code) must be supplied as `totpCode`; otherwise the
- * request is rejected with `TOTP_REQUIRED` / `TOTP_INVALID`.
+ * When the account has two-factor authentication enabled on ANY method
+ * (#591 — was TOTP-only), a valid code/assertion for one of its enrolled
+ * methods (or a single-use recovery code) must be supplied as `code`;
+ * otherwise the request is rejected with `TWO_FACTOR_REQUIRED` (whose
+ * response carries the account's enabled method types, so the client knows
+ * what to offer) or `TWO_FACTOR_INVALID`.
+ *
+ * A method that needs a server-generated challenge before it can be
+ * verified (email, WebAuthn) requires a prior call to
+ * `POST /api/auth/login/challenge` with the same credentials.
  *
  * @route POST /api/auth/login
  * @body  {string} email     User's email
  * @body  {string} password  User's password
- * @body  {string} [totpCode] TOTP or recovery code, required when 2FA is enabled
+ * @body  {string} [code]        Second-factor code/assertion (or a recovery code), required when 2FA is enabled
+ * @body  {string} [methodType]  Which enrolled method `code` is for — defaults to 'totp'
  * @returns Sets an httpOnly "token" cookie and returns `{ success, data: { user } }`.
  *          The JWT is never exposed in the response body.
  *
@@ -154,10 +163,11 @@ export const createAuthRouter = (pool: Pool) => {
  */
 router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request, res: Response) => {
   try {
-    const { email, password, totpCode } = res.locals.body as {
+    const { email, password, code, methodType } = res.locals.body as {
       email: string;
       password: string;
-      totpCode?: string;
+      code?: string;
+      methodType?: TwoFactorMethodType;
     };
 
     // Authenticate user and generate token
@@ -173,27 +183,30 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request
       });
     }
 
-    // Enforce two-factor authentication when the account has it enabled.
-    // The TOTP code is only checked after the password is verified so this
-    // endpoint never leaks whether 2FA is enabled for arbitrary emails.
-    if (await twoFactorService.isEnabled(user.id)) {
-      if (!totpCode) {
+    // Enforce two-factor authentication when the account has ANY method
+    // enabled. The check is only made after the password is verified so
+    // this endpoint never leaks whether 2FA is enabled for arbitrary emails.
+    if (await twoFactorService.hasAnyEnabled(user.id)) {
+      if (!code) {
+        const methods = await twoFactorService.listEnabledMethods(user.id);
         return res.status(401).json({
           success: false,
           error: {
-            code: 'TOTP_REQUIRED',
+            code: 'TWO_FACTOR_REQUIRED',
             message: 'Two-factor authentication code required'
-          }
+          },
+          data: { methods }
         });
       }
-      const totpValid =
-        (await twoFactorService.verifyCode(user.id, totpCode)) ||
-        (await twoFactorService.consumeRecoveryCode(user.id, totpCode));
-      if (!totpValid) {
+      const resolvedMethod = methodType ?? 'totp';
+      const codeValid =
+        (await twoFactorService.verifyCode(user.id, code, resolvedMethod)) ||
+        (await twoFactorService.consumeRecoveryCode(user.id, code));
+      if (!codeValid) {
         return res.status(401).json({
           success: false,
           error: {
-            code: 'TOTP_INVALID',
+            code: 'TWO_FACTOR_INVALID',
             message: 'Invalid two-factor authentication code'
           }
         });
@@ -235,6 +248,55 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request
       }
     });
   }
+});
+
+/**
+ * Requests a fresh 2FA challenge DURING login, before a session exists —
+ * the pre-session equivalent of the authenticated `POST /api/auth/2fa/challenge`.
+ * Needed for any method whose code must be generated first (email) or whose
+ * assertion the browser can only request against a fresh server challenge
+ * (WebAuthn); TOTP needs no challenge, since its code is computed from a
+ * secret the account already has.
+ *
+ * Re-verifies the password rather than trusting a bare userId/email, for
+ * the same reason `/login` itself waits for a valid password before
+ * revealing anything 2FA-related: an unauthenticated caller must not be
+ * able to trigger an email send, or learn a WebAuthn credential exists, for
+ * an arbitrary address by guessing it.
+ *
+ * Deliberately NOT under `/2fa` (routes/twoFactor.ts, entirely behind
+ * `authenticate`) — it lives here, alongside `/login`, so an unauthenticated
+ * request never has to pass through that router's `authenticate` gate at all.
+ *
+ * @route POST /api/auth/login/challenge
+ * @body  {string} email
+ * @body  {string} password
+ * @body  {string} methodType  Which enrolled method to challenge
+ * @returns `{ success, data }` — `data` is the provider's challenge payload
+ *          (e.g. WebAuthn's `PublicKeyCredentialRequestOptionsJSON`) or
+ *          `null` for a method that delivers out of band (email).
+ */
+router.post('/login/challenge', loginLimiter, validateBody(twoFactorLoginChallengeBody), async (_req: Request, res: Response) => {
+  const { email, password, methodType } = res.locals.body as {
+    email: string;
+    password: string;
+    methodType: TwoFactorMethodType;
+  };
+
+  const user = await userService.validatePassword(email, password);
+  if (!user) {
+    return res.status(401).json({
+      success: false,
+      error: { code: 'LOGIN_FAILED', message: 'Invalid email or password' }
+    });
+  }
+
+  // No try/catch: a resolveProvider()/requestChallenge ConflictError (method
+  // not enabled, unregistered, or doesn't use a requested challenge) reaches
+  // the central errorHandler and renders with its own proper status/code —
+  // same reasoning as routes/twoFactor.ts's /setup and /challenge.
+  const data = await twoFactorService.requestChallenge(user.id, methodType);
+  res.json({ success: true, data: data ?? null });
 });
 
 /**

@@ -86,6 +86,24 @@ describe('TwoFactorService.hasAnyEnabled', () => {
   });
 });
 
+describe('TwoFactorService.listEnabledMethods', () => {
+  it('returns an empty array when no method is enabled', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const service = new TwoFactorService(pool);
+    expect(await service.listEnabledMethods(7)).toEqual([]);
+  });
+
+  it('returns every enabled method type', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ method_type: 'totp' }, { method_type: 'email' }], null]);
+
+    const service = new TwoFactorService(pool);
+    expect(await service.listEnabledMethods(7)).toEqual(['totp', 'email']);
+  });
+});
+
 describe('TwoFactorService.verifyCode — not-found / corrupt-data paths', () => {
   it('returns false when no method row exists', async () => {
     const { pool, execute } = makePool();
