@@ -374,7 +374,7 @@ describe('every fixture-free GET runs against the real schema', () => {
 
   it.each(ENDPOINTS)('GET %s does not fail on the SQL', async (endpoint) => {
     const cookie = await authCookie();
-    const res = await request(app).get(`/api${endpoint}`).set('Cookie', cookie);
+    const res = await request(app).get(`/api/v1${endpoint}`).set('Cookie', cookie);
     // Surface the error envelope: a bare "expected < 500, received 500" says
     // nothing about which column or join is wrong, which is the whole point.
     expect({ endpoint, status: res.status, error: res.body?.error }).toMatchObject({
@@ -394,7 +394,7 @@ describe('every fixture-free GET runs against the real schema', () => {
     async (endpoint) => {
       const cookie = await authCookie();
       const res = await request(app)
-        .get(`/api${endpoint}?startDate=2020-01-01&endDate=2030-12-31`)
+        .get(`/api/v1${endpoint}?startDate=2020-01-01&endDate=2030-12-31`)
         .set('Cookie', cookie);
       if (res.status >= 500) {
         throw new Error(
@@ -569,7 +569,7 @@ describe('mutations run against the real schema', () => {
 
   it.each(cases().map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
     const cookie = await authCookie();
-    const req = request(app)[testCase.method](`/api${testCase.path}`).set('Cookie', cookie);
+    const req = request(app)[testCase.method](`/api/v1${testCase.path}`).set('Cookie', cookie);
     const res = await (testCase.body === undefined ? req : req.send(testCase.body()));
 
     if (res.status >= 500) {
@@ -872,7 +872,7 @@ describe('path-parameter mutations run against the real schema', () => {
   it.each(cases.map((c) => [c.name, c] as const))('%s does not fail on the SQL', async (_name, testCase) => {
     const cookie = await authCookie();
     const { path: reqPath, body } = await testCase.setup();
-    const req = request(app)[testCase.method](`/api${reqPath}`).set('Cookie', cookie);
+    const req = request(app)[testCase.method](`/api/v1${reqPath}`).set('Cookie', cookie);
     const res = await (body === undefined ? req : req.send(body));
 
     if (res.status >= 500) {
@@ -944,7 +944,7 @@ describe('workflow actions run against the real schema', () => {
   /** Files a request through its endpoint and returns the created id. */
   const file = async (path: string, body: Record<string, unknown>): Promise<number> => {
     const cookie = await authCookie();
-    const res = await request(app).post(`/api${path}`).set('Cookie', cookie).send(body);
+    const res = await request(app).post(`/api/v1${path}`).set('Cookie', cookie).send(body);
     if (res.status >= 400) {
       throw new Error(`filing ${path} failed with ${res.status}: ${JSON.stringify(res.body?.error ?? res.body)}`);
     }
@@ -983,7 +983,7 @@ describe('workflow actions run against the real schema', () => {
 
   const post = (path: string, body?: Record<string, unknown>) => async () => {
     const cookie = await authCookie();
-    const req = request(app).post(`/api${path}`).set('Cookie', cookie);
+    const req = request(app).post(`/api/v1${path}`).set('Cookie', cookie);
     return body === undefined ? req : req.send(body);
   };
 
@@ -1113,7 +1113,7 @@ describe('shift-swap and import run against the real schema', () => {
     body?: Record<string, unknown>
   ): Promise<request.Response> => {
     const cookie = await authCookie();
-    const req = request(app)[method](`/api${path}`).set('Cookie', cookie);
+    const req = request(app)[method](`/api/v1${path}`).set('Cookie', cookie);
     return body === undefined ? req : req.send(body);
   };
 
