@@ -91,6 +91,37 @@ describe('<Attendance />', () => {
     await waitFor(() => expect(clockOut).toHaveBeenCalledWith(42));
   });
 
+  it('sends the device location on clock-in when geolocation succeeds', async () => {
+    const getCurrentPosition = jest.fn((success: PositionCallback) =>
+      success({ coords: { latitude: 45.07, longitude: 7.68 } } as GeolocationPosition)
+    );
+    Object.defineProperty(global.navigator, 'geolocation', {
+      value: { getCurrentPosition },
+      configurable: true,
+    });
+    getAttendanceRecords.mockImplementation(() => okResponse([]));
+    render(<Attendance />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /clock in/i }));
+
+    await waitFor(() => expect(clockIn).toHaveBeenCalledWith(undefined, { latitude: 45.07, longitude: 7.68 }));
+
+    delete (global.navigator as { geolocation?: unknown }).geolocation;
+  });
+
+  it('clocks in with no location when geolocation is denied or unavailable', async () => {
+    Object.defineProperty(global.navigator, 'geolocation', {
+      value: undefined,
+      configurable: true,
+    });
+    getAttendanceRecords.mockImplementation(() => okResponse([]));
+    render(<Attendance />);
+
+    await userEvent.click(await screen.findByRole('button', { name: /clock in/i }));
+
+    await waitFor(() => expect(clockIn).toHaveBeenCalledWith(undefined, undefined));
+  });
+
   it('shows a failed clock-in as an inline error, not a silent no-op', async () => {
     getAttendanceRecords.mockImplementation(() => okResponse([]));
     clockIn.mockRejectedValue(new Error('Already clocked in elsewhere'));

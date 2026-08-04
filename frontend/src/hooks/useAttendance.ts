@@ -74,7 +74,10 @@ export function useAttendanceMutations() {
   const queryClient = useQueryClient();
   const invalidate = () => queryClient.invalidateQueries({ queryKey: attendanceKeys.all });
 
-  const clockInMutation = useMutation({ mutationFn: () => clockIn(), onSuccess: invalidate });
+  const clockInMutation = useMutation({
+    mutationFn: (location?: { latitude: number; longitude: number }) => clockIn(undefined, location),
+    onSuccess: invalidate,
+  });
   const clockOutMutation = useMutation({
     mutationFn: (id: number | string) => clockOut(id),
     onSuccess: invalidate,

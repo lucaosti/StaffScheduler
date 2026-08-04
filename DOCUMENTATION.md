@@ -645,6 +645,17 @@ GET  /api/attendance/cost-estimate       planned vs. actual hours/cost for a dat
 
 Required permissions: `attendance.approve` (approve/reject), `attendance.read` (view others' records and cost estimates). Clock-in/out require no special permission beyond authentication — every user can punch for themselves.
 
+**Geofencing (#308)**: `clock-in` optionally carries `latitude`/`longitude`. Enforcement is per-caller and opt-in per department — `GeofenceService.isCallerWithinAllowedGeofence` resolves the departments the caller belongs to; if none of them has an active `department_geofences` row, geofencing has no effect and the coordinates (if any) are stored but not checked. Once at least one of the caller's departments has an active fence, the punch is rejected (a `ValidationError`, and an `attendance.clock_in_rejected_geofence` audit entry) unless the point falls inside at least one of them — a caller in several departments is satisfied by any one fence, so a multi-site employee isn't blocked by a department they aren't physically at. Fences are polygons (`{lat, lng}[]`, at least 3 points), checked with a plain ray-casting point-in-polygon test (`backend/src/utils/geo.ts`) rather than a spatial database feature or a mapping library — deliberately, per this project's usual preference for owned code over a new dependency where the algorithm is small.
+
+```
+GET    /api/departments/:id/geofences               list a department's fences
+POST   /api/departments/:id/geofences                create a fence
+PUT    /api/departments/:id/geofences/:geofenceId    update a fence
+DELETE /api/departments/:id/geofences/:geofenceId    delete a fence
+```
+
+Same access rule as every other department sub-resource: `settings.manage` reaches any department, `department.manage` only the caller's own. Configured from Settings → Geofences (admin only); the editor is a plain coordinate-list form, not a map — see that component's header for why.
+
 ---
 
 ## 7b. Business policies

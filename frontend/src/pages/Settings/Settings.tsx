@@ -16,6 +16,7 @@ import ModulesSection from '../Settings/ModulesSection';
 import CalendarSection from '../Settings/CalendarSection';
 import FieldPolicySection from '../Settings/FieldPolicySection';
 import TwoFactorSection from '../Settings/TwoFactorSection';
+import GeofenceSection from '../Settings/GeofenceSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
@@ -46,7 +47,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -203,6 +204,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {isAdmin && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'geofences' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('geofences')}
+                >
+                  <i className="bi bi-geo-alt me-2"></i>Geofences
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -238,6 +249,8 @@ const Settings: React.FC = () => {
       {activeTab === 'fields' && isAdmin && (
         <FieldPolicySection organizationName={user?.organizationName ?? null} />
       )}
+
+      {activeTab === 'geofences' && isAdmin && <GeofenceSection />}
     </div>
   );
 };

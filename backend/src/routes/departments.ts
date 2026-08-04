@@ -32,22 +32,27 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
+import { GeofenceService } from '../services/GeofenceService';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
   idAndUserIdParam,
+  idAndGeofenceIdParam,
   createDepartmentBody,
   updateDepartmentBody,
   addUserToDepartmentBody,
   departmentListQuery,
+  createGeofenceBody,
+  updateGeofenceBody,
 } from '../schemas';
-import { UpdateDepartmentRequest } from '../types';
+import { UpdateDepartmentRequest, User } from '../types';
 
 export const createDepartmentsRouter = (pool: Pool) => {
   const router = Router();
   const departmentService = new DepartmentService(pool);
+  const geofenceService = new GeofenceService(pool);
   const userService = new UserService(pool);
 
   // The isActive/orgUnitId filters were documented but never read; they now
@@ -268,6 +273,54 @@ export const createDepartmentsRouter = (pool: Pool) => {
     const stats = await departmentService.getDepartmentStatsByDepartment(departmentId);
 
     res.json({ success: true, data: stats });
+  }));
+
+  /**
+   * Same access rule as every other department sub-resource in this file:
+   * a full administrator (`settings.manage`) sees any department's fences; a
+   * department manager (`department.manage`) sees only their own department's.
+   */
+  const canManageDepartment = async (actor: User, departmentId: number): Promise<boolean> => {
+    if (userHasPermission(actor, 'settings.manage')) return true;
+    if (!userHasPermission(actor, 'department.manage')) return false;
+    const managed = await departmentService.getDepartmentsForUser(actor.id);
+    return managed.some((d) => d.id === departmentId && d.managerId === actor.id);
+  };
+
+  router.get('/:id/geofences', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    const geofences = await geofenceService.listForDepartment(departmentId);
+    res.json({ success: true, data: geofences });
+  }));
+
+  router.post('/:id/geofences', authenticate, validateParams(idParam), validateBody(createGeofenceBody), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    const geofence = await geofenceService.create(departmentId, res.locals.body);
+    res.status(201).json({ success: true, data: geofence });
+  }));
+
+  router.put('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), validateBody(updateGeofenceBody), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    const geofence = await geofenceService.update(res.locals.params.geofenceId, res.locals.body);
+    res.json({ success: true, data: geofence });
+  }));
+
+  router.delete('/:id/geofences/:geofenceId', authenticate, validateParams(idAndGeofenceIdParam), asyncHandler(async (req, res) => {
+    const departmentId = res.locals.params.id;
+    if (!(await canManageDepartment(req.user!, departmentId))) {
+      return res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } });
+    }
+    await geofenceService.delete(res.locals.params.geofenceId);
+    res.json({ success: true, data: { message: 'Geofence deleted successfully' } });
   }));
 
   return router;
