@@ -13,7 +13,7 @@
 import './observability/otel-bootstrap';
 
 import { config } from './config';
-import { database } from './config/database';
+import { database, createReadPool } from './config/database';
 import { closeRedis } from './config/redis';
 import { logger } from './config/logger';
 import { eventBus } from './services/EventBus';
@@ -52,7 +52,14 @@ export async function startServer(): Promise<void> {
       return;
     }
 
-    const app = buildApp(pool);
+    // Read replica for analytical SELECTs (#323) — the SAME pool object when
+    // DB_REPLICA_HOST is unset, so a single-instance deployment is unaffected.
+    const readPool = createReadPool(pool);
+    if (readPool !== pool) {
+      logger.info('Read replica configured — reports/calendar/audit-log reads route to it');
+    }
+
+    const app = buildApp(pool, { readPool });
     const port = config.server.port;
 
     // Wire the SSE bus onto Redis pub/sub so events fan out across instances.
@@ -91,6 +98,12 @@ export async function startServer(): Promise<void> {
         try { stopWebhookWorker(); } catch { /* ignore */ }
         try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
+        // Only end readPool when it's a distinct pool (a replica was
+        // configured) — otherwise it IS `pool`, already ended above, and a
+        // second `.end()` on the same mysql2 pool throws.
+        if (readPool !== pool) {
+          try { await readPool.end(); } catch { /* ignore */ }
+        }
         try { await closeRedis(); } catch { /* ignore */ }
         try { await shutdownTracing(); } catch { /* ignore */ }
         logger.info('Connection pool closed, process exiting');

@@ -42,9 +42,9 @@ const writeIcsResponse = (
     .send(body);
 };
 
-export const createCalendarRouter = (pool: Pool): Router => {
+export const createCalendarRouter = (pool: Pool, readPool: Pool = pool): Router => {
   const router = Router();
-  const service = new CalendarService(pool);
+  const service = new CalendarService(pool, readPool);
   const rbac = new RbacService(pool);
 
   // A person's own feed tokens. Authentication alone: these are theirs, and no

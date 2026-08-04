@@ -23,6 +23,7 @@ jest.mock('dotenv', () => ({ config: jest.fn() }));
 const ENV_KEYS = [
   'PORT', 'NODE_ENV', 'TRUST_PROXY_HOPS',
   'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_POOL_LIMIT', 'DB_QUEUE_LIMIT',
+  'DB_REPLICA_HOST', 'DB_REPLICA_PORT', 'DB_REPLICA_NAME', 'DB_REPLICA_USER', 'DB_REPLICA_PASSWORD', 'DB_REPLICA_POOL_LIMIT',
   'JWT_SECRET', 'JWT_EXPIRES_IN', 'AUTH_PERMISSION_CACHE_TTL_MS',
   'EMAIL_HOST', 'EMAIL_PORT', 'EMAIL_SECURE', 'EMAIL_USER', 'EMAIL_PASSWORD',
   'EMAIL_FROM_NAME', 'EMAIL_FROM_ADDRESS',
@@ -70,6 +71,10 @@ describe('defaults (bare environment)', () => {
     expect(config.database).toMatchObject({
       host: 'localhost', port: 3306, database: 'staff_scheduler', user: 'scheduler_user',
       password: 'scheduler_password', connectionLimit: 30, queueLimit: 100,
+      // #323: unset by default, and everything else falls back to the
+      // primary's own values — so createReadPool(pool) returns `pool` itself.
+      replicaHost: null, replicaPort: 3306, replicaDatabase: 'staff_scheduler',
+      replicaUser: 'scheduler_user', replicaPassword: 'scheduler_password', replicaConnectionLimit: 30,
     });
     expect(config.jwt.secret).toBe('fallback-jwt_secret');
     expect(config.jwt.expiresIn).toBe('15m');
@@ -100,6 +105,8 @@ describe('explicit environment (full profile)', () => {
       PORT: '4000', NODE_ENV: 'staging', TRUST_PROXY_HOPS: '1',
       DB_HOST: 'db', DB_PORT: '3307', DB_NAME: 'ss', DB_USER: 'u', DB_PASSWORD: 'p',
       DB_POOL_LIMIT: '5', DB_QUEUE_LIMIT: '9',
+      DB_REPLICA_HOST: 'db-replica', DB_REPLICA_PORT: '3308', DB_REPLICA_NAME: 'ss_ro',
+      DB_REPLICA_USER: 'ru', DB_REPLICA_PASSWORD: 'rp', DB_REPLICA_POOL_LIMIT: '10',
       JWT_SECRET: 'real-secret', JWT_EXPIRES_IN: '15m', AUTH_PERMISSION_CACHE_TTL_MS: '5000',
       EMAIL_HOST: 'mail', EMAIL_PORT: '2525', EMAIL_SECURE: 'true', EMAIL_USER: 'mu', EMAIL_PASSWORD: 'mp',
       EMAIL_FROM_NAME: 'Ops', EMAIL_FROM_ADDRESS: 'ops@x.io',
@@ -115,7 +122,11 @@ describe('explicit environment (full profile)', () => {
     });
 
     expect(config.server).toEqual({ port: 4000, env: 'staging', trustProxyHops: 1 });
-    expect(config.database).toMatchObject({ host: 'db', port: 3307, database: 'ss', user: 'u', password: 'p', connectionLimit: 5, queueLimit: 9 });
+    expect(config.database).toMatchObject({
+      host: 'db', port: 3307, database: 'ss', user: 'u', password: 'p', connectionLimit: 5, queueLimit: 9,
+      replicaHost: 'db-replica', replicaPort: 3308, replicaDatabase: 'ss_ro',
+      replicaUser: 'ru', replicaPassword: 'rp', replicaConnectionLimit: 10,
+    });
     expect(config.jwt).toMatchObject({ secret: 'real-secret', expiresIn: '15m', expiresInMs: 15 * 60_000 });
     expect(config.auth.permissionCacheTtlMs).toBe(5000);
     expect(config.email).toMatchObject({ host: 'mail', port: 2525, secure: true, auth: { user: 'mu', pass: 'mp' }, from: { name: 'Ops', address: 'ops@x.io' } });

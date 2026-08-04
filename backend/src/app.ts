@@ -69,10 +69,18 @@ import { createRateLimiter } from './middleware/rateLimit';
 interface BuildAppOptions {
   /** When true, skip rate limiting + morgan logging (useful for tests). */
   silent?: boolean;
+  /**
+   * Pool for analytical SELECTs (reports, calendar feeds, audit log
+   * listing/export — #323). Defaults to `pool` itself, so a caller that
+   * omits it — every existing test, and any single-instance deployment —
+   * gets the exact same behavior as before this option existed.
+   */
+  readPool?: Pool;
 }
 
 export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Express {
   const app = express();
+  const readPool = options.readPool ?? pool;
 
   // Trust exactly N reverse-proxy hops for X-Forwarded-For/-Proto, so req.ip
   // reflects the real client rather than the load balancer's own address —
@@ -215,12 +223,12 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/employee-pairings`, createEmployeePairingsRouter(pool));
     app.use(`${prefix}/timeline`, createTimelineRouter(pool));
     app.use(`${prefix}/skills`, createSkillsRouter(pool));
-    app.use(`${prefix}/audit-logs`, createAuditLogsRouter(pool));
-    app.use(`${prefix}/calendar`, createCalendarRouter(pool));
+    app.use(`${prefix}/audit-logs`, createAuditLogsRouter(pool, readPool));
+    app.use(`${prefix}/calendar`, createCalendarRouter(pool, readPool));
     app.use(`${prefix}/on-call`, createOnCallRouter(pool));
     app.use(`${prefix}/directory`, createDirectoryRouter(pool));
     app.use(`${prefix}/skill-gap`, createSkillGapRouter(pool));
-    app.use(`${prefix}/reports`, createReportsRouter(pool));
+    app.use(`${prefix}/reports`, createReportsRouter(pool, readPool));
     app.use(`${prefix}/notifications`, createNotificationsRouter(pool));
     app.use(`${prefix}/webhooks`, createWebhooksRouter(pool));
     app.use(`${prefix}/import`, createBulkImportRouter(pool));

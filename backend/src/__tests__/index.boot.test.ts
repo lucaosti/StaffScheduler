@@ -205,7 +205,7 @@ describe('startServer()', () => {
       await startServer();
 
       expect(exitSpy).not.toHaveBeenCalled();
-      expect(buildApp).toHaveBeenCalledWith(mockPool);
+      expect(buildApp).toHaveBeenCalledWith(mockPool, { readPool: mockPool });
       expect(mockListen).toHaveBeenCalled();
       expect(mockInitOptimizationWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartOutboxWorker).toHaveBeenCalledWith(mockPool);
