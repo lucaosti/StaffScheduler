@@ -1,22 +1,17 @@
 /**
- * Winston Logger Configuration for Staff Scheduler Backend
- * 
- * Provides centralized logging functionality with file rotation,
- * multiple transport options, and environment-specific formatting.
- * 
- * Features:
- * - File-based logging with rotation (10MB max, configurable files)
- * - Console logging for development environments
- * - JSON structured logging for production
- * - Error stack trace capture
- * - Timestamp and service metadata
- * - Configurable log levels
- * 
- * Configuration:
- * - Production: File logging only with JSON format
- * - Development: Both file and colorized console logging
- * - Log rotation prevents disk space issues
- * 
+ * Winston logger — the lowest-level module in the dependency tree, since
+ * everything logs. Deliberately has no dependency on middleware or
+ * observability code (see the requestId-resolver hook below for why that
+ * matters and what it replaced); every other module can safely import this
+ * one without risking a cycle.
+ *
+ * File transport always runs (rotated, JSON in production for structured
+ * ingestion, colorized text alongside it in development); console transport
+ * is development-only, since a production process's stdout is not where
+ * anyone reads logs from. Both are disabled entirely under `NODE_ENV=test`
+ * — see the `isTest` block below for why silencing, not just muting a
+ * transport, is required there.
+ *
  * @author Luca Ostinelli
  */
 

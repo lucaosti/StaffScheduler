@@ -1,10 +1,24 @@
 /**
- * Department Service
- * 
- * Handles all department-related business logic including CRUD operations,
- * employee management, and department statistics.
- * 
- * @module services/DepartmentService
+ * Department CRUD, membership, and statistics.
+ *
+ * `deleteDepartment` is a soft delete (`is_active = 0`) and, unlike a plain
+ * soft delete, refuses outright when any employee is still assigned — a
+ * department with active membership going inactive would silently strand
+ * those assignments rather than surface a decision the caller has to make.
+ *
+ * `assignEmployeesToDepartment` validates the whole batch against active
+ * users in one query and skips (rather than fails on) any that are invalid,
+ * so one stale id in a bulk assignment does not block the rest of it; the
+ * skipped ids are logged for visibility. The `INSERT IGNORE` on the actual
+ * write then absorbs an employee already assigned, since re-assigning them
+ * is a no-op, not an error.
+ *
+ * `getDepartmentsForUser` (member of) and `getDepartmentsByManager` (manages)
+ * are deliberately separate queries rather than one parameterized by role:
+ * they answer different questions and return different columns, and
+ * collapsing them would make the caller branch on which fields are
+ * meaningful instead of the service doing it once.
+ *
  * @author Luca Ostinelli
  */
 
