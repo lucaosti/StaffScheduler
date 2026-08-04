@@ -48,4 +48,15 @@ export interface TwoFactorMethodProvider {
 
   /** Whether this method is enrolled AND enabled for the user. */
   isEnabled(userId: number): Promise<boolean>;
+
+  /**
+   * Generates and delivers a fresh challenge code/assertion request for an
+   * already-enabled method. Optional: TOTP has no equivalent (its code is
+   * computed from a shared secret, never delivered), but any method whose
+   * code must be PUSHED to the user first (email #588, SMS #589) implements
+   * this. Providers that don't need it simply omit it — `TwoFactorService`
+   * treats a missing implementation as "this method needs no challenge
+   * request," not an error.
+   */
+  requestChallenge?(userId: number): Promise<void>;
 }
