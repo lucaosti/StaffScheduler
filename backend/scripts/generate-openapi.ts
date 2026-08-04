@@ -239,10 +239,16 @@ const scanRoutes = (): FoundOp[] => {
       // The presence check below is what every operation needs; the schema
       // work further down is what only some of them need.
       const resolve = (local: string) => aliases.get(local) ?? local;
-      const specPath = (prefix + (routePath === '/' ? '' : routePath)).replace(
-        /:(\w+)\??/g,
-        '{$1}'
-      );
+      const specPath = (prefix + (routePath === '/' ? '' : routePath))
+        // Express 5 / path-to-regexp v8's optional-segment syntax
+        // (`{/:name}`, replacing the old bare `:name?` suffix) unwraps to a
+        // plain `/:name` first, so the `{$1}` conversion below still applies
+        // uniformly. The spec documents the with- and without-param cases as
+        // two separate curated paths (OpenAPI has no optional-segment
+        // syntax), and this produces the WITH-param one, matching what the
+        // old `:name?` conversion always produced.
+        .replace(/\{\/:(\w+)\}/g, '/:$1')
+        .replace(/:(\w+)\??/g, '{$1}');
       found.push({
         method,
         specPath,
