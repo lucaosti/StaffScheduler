@@ -3,9 +3,12 @@
  *
  * The assertions that matter are about honesty. Both sides of the exchange are
  * named before anything is sent — a screen showing only what you give up is
- * how someone agrees to a shift they did not realise they were taking. And the
- * target is told plainly that a manager decides, rather than being shown
- * buttons that would 403 or an empty cell that reads as a broken page.
+ * how someone agrees to a shift they did not realise they were taking. And
+ * the two-gate model (#522) is exercised end to end: a new request sits in
+ * `pending_target` until the target accepts or declines it (their own
+ * decision, not a manager's), and only an accepted request reaches the
+ * manager step, where the target is told plainly that a manager decides
+ * rather than being shown buttons that would 403.
  *
  * @author Luca Ostinelli
  */
@@ -38,6 +41,7 @@ jest.mock('../../services/assignmentService', () => ({
 const getSwapRequests = jest.fn();
 const getSwapCandidates = jest.fn();
 const createSwapRequest = jest.fn();
+const respondToSwap = jest.fn();
 const approveSwap = jest.fn();
 const declineSwap = jest.fn();
 const cancelSwap = jest.fn();
@@ -47,6 +51,7 @@ jest.mock('../../services/shiftSwapService', () => ({
   getSwapRequests: (...a: unknown[]) => getSwapRequests(...a),
   getSwapCandidates: (...a: unknown[]) => getSwapCandidates(...a),
   createSwapRequest: (...a: unknown[]) => createSwapRequest(...a),
+  respondToSwap: (...a: unknown[]) => respondToSwap(...a),
   approveSwap: (...a: unknown[]) => approveSwap(...a),
   declineSwap: (...a: unknown[]) => declineSwap(...a),
   cancelSwap: (...a: unknown[]) => cancelSwap(...a),
@@ -80,7 +85,10 @@ const swapRequest = (over: Record<string, unknown> = {}) => ({
   requesterAssignmentId: 1,
   targetUserId: 9,
   targetAssignmentId: 2,
-  status: 'pending',
+  // A freshly created swap sits here — awaiting the target's response — not
+  // in front of a manager (#522).
+  status: 'pending_target',
+  declinedBy: null,
   notes: null,
   reviewerId: null,
   reviewedAt: null,
@@ -98,8 +106,11 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(() => okResponse({ candidates: [candidate], truncated: false }));
   createSwapRequest.mockReset().mockImplementation(() => okResponse(swapRequest()));
+  respondToSwap.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'pending' })));
   approveSwap.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'approved' })));
-  declineSwap.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'rejected' })));
+  declineSwap
+    .mockReset()
+    .mockImplementation(() => okResponse(swapRequest({ status: 'declined', declinedBy: 'manager' })));
   cancelSwap.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'cancelled' })));
 });
 
@@ -188,14 +199,68 @@ describe('proposing', () => {
   });
 });
 
-describe('deciding', () => {
-  it('lets the requester withdraw their own pending request', async () => {
+describe('responding (the target\'s own decision, #522)', () => {
+  it('offers accept/decline only to the target, while pending_target', async () => {
+    getSwapRequests.mockImplementation(() =>
+      okResponse([swapRequest({ requesterUserId: 9, targetUserId: 5 })])
+    );
+    render(<ShiftSwaps />);
+    expect(await screen.findByRole('button', { name: 'Accept' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeInTheDocument();
+  });
+
+  it('tells the requester they are waiting on the other person, not shown accept/decline', async () => {
+    render(<ShiftSwaps />); // default: requesterUserId 5 === myId, targetUserId 9
+    expect(await screen.findByText(/waiting for the other person/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+  });
+
+  it('accepts, routing the request to the manager step', async () => {
+    getSwapRequests.mockImplementation(() =>
+      okResponse([swapRequest({ requesterUserId: 9, targetUserId: 5 })])
+    );
+    render(<ShiftSwaps />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+    await waitFor(() => expect(respondToSwap).toHaveBeenCalledWith(3, true, undefined));
+  });
+
+  it('declines, ending the request with no manager involved', async () => {
+    getSwapRequests.mockImplementation(() =>
+      okResponse([swapRequest({ requesterUserId: 9, targetUserId: 5 })])
+    );
+    respondToSwap.mockImplementation(() =>
+      okResponse(swapRequest({ status: 'declined', declinedBy: 'target' }))
+    );
+    render(<ShiftSwaps />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+    await waitFor(() => expect(respondToSwap).toHaveBeenCalledWith(3, false, undefined));
+  });
+
+  it('lets the requester withdraw while still awaiting the target', async () => {
+    render(<ShiftSwaps />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => expect(cancelSwap).toHaveBeenCalledWith(3));
+  });
+
+  it('names who declined, since a target refusal and a manager refusal mean different things', async () => {
+    getSwapRequests.mockImplementation(() =>
+      okResponse([swapRequest({ status: 'declined', declinedBy: 'target' })])
+    );
+    render(<ShiftSwaps />);
+    expect(await screen.findByText(/declined by the other person/i)).toBeInTheDocument();
+  });
+});
+
+describe('deciding (the manager step, after the target has accepted)', () => {
+  it('lets the requester withdraw an accepted, not-yet-decided request', async () => {
+    getSwapRequests.mockImplementation(() => okResponse([swapRequest({ status: 'pending' })]));
     render(<ShiftSwaps />);
     await userEvent.click(await screen.findByRole('button', { name: 'Withdraw' }));
     await waitFor(() => expect(cancelSwap).toHaveBeenCalledWith(3));
   });
 
   it('offers no decision to someone without shiftswap.approve', async () => {
+    getSwapRequests.mockImplementation(() => okResponse([swapRequest({ status: 'pending' })]));
     render(<ShiftSwaps />);
     await screen.findByRole('button', { name: 'Withdraw' });
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
@@ -203,6 +268,7 @@ describe('deciding', () => {
   });
 
   it('approves and declines with the permission', async () => {
+    getSwapRequests.mockImplementation(() => okResponse([swapRequest({ status: 'pending' })]));
     permissions = ['shiftswap.approve'];
     render(<ShiftSwaps />);
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
@@ -213,20 +279,19 @@ describe('deciding', () => {
   });
 
   /**
-   * The model gives the person whose shift is being taken no say: `approve`
-   * and `decline` are gated on `shiftswap.approve`, so a manager decides and
-   * both assignments move. Whether that is right is #522; what would be wrong
-   * is a UI that hides it.
+   * Once the target has already accepted, the remaining decision belongs to
+   * a manager: `approve`/`decline` are gated on `shiftswap.approve`. The
+   * target — who already had their own say at the pending_target step — is
+   * told plainly that a manager decides this, rather than being shown
+   * buttons that would 403 or an empty cell that reads as a broken page.
    */
   it('tells the target that a manager decides, rather than leaving a blank', async () => {
     getSwapRequests.mockImplementation(() =>
-      okResponse([swapRequest({ requesterUserId: 9, targetUserId: 5 })])
+      okResponse([swapRequest({ requesterUserId: 9, targetUserId: 5, status: 'pending' })])
     );
     render(<ShiftSwaps />);
 
     expect(await screen.findByText('A manager decides this')).toBeInTheDocument();
-    // Not buttons that would 403, and not an empty cell that reads as a page
-    // which failed to load them.
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
   });

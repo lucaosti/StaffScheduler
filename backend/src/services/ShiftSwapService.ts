@@ -2,13 +2,20 @@
  * Shift swap requests (F01).
  *
  * Two-leg swap: employee A asks to exchange their assignment with employee B's.
- * The decision is routed through the `approval_workflows`/`pending_approvals`
+ *
+ * Two gates (#522), not one: the target (B) must accept before a manager
+ * decides. A swap changes B's commitment with the same force as a re-solve,
+ * and until #522 B had less say than a re-solve gives them — a re-solve at
+ * least notifies. `pending_target` is the state before B has responded;
+ * `pending` now means "B accepted, awaiting manager." The manager step is
+ * unchanged: routed through the `approval_workflows`/`pending_approvals`
  * engine (`ShiftSwap.Request`, demo-seeded as `unit_structure` — assigned to
  * the requester's unit as a whole; the unit head can keep it, delegate it to
- * a team member, or open it to the team, see ApprovalEngineService). Once
- * that decision resolves as approved, this atomically rewrites the `user_id`
- * on both `shift_assignments` rows so neither employee ends up unassigned
- * mid-swap.
+ * a team member, or open it to the team, see ApprovalEngineService), and its
+ * `pending_approvals` row is created only once B accepts — there is nothing
+ * for a manager to decide before that. Once the manager approves, this
+ * atomically rewrites the `user_id` on both `shift_assignments` rows so
+ * neither employee ends up unassigned mid-swap.
  *
  * @author Luca Ostinelli
  */
@@ -22,7 +29,8 @@ import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
 
-type SwapStatus = 'pending' | 'approved' | 'declined' | 'cancelled';
+type SwapStatus = 'pending_target' | 'pending' | 'approved' | 'declined' | 'cancelled';
+type DeclinedBy = 'target' | 'manager';
 
 interface ShiftSwapRequest {
   id: number;
@@ -31,6 +39,7 @@ interface ShiftSwapRequest {
   targetUserId: number;
   targetAssignmentId: number;
   status: SwapStatus;
+  declinedBy: DeclinedBy | null;
   notes: string | null;
   reviewerId: number | null;
   reviewedAt: string | null;
@@ -53,6 +62,7 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
   targetUserId: row.target_user_id as number,
   targetAssignmentId: row.target_assignment_id as number,
   status: row.status as SwapStatus,
+  declinedBy: (row.declined_by as DeclinedBy | null) ?? null,
   notes: (row.notes as string) ?? null,
   reviewerId: (row.reviewer_id as number | null) ?? null,
   reviewedAt: (row.reviewed_at as string | null) ?? null,
@@ -73,21 +83,23 @@ export class ShiftSwapService {
   }
 
   /**
-   * Creates a pending swap request. Validates that the requester owns
-   * `requesterAssignmentId`, that `targetAssignmentId` belongs to a
-   * different user, and resolves the target user from the row.
+   * Creates a swap request in `pending_target`, awaiting the target's
+   * response (#522) — not yet routed to a manager. Validates that the
+   * requester owns `requesterAssignmentId`, that `targetAssignmentId`
+   * belongs to a different user, and resolves the target user from the row.
    */
   async create(input: CreateSwapInput): Promise<ShiftSwapRequest> {
     // Resolve the approval gate BEFORE inserting the request: a swap whose
     // configured workflow cannot attach an approver (e.g. the requester has
-    // no primary org unit for a unit-scoped step) would otherwise be
-    // inserted 'pending' with no pending_approvals row — permanently
-    // undecidable by anyone. Fail loudly instead.
+    // no primary org unit for a unit-scoped step) would otherwise ask the
+    // target to accept a request nobody could ever approve afterward. Fail
+    // loudly instead — the actual pending_approvals row isn't created until
+    // the target accepts (respondAsTarget), since there is nothing for a
+    // manager to decide before that; this is a dry-run check only.
     const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
-    let workflowCtx: { actorUserId: number; orgUnitId: number | undefined } | null = null;
     if (workflow && workflow.steps.length > 0) {
       const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
-      workflowCtx = { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined };
+      const workflowCtx = { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined };
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this shift swap request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
@@ -96,6 +108,7 @@ export class ShiftSwapService {
     }
 
     const conn = await this.pool.getConnection();
+    let created: ShiftSwapRequest;
     try {
       await conn.beginTransaction();
 
@@ -121,7 +134,7 @@ export class ShiftSwapService {
       const [insert] = await conn.execute<ResultSetHeader>(
         `INSERT INTO shift_swap_requests
             (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, notes, status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
+         VALUES (?, ?, ?, ?, ?, 'pending_target')`,
         [
           input.requesterUserId,
           input.requesterAssignmentId,
@@ -132,41 +145,147 @@ export class ShiftSwapService {
       );
       await conn.commit();
 
-      const created = await this.getById(insert.insertId);
-      if (!created) throw new Error('Failed to retrieve created swap request');
-      logger.info(`Shift swap created: id=${created.id} requester=${input.requesterUserId}`);
-      await this.audit.write({
-        actorId: input.requesterUserId,
-        action: 'shift_swap.create',
-        entityType: 'shift_swap_request',
-        entityId: created.id,
-        description: `Shift swap requested: assignment ${input.requesterAssignmentId} ↔ ${input.targetAssignmentId}`,
-        after: { id: created.id, status: 'pending', targetUserId: created.targetUserId },
-      });
-
-      if (workflow && workflow.steps.length > 0 && workflowCtx) {
-        const pa = await this.engine.createPendingApprovalForStep(
-          workflow.id,
-          workflow.steps[0],
-          { shiftSwapRequestId: created.id },
-          workflowCtx
-        );
-        if (!pa) {
-          // The pre-insert check passed but resolution changed underneath
-          // us (e.g. a concurrent membership removal). Never leave a
-          // stranded, undecidable request behind.
-          await this.pool.execute(`DELETE FROM shift_swap_requests WHERE id = ?`, [created.id]);
-          throw new ConflictError('No approver could be resolved for this shift swap request — approver resolution changed during creation. Please retry.');
-        }
-      }
-
-      return created;
+      const row = await this.getById(insert.insertId);
+      if (!row) throw new Error('Failed to retrieve created swap request');
+      created = row;
     } catch (err) {
       await conn.rollback();
       throw err;
     } finally {
       conn.release();
     }
+
+    logger.info(`Shift swap created: id=${created.id} requester=${input.requesterUserId} target=${created.targetUserId}`);
+    await this.audit.write({
+      actorId: input.requesterUserId,
+      action: 'shift_swap.create',
+      entityType: 'shift_swap_request',
+      entityId: created.id,
+      description: `Shift swap requested: assignment ${input.requesterAssignmentId} ↔ ${input.targetAssignmentId}`,
+      after: { id: created.id, status: 'pending_target', targetUserId: created.targetUserId },
+    });
+
+    // The whole point of #522: the target has to hear about this from the
+    // system, not discover it by finding themselves working a different day.
+    this.notifications.notifyAsync({
+      userId: created.targetUserId,
+      type: 'shiftswap.requested',
+      title: 'Shift swap requested',
+      body: `Someone wants to swap shifts with you (request #${created.id}). Review it to accept or decline.`,
+    });
+
+    return created;
+  }
+
+  /**
+   * The target's response to a pending swap (#522) — the gate that used not
+   * to exist. Accepting routes the request to the manager step (creating the
+   * `pending_approvals` row the workflow needs, exactly as `create()` used
+   * to do unconditionally); declining ends the request immediately, with no
+   * manager involved, since there is nothing left to approve.
+   */
+  async respondAsTarget(
+    id: number,
+    targetUserId: number,
+    accepted: boolean,
+    notes: string | null = null
+  ): Promise<ShiftSwapRequest> {
+    const existing = await this.getById(id);
+    if (!existing) throw new NotFoundError('Shift swap request not found');
+    if (existing.targetUserId !== targetUserId) throw new ForbiddenError('Forbidden');
+    if (existing.status !== 'pending_target') {
+      throw new ConflictError(`Cannot respond to swap in status '${existing.status}'`);
+    }
+
+    if (!accepted) {
+      const [result] = await this.pool.execute<ResultSetHeader>(
+        `UPDATE shift_swap_requests
+            SET status = 'declined', declined_by = 'target', review_notes = ?
+          WHERE id = ? AND status = 'pending_target'`,
+        [notes, id]
+      );
+      if (result.affectedRows === 0) {
+        const current = await this.getById(id);
+        throw new ConflictError(`Cannot respond to swap in status '${current?.status ?? 'unknown'}'`);
+      }
+      const declined = await this.getById(id);
+      if (!declined) throw new Error('Failed to retrieve declined swap');
+      await this.audit.write({
+        actorId: targetUserId,
+        action: 'shift_swap.decline_by_target',
+        entityType: 'shift_swap_request',
+        entityId: id,
+        description: 'Shift swap declined by target',
+        justification: notes ?? null,
+        after: { status: 'declined', declinedBy: 'target' },
+      });
+      this.notifications.notifyAsync({
+        userId: declined.requesterUserId,
+        type: 'shiftswap.declined',
+        title: 'Shift swap declined',
+        body: `Your shift swap request #${declined.id} was declined.`,
+      });
+      return declined;
+    }
+
+    // Accepted: resolve the manager step now, not at creation — the
+    // requester's org-unit membership (or the workflow itself) may have
+    // changed in the time between request and response, so this is
+    // re-checked rather than trusted from create()'s earlier dry run.
+    const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
+    const [result] = await this.pool.execute<ResultSetHeader>(
+      `UPDATE shift_swap_requests SET status = 'pending' WHERE id = ? AND status = 'pending_target'`,
+      [id]
+    );
+    if (result.affectedRows === 0) {
+      const current = await this.getById(id);
+      throw new ConflictError(`Cannot respond to swap in status '${current?.status ?? 'unknown'}'`);
+    }
+
+    if (workflow && workflow.steps.length > 0) {
+      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
+      const workflowCtx = { actorUserId: existing.requesterUserId, orgUnitId: orgUnitId ?? undefined };
+      const pa = await this.engine.createPendingApprovalForStep(
+        workflow.id,
+        workflow.steps[0],
+        { shiftSwapRequestId: id },
+        workflowCtx
+      );
+      if (!pa) {
+        // Resolution changed underneath us since create()'s dry run (e.g. a
+        // concurrent org-unit membership removal). Revert to 'pending_target'
+        // rather than leaving the swap silently stuck in 'pending' with no
+        // pending_approvals row and nobody able to act on it — the target
+        // can retry their acceptance once the underlying membership issue is
+        // fixed, the same way create()'s own dry-run failure is retryable.
+        await this.pool.execute(
+          `UPDATE shift_swap_requests SET status = 'pending_target' WHERE id = ?`,
+          [id]
+        );
+        throw new ConflictError(
+          'No approver could be resolved for this shift swap request — approver resolution changed since it was created. Ask an administrator to fix the assignment, then try accepting again.'
+        );
+      }
+    }
+
+    const accepted_ = await this.getById(id);
+    if (!accepted_) throw new Error('Failed to retrieve accepted swap');
+    await this.audit.write({
+      actorId: targetUserId,
+      action: 'shift_swap.accept_by_target',
+      entityType: 'shift_swap_request',
+      entityId: id,
+      description: 'Shift swap accepted by target, routed to manager',
+      justification: notes ?? null,
+      after: { status: 'pending' },
+    });
+    this.notifications.notifyAsync({
+      userId: accepted_.requesterUserId,
+      type: 'shiftswap.accepted_by_target',
+      title: 'Shift swap accepted',
+      body: `Your shift swap request #${accepted_.id} was accepted and is now awaiting manager approval.`,
+    });
+    return accepted_;
   }
 
   private async findPendingApprovalId(shiftSwapRequestId: number): Promise<number | null> {
@@ -462,7 +581,7 @@ export class ShiftSwapService {
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE shift_swap_requests
-          SET status = 'declined', reviewer_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?
+          SET status = 'declined', declined_by = 'manager', reviewer_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?
         WHERE id = ? AND status = 'pending'`,
       [reviewerId, notes, id]
     );
@@ -497,7 +616,7 @@ export class ShiftSwapService {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE shift_swap_requests
           SET status = 'cancelled'
-        WHERE id = ? AND requester_user_id = ? AND status = 'pending'`,
+        WHERE id = ? AND requester_user_id = ? AND status IN ('pending_target', 'pending')`,
       [id, requesterUserId]
     );
     if (result.affectedRows === 0) {

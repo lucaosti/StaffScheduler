@@ -24,7 +24,10 @@ const buildSwap = (overrides: Record<string, unknown> = {}) => ({
   requester_assignment_id: 100,
   target_user_id: 8,
   target_assignment_id: 200,
+  // The manager-step tests (approve/decline/cancel) all assume the target
+  // has already accepted — 'pending' now means that, not "request submitted".
   status: 'pending',
+  declined_by: null,
   notes: null,
   reviewer_id: null,
   reviewed_at: null,
@@ -108,16 +111,14 @@ describe('ShiftSwapService.create', () => {
     ).rejects.toThrow(/different user/);
   });
 
-  it('inserts the swap and returns the persisted row (no workflow configured)', async () => {
+  it('inserts the swap as pending_target and returns the persisted row (no workflow configured)', async () => {
     const { pool, conn, execute } = makePool();
     execute.mockResolvedValueOnce([[], null]); // getWorkflowByChangeType('ShiftSwap.Request') -> not found (checked before insert)
     conn.execute
       .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null])
       .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null])
       .mockResolvedValueOnce([{ insertId: 42 }, null]);
-    execute
-      .mockResolvedValueOnce([[buildSwap({ id: 42 })], null]) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
+    execute.mockResolvedValueOnce([[buildSwap({ id: 42, status: 'pending_target' })], null]); // getById
 
     const service = new ShiftSwapService(pool);
     const created = await service.create({
@@ -128,6 +129,8 @@ describe('ShiftSwapService.create', () => {
     });
     expect(created.id).toBe(42);
     expect(created.targetUserId).toBe(8);
+    expect(created.status).toBe('pending_target');
+    expect(conn.execute.mock.calls[2][0]).toContain(`'pending_target'`);
     expect(conn.commit).toHaveBeenCalled();
   });
 
@@ -315,6 +318,19 @@ describe('ShiftSwapService.cancel', () => {
     const service = new ShiftSwapService(pool);
     await expect(service.cancel(1, 999)).rejects.toThrow(/Forbidden/);
   });
+
+  it('is available while still awaiting the target, not just while awaiting the manager (#522)', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // guarded UPDATE
+      .mockResolvedValueOnce([[buildSwap({ status: 'cancelled' })], null]); // getById after
+
+    const service = new ShiftSwapService(pool);
+    const result = await service.cancel(1, 7);
+
+    expect(result.status).toBe('cancelled');
+    expect(execute.mock.calls[0][0]).toContain(`IN ('pending_target', 'pending')`);
+  });
 });
 
 // ── Workflow attachment, non-final steps and in-transaction diagnosis ────────
@@ -341,25 +357,21 @@ const workflowFixture = {
   steps: [{ id: 20, workflowId: 10, stepOrder: 1, approverScope: 'unit_structure' }],
 };
 
-describe('ShiftSwapService.create — workflow attachment', () => {
-  it('attaches the first-step pending approval after commit', async () => {
+describe('ShiftSwapService.create — approver dry run', () => {
+  it('checks the approval gate but does NOT attach a pending approval at creation (#522)', async () => {
     const { pool, conn, execute } = makePool();
     conn.execute
       .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null])
       .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null])
       .mockResolvedValueOnce([{ insertId: 42 }, null]);
-    execute
-      .mockResolvedValueOnce([[buildSwap({ id: 42 })], null]) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
+    execute.mockResolvedValueOnce([[buildSwap({ id: 42, status: 'pending_target' })], null]); // getById
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
     jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
     jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
-    const createPa = jest
-      .spyOn(engine, 'createPendingApprovalForStep')
-      .mockResolvedValue({ id: 501 } as never);
+    const canCreate = jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+    const createPa = jest.spyOn(engine, 'createPendingApprovalForStep');
 
     const created = await service.create({
       requesterUserId: 7,
@@ -368,39 +380,140 @@ describe('ShiftSwapService.create — workflow attachment', () => {
     });
 
     expect(created.id).toBe(42);
-    expect(createPa).toHaveBeenCalledWith(
-      10,
-      workflowFixture.steps[0],
-      { shiftSwapRequestId: 42 },
-      { actorUserId: 7, orgUnitId: 3 }
-    );
+    expect(created.status).toBe('pending_target');
+    // The gate is checked (a dry run)...
+    expect(canCreate).toHaveBeenCalled();
+    // ...but nothing is actually attached — there is nothing for a manager
+    // to decide until the target accepts.
+    expect(createPa).not.toHaveBeenCalled();
+  });
+});
+
+describe('ShiftSwapService.respondAsTarget', () => {
+  it('rejects a caller who is not the target', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]);
+
+    const service = new ShiftSwapService(pool);
+    await expect(service.respondAsTarget(1, 999, true)).rejects.toThrow(/Forbidden/);
   });
 
-  it('deletes the stranded request when approver resolution changes mid-flight', async () => {
-    const { pool, conn, execute } = makePool();
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 100, user_id: 7 }], null])
-      .mockResolvedValueOnce([[{ id: 200, user_id: 8 }], null])
-      .mockResolvedValueOnce([{ insertId: 42 }, null]);
+  it('rejects responding to a swap that is not awaiting the target', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[buildSwap({ status: 'pending', target_user_id: 8 })], null]);
+
+    const service = new ShiftSwapService(pool);
+    await expect(service.respondAsTarget(1, 8, true)).rejects.toThrow(/Cannot respond to swap in status 'pending'/);
+  });
+
+  it('declining ends the request immediately, with no manager involved', async () => {
+    const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[buildSwap({ id: 42 })], null]) // getById
-      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]) // audit.write
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // cleanup DELETE
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // guarded UPDATE -> declined
+      .mockResolvedValueOnce([[buildSwap({ status: 'declined', declined_by: 'target', target_user_id: 8 })], null]) // getById after
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
+
+    const service = new ShiftSwapService(pool);
+    const engine = engineOf(service);
+    const getWorkflow = jest.spyOn(engine, 'getWorkflowByChangeType');
+
+    const result = await service.respondAsTarget(1, 8, false, 'not a good time');
+
+    expect(result.status).toBe('declined');
+    expect(result.declinedBy).toBe('target');
+    expect(execute.mock.calls[1][0]).toContain(`declined_by = 'target'`);
+    // No manager step is ever consulted on a decline.
+    expect(getWorkflow).not.toHaveBeenCalled();
+  });
+
+  it('throws 409 when the swap was decided concurrently between the auth check and the guarded update', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]) // guarded UPDATE loses the race
+      .mockResolvedValueOnce([[buildSwap({ status: 'cancelled', target_user_id: 8 })], null]); // re-fetch
+
+    const service = new ShiftSwapService(pool);
+    await expect(service.respondAsTarget(1, 8, false)).rejects.toThrow(/Cannot respond to swap in status 'cancelled'/);
+  });
+
+  it('throws 409 on an accept when the swap was decided concurrently between the auth check and the guarded update', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null]) // guarded UPDATE loses the race
+      .mockResolvedValueOnce([[buildSwap({ status: 'cancelled', target_user_id: 8 })], null]); // re-fetch
+
+    const service = new ShiftSwapService(pool);
+    jest.spyOn(engineOf(service), 'getWorkflowByChangeType').mockResolvedValue(null as never);
+    await expect(service.respondAsTarget(1, 8, true)).rejects.toThrow(/Cannot respond to swap in status 'cancelled'/);
+  });
+
+  it('accepting attaches the first-step pending approval and routes the request to the manager', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // guarded UPDATE -> pending
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending', target_user_id: 8 })], null]) // getById after
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
     jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
     jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+    const createPa = jest
+      .spyOn(engine, 'createPendingApprovalForStep')
+      .mockResolvedValue({ id: 501 } as never);
+
+    const result = await service.respondAsTarget(1, 8, true);
+
+    expect(result.status).toBe('pending');
+    expect(createPa).toHaveBeenCalledWith(
+      10,
+      workflowFixture.steps[0],
+      { shiftSwapRequestId: 1 },
+      { actorUserId: 7, orgUnitId: 3 }
+    );
+  });
+
+  it('reverts to pending_target (not stranded) when approver resolution changes mid-flight', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // guarded UPDATE -> pending
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // revert UPDATE -> pending_target
+
+    const service = new ShiftSwapService(pool);
+    const engine = engineOf(service);
+    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
+    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
     jest.spyOn(engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
-    await expect(
-      service.create({ requesterUserId: 7, requesterAssignmentId: 100, targetAssignmentId: 200 })
-    ).rejects.toThrow(/approver resolution changed during creation/);
+    await expect(service.respondAsTarget(1, 8, true)).rejects.toThrow(/approver resolution changed/);
 
-    const deleteCall = execute.mock.calls[execute.mock.calls.length - 1];
-    expect(deleteCall[0]).toContain('DELETE FROM shift_swap_requests');
-    expect(deleteCall[1]).toEqual([42]);
+    const revertCall = execute.mock.calls[execute.mock.calls.length - 1];
+    expect(revertCall[0]).toContain(`'pending_target'`);
+    expect(revertCall[1]).toEqual([1]);
+  });
+
+  it('accepting with no workflow configured routes straight to pending, with no pending approval to attach', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending_target', target_user_id: 8 })], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // guarded UPDATE -> pending
+      .mockResolvedValueOnce([[buildSwap({ status: 'pending', target_user_id: 8 })], null]) // getById after
+      .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null]); // audit.write
+
+    const service = new ShiftSwapService(pool);
+    const engine = engineOf(service);
+    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(null as never);
+    const createPa = jest.spyOn(engine, 'createPendingApprovalForStep');
+
+    const result = await service.respondAsTarget(1, 8, true);
+
+    expect(result.status).toBe('pending');
+    expect(createPa).not.toHaveBeenCalled();
   });
 });
 

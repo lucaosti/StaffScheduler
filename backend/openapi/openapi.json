@@ -778,10 +778,25 @@
           "status": {
             "type": "string",
             "enum": [
+              "pending_target",
               "pending",
               "approved",
-              "rejected",
+              "declined",
               "cancelled"
+            ]
+          },
+          "declinedBy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "target",
+                  "manager"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "notes": {
@@ -843,6 +858,7 @@
           "targetUserId",
           "targetAssignmentId",
           "status",
+          "declinedBy",
           "notes",
           "reviewerId",
           "reviewedAt",
@@ -9790,6 +9806,66 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/shift-swap/{id}/respond": {
+      "post": {
+        "tags": [
+          "Shift Swap"
+        ],
+        "summary": "The target's response to a pending swap (#522)",
+        "description": "Only the target (whose own assignment would move) may respond, gated on identity rather than a permission code — accepting a swap of your own shift isn't a manager privilege. Accepting routes the request to the manager step; declining ends it immediately with no manager involved.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response recorded."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "accepted": {
+                    "type": "boolean"
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "accepted"
+                ]
+              }
+            }
           }
         }
       }

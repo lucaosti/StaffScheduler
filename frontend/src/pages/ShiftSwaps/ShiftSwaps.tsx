@@ -1,5 +1,5 @@
 /**
- * Shift swaps — proposing one, and deciding one.
+ * Shift swaps — proposing one, responding to one, and deciding one.
  *
  * WHY BOTH SIDES ARE SHOWN BEFORE ANYTHING IS SENT. A swap changes two
  * people's commitments at once. A screen that shows only what you are giving
@@ -8,13 +8,16 @@
  * are pinned and broken commitments are notified is that a shift someone has
  * been told about is one they have arranged their life around.
  *
- * WHAT THIS PAGE IS HONEST ABOUT. In the current model the person whose shift
- * is being taken is never asked: `approve` and `decline` are gated on
- * `shiftswap.approve`, so a manager decides and both assignments move. The
- * target sees the request in their list with no action available, and the page
- * says so plainly rather than showing buttons that would 403 or implying a
- * consent the system never collects. Whether that model is right is #522; what
- * would be wrong is a UI that hides it.
+ * TWO GATES, NOT ONE (#522). A swap used to skip straight from creation to
+ * manager approval — the target was never asked, and discovered the swap by
+ * finding themselves working a different day. `pending_target` is the state
+ * before the target has responded; only they can accept or decline it
+ * (gated on identity, not a permission code — whether to agree to a swap of
+ * your own shift isn't a manager privilege). Accepting moves the request to
+ * `pending`, which now means "target accepted, awaiting manager" rather
+ * than "request submitted"; only then do `approve`/`decline` (gated on
+ * `shiftswap.approve`) become available. A target decline ends the request
+ * immediately — there is nothing left for a manager to approve.
  *
  * @author Luca Ostinelli
  */
@@ -37,10 +40,16 @@ import { useActionFeedback } from '../../hooks/useActionFeedback';
 const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 const STATUS_BADGE: Record<string, string> = {
+  pending_target: 'bg-info text-dark',
   pending: 'bg-warning text-dark',
   approved: 'bg-success',
-  rejected: 'bg-danger',
+  declined: 'bg-danger',
   cancelled: 'bg-secondary',
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  pending_target: 'Awaiting response',
+  pending: 'Awaiting approval',
 };
 
 
@@ -61,7 +70,7 @@ const ShiftSwaps: React.FC = () => {
   const mine = useMyAssignmentsQuery(myId);
   const requests = useSwapRequestsQuery();
   const candidates = useSwapCandidatesQuery(giving ? Number(giving.id) : null);
-  const { propose, approve, decline, cancel } = useSwapMutations();
+  const { propose, respond, approve, decline, cancel } = useSwapMutations();
 
 
   const swappable = (mine.data ?? []).filter(
@@ -191,14 +200,42 @@ const ShiftSwaps: React.FC = () => {
                   <td>{isTarget ? 'You' : r.targetUserId}</td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[r.status] ?? 'bg-secondary'}`}>
-                      {r.status}
+                      {STATUS_LABEL[r.status] ?? r.status}
                     </span>
+                    {r.status === 'declined' && r.declinedBy && (
+                      <span className="text-muted small d-block">
+                        {r.declinedBy === 'target' ? 'Declined by the other person' : 'Declined by manager'}
+                      </span>
+                    )}
                   </td>
                   <td className="text-end">
-                    {r.status === 'pending' && isRequester && (
+                    {r.status === 'pending_target' && isTarget && (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-success me-2"
+                          onClick={() => act(respond.mutateAsync({ id: r.id, accepted: true }))}
+                          disabled={respond.isPending}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => act(respond.mutateAsync({ id: r.id, accepted: false }))}
+                          disabled={respond.isPending}
+                        >
+                          Decline
+                        </button>
+                      </>
+                    )}
+                    {r.status === 'pending_target' && isRequester && (
+                      <span className="text-muted small">Waiting for the other person to respond</span>
+                    )}
+                    {(r.status === 'pending_target' || r.status === 'pending') && isRequester && (
                       <button
                         type="button"
-                        className="btn btn-sm btn-outline-secondary me-2"
+                        className="btn btn-sm btn-outline-secondary ms-2"
                         onClick={() => act(cancel.mutateAsync(r.id))}
                         disabled={cancel.isPending}
                       >
@@ -226,9 +263,9 @@ const ShiftSwaps: React.FC = () => {
                       </>
                     )}
                     {/* Said plainly rather than left as an empty cell: the
-                        target has no action because the model gives them
-                        none, and a blank space would read as a page that
-                        failed to load its buttons. */}
+                        target has no manager-approval action because the
+                        model gives them none — their own decision already
+                        happened at the pending_target step. */}
                     {r.status === 'pending' && isTarget && !canDecide && (
                       <span className="text-muted small">A manager decides this</span>
                     )}
