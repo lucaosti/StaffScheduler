@@ -1,16 +1,17 @@
 /**
- * Database Configuration and Connection Manager
- * 
- * Provides MySQL database connection management with connection pooling,
- * query execution utilities, transaction support, and health monitoring.
- * 
- * Features:
- * - Connection pooling for optimal performance
- * - Prepared statement support
- * - Transaction management
- * - Connection health monitoring
- * - Error handling and logging
- * 
+ * The one exception to "no global service singletons": every other service
+ * receives its pool through the router-factory injection chain rooted in
+ * `src/index.ts`, but health checks and the auth middleware run before and
+ * outside that chain (a health check must answer even if request routing is
+ * still being wired up), so they need a connection available without it.
+ * This singleton exists to serve exactly those two callers — not as a second,
+ * competing way to reach the database from application code, which should
+ * always go through the injected pool.
+ *
+ * Pool sizing (`connectionLimit`, `queueLimit`, `connectTimeout`) comes from
+ * `config.database`, not hardcoded here, so it can be tuned per deployment
+ * without a code change.
+ *
  * @author Luca Ostinelli
  */
 

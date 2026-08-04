@@ -1,10 +1,23 @@
 /**
- * Shift Service
- * 
- * Handles all shift-related business logic including shift management,
- * assignments, and schedule integration.
- * 
- * @module services/ShiftService
+ * Shift CRUD, required skills, template-driven generation, and assignments.
+ *
+ * `getShiftById` fetches required skills and assignments as two separate
+ * queries rather than joining them onto the shift row: both are one-to-many,
+ * so a join would fan the single shift row out across every skill/assignment
+ * combination and need de-duplication in application code for a result that
+ * two indexed round trips already give cleanly.
+ *
+ * Required skills are always replaced wholesale (delete then re-insert) on
+ * update, rather than diffed — the set is small and the caller already sends
+ * the complete desired list, so a diff would add complexity without changing
+ * what gets written.
+ *
+ * `createShiftsFromTemplate` expands a template across a date range and
+ * day-of-week filter, copying the template's skill requirements onto every
+ * generated shift in one batched INSERT per shift rather than one row at a
+ * time — the same "N inserts become one" shape used everywhere else in this
+ * service for skill rows.
+ *
  * @author Luca Ostinelli
  */
 
