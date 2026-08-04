@@ -125,6 +125,41 @@ describe('EmployeeLoanService.isOnLoan', () => {
   });
 });
 
+describe('EmployeeLoanService.listLoanedInUserIds', () => {
+  it('returns the distinct user ids from the query', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ user_id: 7 }, { user_id: 8 }], null] as Tuple);
+    const service = new EmployeeLoanService(pool);
+    const ids = await service.listLoanedInUserIds(2, '2026-05-01', '2026-05-31');
+    expect(ids).toEqual([7, 8]);
+    const [sql, params] = execute.mock.calls[0];
+    expect(sql).toMatch(/to_org_unit_id = \?/);
+    expect(sql).toMatch(/status = 'approved'/);
+    expect(params).toEqual([2, '2026-05-31', '2026-05-01']);
+  });
+
+  it('returns an empty array when nothing matches', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    const service = new EmployeeLoanService(pool);
+    expect(await service.listLoanedInUserIds(2, '2026-05-01', '2026-05-31')).toEqual([]);
+  });
+});
+
+describe('EmployeeLoanService.listActiveLoansInto', () => {
+  it('returns active loans with normalized date strings', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ user_id: 9, start_date: '2026-08-01', end_date: '2026-08-14' }],
+      null,
+    ] as Tuple);
+    const service = new EmployeeLoanService(pool);
+    const loans = await service.listActiveLoansInto(2);
+    expect(loans).toEqual([{ userId: 9, startDate: '2026-08-01', endDate: '2026-08-14' }]);
+    expect(execute.mock.calls[0][0]).toMatch(/CURDATE\(\)/);
+  });
+});
+
 // ── Workflow attachment and decision arms (engine/matrix spied) ──────────────
 // Same instance-boundary spying as the time-off and shift-swap suites: the
 // matrix and engine have their own suites, so these tests pin only the loan

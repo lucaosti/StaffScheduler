@@ -567,6 +567,44 @@ describe('AssignmentService.getAvailableEmployeesForShift', () => {
     const r = await svc.getAvailableEmployeesForShift(1);
     expect(r.length).toBe(1);
   });
+
+  /**
+   * Issue #602: a person on an approved loan into the shift's department's
+   * bridged org unit must be offered as a candidate even without a
+   * `user_departments` row of their own.
+   */
+  it('folds the org-unit loan pool into the candidate query when the department has a bridge', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[shiftRow({ org_unit_id: 55 })], null])
+      .mockResolvedValueOnce([
+        [{ userId: 42, firstName: 'Loaned', lastName: 'In', email: 'l@b' }],
+        null,
+      ]);
+    execute.mockResolvedValueOnce([[{ user_id: 42 }], null]); // EmployeeLoanService.listLoanedInUserIds
+
+    const svc = new AssignmentService(pool);
+    const r = await svc.getAvailableEmployeesForShift(1);
+
+    expect(r).toEqual([{ userId: 42, firstName: 'Loaned', lastName: 'In', email: 'l@b' }]);
+    const [loanSql, loanParams] = execute.mock.calls[0];
+    expect(loanSql).toMatch(/to_org_unit_id = \?/);
+    expect(loanParams[0]).toBe(55);
+    const [candidateSql] = conn.execute.mock.calls[1];
+    expect(candidateSql).toMatch(/u\.id IN \(42\)/);
+  });
+
+  it('skips the loan pool when the shift department has no org-unit bridge', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[shiftRow({ org_unit_id: null })], null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new AssignmentService(pool);
+    await svc.getAvailableEmployeesForShift(1);
+
+    expect(execute).not.toHaveBeenCalled();
+  });
 });
 
 describe('AssignmentService.checkUserAvailability', () => {

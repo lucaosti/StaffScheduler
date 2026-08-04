@@ -44,6 +44,8 @@ type Rows = Array<Record<string, unknown>>;
 
 interface Fixtures {
   schedule?: Rows;
+  deptOrgUnit?: Rows;
+  loanedIn?: Rows;
   shifts?: Rows;
   employees?: Rows;
   pinned?: Rows;
@@ -67,6 +69,8 @@ interface Fixtures {
 const MATCHERS: Array<[keyof Fixtures, string]> = [
   ['schedule', 'FROM schedules WHERE id = ?'],
   ['predecessor', 'SELECT id FROM schedules'],
+  ['deptOrgUnit', 'SELECT org_unit_id FROM departments'],
+  ['loanedIn', 'FROM employee_loans'],
   ['shifts', 'GROUP BY s.id'],
   ['employees', 'FROM users u'],
   ['pinned', 'sa.is_pinned = 1'],
@@ -113,6 +117,10 @@ const EMPLOYEE_ROW = {
 const primeQueries = (execute: jest.Mock, fixtures: Fixtures = {}) => {
   const table: Fixtures = {
     schedule: [SCHEDULE_ROW],
+    // No org-unit bridge by default — the loan pool then stays untouched,
+    // matching every existing test's expectations unless a test opts in.
+    deptOrgUnit: [],
+    loanedIn: [],
     shifts: [SHIFT_ROW],
     employees: [EMPLOYEE_ROW],
     ...fixtures,
@@ -225,6 +233,46 @@ describe('AutoScheduleService.generate', () => {
     expect(out.engine).toBe('greedy');
     expect(out.degraded).toBe(false);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  /**
+   * Issue #602: approving an employee loan used to change nothing but the
+   * loan's own status. `departments.org_unit_id` bridges a loan's org-unit
+   * scope to the shift's department scope, so a person on an approved loan
+   * INTO that org unit must be a scheduling candidate exactly like a real
+   * department member — even though they have no `user_departments` row.
+   */
+  it('admits a person on an approved loan into the bridged org unit as a candidate', async () => {
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, {
+      deptOrgUnit: [{ org_unit_id: 55 }],
+      loanedIn: [{ user_id: 42 }],
+      employees: [EMPLOYEE_ROW, { ...EMPLOYEE_ROW, id: 42, skill_names: '' }],
+    });
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    await new AutoScheduleService(pool).generate(1, 7);
+
+    const [sql, params] = queryFor(execute, 'loanedIn');
+    expect(sql).toMatch(/to_org_unit_id = \?/);
+    expect(params[0]).toBe(55);
+
+    const [empSql] = queryFor(execute, 'employees');
+    expect(empSql).toMatch(/LEFT JOIN user_departments ud/);
+    expect(empSql).toMatch(/u\.id IN \(42\)/);
+
+    const problem = lastProblemGiven();
+    expect(problem.employees.map((e: any) => e.id)).toEqual(expect.arrayContaining(['1', '42']));
+  });
+
+  it('skips the loan lookup entirely when the department has no org-unit bridge', async () => {
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, { deptOrgUnit: [] });
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(wasQueried(execute, 'loanedIn')).toBe(false);
   });
 
   /**
