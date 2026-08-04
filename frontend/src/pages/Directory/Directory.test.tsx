@@ -25,6 +25,8 @@ const getMyProfile = jest.fn();
 const getProfile = jest.fn();
 const saveProfileFields = jest.fn();
 const removeProfileField = jest.fn();
+const previewVcardImport = jest.fn();
+const importVcard = jest.fn();
 
 jest.mock('../../services/directoryService', () => ({
   __esModule: true,
@@ -32,6 +34,8 @@ jest.mock('../../services/directoryService', () => ({
   getProfile: (...a: unknown[]) => getProfile(...a),
   saveProfileFields: (...a: unknown[]) => saveProfileFields(...a),
   removeProfileField: (...a: unknown[]) => removeProfileField(...a),
+  previewVcardImport: (...a: unknown[]) => previewVcardImport(...a),
+  importVcard: (...a: unknown[]) => importVcard(...a),
   vcardUrl: (id: number) => `/api/directory/users/${id}/vcard`,
 }));
 
@@ -61,7 +65,17 @@ beforeEach(() => {
   saveProfileFields.mockReset().mockImplementation(() => okResponse(profile()));
   removeProfileField.mockReset().mockImplementation(() => okResponse(undefined));
   getEmployees.mockReset().mockImplementation(() => okResponse([{ id: 9, firstName: 'Grace', lastName: 'Hopper' }]));
+  previewVcardImport.mockReset();
+  importVcard.mockReset();
 });
+
+/** jsdom has no FileReader-driven file content by default; this stands in for
+ * a user picking a .vcf file and the browser reading its text. */
+const chooseVcfFile = async (contents: string, name = 'contacts.vcf') => {
+  const input = screen.getByLabelText('.vcf file') as HTMLInputElement;
+  const file = new File([contents], name, { type: 'text/vcard' });
+  await userEvent.upload(input, file);
+};
 
 describe('own profile', () => {
   it('is shown to anyone signed in', async () => {
@@ -166,5 +180,81 @@ describe('other people', () => {
     // The id comes from the profile being shown; using the signed-in user's
     // would silently edit the wrong person.
     await waitFor(() => expect(removeProfileField).toHaveBeenCalledWith(9, 'Locker'));
+  });
+});
+
+describe('bulk vCard import (#534)', () => {
+  it('is absent without user.manage', async () => {
+    render(<Directory />);
+    await screen.findByText('Ada Lovelace');
+    expect(screen.queryByText('Bulk import from vCard')).not.toBeInTheDocument();
+  });
+
+  it('previews what a file will do before anything is written', async () => {
+    permissions = ['user.manage'];
+    previewVcardImport.mockImplementation(() =>
+      okResponse({
+        rows: [
+          { email: 'new@x.com', name: 'New Person', outcome: 'create' },
+          { email: 'dup@x.com', name: 'Dup Person', outcome: 'skip', reason: 'email already exists' },
+        ],
+      })
+    );
+    render(<Directory />);
+    await screen.findByText('Ada Lovelace');
+
+    await chooseVcfFile('BEGIN:VCARD\r\nFN:New Person\r\nEMAIL:new@x.com\r\nEND:VCARD\r\n');
+    await userEvent.click(await screen.findByRole('button', { name: /preview contacts\.vcf/i }));
+
+    expect(await screen.findByText('Will create an account')).toBeInTheDocument();
+    expect(screen.getByText('Will skip — email already exists')).toBeInTheDocument();
+    expect(importVcard).not.toHaveBeenCalled();
+  });
+
+  it('requires a password of at least 8 characters before confirming', async () => {
+    permissions = ['user.manage'];
+    previewVcardImport.mockImplementation(() =>
+      okResponse({ rows: [{ email: 'new@x.com', name: 'New Person', outcome: 'create' }] })
+    );
+    render(<Directory />);
+    await screen.findByText('Ada Lovelace');
+    await chooseVcfFile('BEGIN:VCARD\r\nFN:New Person\r\nEMAIL:new@x.com\r\nEND:VCARD\r\n');
+    await userEvent.click(await screen.findByRole('button', { name: /preview contacts\.vcf/i }));
+    await screen.findByText('Will create an account');
+
+    const confirm = screen.getByRole('button', { name: /confirm import/i });
+    expect(confirm).toBeDisabled();
+    await userEvent.type(screen.getByLabelText(/initial password/i), 'longenough1');
+    expect(confirm).toBeEnabled();
+  });
+
+  it('reports the outcome and offers to import another file, without exposing the write behind only a total', async () => {
+    permissions = ['user.manage'];
+    previewVcardImport.mockImplementation(() =>
+      okResponse({ rows: [{ email: 'new@x.com', name: 'New Person', outcome: 'create' }] })
+    );
+    importVcard.mockImplementation(() =>
+      okResponse({ inserted: 1, skipped: [{ email: 'dup@x.com', reason: 'email already exists' }] })
+    );
+    render(<Directory />);
+    await screen.findByText('Ada Lovelace');
+    await chooseVcfFile('BEGIN:VCARD\r\nFN:New Person\r\nEMAIL:new@x.com\r\nEND:VCARD\r\n');
+    await userEvent.click(await screen.findByRole('button', { name: /preview contacts\.vcf/i }));
+    await screen.findByText('Will create an account');
+    await userEvent.type(screen.getByLabelText(/initial password/i), 'longenough1');
+    await userEvent.click(screen.getByRole('button', { name: /confirm import/i }));
+
+    await waitFor(() =>
+      expect(importVcard).toHaveBeenCalledWith(
+        'BEGIN:VCARD\r\nFN:New Person\r\nEMAIL:new@x.com\r\nEND:VCARD\r\n',
+        'longenough1'
+      )
+    );
+    expect(await screen.findByText(/created 1 account/i)).toBeInTheDocument();
+    expect(screen.getByText(/skipped 1: dup@x\.com \(email already exists\)/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Import another file' }));
+    expect(screen.queryByText(/created 1 account/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('.vcf file')).toBeInTheDocument();
   });
 });

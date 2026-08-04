@@ -4586,6 +4586,45 @@
         }
       }
     },
+    "/directory/import-vcard/preview": {
+      "post": {
+        "tags": [
+          "Directory"
+        ],
+        "summary": "Preview a bulk vCard import",
+        "description": "Admin only. Reports what each card in the file would do — create or skip, and why — without writing anything.",
+        "responses": {
+          "200": {
+            "description": "Per-card outcome preview."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vcf": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "vcf"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/directory/import-vcard": {
       "post": {
         "tags": [
