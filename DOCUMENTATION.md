@@ -656,6 +656,19 @@ DELETE /api/departments/:id/geofences/:geofenceId    delete a fence
 
 Same access rule as every other department sub-resource: `settings.manage` reaches any department, `department.manage` only the caller's own. Configured from Settings → Geofences (admin only); the editor is a plain coordinate-list form, not a map — see that component's header for why.
 
+**Kiosk clock-in (#309)**: a shared tablet parked at a physical location, punching by employee id rather than a user login — there is deliberately no signed-in user at a kiosk. Authentication is a per-device token (`X-Kiosk-Token` header), not a JWT: `KioskService.authenticate` hashes the header with SHA-256 and looks up `kiosk_devices` by the hash, the same token-hashing pattern `RefreshTokenService` uses for refresh tokens. The raw token exists in plaintext only once, in the create response — only its hash is ever stored, so it cannot be shown again if lost; the admin UI displays it once and the device operator must copy it into the tablet immediately.
+
+```
+GET    /api/departments/:id/kiosks              list a department's kiosk devices
+POST   /api/departments/:id/kiosks               register a device, returns its one-time raw token
+DELETE /api/departments/:id/kiosks/:kioskId      revoke a device
+POST   /api/attendance/kiosk/punch                punch (toggle) by employee id — kiosk-token auth, no user session
+```
+
+`POST /kiosk/punch` is mounted ahead of `authenticate` in `routes/attendance.ts` so it never runs through user auth: `authenticateKiosk` (`middleware/kioskAuth.ts`) is the only gate. It resolves the employee id to a user scoped to the device's own department (`KioskService.resolveEmployee`, an active `users` row joined to `user_departments`), then calls `AttendanceService.punch(userId)`, which toggles — clocks in if the user has no open record, clocks out the open one otherwise — so the same button on the tablet serves both directions without the employee having to remember their current state.
+
+Device management uses the same `canManageDepartment` access rule as geofences. Configured from Settings → Kiosk Devices (admin only). The public punch page lives at `/kiosk` — outside the authenticated app shell, since a device browser has no user session — and stores its device token in `localStorage`, scoped to that browser/tablet rather than to any person.
+
 ---
 
 ## 7b. Business policies

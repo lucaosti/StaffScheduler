@@ -35,6 +35,7 @@ import type {
   ShiftAssignment,
   Geofence,
   GeoPoint,
+  KioskDevice,
 } from '@staff-scheduler/shared';
 export type {
   Permission,
@@ -52,6 +53,7 @@ export type {
   ShiftAssignment,
   Geofence,
   GeoPoint,
+  KioskDevice,
 };
 
 

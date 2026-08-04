@@ -24,6 +24,7 @@
 import { ApiResponse, AttendanceRecord, AttendanceCostEstimate } from '../types';
 import type { paths } from '../api/schema';
 import { apiClient } from '../api/client';
+import { API_BASE_URL, handleResponse } from './apiUtils';
 
 export type AttendanceFilters = NonNullable<paths['/attendance']['get']['parameters']['query']>;
 export type CostEstimateParams = NonNullable<
@@ -81,6 +82,28 @@ export const rejectAttendance = (
     { notes },
     { params: { id: Number(id) } }
   );
+
+export interface KioskPunchResult {
+  action: 'clocked_in' | 'clocked_out';
+  employeeName: string;
+  record: AttendanceRecord;
+}
+
+/**
+ * Not routed through `apiClient`: the kiosk punch is authenticated by a
+ * device token (`X-Kiosk-Token`), not a user session, so it must not carry
+ * the Authorization header `apiClient`/`getAuthHeaders` attaches — a shared
+ * kiosk has no signed-in user for that header to name.
+ */
+export const punchKiosk = (
+  kioskToken: string,
+  employeeId: string
+): Promise<ApiResponse<KioskPunchResult>> =>
+  fetch(`${API_BASE_URL}/attendance/kiosk/punch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Kiosk-Token': kioskToken },
+    body: JSON.stringify({ employeeId }),
+  }).then((response) => handleResponse<KioskPunchResult>(response));
 
 export const getCostEstimate = (
   params: CostEstimateParams

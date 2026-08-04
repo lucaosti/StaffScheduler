@@ -34,10 +34,12 @@ jest.mock('../middleware/auth', () => ({
 jest.mock('../services/DepartmentService');
 jest.mock('../services/UserService');
 jest.mock('../services/GeofenceService');
+jest.mock('../services/KioskService');
 
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { GeofenceService } from '../services/GeofenceService';
+import { KioskService } from '../services/KioskService';
 import { createDepartmentsRouter } from '../routes/departments';
 import { ConflictError } from '../errors';
 import { errorHandler } from '../middleware/errorHandler';
@@ -559,6 +561,79 @@ describe('departments router geofence endpoints', () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x.com' };
 
     const res = await request(mountApp()).delete('/api/departments/3/geofences/1');
+
+    expect(res.status).toBe(403);
+  });
+});
+
+// ── Kiosk devices ────────────────────────────────────────────────────────────
+
+describe('departments router kiosk endpoints', () => {
+  const device = {
+    id: 1,
+    name: 'Break room tablet',
+    departmentId: 3,
+    isActive: true,
+    createdAt: 'x',
+    lastUsedAt: null,
+  };
+
+  it('GET /:id/kiosks returns 200 for an admin', async () => {
+    (KioskService.prototype.listForDepartment as jest.Mock) = jest.fn().mockResolvedValue([device]);
+
+    const res = await request(mountApp()).get('/api/departments/3/kiosks');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([device]);
+  });
+
+  it('GET /:id/kiosks returns 403 for an employee not in the department', async () => {
+    currentUser = { id: 5, role: 'employee', email: 'e@x.com' };
+
+    const res = await request(mountApp()).get('/api/departments/3/kiosks');
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+
+  it('POST /:id/kiosks creates a device for an admin and returns the raw token', async () => {
+    (KioskService.prototype.create as jest.Mock) = jest.fn().mockResolvedValue({ device, token: 'raw-token-value' });
+
+    const res = await request(mountApp())
+      .post('/api/departments/3/kiosks')
+      .send({ name: 'Break room tablet' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data).toEqual({ ...device, token: 'raw-token-value' });
+  });
+
+  it('POST /:id/kiosks returns 403 for a manager of a different department', async () => {
+    currentUser = { id: 5, role: 'manager', email: 'm@x.com' };
+    (DepartmentService.prototype.getDepartmentsForUser as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ id: 2, managerId: 5 }]);
+
+    const res = await request(mountApp())
+      .post('/api/departments/3/kiosks')
+      .send({ name: 'Break room tablet' });
+
+    expect(res.status).toBe(403);
+  });
+
+  it('DELETE /:id/kiosks/:kioskId revokes a device for an admin', async () => {
+    (KioskService.prototype.revoke as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+
+    const res = await request(mountApp()).delete('/api/departments/3/kiosks/1');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(KioskService.prototype.revoke).toHaveBeenCalledWith(1);
+  });
+
+  it('DELETE /:id/kiosks/:kioskId returns 403 for an employee', async () => {
+    currentUser = { id: 5, role: 'employee', email: 'e@x.com' };
+
+    const res = await request(mountApp()).delete('/api/departments/3/kiosks/1');
 
     expect(res.status).toBe(403);
   });

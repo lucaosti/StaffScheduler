@@ -263,6 +263,16 @@ export const geofenceSchema = z.object({
 });
 export type Geofence = z.infer<typeof geofenceSchema>;
 
+export const kioskDeviceSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  departmentId: z.number().int(),
+  isActive: z.boolean(),
+  createdAt: timestamp,
+  lastUsedAt: timestamp.nullable(),
+});
+export type KioskDevice = z.infer<typeof kioskDeviceSchema>;
+
 /**
  * A scoped business policy.
  *

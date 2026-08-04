@@ -327,6 +327,7 @@ describe('domain components match the shared schemas', () => {
     Assignment: sharedSchemas.shiftAssignmentSchema,
     PaginationMeta: sharedSchemas.paginationMetaSchema,
     Geofence: sharedSchemas.geofenceSchema,
+    KioskDevice: sharedSchemas.kioskDeviceSchema,
   } as const;
 
   const componentProps = (name: string): string[] =>

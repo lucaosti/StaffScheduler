@@ -16,11 +16,13 @@
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
-import { authenticate, requirePermission, requireModuleForUser, userHasPermission } from '../middleware/auth';
+import { authenticate, requirePermission, requireModule, requireModuleForUser, userHasPermission } from '../middleware/auth';
+import { authenticateKiosk } from '../middleware/kioskAuth';
 import { asyncHandler } from '../middleware/asyncHandler';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { clockInBody, optionalNotesBody, idParam, costEstimateQuery, attendanceListQuery } from '../schemas';
+import { clockInBody, optionalNotesBody, idParam, costEstimateQuery, attendanceListQuery, kioskPunchBody } from '../schemas';
 import { AttendanceService } from '../services/AttendanceService';
+import { KioskService } from '../services/KioskService';
 import { z } from 'zod';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
@@ -34,7 +36,31 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createAttendanceRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new AttendanceService(pool);
+  const kioskService = new KioskService(pool);
   const exporter = new ExportService(new AuditLogService(pool));
+
+  /**
+   * Kiosk punch — a shared tablet, not a user session (see
+   * `services/KioskService.ts` and `middleware/kioskAuth.ts` for why this is
+   * a device credential rather than a JWT). Mounted BEFORE `authenticate`
+   * below so it never runs through user auth at all; `requireModule` (the
+   * org-agnostic form) is the closest module gate available with no
+   * `req.user` to read an organization from.
+   */
+  router.post(
+    '/kiosk/punch',
+    requireModule('attendance'),
+    authenticateKiosk,
+    validateBody(kioskPunchBody),
+    asyncHandler(async (req: Request, res: Response) => {
+      const employee = await kioskService.resolveEmployee(res.locals.body.employeeId, req.kiosk!.departmentId);
+      if (!employee) {
+        return respondError(res, 404, 'NOT_FOUND', 'No matching employee in this device\'s department');
+      }
+      const { action, record } = await service.punch(employee.id);
+      res.json({ success: true, data: { action, employeeName: employee.name, record } });
+    })
+  );
 
   /**
    * The listing filters, with the caller pinned to their own records unless they

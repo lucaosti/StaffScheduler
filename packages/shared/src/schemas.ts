@@ -241,6 +241,16 @@ export const updateGeofenceBody = z.object({
 
 export const idAndGeofenceIdParam = z.object({ id: positiveInt, geofenceId: positiveInt });
 
+export const createKioskDeviceBody = z.object({
+  name: z.string().min(1).max(100),
+});
+
+export const idAndKioskIdParam = z.object({ id: positiveInt, kioskId: positiveInt });
+
+export const kioskPunchBody = z.object({
+  employeeId: z.string().min(1).max(50),
+});
+
 export const updateUserBody = z.object({
   email: z.string().email().optional(),
   password: z.string().min(8).optional(),
