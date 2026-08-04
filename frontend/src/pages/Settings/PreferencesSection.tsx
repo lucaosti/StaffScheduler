@@ -9,6 +9,7 @@
  */
 
 import React, { useState } from 'react';
+import WebPushToggle from './WebPushToggle';
 
 interface PersonalSettings {
   theme: 'light' | 'dark' | 'auto';
@@ -180,6 +181,8 @@ const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => 
                   </div>
                 </div>
               </div>
+
+              <WebPushToggle />
 
               <div className="mt-4">
                 <button

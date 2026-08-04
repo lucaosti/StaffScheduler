@@ -608,6 +608,19 @@ export const notificationListQuery = z.object({
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
 
+/** The PushSubscription object the browser's `pushManager.subscribe()` returns, verbatim. */
+export const pushSubscribeBody = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1),
+  }),
+});
+
+export const pushUnsubscribeBody = z.object({
+  endpoint: z.string().url(),
+});
+
 export const employeeLoanListQuery = z.object({
   userId: positiveInt.optional(),
   toOrgUnitId: positiveInt.optional(),
