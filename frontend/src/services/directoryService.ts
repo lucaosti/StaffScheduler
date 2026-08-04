@@ -37,8 +37,28 @@ export interface DirectoryProfile {
   fields: DirectoryField[];
 }
 
+export interface VcardImportPreviewRow {
+  email: string;
+  name: string;
+  outcome: 'create' | 'skip';
+  reason?: string;
+}
+
+export interface VcardImportResult {
+  inserted: number;
+  skipped: Array<{ email: string; reason: string }>;
+}
+
 type FieldsBody = NonNullable<
   paths['/directory/users/{id}/fields']['put']['requestBody']
+>['content']['application/json'];
+
+type ImportPreviewBody = NonNullable<
+  paths['/directory/import-vcard/preview']['post']['requestBody']
+>['content']['application/json'];
+
+type ImportBody = NonNullable<
+  paths['/directory/import-vcard']['post']['requestBody']
 >['content']['application/json'];
 
 export const getMyProfile = (): Promise<ApiResponse<DirectoryProfile>> =>
@@ -67,3 +87,19 @@ export const removeProfileField = (id: number, key: string): Promise<ApiResponse
 
 /** Where the browser should go to download one person's card. */
 export const vcardUrl = (id: number): string => `/api/directory/users/${id}/vcard`;
+
+/** Dry run: what a bulk vCard import WOULD do, without writing anything. */
+export const previewVcardImport = (vcf: string): Promise<ApiResponse<{ rows: VcardImportPreviewRow[] }>> =>
+  apiClient.post<{ rows: VcardImportPreviewRow[] }, '/directory/import-vcard/preview'>(
+    '/directory/import-vcard/preview',
+    { vcf } satisfies ImportPreviewBody
+  );
+
+export const importVcard = (
+  vcf: string,
+  defaultPassword: string
+): Promise<ApiResponse<VcardImportResult>> =>
+  apiClient.post<VcardImportResult, '/directory/import-vcard'>(
+    '/directory/import-vcard',
+    { vcf, defaultPassword } satisfies ImportBody
+  );

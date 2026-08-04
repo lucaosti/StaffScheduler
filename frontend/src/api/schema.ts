@@ -2843,6 +2843,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/directory/import-vcard/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a bulk vCard import
+         * @description Admin only. Reports what each card in the file would do — create or skip, and why — without writing anything.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        vcf: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Per-card outcome preview. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/directory/import-vcard": {
         parameters: {
             query?: never;

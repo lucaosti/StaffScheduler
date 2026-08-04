@@ -233,4 +233,39 @@ export class UserDirectoryService {
     logger.info(`vCard import: inserted=${inserted} skipped=${skipped.length}`);
     return { inserted, skipped };
   }
+
+  /**
+   * Dry run for `importVcf`: reports what each card WOULD do without writing
+   * anything, so the caller sees a preview before committing to a bulk write
+   * whose only alternative feedback is a total count. Mirrors `importVcf`'s
+   * actual decision exactly — including that a duplicate later in the SAME
+   * file is treated the same as a duplicate already in the database, since
+   * that is what really happens once the first card of the pair commits.
+   */
+  async previewImportVcf(
+    vcfText: string
+  ): Promise<{ rows: Array<{ email: string; name: string; outcome: 'create' | 'skip'; reason?: string }> }> {
+    const cards = parseVcf(vcfText);
+    const emails = cards.map((c) => c.email).filter((e): e is string => Boolean(e));
+    const existing = new Set<string>();
+    if (emails.length > 0) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT email FROM users WHERE email IN (${emails.map(() => '?').join(',')})`,
+        emails
+      );
+      rows.forEach((r) => existing.add(r.email as string));
+    }
+
+    return {
+      rows: cards.map((card) => {
+        const name = card.fn || [card.givenName, card.familyName].filter(Boolean).join(' ') || '(unknown)';
+        if (!card.email) return { email: '', name, outcome: 'skip' as const, reason: 'missing email' };
+        if (existing.has(card.email)) {
+          return { email: card.email, name, outcome: 'skip' as const, reason: 'email already exists' };
+        }
+        existing.add(card.email);
+        return { email: card.email, name, outcome: 'create' as const };
+      }),
+    };
+  }
 }

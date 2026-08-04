@@ -42,6 +42,7 @@ const mounts: Mount[] = [
       { method: 'delete', url: '/users/1/fields/birthday' },
       { method: 'get', url: '/users/1/vcard' },
       { method: 'get', url: '/vcard.vcf?ids=1,2' },
+      { method: 'post', url: '/import-vcard/preview' },
       { method: 'post', url: '/import-vcard' },
     ],
   },
