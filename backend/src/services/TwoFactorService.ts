@@ -1,126 +1,112 @@
 /**
- * Two-factor authentication service (F15).
+ * Two-factor authentication service (F15) — method-registry dispatcher (#586, part of #331).
  *
- * Stores the TOTP secret on the `users` row. `enable` is gated by a fresh
- * code verification so users cannot lock themselves out. Recovery codes are
- * generated once at enablement and stored as a JSON array; presenting one
- * consumes it (the array shrinks).
+ * Delegates enrollment/verification to a `TwoFactorMethodProvider` keyed by
+ * `TwoFactorMethodType` (TOTP is the only one registered so far — WebAuthn
+ * #587, email #588, and SMS #589 add their own providers to the same map,
+ * with no change needed here or in the routes). Recovery codes stay here,
+ * centrally, one set per user regardless of how many methods are enrolled —
+ * they prove account ownership, not possession of a specific method.
+ *
+ * Every public method defaults `methodType` to `'totp'`, so this refactor is
+ * a no-op from every existing call site's perspective (routes/auth.ts,
+ * routes/twoFactor.ts) until a second provider is registered and a caller
+ * explicitly asks for it.
  *
  * @author Luca Ostinelli
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { ConflictError, NotFoundError, ValidationError } from '../errors';
+import { ConflictError } from '../errors';
 import bcrypt from 'bcrypt';
-import {
-  buildOtpauthUri,
-  generateRecoveryCodes,
-  generateSecret,
-  matchTotpCounter,
-  verifyTotp,
-} from '../utils/totp';
+import { generateRecoveryCodes } from '../utils/totp';
 import { config } from '../config';
 import { logger } from '../config/logger';
-
-interface TwoFactorSetupPayload {
-  secret: string;
-  otpauthUri: string;
-}
+import { TwoFactorMethodProvider, TwoFactorMethodType, TwoFactorSetupPayload } from './TwoFactorMethodProvider';
+import { TotpProvider } from './TotpProvider';
 
 interface TwoFactorEnablePayload {
+  /** Only non-empty the FIRST time any method is enabled for the user — a second method reuses the existing recovery codes. */
   recoveryCodes: string[];
 }
 
 export class TwoFactorService {
-  constructor(private pool: Pool) {}
+  private readonly providers: Partial<Record<TwoFactorMethodType, TwoFactorMethodProvider>>;
 
-  /**
-   * Step 1 of enablement: generate a fresh secret, persist it but leave
-   * `totp_enabled` false until the user proves they can produce codes.
-   */
-  async beginSetup(userId: number, accountLabel: string): Promise<TwoFactorSetupPayload> {
-    const secret = generateSecret();
-    await this.pool.execute(
-      `UPDATE users SET totp_secret = ?, totp_enabled = 0, totp_last_counter = NULL WHERE id = ?`,
-      [secret, userId]
-    );
-    const otpauthUri = buildOtpauthUri({
-      issuer: 'Staff Scheduler',
-      account: accountLabel,
-      secretBase32: secret,
-    });
-    logger.info(`2FA setup started for user ${userId}`);
-    return { secret, otpauthUri };
+  constructor(private pool: Pool) {
+    // Partial: the other three method types don't have providers registered
+    // yet (#587/#588/#589) — resolveProvider throws a clear error for them
+    // rather than a Record forcing a placeholder entry into existence.
+    this.providers = { totp: new TotpProvider(pool) };
+  }
+
+  private resolveProvider(methodType: TwoFactorMethodType): TwoFactorMethodProvider {
+    const provider = this.providers[methodType];
+    if (!provider) throw new ConflictError(`Two-factor method '${methodType}' is not available`);
+    return provider;
+  }
+
+  async beginSetup(userId: number, accountLabel: string, methodType: TwoFactorMethodType = 'totp'): Promise<TwoFactorSetupPayload> {
+    return this.resolveProvider(methodType).beginSetup(userId, accountLabel);
   }
 
   /**
-   * Step 2 of enablement: verify a code, then mark 2FA enabled and emit
-   * recovery codes. Hashes the codes before storage so a DB leak cannot
-   * be used to bypass 2FA without further work.
+   * Step 2 of enrollment. Recovery codes are generated once — the first time
+   * ANY method is enabled for the user — and reused across further methods,
+   * since they authenticate the account, not the method.
    */
-  async confirmEnable(userId: number, code: string): Promise<TwoFactorEnablePayload> {
+  async confirmEnable(userId: number, code: string, methodType: TwoFactorMethodType = 'totp'): Promise<TwoFactorEnablePayload> {
+    await this.resolveProvider(methodType).confirmEnable(userId, code);
+
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT totp_secret, totp_enabled FROM users WHERE id = ? LIMIT 1`,
+      `SELECT two_factor_recovery_codes FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
-    if (rows.length === 0) throw new NotFoundError('User not found');
-    const secret = rows[0].totp_secret as string | null;
-    if (!secret) throw new ConflictError('2FA setup has not been started');
-    if (rows[0].totp_enabled) throw new ConflictError('2FA is already enabled');
-    if (!verifyTotp(secret, code)) throw new ValidationError('Invalid verification code');
+    if (rows.length > 0 && rows[0].two_factor_recovery_codes) {
+      logger.info(`2FA method '${methodType}' enabled for user ${userId} (existing recovery codes kept)`);
+      return { recoveryCodes: [] };
+    }
 
     const codes = generateRecoveryCodes(10);
-    const hashed = await Promise.all(
-      codes.map((c) => bcrypt.hash(c, config.security.bcryptRounds))
-    );
+    const hashed = await Promise.all(codes.map((c) => bcrypt.hash(c, config.security.bcryptRounds)));
     await this.pool.execute(
-      `UPDATE users SET totp_enabled = 1, totp_recovery_codes = ? WHERE id = ?`,
+      `UPDATE users SET two_factor_recovery_codes = ? WHERE id = ?`,
       [JSON.stringify(hashed), userId]
     );
-    logger.info(`2FA enabled for user ${userId}`);
+    logger.info(`2FA method '${methodType}' enabled for user ${userId} (recovery codes issued)`);
     return { recoveryCodes: codes };
   }
 
-  async disable(userId: number): Promise<void> {
-    await this.pool.execute(
-      `UPDATE users SET totp_enabled = 0, totp_secret = NULL, totp_recovery_codes = NULL, totp_last_counter = NULL WHERE id = ?`,
-      [userId]
-    );
-    logger.info(`2FA disabled for user ${userId}`);
+  /**
+   * Removes one method's enrollment. When that was the user's last enabled
+   * method, recovery codes are cleared too — they authenticate "you have a
+   * working second factor," which is no longer true once none remain.
+   */
+  async disable(userId: number, methodType: TwoFactorMethodType = 'totp'): Promise<void> {
+    await this.resolveProvider(methodType).disable(userId);
+
+    const stillEnabled = await this.hasAnyEnabled(userId);
+    if (!stillEnabled) {
+      await this.pool.execute(`UPDATE users SET two_factor_recovery_codes = NULL WHERE id = ?`, [userId]);
+    }
+    logger.info(`2FA method '${methodType}' disabled for user ${userId}`);
   }
 
-  /**
-   * Returns true iff `code` is a current TOTP for the user AND has not been
-   * used before. The matched time-step counter is persisted with a
-   * compare-and-set guard, so a code accepted once cannot be replayed within
-   * its validity window — not even by a concurrent login racing this one.
-   */
-  async verifyCode(userId: number, code: string): Promise<boolean> {
+  async verifyCode(userId: number, code: string, methodType: TwoFactorMethodType = 'totp'): Promise<boolean> {
+    return this.resolveProvider(methodType).verifyCode(userId, code);
+  }
+
+  async isEnabled(userId: number, methodType: TwoFactorMethodType = 'totp'): Promise<boolean> {
+    return this.resolveProvider(methodType).isEnabled(userId);
+  }
+
+  /** True iff the user has at least one enrolled, enabled method of any type. */
+  async hasAnyEnabled(userId: number): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT totp_secret, totp_enabled, totp_last_counter FROM users WHERE id = ? LIMIT 1`,
+      `SELECT 1 FROM two_factor_methods WHERE user_id = ? AND enabled = 1 LIMIT 1`,
       [userId]
     );
-    if (rows.length === 0) return false;
-    const secret = rows[0].totp_secret as string | null;
-    if (!secret || !rows[0].totp_enabled) return false;
-
-    const counter = matchTotpCounter(secret, code);
-    if (counter === null) return false;
-
-    const lastCounter = rows[0].totp_last_counter as number | null;
-    if (lastCounter !== null && counter <= Number(lastCounter)) {
-      logger.warn(`Replayed TOTP code rejected for user ${userId}`);
-      return false;
-    }
-
-    // Compare-and-set: only wins if no concurrent login recorded this (or a
-    // later) step first. affectedRows = 0 means we lost the race → replay.
-    const [result] = await this.pool.execute<ResultSetHeader>(
-      `UPDATE users SET totp_last_counter = ?
-        WHERE id = ? AND (totp_last_counter IS NULL OR totp_last_counter < ?)`,
-      [counter, userId, counter]
-    );
-    return result.affectedRows > 0;
+    return rows.length > 0;
   }
 
   /**
@@ -129,11 +115,11 @@ export class TwoFactorService {
    */
   async consumeRecoveryCode(userId: number, code: string): Promise<boolean> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT totp_recovery_codes FROM users WHERE id = ? LIMIT 1`,
+      `SELECT two_factor_recovery_codes FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
     if (rows.length === 0) return false;
-    const stored = rows[0].totp_recovery_codes as string | null;
+    const stored = rows[0].two_factor_recovery_codes as string | null;
     if (!stored) return false;
     let codes: string[];
     try {
@@ -150,21 +136,13 @@ export class TwoFactorService {
         // affectedRows is 0 and this attempt is rejected instead of silently
         // resurrecting the concurrently-consumed code.
         const [result] = await this.pool.execute<ResultSetHeader>(
-          `UPDATE users SET totp_recovery_codes = ?
-            WHERE id = ? AND totp_recovery_codes = ?`,
+          `UPDATE users SET two_factor_recovery_codes = ?
+            WHERE id = ? AND two_factor_recovery_codes = ?`,
           [JSON.stringify(remaining), userId, stored]
         );
         return result.affectedRows > 0;
       }
     }
     return false;
-  }
-
-  async isEnabled(userId: number): Promise<boolean> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT totp_enabled FROM users WHERE id = ? LIMIT 1`,
-      [userId]
-    );
-    return rows.length > 0 && Boolean(rows[0].totp_enabled);
   }
 }
