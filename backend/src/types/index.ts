@@ -432,7 +432,7 @@ export interface ChangeRequestFilters {
 export type PendingApprovalStatus = 'pending' | 'approved' | 'rejected' | 'escalated' | 'skipped';
 
 /** Which entity table a `pending_approvals` row is deciding on. Exactly one of the four *Id fields is set. */
-export type PendingApprovalEntityType = 'change_request' | 'time_off_request' | 'employee_loan' | 'shift_swap_request';
+export type PendingApprovalEntityType = 'change_request' | 'time_off_request' | 'employee_loan' | 'shift_swap_request' | 'policy_exception';
 
 export interface PendingApproval {
   id: number;
@@ -440,6 +440,7 @@ export interface PendingApproval {
   timeOffRequestId: number | null;
   employeeLoanId: number | null;
   shiftSwapRequestId: number | null;
+  policyExceptionId: number | null;
   workflowId: number;
   stepId: number;
   stepOrder: number;

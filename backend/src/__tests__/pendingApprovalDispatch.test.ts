@@ -3,8 +3,8 @@
  *
  * pendingApprovals.route.test.ts already exercises this indirectly through
  * the HTTP layer, but only for changeRequest/timeOff/shiftSwap. These tests
- * cover it directly, including the previously-untested employeeLoan branch
- * and the "no linked entity" guard.
+ * cover it directly, including the previously-untested employeeLoan and
+ * policyException branches and the "no linked entity" guard.
  */
 
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
@@ -13,12 +13,14 @@ import { ChangeRequestService } from '../services/ChangeRequestService';
 import { TimeOffService } from '../services/TimeOffService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { PolicyExceptionService } from '../services/PolicyExceptionService';
 
 jest.mock('../services/ApprovalEngineService');
 jest.mock('../services/ChangeRequestService');
 jest.mock('../services/TimeOffService');
 jest.mock('../services/EmployeeLoanService');
 jest.mock('../services/ShiftSwapService');
+jest.mock('../services/PolicyExceptionService');
 
 const pool = {} as never;
 
@@ -28,6 +30,7 @@ const basePa = {
   timeOffRequestId: null,
   employeeLoanId: null,
   shiftSwapRequestId: null,
+  policyExceptionId: null,
 };
 
 afterEach(() => jest.clearAllMocks());
@@ -125,5 +128,27 @@ describe('dispatchPendingApprovalDecision', () => {
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'rejected', null);
     expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(2, 9, null, null);
+  });
+
+  it('dispatches approved to PolicyExceptionService.approve', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      ...basePa,
+      policyExceptionId: 6,
+    });
+    (PolicyExceptionService.prototype.approve as jest.Mock).mockResolvedValueOnce({ id: 6 });
+
+    await dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null);
+    expect(PolicyExceptionService.prototype.approve).toHaveBeenCalledWith(6, 9, null, null);
+  });
+
+  it('dispatches rejected to PolicyExceptionService.reject', async () => {
+    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+      ...basePa,
+      policyExceptionId: 6,
+    });
+    (PolicyExceptionService.prototype.reject as jest.Mock).mockResolvedValueOnce({ id: 6 });
+
+    await dispatchPendingApprovalDecision(pool, 1, 9, 'rejected', null);
+    expect(PolicyExceptionService.prototype.reject).toHaveBeenCalledWith(6, 9, null, null);
   });
 });

@@ -264,6 +264,39 @@ describe('PolicyService extended', () => {
 
 /* ---------------- PolicyExceptionService extended ---------------- */
 
+// Same instance-boundary spying as EmployeeLoanService's "workflow
+// attachment" and "decision arms" suites: ApprovalEngineService has its own
+// suite, so these tests pin only PolicyExceptionService's own orchestration
+// decisions rather than the engine's internal SQL shape.
+const policyExceptionInternalsOf = (service: PolicyExceptionService) =>
+  service as unknown as {
+    engine: {
+      getWorkflowByChangeType: (t: string) => unknown;
+      canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+      createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
+      decidePendingApproval: (...a: unknown[]) => unknown;
+    };
+    approvals: { resolve: (t: string, c: unknown) => unknown };
+  };
+
+const policyExceptionWorkflow = {
+  id: 11,
+  changeType: 'Policy.Exception',
+  requireAll: false,
+  description: null,
+  steps: [{ id: 21, workflowId: 11, stepOrder: 1, approverScope: 'policy_owner' }],
+};
+
+const spyPolicyExceptionCreation = (service: PolicyExceptionService) => {
+  const internals = policyExceptionInternalsOf(service);
+  jest
+    .spyOn(internals.approvals, 'resolve')
+    .mockResolvedValue({ autoApprove: false, approverUserId: 8 } as never);
+  jest.spyOn(internals.engine, 'getWorkflowByChangeType').mockResolvedValue(policyExceptionWorkflow as never);
+  jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+  return internals;
+};
+
 describe('PolicyExceptionService extended', () => {
   it('create rejects when policy missing', async () => {
     const { pool, execute } = makePool();
@@ -290,31 +323,77 @@ describe('PolicyExceptionService extended', () => {
     expect(execute.mock.calls[0][0]).toMatch(/status/);
   });
 
-  it('create with non-actor approver yields pending and notifies', async () => {
+  it('list with no filters omits the WHERE clause', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    const svc = new PolicyExceptionService(pool);
+    await svc.list();
+    expect(execute.mock.calls[0][0]).not.toMatch(/WHERE/);
+  });
+
+  it('throws Failed to create exception request when getById returns null after insert (auto-approve path)', async () => {
+    const { pool, execute } = makePool();
+    // matrixRow()/policyRow() defaults resolve auto-approve (actor 1 === policy owner 1):
+    // the workflow lookup is skipped entirely, matching the pre-#603 query shape.
+    execute
+      .mockResolvedValueOnce([[policyRow()], null] as Tuple) // policies.getById
+      .mockResolvedValueOnce([[matrixRow()], null] as Tuple) // approvals.resolve
+      .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
+      .mockResolvedValueOnce([[], null] as Tuple); // getById → null
+    const svc = new PolicyExceptionService(pool);
+    await expect(
+      svc.create({ policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 1 })
+    ).rejects.toThrow('Failed to create exception request');
+  });
+
+  it('notifies the resolved approver on a pending create without blocking on it', async () => {
+    // notifyAsync is fire-and-forget (see NotificationService.notifyAsync) —
+    // a failure there logs and never propagates, so create() itself must
+    // succeed regardless of what the notification insert does.
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
-      .mockResolvedValueOnce([[matrixRow({ auto_approve_for_owner: 0 })], null] as Tuple) // matrix
+      .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
+      .mockResolvedValueOnce([[exceptionRow({ id: 9, status: 'pending' })], null] as Tuple) // getById
+      .mockRejectedValueOnce(new Error('notify-fail')) // notification insert fails
+      .mockResolvedValue([[], null] as Tuple); // createPendingApprovalForStep's own SQL
+    const svc = new PolicyExceptionService(pool);
+    const internals = spyPolicyExceptionCreation(svc);
+    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
+
+    const result = await svc.create({
+      policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 7,
+    });
+    expect(result.status).toBe('pending');
+  });
+
+  it('refuses upfront when the first step cannot resolve an approver', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple); // policy
+    const svc = new PolicyExceptionService(pool);
+    const internals = spyPolicyExceptionCreation(svc);
+    (internals.engine.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);
+
+    await expect(
+      svc.create({ policyId: 1, targetType: 'shift_assignment', targetId: 100, requestedByUserId: 7 })
+    ).rejects.toThrow(/policy has no owner who can decide it/);
+  });
+
+  it('create with non-actor approver yields pending, attaches the first step, and notifies', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
       .mockResolvedValueOnce([{ insertId: 5 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[exceptionRow({ id: 5, status: 'pending' })], null] as Tuple) // SELECT created
-      .mockResolvedValueOnce([{ insertId: 99 }, null] as Tuple) // notification INSERT
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 99,
-            user_id: 8,
-            type: 'policy.exception.requested',
-            title: 't',
-            body: null,
-            link: null,
-            is_read: 0,
-            created_at: 'x',
-            read_at: null,
-          },
-        ],
-        null,
-      ] as Tuple);
+      // fanOutNotifications-equivalent notifyAsync insert + createPendingApprovalForStep
+      // fall through to a permissive default.
+      .mockResolvedValue([[], null] as Tuple);
     const svc = new PolicyExceptionService(pool);
+    const internals = spyPolicyExceptionCreation(svc);
+    const createPa = jest
+      .spyOn(internals.engine, 'createPendingApprovalForStep')
+      .mockResolvedValue({ id: 501 } as never);
+
     const created = await svc.create({
       policyId: 1,
       targetType: 'shift_assignment',
@@ -322,16 +401,138 @@ describe('PolicyExceptionService extended', () => {
       requestedByUserId: 7,
     });
     expect(created.status).toBe('pending');
+    expect(createPa).toHaveBeenCalledWith(
+      11,
+      policyExceptionWorkflow.steps[0],
+      { policyExceptionId: 5 },
+      { actorUserId: 7, policyOwnerId: 8 }
+    );
   });
 
-  it('approve enforces resolved approver', async () => {
+  it('deletes the stranded request when approver resolution changes mid-flight', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([{ insertId: 5 }, null] as Tuple)
+      .mockResolvedValueOnce([[exceptionRow({ id: 5, status: 'pending' })], null] as Tuple)
+      .mockResolvedValue([[], null] as Tuple); // also serves the cleanup DELETE
+    const svc = new PolicyExceptionService(pool);
+    const internals = spyPolicyExceptionCreation(svc);
+    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
+
+    await expect(
+      svc.create({ policyId: 1, targetType: 'shift_assignment', targetId: 100, requestedByUserId: 7 })
+    ).rejects.toThrow(/approver resolution changed during creation/);
+
+    const deleteCall = execute.mock.calls.find((c) => String(c[0]).includes('DELETE FROM policy_exception_requests'));
+    expect(deleteCall?.[1]).toEqual([5]);
+  });
+
+  const spyDecide = (service: PolicyExceptionService, result: unknown) =>
+    jest
+      .spyOn(policyExceptionInternalsOf(service).engine, 'decidePendingApproval')
+      .mockImplementation(async (...args: unknown[]) => {
+        const ctx = await (args[4] as () => Promise<{ policyOwnerId: number }>)();
+        expect(ctx.policyOwnerId).toBe(8); // decisions are scoped to the policy's owner
+        return result as never;
+      });
+
+  it('approve throws Exception request not found when getById returns null', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    await expect(new PolicyExceptionService(pool).approve(1, 8)).rejects.toThrow('Exception request not found');
+  });
+
+  it('approve throws Policy not found when policies.getById returns null', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple) // getById existing
+      .mockResolvedValueOnce([[], null] as Tuple); // policies.getById → null
+    await expect(new PolicyExceptionService(pool).approve(1, 8)).rejects.toThrow('Policy not found');
+  });
+
+  it('approve refuses when no pending approval row exists', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple) // getById
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple); // matrix -> approver=8
+      .mockResolvedValueOnce([[], null] as Tuple); // findPendingApprovalId
+
+    await expect(new PolicyExceptionService(pool).approve(1, 99)).rejects.toThrow(
+      'No pending approval found for this exception request'
+    );
+  });
+
+  it('approve throws Failed to refresh exception when getById returns null after the final-step UPDATE', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple) // existing
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple); // refresh → null
     const svc = new PolicyExceptionService(pool);
-    await expect(svc.approve(1, 99)).rejects.toThrow(/Forbidden/);
+    spyDecide(svc, { isFinalStep: true });
+
+    await expect(svc.approve(1, 8)).rejects.toThrow('Failed to refresh exception');
+  });
+
+  it('approve flow with no notes exercises the fallback defaults', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'approved' })], null] as Tuple)
+      .mockResolvedValue([[], null] as Tuple);
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, { isFinalStep: true });
+
+    const r = await svc.approve(1, 8);
+    expect(r.status).toBe('approved');
+  });
+
+  it('approve returns after a non-final decision without touching the request row', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple) // getById
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple); // refresh
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, { isFinalStep: false });
+
+    const result = await svc.approve(1, 8);
+    expect(result.status).toBe('pending');
+    const updates = execute.mock.calls.filter((c) => String(c[0]).includes('UPDATE policy_exception_requests'));
+    expect(updates).toHaveLength(0);
+  });
+
+  it('approve throws when the refreshed request cannot be re-read after a non-final decision', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple); // refresh → null
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, { isFinalStep: false });
+
+    await expect(svc.approve(1, 8)).rejects.toThrow('Failed to refresh exception');
+  });
+
+  it('approve diagnoses a concurrent decision on the final step', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple)
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple); // guarded UPDATE misses
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, { isFinalStep: true });
+
+    await expect(svc.approve(1, 8)).rejects.toThrow(/Cannot approve exception in status 'pending'/);
   });
 
   it('approve flow updates and notifies requester', async () => {
@@ -339,40 +540,49 @@ describe('PolicyExceptionService extended', () => {
     execute
       .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple) // existing
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple) // policy
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple) // matrix -> approver=8
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE
       .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'approved' })], null] as Tuple) // refresh
-      .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // notification insert
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 1,
-            user_id: 7,
-            type: 'policy.exception.approved',
-            title: 't',
-            body: null,
-            link: null,
-            is_read: 0,
-            created_at: 'x',
-            read_at: null,
-          },
-        ],
-        null,
-      ] as Tuple);
+      .mockResolvedValue([[], null] as Tuple); // audit + notification fall through
     const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, { isFinalStep: true });
+
     const r = await svc.approve(1, 8, 'ok');
     expect(r.status).toBe('approved');
   });
 
   it('approve raises when not pending', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'approved' })], null] as Tuple)
-      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple);
+    execute.mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'approved' })], null] as Tuple);
     const svc = new PolicyExceptionService(pool);
     await expect(svc.approve(1, 8)).rejects.toThrow(/Cannot approve/);
+  });
+
+  it('reject throws Exception request not found when getById returns null', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    await expect(new PolicyExceptionService(pool).reject(1, 8)).rejects.toThrow('Exception request not found');
+  });
+
+  it('reject throws Policy not found when policies.getById returns null', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+    await expect(new PolicyExceptionService(pool).reject(1, 8)).rejects.toThrow('Policy not found');
+  });
+
+  it('reject diagnoses a concurrent decision', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple)
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple); // guarded UPDATE misses
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, undefined);
+
+    await expect(svc.reject(1, 8)).rejects.toThrow(/Cannot reject exception in status 'pending'/);
   });
 
   it('reject flow updates and notifies', async () => {
@@ -380,48 +590,50 @@ describe('PolicyExceptionService extended', () => {
     execute
       .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
       .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'rejected' })], null] as Tuple)
-      .mockResolvedValueOnce([{ insertId: 2 }, null] as Tuple)
-      .mockResolvedValueOnce([
-        [
-          {
-            id: 2,
-            user_id: 7,
-            type: 'policy.exception.rejected',
-            title: 't',
-            body: null,
-            link: null,
-            is_read: 0,
-            created_at: 'x',
-            read_at: null,
-          },
-        ],
-        null,
-      ] as Tuple);
+      .mockResolvedValue([[], null] as Tuple);
     const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, undefined);
+
     const r = await svc.reject(1, 8, 'no');
     expect(r.status).toBe('rejected');
   });
 
-  it('reject Forbidden when actor != approver', async () => {
+  it('reject flow with no notes exercises the fallback defaults', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple);
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'rejected' })], null] as Tuple)
+      .mockResolvedValue([[], null] as Tuple);
     const svc = new PolicyExceptionService(pool);
-    await expect(svc.reject(1, 99)).rejects.toThrow(/Forbidden/);
+    spyDecide(svc, undefined);
+
+    const r = await svc.reject(1, 8);
+    expect(r.status).toBe('rejected');
+  });
+
+  it('reject throws Failed to refresh exception when getById returns null after the reject UPDATE', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[exceptionRow({ id: 1 })], null] as Tuple)
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
+      .mockResolvedValueOnce([[{ id: 501 }], null] as Tuple) // findPendingApprovalId
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE
+      .mockResolvedValueOnce([[], null] as Tuple); // refresh → null
+    const svc = new PolicyExceptionService(pool);
+    spyDecide(svc, undefined);
+
+    await expect(svc.reject(1, 8)).rejects.toThrow('Failed to refresh exception');
   });
 
   it('reject raises when not pending', async () => {
     const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'rejected' })], null] as Tuple)
-      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple)
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple)
-      .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple);
+    execute.mockResolvedValueOnce([[exceptionRow({ id: 1, status: 'rejected' })], null] as Tuple);
     const svc = new PolicyExceptionService(pool);
     await expect(svc.reject(1, 8)).rejects.toThrow(/Cannot reject/);
   });

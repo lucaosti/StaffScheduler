@@ -49,6 +49,7 @@ export interface PendingApprovalEntityRef {
   timeOffRequestId?: number;
   employeeLoanId?: number;
   shiftSwapRequestId?: number;
+  policyExceptionId?: number;
 }
 
 export interface DecidePendingApprovalResult {
@@ -66,6 +67,7 @@ const mapPendingApprovalRow = (r: any): PendingApproval => ({
   timeOffRequestId: r.time_off_request_id ?? null,
   employeeLoanId: r.employee_loan_id ?? null,
   shiftSwapRequestId: r.shift_swap_request_id ?? null,
+  policyExceptionId: r.policy_exception_id ?? null,
   workflowId: r.workflow_id,
   stepId: r.step_id,
   stepOrder: r.step_order,
@@ -381,14 +383,15 @@ export class ApprovalEngineService {
 
     const [result] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO pending_approvals
-         (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id,
+         (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id, policy_exception_id,
           workflow_id, step_id, step_order, assigned_to_user_id, assigned_to_org_unit_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
       [
         entityRef.changeRequestId ?? null,
         entityRef.timeOffRequestId ?? null,
         entityRef.employeeLoanId ?? null,
         entityRef.shiftSwapRequestId ?? null,
+        entityRef.policyExceptionId ?? null,
         workflowId,
         step.id,
         step.stepOrder,
@@ -429,7 +432,9 @@ export class ApprovalEngineService {
           ? ['employee_loans', 'user_id', pa.employeeLoanId]
           : pa.shiftSwapRequestId !== null
             ? ['shift_swap_requests', 'requester_user_id', pa.shiftSwapRequestId]
-            : ['change_requests', 'proposer_user_id', pa.changeRequestId];
+            : pa.policyExceptionId !== null
+              ? ['policy_exception_requests', 'requested_by_user_id', pa.policyExceptionId]
+              : ['change_requests', 'proposer_user_id', pa.changeRequestId];
     if (id === null) return null;
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT ${column} AS proposer_user_id FROM ${table} WHERE id = ? LIMIT 1`,
@@ -463,6 +468,7 @@ export class ApprovalEngineService {
     if (pa.timeOffRequestId !== null) return { timeOffRequestId: pa.timeOffRequestId };
     if (pa.employeeLoanId !== null) return { employeeLoanId: pa.employeeLoanId };
     if (pa.shiftSwapRequestId !== null) return { shiftSwapRequestId: pa.shiftSwapRequestId };
+    if (pa.policyExceptionId !== null) return { policyExceptionId: pa.policyExceptionId };
     throw new ConflictError('Pending approval has no linked entity');
   }
 
@@ -756,7 +762,7 @@ export class ApprovalEngineService {
     // change requests.
     const [overdueRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT pa.id, pa.change_request_id, pa.time_off_request_id, pa.employee_loan_id,
-              pa.shift_swap_request_id, pa.workflow_id, pa.step_id, pa.step_order,
+              pa.shift_swap_request_id, pa.policy_exception_id, pa.workflow_id, pa.step_id, pa.step_order,
               pa.assigned_to_user_id,
               ast.escalate_after_hours,
               u.id AS manager_id
@@ -787,7 +793,8 @@ export class ApprovalEngineService {
       if (row.change_request_id !== null) return { changeRequestId: row.change_request_id };
       if (row.time_off_request_id !== null) return { timeOffRequestId: row.time_off_request_id };
       if (row.employee_loan_id !== null) return { employeeLoanId: row.employee_loan_id };
-      return { shiftSwapRequestId: row.shift_swap_request_id };
+      if (row.shift_swap_request_id !== null) return { shiftSwapRequestId: row.shift_swap_request_id };
+      return { policyExceptionId: row.policy_exception_id };
     };
 
     const items: Array<{ pendingApprovalId: number; entityRef: PendingApprovalEntityRef; escalatedToUserId: number | null }> =
@@ -816,7 +823,7 @@ export class ApprovalEngineService {
     // every row shares the same column list regardless of entity type.
     const escalatable = rows.filter((r) => (r.manager_id as number | null) !== null);
     if (escalatable.length > 0) {
-      const insertPlaceholders = escalatable.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, \'pending\')').join(', ');
+      const insertPlaceholders = escalatable.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, \'pending\')').join(', ');
       const insertValues = escalatable.flatMap((r) => {
         const ref = entityRefOf(r);
         return [
@@ -824,6 +831,7 @@ export class ApprovalEngineService {
           ref.timeOffRequestId ?? null,
           ref.employeeLoanId ?? null,
           ref.shiftSwapRequestId ?? null,
+          ref.policyExceptionId ?? null,
           r.workflow_id,
           r.step_id,
           r.step_order,
@@ -832,7 +840,7 @@ export class ApprovalEngineService {
       });
       await this.pool.execute(
         `INSERT INTO pending_approvals
-           (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id,
+           (change_request_id, time_off_request_id, employee_loan_id, shift_swap_request_id, policy_exception_id,
             workflow_id, step_id, step_order, assigned_to_user_id, status)
          VALUES ${insertPlaceholders}`,
         insertValues

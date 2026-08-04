@@ -1,10 +1,16 @@
 /**
  * Policy exception requests (deroghe).
  *
- * A user requests a per-target derogation to a specific policy. The approver
- * is resolved through the approval matrix (default: the policy owner). When
- * the actor is the resolved approver and auto-approve is on, the exception
- * is created already approved.
+ * A user requests a per-target derogation to a specific policy. The legacy
+ * `approval_matrix` (`ApprovalMatrixService`) is still consulted at
+ * *creation* time only, to decide whether the request auto-approves
+ * immediately (actor is already the resolved policy owner) — the same
+ * narrow use `EmployeeLoanService` makes of it. Otherwise the request is
+ * routed through the modern `approval_workflows`/`pending_approvals` engine
+ * (see `ApprovalEngineService`), exactly like time-off, loans, and shift-swap
+ * decisions: this was the one request type that used to route exclusively
+ * through the legacy matrix, with none of the ordered multi-step routing,
+ * structure delegation, or responsibility rules the other four get (#603).
  *
  * Scheduling code uses `hasApproved()` to know whether a policy violation
  * has been waived for the target.
@@ -16,6 +22,7 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { ApprovalMatrixService } from './ApprovalMatrixService';
+import { ApprovalEngineService } from './ApprovalEngineService';
 import { NotificationService } from './NotificationService';
 import { PolicyService } from './PolicyService';
 import { AuditLogService } from './AuditLogService';
@@ -70,17 +77,25 @@ const mapRow = (row: RowDataPacket): PolicyExceptionRequest => ({
 
 export class PolicyExceptionService {
   private approvals: ApprovalMatrixService;
+  private engine: ApprovalEngineService;
   private notifications: NotificationService;
   private policies: PolicyService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
     this.approvals = new ApprovalMatrixService(pool);
+    this.engine = new ApprovalEngineService(pool);
     this.notifications = new NotificationService(pool);
     this.policies = new PolicyService(pool);
     this.audit = new AuditLogService(pool);
   }
 
+  /**
+   * Creates an exception request. If the actor is the resolved policy owner
+   * and the matrix allows auto-approval, the request is created already
+   * approved. Otherwise it is attached to the `Policy.Exception` workflow's
+   * first step.
+   */
   async create(input: CreateExceptionInput): Promise<PolicyExceptionRequest> {
     const policy = await this.policies.getById(input.policyId);
     if (!policy) throw new NotFoundError('Policy not found');
@@ -91,6 +106,21 @@ export class PolicyExceptionService {
     });
     const status: ExceptionStatus = resolved.autoApprove ? 'approved' : 'pending';
     const reviewerId = resolved.autoApprove ? input.requestedByUserId : null;
+
+    // Resolve the approval gate BEFORE inserting the request — same
+    // reasoning as EmployeeLoanService.create: a pending request whose
+    // configured workflow cannot attach an approver (e.g. the policy has no
+    // owner who can decide it) would otherwise be inserted with no
+    // pending_approvals row, permanently undecidable by anyone.
+    const workflow = resolved.autoApprove ? null : await this.engine.getWorkflowByChangeType('Policy.Exception');
+    const workflowCtx = { actorUserId: input.requestedByUserId, policyOwnerId: policy.imposedByUserId };
+    if (workflow && workflow.steps.length > 0) {
+      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+        throw new ConflictError(
+          'No approver could be resolved for this exception request — the policy has no owner who can decide it. Ask an administrator to fix the assignment.'
+        );
+      }
+    }
 
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO policy_exception_requests
@@ -123,18 +153,35 @@ export class PolicyExceptionService {
       justification: input.reason ?? null,
       after: { id: created.id, status, policyId: input.policyId },
     });
+    // notifyAsync is fire-and-forget and already logs its own failures (see
+    // NotificationService.notifyAsync) — it never throws synchronously, so a
+    // try/catch here could never fire. Removed rather than kept as
+    // reassuring-looking dead code.
     if (status === 'pending' && resolved.approverUserId) {
-      try {
-        this.notifications.notifyAsync({
-          userId: resolved.approverUserId,
-          type: 'policy.exception.requested',
-          title: 'Policy exception request',
-          body: `Exception requested for policy ${policy.policyKey} on ${input.targetType}#${input.targetId}.`,
-        });
-      } catch (err) {
-        logger.warn(`Failed to notify approver: ${(err as Error).message}`);
+      this.notifications.notifyAsync({
+        userId: resolved.approverUserId,
+        type: 'policy.exception.requested',
+        title: 'Policy exception request',
+        body: `Exception requested for policy ${policy.policyKey} on ${input.targetType}#${input.targetId}.`,
+      });
+    }
+
+    if (workflow && workflow.steps.length > 0) {
+      const pa = await this.engine.createPendingApprovalForStep(
+        workflow.id,
+        workflow.steps[0],
+        { policyExceptionId: created.id },
+        workflowCtx
+      );
+      if (!pa) {
+        // The pre-insert check passed but resolution changed underneath us
+        // (e.g. the policy's owner was concurrently changed). Never leave a
+        // stranded, undecidable request behind.
+        await this.pool.execute(`DELETE FROM policy_exception_requests WHERE id = ?`, [created.id]);
+        throw new ConflictError('No approver could be resolved for this exception request — approver resolution changed during creation. Please retry.');
       }
     }
+
     return created;
   }
 
@@ -187,17 +234,41 @@ export class PolicyExceptionService {
     return ((rows[0] as { c: number }).c) > 0;
   }
 
-  async approve(id: number, reviewerId: number, notes: string | null = null): Promise<PolicyExceptionRequest> {
+  private async findPendingApprovalId(policyExceptionId: number): Promise<number | null> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT id FROM pending_approvals WHERE policy_exception_id = ? AND status = 'pending' ORDER BY id DESC LIMIT 1`,
+      [policyExceptionId]
+    );
+    return rows.length === 0 ? null : ((rows[0] as any).id as number);
+  }
+
+  async approve(
+    id: number,
+    reviewerId: number,
+    notes: string | null = null,
+    organizationName: string | null = null
+  ): Promise<PolicyExceptionRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Exception request not found');
+    if (existing.status !== 'pending') {
+      throw new ConflictError(`Cannot approve exception in status '${existing.status}'`);
+    }
     const policy = await this.policies.getById(existing.policyId);
     if (!policy) throw new NotFoundError('Policy not found');
-    const resolved = await this.approvals.resolve('Policy.Exception', {
-      policyOwnerId: policy.imposedByUserId,
-      actorUserId: reviewerId,
-    });
-    if (resolved.approverUserId !== reviewerId) {
-      throw new ForbiddenError('Forbidden');
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this exception request');
+    const decision = await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'approved',
+      notes,
+      async () => ({ actorUserId: reviewerId, policyOwnerId: policy.imposedByUserId }),
+      organizationName
+    );
+    if (!decision.isFinalStep) {
+      const refreshed = await this.getById(id);
+      if (!refreshed) throw new Error('Failed to refresh exception');
+      return refreshed;
     }
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE policy_exception_requests
@@ -228,18 +299,29 @@ export class PolicyExceptionService {
     return refreshed;
   }
 
-  async reject(id: number, reviewerId: number, notes: string | null = null): Promise<PolicyExceptionRequest> {
+  async reject(
+    id: number,
+    reviewerId: number,
+    notes: string | null = null,
+    organizationName: string | null = null
+  ): Promise<PolicyExceptionRequest> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Exception request not found');
+    if (existing.status !== 'pending') {
+      throw new ConflictError(`Cannot reject exception in status '${existing.status}'`);
+    }
     const policy = await this.policies.getById(existing.policyId);
     if (!policy) throw new NotFoundError('Policy not found');
-    const resolved = await this.approvals.resolve('Policy.Exception', {
-      policyOwnerId: policy.imposedByUserId,
-      actorUserId: reviewerId,
-    });
-    if (resolved.approverUserId !== reviewerId) {
-      throw new ForbiddenError('Forbidden');
-    }
+    const pendingApprovalId = await this.findPendingApprovalId(id);
+    if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this exception request');
+    await this.engine.decidePendingApproval(
+      pendingApprovalId,
+      reviewerId,
+      'rejected',
+      notes,
+      async () => ({ actorUserId: reviewerId, policyOwnerId: policy.imposedByUserId }),
+      organizationName
+    );
     const [res] = await this.pool.execute<ResultSetHeader>(
       `UPDATE policy_exception_requests
           SET status = 'rejected', reviewer_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, review_notes = ?
