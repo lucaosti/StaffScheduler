@@ -46,7 +46,6 @@ export class DepartmentService {
     try {
       await connection.beginTransaction();
 
-      // Check if department name already exists
       const [existing] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM departments WHERE name = ? LIMIT 1',
         [deptData.name]
@@ -56,7 +55,6 @@ export class DepartmentService {
         throw new ConflictError('Department name already exists');
       }
 
-      // Validate manager if provided
       if (deptData.managerId) {
         const [managerRows] = await connection.execute<RowDataPacket[]>(
           'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
@@ -68,7 +66,6 @@ export class DepartmentService {
         }
       }
 
-      // Insert department record
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO departments (name, description, manager_id, org_unit_id, is_active)
          VALUES (?, ?, ?, ?, ?)`,
@@ -87,7 +84,6 @@ export class DepartmentService {
 
       logger.info(`Department created successfully: ${deptData.name}`, { departmentId });
 
-      // Retrieve and return the created department
       const newDepartment = await this.getDepartmentById(departmentId);
       if (!newDepartment) {
         throw new Error('Failed to retrieve created department');
@@ -242,12 +238,10 @@ export class DepartmentService {
     try {
       await connection.beginTransaction();
 
-      // Build dynamic update query
       const updates: string[] = [];
       const values: SqlParam[] = [];
 
       if (deptData.name !== undefined) {
-        // Check name uniqueness if changing
         const [existing] = await connection.execute<RowDataPacket[]>(
           'SELECT id FROM departments WHERE name = ? AND id != ? LIMIT 1',
           [deptData.name, id]
@@ -266,7 +260,6 @@ export class DepartmentService {
 
       if (deptData.managerId !== undefined) {
         if (deptData.managerId !== null) {
-          // Validate manager exists
           const [managerRows] = await connection.execute<RowDataPacket[]>(
             'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
             [deptData.managerId]
@@ -289,7 +282,6 @@ export class DepartmentService {
         values.push(deptData.isActive ? 1 : 0);
       }
 
-      // Execute update if there are changes
       if (updates.length > 0) {
         values.push(id);
         await connection.execute(
@@ -302,7 +294,6 @@ export class DepartmentService {
 
       logger.info(`Department updated successfully: ${id}`);
 
-      // Retrieve and return updated department
       const updatedDepartment = await this.getDepartmentById(id);
       if (!updatedDepartment) {
         throw new NotFoundError('Department not found after update');
@@ -331,7 +322,6 @@ export class DepartmentService {
     try {
       await connection.beginTransaction();
 
-      // Check if department has employees
       const [employeeRows] = await connection.execute<RowDataPacket[]>(
         'SELECT COUNT(*) as count FROM user_departments WHERE department_id = ?',
         [id]
@@ -341,7 +331,6 @@ export class DepartmentService {
         throw new ConflictError('Cannot delete department with assigned employees');
       }
 
-      // Soft delete the department
       const [result] = await connection.execute<ResultSetHeader>(
         'UPDATE departments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
         [id]
@@ -413,7 +402,6 @@ export class DepartmentService {
     try {
       await connection.beginTransaction();
 
-      // Verify department exists
       const [deptRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
         [departmentId]

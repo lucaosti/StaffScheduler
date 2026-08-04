@@ -50,7 +50,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
   const departmentService = new DepartmentService(pool);
   const userService = new UserService(pool);
 
-  // Get all departments
   // The isActive/orgUnitId filters were documented but never read; they now
   // apply to the unrestricted listing. The scoped listing stays unfiltered:
   // it already returns only the caller's own departments.
@@ -67,7 +66,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: departments });
   }));
 
-  // Get single department
   router.get('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
@@ -95,7 +93,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: department });
   }));
 
-  // Create new department
   router.post('/', authenticate, validateBody(createDepartmentBody), asyncHandler(async (req, res) => {
     const user = req.user!;
 
@@ -123,7 +120,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.status(201).json({ success: true, data: createdDepartment });
   }));
 
-  // Update department
   router.put('/:id', authenticate, validateParams(idParam), validateBody(updateDepartmentBody), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
@@ -163,7 +159,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: updatedDepartment });
   }));
 
-  // Delete department
   router.delete('/:id', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
@@ -180,7 +175,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: { message: 'Department deleted successfully' } });
   }));
 
-  // Add user to department
   router.post('/:id/users', authenticate, validateParams(idParam), validateBody(addUserToDepartmentBody), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
@@ -226,7 +220,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.status(201).json({ success: true, data: { message: 'User added to department successfully' } });
   }));
 
-  // Remove user from department
   router.delete('/:id/users/:userId', authenticate, validateParams(idAndUserIdParam), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
@@ -256,7 +249,6 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: { message: 'User removed from department successfully' } });
   }));
 
-  // Get department statistics
   router.get('/:id/stats', authenticate, validateParams(idParam), asyncHandler(async (req, res) => {
     const user = req.user!;
     const departmentId = res.locals.params.id;
