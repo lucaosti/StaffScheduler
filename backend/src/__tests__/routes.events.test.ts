@@ -9,7 +9,7 @@
  */
 
 import { EventEmitter } from 'events';
-import express, { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import { createEventsRouter } from '../routes/events';
 import { eventBus } from '../services/EventBus';
 
@@ -46,16 +46,17 @@ const buildFakePair = () => {
 /**
  * Invoke the SSE route handler directly (bypassing supertest / HTTP) so we
  * can emit request lifecycle events synchronously.
+ *
+ * Reads the router's OWN `.stack` rather than mounting it into an app and
+ * digging through `app._router` — the extra "mounted into an app" layer of
+ * wrapping is exactly the part of Express's internals that changed shape
+ * between major versions, and the router's own stack (route → route.stack →
+ * handle) hasn't.
  */
 const invokeStreamHandler = (req: any, res: Response) => {
-  const app = express();
-  app.use(createEventsRouter());
+  const router = createEventsRouter() as unknown as { stack: any[] };
 
-  // Extract the single route handler registered for GET /stream.
-  const layer = (app._router.stack as any[]).find((l: any) => l.handle?.stack);
-  const routeLayer = layer?.handle?.stack?.find(
-    (l: any) => l.route?.path === '/stream'
-  );
+  const routeLayer = router.stack.find((l: any) => l.route?.path === '/stream');
   const handlers: ((...args: any[]) => void)[] = routeLayer?.route?.stack?.map(
     (l: any) => l.handle
   ) ?? [];

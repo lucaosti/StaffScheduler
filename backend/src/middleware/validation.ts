@@ -104,7 +104,14 @@ export const validateQuery = <T>(schema: ZodType<T>) =>
 
 export const validateBody = <T>(schema: ZodType<T>) =>
   (req: Request, res: Response, next: NextFunction) => {
-    const result = schema.safeParse(req.body);
+    // Express 5's bundled body-parser leaves `req.body` `undefined` rather
+    // than `{}` when the request carries no matching Content-Type — a real
+    // behavior change from Express 4 (verified directly against it), not a
+    // documentation gap. Defaulted here so a request with no body validates
+    // the same way against an all-optional-fields schema either version
+    // would have accepted, rather than failing VALIDATION_ERROR on a root
+    // type mismatch no route actually intended to reject.
+    const result = schema.safeParse(req.body ?? {});
     if (!result.success) {
       return res.status(400).json({
         success: false,

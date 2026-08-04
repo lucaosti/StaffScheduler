@@ -1253,7 +1253,7 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 | `AuditLogService.write` swallows errors | An audit write failure must never block a business operation. The audit log is observability, not a transaction requirement. |
 | `WITH RECURSIVE` CTE for org-unit subtrees | Fetches the entire subtree in one query. No N+1. Depth is bounded by the org tree (typically < 10 levels). |
 | `approval_matrix` preserved alongside `approval_workflows` | Removing it would break existing service tests and the `policies` route that still calls `ApprovalMatrixService`. A future PR can migrate these callers and drop the legacy table. |
-| Deliberate major-version holds: express 4, helmet 7, express-rate-limit 7, jest 29, dotenv 16 | All are actively maintained with zero known vulnerabilities (`npm audit` gate in CI). Their next majors are API-breaking (e.g. Express 5 changes wildcard routing) with no security payoff today; upgrades should be dedicated PRs, not drive-by bumps. ESLint, by contrast, was EOL on v8 and has been migrated to v9 flat config. |
+| Deliberate major-version holds: helmet 7, express-rate-limit 7, jest 29, dotenv 16 | All are actively maintained with zero known vulnerabilities (`npm audit` gate in CI). Their next majors are API-breaking with no security payoff today; upgrades should be dedicated PRs, not drive-by bumps. Express was migrated to 5 (#318) once its predecessor entered security-only maintenance; ESLint was EOL on v8 and has been migrated to v9 flat config. |
 
 ---
 
