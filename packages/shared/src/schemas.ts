@@ -211,6 +211,26 @@ export const bulkCreateAssignmentsBody = z.object({
   })).min(1, 'At least one assignment is required'),
 });
 
+/**
+ * Batch endpoints for high-volume integrations (#316) — distinct from
+ * `bulkCreateAssignmentsBody`/`POST /assignments/bulk` above, which predates
+ * this and intentionally swallows per-row failures for its own callers (see
+ * `AssignmentService.bulkCreateAssignments`). These report one outcome per
+ * input row instead, via the shared `BatchResult` envelope in `./batch`, so
+ * an integration can tell exactly which rows in a large payload failed and
+ * why. Capped at 200 rows: high-volume still means one HTTP request per bulk
+ * operation, not one request replacing an unbounded stream.
+ */
+const MAX_BATCH_SIZE = 200;
+
+export const batchCreateEmployeesBody = z.object({
+  employees: z.array(createUserBody).min(1, 'At least one employee is required').max(MAX_BATCH_SIZE),
+});
+
+export const batchCreateAssignmentsBody = z.object({
+  assignments: z.array(createAssignmentBody).min(1, 'At least one assignment is required').max(MAX_BATCH_SIZE),
+});
+
 export const createDepartmentBody = z.object({
   name: z.string().min(1, 'Department name is required'),
   managerId: z.number().int().positive().optional(),

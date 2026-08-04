@@ -374,6 +374,37 @@ describe('assignments router (extended)', () => {
     expect(res.status).toBe(500);
   });
 
+  it('POST /batch 400 when the array is empty', async () => {
+    const res = await request(app()).post('/api/assignments/batch').send({ assignments: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /batch 207 with one outcome per row, correlated by index', async () => {
+    (AssignmentService.prototype.createAssignment as jest.Mock) = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 10, shiftId: 1, userId: 1 })
+      .mockRejectedValueOnce(new ConflictError('User already assigned to an overlapping shift'));
+
+    const res = await request(app()).post('/api/assignments/batch').send({
+      assignments: [{ shiftId: 1, userId: 1 }, { shiftId: 2, userId: 1 }],
+    });
+
+    expect(res.status).toBe(207);
+    expect(res.body.data.succeeded).toBe(1);
+    expect(res.body.data.failed).toBe(1);
+    expect(res.body.data.results).toEqual([
+      { index: 0, success: true, data: { id: 10, shiftId: 1, userId: 1 } },
+      { index: 1, success: false, error: { code: 'CONFLICT', message: 'User already assigned to an overlapping shift' } },
+    ]);
+  });
+
+  it('POST /batch refuses more than 200 rows', async () => {
+    const res = await request(app()).post('/api/assignments/batch').send({
+      assignments: Array.from({ length: 201 }, (_, i) => ({ shiftId: i + 1, userId: 1 })),
+    });
+    expect(res.status).toBe(400);
+  });
+
   for (const action of ['confirm', 'decline', 'complete'] as const) {
     describe(`PATCH /:id/${action}`, () => {
       const method = `${action}Assignment` as keyof typeof AssignmentService.prototype;
@@ -895,6 +926,42 @@ describe('employees router (extended)', () => {
       .mockRejectedValue(new Error('x'));
     const res = await request(app()).post('/api/employees').send({ email: 'e@x.com', password: 'Password1!', firstName: 'A', lastName: 'B' });
     expect(res.status).toBe(500);
+  });
+
+  it('POST /batch 400 when the array is empty', async () => {
+    const res = await request(app()).post('/api/employees/batch').send({ employees: [] });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST /batch 207 with one outcome per row, correlated by index', async () => {
+    (EmployeeService.prototype.createEmployee as jest.Mock) = jest
+      .fn()
+      .mockResolvedValueOnce({ id: 1, email: 'a@x.com' })
+      .mockRejectedValueOnce(new ValidationError('Email already in use'));
+
+    const res = await request(app()).post('/api/employees/batch').send({
+      employees: [
+        { email: 'a@x.com', password: 'Password1!', firstName: 'A', lastName: 'One' },
+        { email: 'b@x.com', password: 'Password1!', firstName: 'B', lastName: 'Two' },
+      ],
+    });
+
+    expect(res.status).toBe(207);
+    expect(res.body.data.succeeded).toBe(1);
+    expect(res.body.data.failed).toBe(1);
+    expect(res.body.data.results).toEqual([
+      { index: 0, success: true, data: { id: 1, email: 'a@x.com' } },
+      { index: 1, success: false, error: { code: 'VALIDATION_ERROR', message: 'Email already in use' } },
+    ]);
+  });
+
+  it('POST /batch refuses more than 200 rows', async () => {
+    const res = await request(app()).post('/api/employees/batch').send({
+      employees: Array.from({ length: 201 }, (_, i) => ({
+        email: `e${i}@x.com`, password: 'Password1!', firstName: 'A', lastName: 'B',
+      })),
+    });
+    expect(res.status).toBe(400);
   });
 
   it('PUT /:id 400/200/404/500', async () => {

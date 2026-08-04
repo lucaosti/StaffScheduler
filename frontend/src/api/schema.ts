@@ -11125,6 +11125,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/employees/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch-create employees
+         * @description Creates up to 200 employees in one request. Unlike a transactional import, one row's failure does not affect the others: the response reports one outcome per input row (`results[]`, index-correlated), so a high-volume integration can retry only the rows that failed. Requires `employee.manage`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        employees: {
+                            /** Format: email */
+                            email: string;
+                            password: string;
+                            firstName: string;
+                            lastName: string;
+                            roleIds?: number[];
+                            employeeId?: string;
+                            phone?: string;
+                            position?: string;
+                            hourlyRate?: number;
+                            departmentIds?: number[];
+                            skillIds?: number[];
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Multi-status: one outcome per input row. */
+                207: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assignments/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Batch-create assignments, one outcome per row
+         * @description Creates up to 200 assignments in one request. Distinct from `/assignments/bulk`, which silently skips failed rows for internal callers: this endpoint reports one outcome per input row (`results[]`, index-correlated) so a high-volume integration can tell exactly which rows failed and why. Requires `assignment.manage`.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        assignments: {
+                            shiftId: number;
+                            userId: number;
+                            notes?: string;
+                            reason?: string;
+                        }[];
+                    };
+                };
+            };
+            responses: {
+                /** @description Multi-status: one outcome per input row. */
+                207: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {

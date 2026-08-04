@@ -14257,6 +14257,183 @@
           }
         }
       }
+    },
+    "/employees/batch": {
+      "post": {
+        "tags": [
+          "Employees"
+        ],
+        "summary": "Batch-create employees",
+        "description": "Creates up to 200 employees in one request. Unlike a transactional import, one row's failure does not affect the others: the response reports one outcome per input row (`results[]`, index-correlated), so a high-volume integration can retry only the rows that failed. Requires `employee.manage`.",
+        "responses": {
+          "207": {
+            "description": "Multi-status: one outcome per input row."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "employees": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "email": {
+                          "type": "string",
+                          "format": "email",
+                          "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$"
+                        },
+                        "password": {
+                          "type": "string",
+                          "minLength": 8
+                        },
+                        "firstName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "lastName": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "roleIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "employeeId": {
+                          "type": "string"
+                        },
+                        "phone": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "string"
+                        },
+                        "hourlyRate": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "departmentIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "skillIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        }
+                      },
+                      "required": [
+                        "email",
+                        "password",
+                        "firstName",
+                        "lastName"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "employees"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/assignments/batch": {
+      "post": {
+        "tags": [
+          "Assignments"
+        ],
+        "summary": "Batch-create assignments, one outcome per row",
+        "description": "Creates up to 200 assignments in one request. Distinct from `/assignments/bulk`, which silently skips failed rows for internal callers: this endpoint reports one outcome per input row (`results[]`, index-correlated) so a high-volume integration can tell exactly which rows failed and why. Requires `assignment.manage`.",
+        "responses": {
+          "207": {
+            "description": "Multi-status: one outcome per input row."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assignments": {
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "shiftId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "userId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "notes": {
+                          "type": "string"
+                        },
+                        "reason": {
+                          "type": "string",
+                          "maxLength": 2000
+                        }
+                      },
+                      "required": [
+                        "shiftId",
+                        "userId"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "assignments"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

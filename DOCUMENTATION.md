@@ -321,6 +321,24 @@ or request a page.
 | `/api/settings` | System settings | `settings.manage` |
 | `/api/health` | Health check (unauthenticated) | — |
 
+**Batch endpoints (#316)**: `POST /api/employees/batch` and `POST /api/assignments/batch` accept up to 200 rows per request and report one outcome per row instead of aborting the whole batch on the first failure — the shape a high-volume integration needs to retry only what actually failed. Both return HTTP 207 with the shared envelope from `packages/shared/src/batch.ts`:
+
+```json
+{
+  "success": true,
+  "data": {
+    "results": [
+      { "index": 0, "success": true, "data": { "...": "the created row" } },
+      { "index": 1, "success": false, "error": { "code": "CONFLICT", "message": "..." } }
+    ],
+    "succeeded": 1,
+    "failed": 1
+  }
+}
+```
+
+`index` is the row's position in the request array — the only way to correlate a failure back to its input, since a row has no id of its own before creation. This is deliberately distinct from `POST /api/assignments/bulk`, which predates it: that endpoint serves internal callers that want "create what you can, discard the rest" (see `AssignmentService.bulkCreateAssignments`'s header) and returns only the successfully created rows, with no per-row detail. The two are not interchangeable — an integration that needs to know *which* rows failed and why must use `/batch`, not `/bulk`.
+
 ### Error codes (common)
 
 | Code | HTTP | Meaning |

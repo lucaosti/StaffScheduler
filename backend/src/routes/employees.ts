@@ -41,7 +41,8 @@ import {
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { employeeColumns } from '../services/exportColumns';
-import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody, employeeListQuery } from '../schemas';
+import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody, employeeListQuery, batchCreateEmployeesBody } from '../schemas';
+import { runBatch } from '../utils/batch';
 
 export const createEmployeesRouter = (pool: Pool) => {
   const router = Router();
@@ -155,6 +156,24 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
     success: true,
     data: employee,
     message: 'Employee created successfully'
+  });
+}));
+
+// One outcome per row (#316) — a high-volume integration needs to know which
+// of 200 rows failed and why, not just that the batch as a whole did or didn't
+// go through. Field policy is enforced per row too: it depends on the actor,
+// not the batch, so one row failing it must not fail its neighbors.
+router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), asyncHandler(async (req: Request, res: Response) => {
+  const { employees } = res.locals.body as z.infer<typeof batchCreateEmployeesBody>;
+  const result = await runBatch(employees, async (employeeData) => {
+    await enforceFieldPolicy(req, employeeData, false);
+    return employeeService.createEmployee(employeeData);
+  });
+
+  res.status(207).json({
+    success: true,
+    data: result,
+    message: `${result.succeeded} of ${result.succeeded + result.failed} employees created successfully`
   });
 }));
 

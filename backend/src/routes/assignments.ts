@@ -29,6 +29,7 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
+import { z } from 'zod';
 import { AssignmentService } from '../services/AssignmentService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
@@ -48,11 +49,13 @@ import {
   auditReasonBody,
   createAssignmentBody,
   bulkCreateAssignmentsBody,
+  batchCreateAssignmentsBody,
   updateAssignmentBody,
 } from '../schemas';
 import { User } from '../types';
 import { ForbiddenError, NotFoundError } from '../errors';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
+import { runBatch } from '../utils/batch';
 
 export const createAssignmentsRouter = (pool: Pool) => {
   const router = Router();
@@ -221,6 +224,24 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
     success: true,
     data: { assignments: createdAssignments, count: createdAssignments.length },
     message: `${createdAssignments.length} assignments created successfully`
+  });
+}));
+
+// Distinct from `/bulk` above on purpose (#316): `/bulk` predates this and
+// exists for internal callers that create what they can and discard the rest
+// (see `AssignmentService.bulkCreateAssignments`'s header). A high-volume
+// integration needs the opposite — one outcome per input row, so it can tell
+// exactly which of 200 rows failed and retry only those.
+router.post('/batch', authenticate, requirePermission('assignment.manage'), validateBody(batchCreateAssignmentsBody), asyncHandler(async (req: Request, res: Response) => {
+  const { assignments } = res.locals.body as z.infer<typeof batchCreateAssignmentsBody>;
+  const result = await runBatch(assignments, (assignmentData) =>
+    assignmentService.createAssignment({ ...assignmentData, actorId: req.user?.id })
+  );
+
+  res.status(207).json({
+    success: true,
+    data: result,
+    message: `${result.succeeded} of ${result.succeeded + result.failed} assignments created successfully`
   });
 }));
 
