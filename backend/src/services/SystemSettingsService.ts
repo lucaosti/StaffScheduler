@@ -134,7 +134,6 @@ export class SystemSettingsService {
     try {
       await connection.beginTransaction();
 
-      // Check if setting exists and is editable
       const [existingRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id, is_editable AS isEditable FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
         [category, key]
@@ -197,7 +196,6 @@ export class SystemSettingsService {
     try {
       await connection.beginTransaction();
 
-      // Get default value
       const [rows] = await connection.execute<RowDataPacket[]>(
         'SELECT default_value AS defaultValue FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
         [category, key]

@@ -51,7 +51,6 @@ export class ShiftService {
     try {
       await connection.beginTransaction();
 
-      // Validate schedule exists
       const [scheduleRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM schedules WHERE id = ? LIMIT 1',
         [shiftData.scheduleId]
@@ -61,7 +60,6 @@ export class ShiftService {
         throw new NotFoundError('Schedule not found');
       }
 
-      // Validate department exists
       const [deptRows] = await connection.execute<RowDataPacket[]>(
         'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
         [shiftData.departmentId]
@@ -71,7 +69,6 @@ export class ShiftService {
         throw new NotFoundError('Department not found');
       }
 
-      // Insert shift record
       const [result] = await connection.execute<ResultSetHeader>(
         `INSERT INTO shifts (
           schedule_id, department_id, template_id, date, start_time, end_time,
@@ -93,7 +90,6 @@ export class ShiftService {
 
       const shiftId = result.insertId;
 
-      // Add required skills if provided
       if (shiftData.requiredSkillIds && shiftData.requiredSkillIds.length > 0) {
         const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
         await connection.execute(
@@ -106,7 +102,6 @@ export class ShiftService {
 
       logger.info(`Shift created successfully: ${shiftId}`);
 
-      // Retrieve and return the created shift
       const newShift = await this.getShiftById(shiftId);
       if (!newShift) {
         throw new Error('Failed to retrieve created shift');
@@ -159,7 +154,6 @@ export class ShiftService {
 
       const row = rows[0];
 
-      // Get required skills
       const [skillRows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT sk.id, sk.name, sk.description, sk.is_active, sk.created_at
         FROM shift_skills ss
@@ -168,7 +162,6 @@ export class ShiftService {
         [id]
       );
 
-      // Get assignments
       const [assignmentRows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT 
           sa.id, sa.shift_id, sa.user_id, sa.status, sa.assigned_at, sa.confirmed_at, sa.notes,
@@ -423,7 +416,6 @@ export class ShiftService {
         );
       }
 
-      // Update required skills if provided
       if (shiftData.requiredSkillIds !== undefined) {
         await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
         if (shiftData.requiredSkillIds.length > 0) {
@@ -466,13 +458,13 @@ export class ShiftService {
     try {
       await connection.beginTransaction();
 
-      // Delete shift assignments first
+      // Both tables' shift_id are already ON DELETE CASCADE against shifts(id)
+      // (see the initial-schema migration), so these two deletes are redundant
+      // in practice — kept explicit so this method's behavior does not depend
+      // on the schema's cascade rules staying as they are.
       await connection.execute('DELETE FROM shift_assignments WHERE shift_id = ?', [id]);
-
-      // Delete shift skills
       await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
 
-      // Delete the shift
       const [result] = await connection.execute<ResultSetHeader>(
         'DELETE FROM shifts WHERE id = ?',
         [id]
@@ -517,7 +509,6 @@ export class ShiftService {
     try {
       await connection.beginTransaction();
 
-      // Get template details
       const [templateRows] = await connection.execute<RowDataPacket[]>(
         `SELECT * FROM shift_templates WHERE id = ? AND is_active = 1 LIMIT 1`,
         [templateId]
@@ -529,7 +520,6 @@ export class ShiftService {
 
       const template = templateRows[0];
 
-      // Get template skills
       const [skillRows] = await connection.execute<RowDataPacket[]>(
         'SELECT skill_id FROM shift_template_skills WHERE template_id = ?',
         [templateId]
@@ -544,7 +534,6 @@ export class ShiftService {
         const dayOfWeek = currentDate.getDay();
 
         if (daysOfWeek.includes(dayOfWeek)) {
-          // Create shift for this day
           const [result] = await connection.execute<ResultSetHeader>(
             `INSERT INTO shifts (
               schedule_id, department_id, template_id, date, start_time, end_time,
