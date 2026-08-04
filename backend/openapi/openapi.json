@@ -14430,6 +14430,117 @@
           }
         }
       }
+    },
+    "/notifications/push/public-key": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Get the VAPID public key for Web Push subscription",
+        "description": "Always 200, even when Web Push isn't configured: `enabled` tells the caller whether to attempt `pushManager.subscribe()` at all, so an unconfigured deployment doesn't surface a broken feature. Module `notifications` must be enabled (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "`{ enabled, publicKey }` — publicKey is null when Web Push is not configured."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/notifications/push/subscribe": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Register or reactivate a device's push subscription",
+        "description": "Body is the browser's PushSubscription object, verbatim. Re-subscribing the same endpoint (a returning device) updates its keys in place rather than creating a duplicate row. Module `notifications` must be enabled (404 otherwise).",
+        "responses": {
+          "201": {
+            "description": "The stored subscription."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "format": "uri"
+                  },
+                  "keys": {
+                    "type": "object",
+                    "properties": {
+                      "p256dh": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "auth": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "p256dh",
+                      "auth"
+                    ]
+                  }
+                },
+                "required": [
+                  "endpoint",
+                  "keys"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Deactivate a device's push subscription",
+        "description": "Deactivates rather than deletes — same audit-trail reasoning as the email outbox. Module `notifications` must be enabled (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "Deactivated."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "endpoint": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                },
+                "required": [
+                  "endpoint"
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

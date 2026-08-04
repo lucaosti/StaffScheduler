@@ -129,6 +129,13 @@ export const config = {
     maxSize: parseInt(process.env.UPLOAD_MAX_SIZE || '10485760'), // 10MB
     allowedTypes: (process.env.UPLOAD_ALLOWED_TYPES || 'image/jpeg,image/png,application/pdf').split(','),
   },
+  webPush: {
+    vapidPublicKey: process.env.VAPID_PUBLIC_KEY,
+    vapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
+    // A contact the push service can reach if it needs to reach the sender
+    // (e.g. to report abuse) — the VAPID spec requires a mailto: or https: URL.
+    vapidSubject: process.env.VAPID_SUBJECT || 'mailto:admin@staffscheduler.com',
+  },
   reports: {
     storagePath: process.env.REPORT_STORAGE_PATH || './reports',
     cleanupDays: parseInt(process.env.REPORT_CLEANUP_DAYS || '30'),
