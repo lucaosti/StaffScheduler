@@ -159,7 +159,7 @@ export class OrgUnitService {
     return created;
   }
 
-  async update(id: number, patch: UpdateOrgUnitInput): Promise<OrgUnit> {
+  async update(id: number, patch: UpdateOrgUnitInput, actorId?: number | null): Promise<OrgUnit> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Org unit not found');
     if (patch.parentId !== undefined && patch.parentId !== null) {
@@ -205,6 +205,33 @@ export class OrgUnitService {
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to refresh org unit');
     _treeCache = null;
+
+    // `before`/`after` carry the RESOLVED state, not the raw patch: the
+    // request may touch only one field (e.g. just managerUserId — an
+    // appointment), and a patch-shaped audit entry would leave "what was the
+    // manager before this?" unanswerable from the trail, which is exactly the
+    // question a headship change needs answered.
+    await this.audit.write({
+      actorId: actorId ?? null,
+      action: 'org_unit.update',
+      entityType: 'org_unit',
+      entityId: id,
+      description: `Org unit ${id} updated`,
+      before: {
+        name: existing.name,
+        description: existing.description,
+        parentId: existing.parentId,
+        managerUserId: existing.managerUserId,
+        isActive: existing.isActive,
+      },
+      after: {
+        name: merged.name,
+        description: merged.description,
+        parentId: merged.parentId,
+        managerUserId: merged.managerUserId,
+        isActive: merged.isActive,
+      },
+    });
     return refreshed;
   }
 
