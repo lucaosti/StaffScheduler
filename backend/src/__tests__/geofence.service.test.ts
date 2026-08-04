@@ -72,6 +72,33 @@ describe('GeofenceService.update', () => {
     expect(execute.mock.calls[0][0]).not.toContain('polygon = ?');
   });
 
+  it('updates only the polygon when that is the only field given', async () => {
+    const { pool, execute } = makePool();
+    const polygon = [{ lat: 5, lng: 5 }, { lat: 5, lng: 6 }, { lat: 6, lng: 6 }];
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ polygon: JSON.stringify(polygon) })], null] as Tuple);
+
+    const updated = await new GeofenceService(pool).update(1, { polygon });
+
+    expect(updated.polygon).toEqual(polygon);
+    expect(execute.mock.calls[0][0]).toContain('polygon = ?');
+    expect(execute.mock.calls[0][0]).not.toContain('name = ?');
+  });
+
+  it('updates only isActive when that is the only field given', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ is_active: 0 })], null] as Tuple);
+
+    const updated = await new GeofenceService(pool).update(1, { isActive: false });
+
+    expect(updated.isActive).toBe(false);
+    expect(execute.mock.calls[0][0]).toContain('is_active = ?');
+    expect(execute.mock.calls[0][1]).toEqual([0, 1]);
+  });
+
   it('throws NotFoundError when no row matches the id', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple);
