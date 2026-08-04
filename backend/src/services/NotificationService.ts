@@ -13,6 +13,7 @@
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { isEmailConfigured } from './MailerService';
+import { isPushConfigured } from './PushService';
 
 interface Notification {
   id: number;
@@ -86,6 +87,27 @@ export class NotificationService {
            VALUES (?, ?, ?, ?)`,
           [res.insertId, recipient, input.title, input.body ?? input.title]
         );
+      }
+    }
+
+    // Same reasoning, same transaction, for Web Push (#310): one outbox row
+    // per ACTIVE device subscription the recipient has registered, so a
+    // person with push on two devices gets it on both, and one with none
+    // configured accumulates nothing.
+    if (isPushConfigured()) {
+      const [subscriptions] = await conn.execute<RowDataPacket[]>(
+        `SELECT id FROM push_subscriptions WHERE user_id = ? AND is_active = TRUE`,
+        [input.userId]
+      );
+      if (subscriptions.length > 0) {
+        const payload = JSON.stringify({ title: input.title, body: input.body, link: input.link });
+        for (const sub of subscriptions) {
+          await conn.execute(
+            `INSERT INTO push_outbox (notification_id, subscription_id, payload)
+             VALUES (?, ?, ?)`,
+            [res.insertId, sub.id, payload]
+          );
+        }
       }
     }
     return res.insertId;

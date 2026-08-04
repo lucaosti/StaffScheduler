@@ -68,6 +68,13 @@ jest.mock('../services/OutboxWorker', () => ({
   stopOutboxWorker: (...args: unknown[]) => mockStopOutboxWorker(...args),
 }));
 
+const mockStartPushWorker = jest.fn();
+const mockStopPushWorker = jest.fn();
+jest.mock('../services/PushWorker', () => ({
+  startPushWorker: (...args: unknown[]) => mockStartPushWorker(...args),
+  stopPushWorker: (...args: unknown[]) => mockStopPushWorker(...args),
+}));
+
 import { startServer } from '../index';
 import { logger } from '../config/logger';
 import { buildApp } from '../app';
@@ -85,6 +92,8 @@ describe('startServer()', () => {
     mockCloseOptimizationQueue.mockReset().mockResolvedValue(undefined);
     mockStartOutboxWorker.mockReset();
     mockStopOutboxWorker.mockReset();
+    mockStartPushWorker.mockReset();
+    mockStopPushWorker.mockReset();
 
     // Prevent process.exit from terminating the test runner.
     exitSpy = jest
@@ -167,6 +176,7 @@ describe('startServer()', () => {
       expect(mockInitModuleCacheInvalidation).not.toHaveBeenCalled();
       expect(mockInitOptimizationWorker).not.toHaveBeenCalled();
       expect(mockStartOutboxWorker).not.toHaveBeenCalled();
+      expect(mockStartPushWorker).not.toHaveBeenCalled();
       expect(mockListen).not.toHaveBeenCalled();
     });
   });
@@ -189,6 +199,7 @@ describe('startServer()', () => {
       expect(mockListen).toHaveBeenCalled();
       expect(mockInitOptimizationWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartOutboxWorker).toHaveBeenCalledWith(mockPool);
+      expect(mockStartPushWorker).toHaveBeenCalledWith(mockPool);
     });
   });
 });
