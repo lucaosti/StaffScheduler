@@ -340,14 +340,27 @@ export const orgUnitSchema = z.object({
 });
 export type OrgUnit = z.infer<typeof orgUnitSchema>;
 
-/** A proposed swap of two assignments between two employees. */
+/**
+ * A proposed swap of two assignments between two employees.
+ *
+ * WHY `pending_target` IS A SEPARATE STATE FROM `pending` (#522). A swap used
+ * to go straight from creation to manager approval — the target employee was
+ * never asked, and discovered the swap by finding themselves working a
+ * different day. `pending_target` is the state before the target has
+ * responded; `pending` now means "target accepted, awaiting manager." The
+ * status enum previously published `'rejected'`, which the API has never
+ * actually returned — the real value is `'declined'`, corrected here rather
+ * than left to drift further now that the swap flow is being touched anyway.
+ */
 export const shiftSwapRequestSchema = z.object({
   id: z.number().int(),
   requesterUserId: z.number().int(),
   requesterAssignmentId: z.number().int(),
   targetUserId: z.number().int(),
   targetAssignmentId: z.number().int(),
-  status: z.enum(['pending', 'approved', 'rejected', 'cancelled']),
+  status: z.enum(['pending_target', 'pending', 'approved', 'declined', 'cancelled']),
+  /** Set only once `status` is `declined` — distinguishes the target refusing from the manager refusing, since they mean different things to the requester. */
+  declinedBy: z.enum(['target', 'manager']).nullable(),
   notes: z.string().nullable(),
   reviewerId: z.number().int().nullable(),
   reviewedAt: timestamp.nullable(),

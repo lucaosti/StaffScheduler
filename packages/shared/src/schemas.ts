@@ -1023,6 +1023,12 @@ export const optionalNotesBody = z.object({
   notes: z.string().max(2000).nullable().optional(),
 });
 
+/** The target's response to a pending shift swap (#522) — accept routes it to the manager, decline ends it immediately. */
+export const respondToShiftSwapBody = z.object({
+  accepted: z.boolean(),
+  notes: z.string().max(2000).nullable().optional(),
+});
+
 export const bulkImportEmployeesBody = z.object({
   csv: z.string().min(1, 'csv is required'),
   defaultPassword: z.string().min(8, 'defaultPassword must be at least 8 characters'),

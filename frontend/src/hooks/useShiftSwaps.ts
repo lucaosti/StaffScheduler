@@ -22,6 +22,7 @@ import {
   declineSwap,
   getSwapCandidates,
   getSwapRequests,
+  respondToSwap,
   SwapCandidates,
   SwapFilters,
 } from '../services/shiftSwapService';
@@ -62,6 +63,11 @@ export function useSwapMutations() {
         targetAssignmentId: number;
         notes?: string;
       }) => createSwapRequest(body),
+      onSuccess: invalidate,
+    }),
+    respond: useMutation({
+      mutationFn: ({ id, accepted, notes }: { id: number; accepted: boolean; notes?: string }) =>
+        respondToSwap(id, accepted, notes),
       onSuccess: invalidate,
     }),
     approve: useMutation({

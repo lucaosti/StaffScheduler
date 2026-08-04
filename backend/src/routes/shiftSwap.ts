@@ -8,7 +8,7 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { createShiftSwapBody, optionalNotesBody, idParam, shiftSwapListQuery } from '../schemas';
+import { createShiftSwapBody, optionalNotesBody, respondToShiftSwapBody, idParam, shiftSwapListQuery } from '../schemas';
 import { ShiftSwapService } from '../services/ShiftSwapService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -53,6 +53,20 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
     const isManager = userHasPermission(req.user, 'shiftswap.approve');
     if (!involves && !isManager) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
     res.json({ success: true, data: item });
+  });
+
+  // The target's own decision — gated on being the target, not on any
+  // permission code: whether to accept a swap of your own shift is not a
+  // manager privilege, it's ownership of the thing being swapped.
+  router.post('/:id/respond', validateParams(idParam), validateBody(respondToShiftSwapBody), async (req: Request, res: Response) => {
+    const { id } = res.locals.params;
+    const updated = await service.respondAsTarget(
+      id,
+      req.user!.id,
+      res.locals.body.accepted as boolean,
+      (res.locals.body.notes as string | null | undefined) ?? null
+    );
+    res.json({ success: true, data: updated });
   });
 
   router.post('/:id/approve', requirePermission('shiftswap.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
