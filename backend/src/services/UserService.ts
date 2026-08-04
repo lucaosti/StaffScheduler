@@ -107,7 +107,9 @@ export class UserService {
   async getUserById(id: number): Promise<User | null> {
     try {
       const [userRows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT id, email, first_name, last_name, employee_id, phone, position, hourly_rate, is_active, last_login, organization_name, created_at, updated_at FROM users WHERE id = ?',
+        `SELECT id, email, first_name, last_name, employee_id, phone, position, hourly_rate, is_active, last_login, organization_name, created_at, updated_at,
+                EXISTS(SELECT 1 FROM two_factor_methods m WHERE m.user_id = users.id AND m.enabled = 1) AS two_factor_enabled
+           FROM users WHERE id = ?`,
         [id]
       );
       if (userRows.length === 0) return null;
@@ -132,7 +134,7 @@ export class UserService {
         // never leaves the server. Without this the enrolment UI cannot say
         // whether 2FA is already on, so the feature was unusable from the
         // application even though the endpoints all existed.
-        twoFactorEnabled: Boolean(row.totp_enabled),
+        twoFactorEnabled: Boolean(row.two_factor_enabled),
         lastLogin: row.last_login,
         organizationName: (row.organization_name as string | null) ?? null,
         departments: deptRows.map((d: any) => ({ id: d.id, name: d.name })),
