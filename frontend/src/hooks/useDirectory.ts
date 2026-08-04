@@ -14,6 +14,8 @@ import {
   DirectoryProfile,
   getMyProfile,
   getProfile,
+  importVcard,
+  previewVcardImport,
   removeProfileField,
   saveProfileFields,
 } from '../services/directoryService';
@@ -55,6 +57,17 @@ export function useDirectoryMutations() {
     }),
     removeField: useMutation({
       mutationFn: ({ id, key }: { id: number; key: string }) => removeProfileField(id, key),
+      onSuccess: invalidate,
+    }),
+    // Not invalidated on success: a preview writes nothing, and the import
+    // mutation below invalidates the employee/directory lists it actually
+    // changes.
+    previewImport: useMutation({
+      mutationFn: (vcf: string) => previewVcardImport(vcf),
+    }),
+    runImport: useMutation({
+      mutationFn: ({ vcf, defaultPassword }: { vcf: string; defaultPassword: string }) =>
+        importVcard(vcf, defaultPassword),
       onSuccess: invalidate,
     }),
   };

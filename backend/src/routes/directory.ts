@@ -7,6 +7,7 @@
  *   DELETE /api/directory/users/:id/fields/:key  remove a custom field
  *   GET   /api/directory/users/:id/vcard    vCard for a single user
  *   GET   /api/directory/vcard.vcf?ids=…    vCard archive for a list of users
+ *   POST  /api/directory/import-vcard/preview  dry run: what import-vcard would do (user.manage)
  *   POST  /api/directory/import-vcard       vCard JSON import (user.manage)
  *
  * @author Luca Ostinelli
@@ -17,7 +18,14 @@ import bcrypt from 'bcrypt';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { directoryFieldsBody, importVcardBody, idParam, idAndKeyParam, vcardQuery } from '../schemas';
+import {
+  directoryFieldsBody,
+  importVcardBody,
+  importVcardPreviewBody,
+  idParam,
+  idAndKeyParam,
+  vcardQuery,
+} from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { config } from '../config';
 
@@ -85,6 +93,17 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       .set('Content-Disposition', 'attachment; filename="directory.vcf"')
       .send(vcf);
   });
+
+  router.post(
+    '/import-vcard/preview',
+    requirePermission('user.manage'),
+    validateBody(importVcardPreviewBody),
+    async (_req: Request, res: Response) => {
+      const { vcf } = res.locals.body as { vcf: string };
+      const out = await service.previewImportVcf(vcf);
+      res.json({ success: true, data: out });
+    }
+  );
 
   router.post(
     '/import-vcard',

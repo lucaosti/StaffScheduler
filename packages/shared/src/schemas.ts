@@ -1043,6 +1043,10 @@ export const importVcardBody = z.object({
   defaultPassword: z.string().min(8, 'defaultPassword must be at least 8 characters'),
 });
 
+export const importVcardPreviewBody = z.object({
+  vcf: z.string().min(1, 'vcf is required'),
+});
+
 // ─── Schemas promoted from route files (single-source contract) ──────────────
 // These lived next to their routers until the OpenAPI spec became generated
 // from this package: every request shape the API accepts must be defined
