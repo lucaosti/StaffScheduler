@@ -13992,6 +13992,82 @@
         }
       }
     },
+    "/org/history/{userId}": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "As-of-a-past-date history for a person",
+        "description": "Roles held, org units belonged to (with which was primary), and org units headed, reconstructed as of the end of the given calendar day (`asOf`) — projected from the audit trail rather than a dedicated temporal schema, since every fact involved already produces an audit row when it changes (`role.grant`/`role.revoke`, `org_unit.member_add`/`_remove`/`_primary_set`, `org_unit.update`). Defaults to the caller. Reading someone else's history requires `org_unit.read`, the same gate `/org/authority/{userId}` carries; reading your own needs nothing beyond being authenticated. A fact written before auditing existed (a seed, a migration-time fixup) has no audit row and so cannot appear in a past snapshot, even if it was genuinely true then — the same limitation `/roles/users/{userId}/timeline`'s `hasHistory` flag documents for the current-state view.",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "asOf",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The as-of snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/org/history": {
+      "get": {
+        "tags": [
+          "Org Units"
+        ],
+        "summary": "As-of-a-past-date history for the authenticated user",
+        "description": "The caller's own as-of snapshot. See `/org/history/{userId}` for someone else's, which requires `org_unit.read`, and for what `asOf` and each field mean.",
+        "responses": {
+          "200": {
+            "description": "The as-of snapshot.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/roles/users/{userId}/timeline": {
       "get": {
         "tags": [

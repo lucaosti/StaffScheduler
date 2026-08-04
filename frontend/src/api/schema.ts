@@ -10941,6 +10941,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/org/history/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * As-of-a-past-date history for a person
+         * @description Roles held, org units belonged to (with which was primary), and org units headed, reconstructed as of the end of the given calendar day (`asOf`) — projected from the audit trail rather than a dedicated temporal schema, since every fact involved already produces an audit row when it changes (`role.grant`/`role.revoke`, `org_unit.member_add`/`_remove`/`_primary_set`, `org_unit.update`). Defaults to the caller. Reading someone else's history requires `org_unit.read`, the same gate `/org/authority/{userId}` carries; reading your own needs nothing beyond being authenticated. A fact written before auditing existed (a seed, a migration-time fixup) has no audit row and so cannot appear in a past snapshot, even if it was genuinely true then — the same limitation `/roles/users/{userId}/timeline`'s `hasHistory` flag documents for the current-state view.
+         */
+        get: {
+            parameters: {
+                query: {
+                    asOf: string;
+                };
+                header?: never;
+                path: {
+                    userId: number;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The as-of snapshot. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/org/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * As-of-a-past-date history for the authenticated user
+         * @description The caller's own as-of snapshot. See `/org/history/{userId}` for someone else's, which requires `org_unit.read`, and for what `asOf` and each field mean.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The as-of snapshot. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/roles/users/{userId}/timeline": {
         parameters: {
             query?: never;
