@@ -52,6 +52,7 @@ import { createDirectoryRouter } from './routes/directory';
 import { createSkillGapRouter } from './routes/skillGap';
 import { createReportsRouter } from './routes/reports';
 import { createNotificationsRouter } from './routes/notifications';
+import { createWebhooksRouter } from './routes/webhooks';
 import { createBulkImportRouter } from './routes/bulkImport';
 import { createEventsRouter } from './routes/events';
 import { createOrgRouter } from './routes/org';
@@ -221,6 +222,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/skill-gap`, createSkillGapRouter(pool));
     app.use(`${prefix}/reports`, createReportsRouter(pool));
     app.use(`${prefix}/notifications`, createNotificationsRouter(pool));
+    app.use(`${prefix}/webhooks`, createWebhooksRouter(pool));
     app.use(`${prefix}/import`, createBulkImportRouter(pool));
     app.use(`${prefix}/events`, createEventsRouter());
     app.use(`${prefix}/org`, createOrgRouter(pool));

@@ -30,16 +30,35 @@ import { DateUtils } from '../utils';
 import { AuditLogService } from './AuditLogService';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
 import { NotificationService } from './NotificationService';
+import { WebhookService } from './WebhookService';
 
 export class ScheduleService {
   private audit: AuditLogService;
   private orchestrator: ScheduleOptimizationOrchestrator;
   private notifications: NotificationService;
+  private webhooks: WebhookService;
 
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
     this.orchestrator = new ScheduleOptimizationOrchestrator(pool);
     this.notifications = new NotificationService(pool);
+    this.webhooks = new WebhookService(pool);
+  }
+
+  /**
+   * Resolves the acting user's `organization_name` — the tag webhook
+   * subscriptions are scoped by. Best-effort: a missing/unresolvable actor
+   * means no organization to dispatch against, not an error, since these
+   * dispatch calls sit alongside a notification loop that is itself
+   * best-effort (notifyAsync swallows its own failures).
+   */
+  private async resolveOrganization(actorId?: number | null): Promise<string | null> {
+    if (!actorId) return null;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT organization_name FROM users WHERE id = ? LIMIT 1`,
+      [actorId]
+    );
+    return (rows[0]?.organization_name as string | null) ?? null;
   }
 
   async createSchedule(scheduleData: CreateScheduleRequest): Promise<Schedule> {
@@ -545,6 +564,20 @@ export class ScheduleService {
           title: 'Schedule published',
           body: `"${publishedSchedule.name}" is now available — check your assigned shifts.`,
         });
+      }
+
+      // Best-effort, same as the notification loop above: a webhook
+      // subscriber (if the acting organization has any) hears about the
+      // publish as one event, not once per assigned employee.
+      const organizationName = await this.resolveOrganization(actorId);
+      if (organizationName) {
+        this.webhooks
+          .dispatch(organizationName, 'schedule.published', {
+            scheduleId: id,
+            name: publishedSchedule.name,
+            publishedAt: publishedSchedule.publishedAt,
+          })
+          .catch((err) => logger.error('Webhook dispatch failed for schedule.published', { error: err }));
       }
 
       return publishedSchedule;

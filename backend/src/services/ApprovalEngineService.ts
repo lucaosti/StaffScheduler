@@ -26,6 +26,7 @@ import {
 } from '../types';
 import { logger } from '../config/logger';
 import { ResponsibilityRuleService } from './ResponsibilityRuleService';
+import { WebhookService } from './WebhookService';
 
 interface ResolveContext {
   orgUnitId?: number;
@@ -82,9 +83,11 @@ const mapPendingApprovalRow = (r: any): PendingApproval => ({
 
 export class ApprovalEngineService {
   private responsibilitySvc: ResponsibilityRuleService;
+  private webhooks: WebhookService;
 
   constructor(private pool: Pool) {
     this.responsibilitySvc = new ResponsibilityRuleService(pool);
+    this.webhooks = new WebhookService(pool);
   }
 
   // --------------------------------------------------------------------------
@@ -491,13 +494,23 @@ export class ApprovalEngineService {
    *
    * `resolveNextStepCtx` supplies the ResolveContext for the next step, if
    * any — entity-specific (e.g. re-deriving the proposer's org unit).
+   *
+   * `organizationName` is OPTIONAL and deliberately not resolved here via a
+   * lookup by `userId` — this method is the one seam all four entity
+   * services share, and an unconditional extra query here would land in
+   * EVERY test across all four that exercises a decision, whether or not it
+   * has anything to do with webhooks (#315). Callers that have the acting
+   * user's organization already in hand (every route does, via
+   * `req.user.organizationName`) pass it through; omitting it just means no
+   * webhook.decided event fires for that decision, not an error.
    */
   async decidePendingApproval(
     pendingApprovalId: number,
     userId: number,
     decision: 'approved' | 'rejected',
     note: string | null,
-    resolveNextStepCtx: (pa: PendingApproval) => Promise<ResolveContext>
+    resolveNextStepCtx: (pa: PendingApproval) => Promise<ResolveContext>,
+    organizationName?: string | null
   ): Promise<DecidePendingApprovalResult> {
     const pa = await this.getPendingApprovalById(pendingApprovalId);
     if (!pa) throw new NotFoundError('Pending approval not found');
@@ -520,6 +533,23 @@ export class ApprovalEngineService {
     if (result.affectedRows === 0) {
       const current = await this.getPendingApprovalById(pendingApprovalId);
       throw new ConflictError(`Pending approval is already ${current?.status ?? pa.status}`);
+    }
+
+    // One event per decision, regardless of entity type (time off, employee
+    // loan, shift swap, change request all route through this one method) or
+    // whether it's the final step of a multi-step workflow — a webhook
+    // subscriber cares that a decision was made, not how many more steps
+    // remain. Best-effort, same as ScheduleService/AssignmentService.
+    // `organizationName` is caller-supplied (see this method's header) —
+    // omitted, dispatch is silently skipped rather than looked up here.
+    if (organizationName) {
+      this.webhooks
+        .dispatch(organizationName, 'approval.decided', {
+          pendingApprovalId,
+          decision,
+          decidedBy: userId,
+        })
+        .catch((err) => logger.warn('Webhook dispatch failed for approval.decided', { error: err }));
     }
 
     if (decision === 'rejected') {

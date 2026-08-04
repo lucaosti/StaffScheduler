@@ -357,7 +357,7 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
     const result = await service.approve(1, 99, 'first sign-off');
 
     expect(result.status).toBe('pending');
-    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'first sign-off', expect.any(Function));
+    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'first sign-off', expect.any(Function), null);
     expect(conn.beginTransaction).not.toHaveBeenCalled();
   });
 
@@ -481,7 +481,7 @@ describe('TimeOffService — residual arms', () => {
     const approved = await service.approve(1, 99, 'enjoy');
 
     expect(approved.status).toBe('approved');
-    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'enjoy', expect.any(Function));
+    expect(decide).toHaveBeenCalledWith(501, 99, 'approved', 'enjoy', expect.any(Function), null);
     expect(conn.commit).toHaveBeenCalled();
   });
 

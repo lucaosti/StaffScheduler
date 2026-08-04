@@ -24,7 +24,8 @@ export async function dispatchPendingApprovalDecision(
   id: number,
   userId: number,
   decision: 'approved' | 'rejected',
-  note: string | null
+  note: string | null,
+  organizationName: string | null = null
 ): Promise<unknown> {
   const engine = new ApprovalEngineService(pool);
   const pa = await engine.getPendingApprovalById(id);
@@ -32,25 +33,25 @@ export async function dispatchPendingApprovalDecision(
 
   if (pa.changeRequestId !== null) {
     const svc = new ChangeRequestService(pool);
-    return svc.advancePendingApproval(id, userId, decision, note);
+    return svc.advancePendingApproval(id, userId, decision, note, organizationName);
   }
   if (pa.timeOffRequestId !== null) {
     const svc = new TimeOffService(pool);
     return decision === 'approved'
-      ? svc.approve(pa.timeOffRequestId, userId, note)
-      : svc.reject(pa.timeOffRequestId, userId, note);
+      ? svc.approve(pa.timeOffRequestId, userId, note, organizationName)
+      : svc.reject(pa.timeOffRequestId, userId, note, organizationName);
   }
   if (pa.employeeLoanId !== null) {
     const svc = new EmployeeLoanService(pool);
     return decision === 'approved'
-      ? svc.approve(pa.employeeLoanId, userId, note)
-      : svc.reject(pa.employeeLoanId, userId, note);
+      ? svc.approve(pa.employeeLoanId, userId, note, organizationName)
+      : svc.reject(pa.employeeLoanId, userId, note, organizationName);
   }
   if (pa.shiftSwapRequestId !== null) {
     const svc = new ShiftSwapService(pool);
     return decision === 'approved'
-      ? svc.approve(pa.shiftSwapRequestId, userId, note)
-      : svc.decline(pa.shiftSwapRequestId, userId, note);
+      ? svc.approve(pa.shiftSwapRequestId, userId, note, organizationName)
+      : svc.decline(pa.shiftSwapRequestId, userId, note, organizationName);
   }
   throw new ConflictError('Pending approval has no linked entity');
 }

@@ -201,12 +201,12 @@ export const createOrgRouter = (pool: Pool): Router => {
   });
 
   router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
-    const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 
   router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
-    const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 

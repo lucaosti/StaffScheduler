@@ -75,6 +75,13 @@ jest.mock('../services/PushWorker', () => ({
   stopPushWorker: (...args: unknown[]) => mockStopPushWorker(...args),
 }));
 
+const mockStartWebhookWorker = jest.fn();
+const mockStopWebhookWorker = jest.fn();
+jest.mock('../services/WebhookWorker', () => ({
+  startWebhookWorker: (...args: unknown[]) => mockStartWebhookWorker(...args),
+  stopWebhookWorker: (...args: unknown[]) => mockStopWebhookWorker(...args),
+}));
+
 import { startServer } from '../index';
 import { logger } from '../config/logger';
 import { buildApp } from '../app';
@@ -94,6 +101,8 @@ describe('startServer()', () => {
     mockStopOutboxWorker.mockReset();
     mockStartPushWorker.mockReset();
     mockStopPushWorker.mockReset();
+    mockStartWebhookWorker.mockReset();
+    mockStopWebhookWorker.mockReset();
 
     // Prevent process.exit from terminating the test runner.
     exitSpy = jest
@@ -159,7 +168,7 @@ describe('startServer()', () => {
      * the first async step after buildApp(), so failing it is the most direct
      * way to reach this branch.
      */
-    it('exits and does not reach app.listen or either background worker', async () => {
+    it('exits and does not reach app.listen or any background worker', async () => {
       mockExecute.mockResolvedValueOnce([[], []]);
       mockEventBusInit.mockRejectedValueOnce(new Error('redis unreachable'));
 
@@ -177,6 +186,7 @@ describe('startServer()', () => {
       expect(mockInitOptimizationWorker).not.toHaveBeenCalled();
       expect(mockStartOutboxWorker).not.toHaveBeenCalled();
       expect(mockStartPushWorker).not.toHaveBeenCalled();
+      expect(mockStartWebhookWorker).not.toHaveBeenCalled();
       expect(mockListen).not.toHaveBeenCalled();
     });
   });
@@ -189,7 +199,7 @@ describe('startServer()', () => {
      * happen on a failure path, and none of them proves the success path
      * actually does what it is supposed to.
      */
-    it('builds the app, starts listening, and starts both background workers', async () => {
+    it('builds the app, starts listening, and starts all background workers', async () => {
       mockExecute.mockResolvedValueOnce([[], []]);
 
       await startServer();
@@ -200,6 +210,7 @@ describe('startServer()', () => {
       expect(mockInitOptimizationWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartOutboxWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartPushWorker).toHaveBeenCalledWith(mockPool);
+      expect(mockStartWebhookWorker).toHaveBeenCalledWith(mockPool);
     });
   });
 });

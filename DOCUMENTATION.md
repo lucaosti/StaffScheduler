@@ -727,6 +727,29 @@ DELETE /api/notifications/push/subscribe    deactivate a device's push subscript
 
 ---
 
+## 7d. Outbound webhooks
+
+An organization (scoped by `users.organization_name`, this app's existing soft-multi-tenant tag) can register HTTP endpoints that receive a signed POST when a `WebhookEventType` fires: `schedule.published`, `assignment.confirmed`, `approval.decided`.
+
+```
+GET    /api/webhooks                    list the caller's org's subscriptions
+POST   /api/webhooks                    create — { url, eventTypes[] } — returns the raw secret ONCE
+GET    /api/webhooks/:id                read one (rejects cross-org access)
+PUT    /api/webhooks/:id                update url / eventTypes / isActive
+DELETE /api/webhooks/:id                delete
+GET    /api/webhooks/:id/deliveries     delivery log (status, attempts, response_status, last_error), capped [1, 200]
+```
+
+All routes require `settings.manage` and are scoped to the caller's own `organizationName`; a subscription belonging to another organization 404s rather than 403s, so its existence isn't leaked.
+
+**Same transactional-outbox shape as email/push**: `WebhookService.dispatch(organizationName, eventType, payload, conn?)` enqueues one `webhook_deliveries` row per active matching subscription — the optional `conn` lets a call site enqueue inside its own transaction, the same seam `NotificationService.notifyWithin` offers. Call sites are best-effort and fire-and-forget (`.catch(...)`, not awaited): `ScheduleService.publishSchedule`, `AssignmentService.confirmAssignment`, and `ApprovalEngineService.decidePendingApproval` (the last one takes `organizationName` as an explicit optional parameter supplied by its callers — see below — rather than looking it up itself, since it is a shared method used by four unrelated entity services and an unconditional lookup query there would run on every call regardless of whether webhooks are in play).
+
+**`organizationName` threading**: `ApprovalEngineService.decidePendingApproval` is invoked by `TimeOffService`, `ShiftSwapService`, `EmployeeLoanService`, and `ChangeRequestService`, all of which now accept `organizationName` as a trailing optional parameter (default `null`, meaning "skip dispatch") and forward it unchanged. Routes supply it from `req.user.organizationName` — already resolved by `authenticate` — so no extra query is needed at the HTTP boundary either.
+
+**Signing and delivery**: `signPayload(secret, rawBody)` produces `X-Webhook-Signature: sha256=<hex>` via HMAC-SHA256, so a subscriber can verify the request came from this deployment. The secret is stored in **plaintext** in `webhook_subscriptions` — deliberately, unlike the kiosk/refresh-token pattern: `WebhookWorker` must reproduce the same signature the subscriber verifies, which needs the raw secret at delivery time, not a one-way hash of it (the standard shape for webhook secrets, e.g. Stripe, GitHub). `WebhookWorker` polls `webhook_deliveries` the same way `OutboxWorker`/`PushWorker` poll their tables (interval poll, `FOR UPDATE SKIP LOCKED` batch claim, unref'd timer), but backs off exponentially on failure instead of retrying every poll: `next_attempt_at` is pushed forward by `min(2^attempts, 60)` minutes, since an endpoint that's down tends to stay down, up to `MAX_ATTEMPTS = 6` before a delivery is marked `failed`. Unlike email/push, there is no "is this configured" gate — a delivery row only exists because `dispatch()` already found a matching active subscription, so the worker always polls.
+
+---
+
 ## 8. Delegation framework
 
 User A can grant User B a time-bounded subset of their own permissions.
