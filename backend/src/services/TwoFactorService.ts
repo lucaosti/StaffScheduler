@@ -2,8 +2,8 @@
  * Two-factor authentication service (F15) — method-registry dispatcher (#586, part of #331).
  *
  * Delegates enrollment/verification to a `TwoFactorMethodProvider` keyed by
- * `TwoFactorMethodType` (TOTP #586 and email #588 are registered so far —
- * WebAuthn #587 and SMS #589 add their own providers to the same map, with
+ * `TwoFactorMethodType` (TOTP #586, email #588, and WebAuthn #587 are
+ * registered so far — SMS #589 adds its own provider to the same map, with
  * no change needed here or in the routes). Recovery codes stay here,
  * centrally, one set per user regardless of how many methods are enrolled —
  * they prove account ownership, not possession of a specific method.
@@ -25,6 +25,7 @@ import { logger } from '../config/logger';
 import { TwoFactorMethodProvider, TwoFactorMethodType, TwoFactorSetupPayload } from './TwoFactorMethodProvider';
 import { TotpProvider } from './TotpProvider';
 import { EmailCodeProvider } from './EmailCodeProvider';
+import { WebAuthnProvider } from './WebAuthnProvider';
 
 interface TwoFactorEnablePayload {
   /** Only non-empty the FIRST time any method is enabled for the user — a second method reuses the existing recovery codes. */
@@ -35,10 +36,14 @@ export class TwoFactorService {
   private readonly providers: Partial<Record<TwoFactorMethodType, TwoFactorMethodProvider>>;
 
   constructor(private pool: Pool) {
-    // Partial: WebAuthn/SMS don't have providers registered yet (#587/#589)
-    // — resolveProvider throws a clear error for them rather than a Record
+    // Partial: SMS doesn't have a provider registered yet (#589) —
+    // resolveProvider throws a clear error for it rather than a Record
     // forcing a placeholder entry into existence.
-    this.providers = { totp: new TotpProvider(pool), email: new EmailCodeProvider(pool) };
+    this.providers = {
+      totp: new TotpProvider(pool),
+      email: new EmailCodeProvider(pool),
+      webauthn: new WebAuthnProvider(pool),
+    };
   }
 
   private resolveProvider(methodType: TwoFactorMethodType): TwoFactorMethodProvider {
@@ -48,17 +53,18 @@ export class TwoFactorService {
   }
 
   /**
-   * Requests delivery of a fresh challenge code for an already-enabled
-   * method (email #588, SMS #589 — TOTP has no equivalent, since its code
-   * is computed rather than delivered). Throws for a method whose provider
-   * doesn't implement this, same as an unregistered method type.
+   * Requests a fresh challenge for an already-enabled method (email #588,
+   * SMS #589 send it out of band and return nothing; WebAuthn #587 has no
+   * delivery channel — the challenge itself is what the caller returns to
+   * the client). Throws for a method whose provider doesn't implement this,
+   * same as an unregistered method type.
    */
-  async requestChallenge(userId: number, methodType: TwoFactorMethodType): Promise<void> {
+  async requestChallenge(userId: number, methodType: TwoFactorMethodType): Promise<Record<string, unknown> | void> {
     const provider = this.resolveProvider(methodType);
     if (!provider.requestChallenge) {
       throw new ConflictError(`Two-factor method '${methodType}' does not use a requested challenge`);
     }
-    await provider.requestChallenge(userId);
+    return provider.requestChallenge(userId);
   }
 
   async beginSetup(userId: number, accountLabel: string, methodType: TwoFactorMethodType = 'totp'): Promise<TwoFactorSetupPayload> {
