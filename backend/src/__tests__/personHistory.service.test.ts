@@ -102,6 +102,23 @@ describe('PersonHistoryService.getSnapshot — roles', () => {
     const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
     expect(snapshot.rolesHeld).toEqual([]);
   });
+
+  it('ignores a revoke event with no before snapshot', async () => {
+    const { pool } = makePool({
+      roles: [
+        roleEvent({ after_snapshot: JSON.stringify({ roleId: 5, scopeOrgUnitId: null, expiresAt: null }) }),
+        roleEvent({
+          action: 'role.revoke',
+          before_snapshot: null,
+          after_snapshot: null,
+          created_at: '2026-01-05 00:00:00',
+        }),
+      ],
+    });
+    const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
+    // The un-parseable revoke changed nothing — the earlier grant still holds.
+    expect(snapshot.rolesHeld).toEqual([{ roleId: 5, scopeOrgUnitId: null, expiresAt: null }]);
+  });
 });
 
 describe('PersonHistoryService.getSnapshot — org-unit membership', () => {
@@ -148,6 +165,31 @@ describe('PersonHistoryService.getSnapshot — org-unit membership', () => {
     const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
     expect(snapshot.orgUnitsBelongedTo).toEqual([]);
   });
+
+  it('ignores a remove event with no before snapshot', async () => {
+    const { pool } = makePool({
+      membership: [
+        membershipEvent({ after_snapshot: JSON.stringify({ userId: 7, orgUnitId: 3, isPrimary: false }) }),
+        membershipEvent({
+          action: 'org_unit.member_remove',
+          before_snapshot: null,
+          after_snapshot: null,
+          created_at: '2026-01-02 00:00:00',
+        }),
+      ],
+    });
+    const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
+    // The un-parseable removal changed nothing — the earlier join still holds.
+    expect(snapshot.orgUnitsBelongedTo).toEqual([{ orgUnitId: 3, isPrimary: false }]);
+  });
+
+  it('ignores an add/primary_set event with no after snapshot', async () => {
+    const { pool } = makePool({
+      membership: [membershipEvent({ after_snapshot: null })],
+    });
+    const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
+    expect(snapshot.orgUnitsBelongedTo).toEqual([]);
+  });
 });
 
 describe('PersonHistoryService.getSnapshot — org-unit headship', () => {
@@ -184,6 +226,16 @@ describe('PersonHistoryService.getSnapshot — org-unit headship', () => {
 
     const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
     expect(snapshot.orgUnitsHeaded).toEqual([]);
+  });
+
+  it('falls back to the current manager when the backfill snapshot did not parse', async () => {
+    const { pool } = makePool({
+      units: [orgUnitRow({ id: 1, manager_user_id: 7 })],
+      headshipBackfill: [{ entity_id: 1, before_snapshot: null }],
+    });
+
+    const snapshot = await new PersonHistoryService(pool).getSnapshot(7, '2026-06-01 23:59:59');
+    expect(snapshot.orgUnitsHeaded).toEqual([1]);
   });
 });
 
