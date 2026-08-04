@@ -88,12 +88,17 @@ describe('evaluateAssignmentCompliance', () => {
   const makePool = (
     prefRows: Record<string, unknown>[],
     settingRows: Array<{ key: string; value: string }>,
-    assignmentRows: Array<{ id: number; date: unknown; start_time: string; end_time: string }>
+    assignmentRows: Array<{ id: number; date: unknown; start_time: string; end_time: string }>,
+    contractRows: Record<string, unknown>[] = []
   ) => {
     const execute = jest
       .fn()
       .mockResolvedValueOnce([prefRows, null])
       .mockResolvedValueOnce([settingRows, null])
+      // `EmploymentContractService.resolveLimitsForPeriod` — checked ahead of
+      // user_preferences/system_settings (#330); empty by default so
+      // existing cases exercise the pre-contract fallback chain unchanged.
+      .mockResolvedValueOnce([contractRows, null])
       .mockResolvedValueOnce([assignmentRows, null]);
     return { execute } as unknown as import('mysql2/promise').Pool;
   };
@@ -178,6 +183,42 @@ describe('evaluateAssignmentCompliance', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) {
       expect(result.violations.some((v) => v.code === 'MIN_REST_HOURS')).toBe(true);
+    }
+  });
+
+  it('an employment contract limit overrides user_preferences — #330', async () => {
+    // user_preferences would pass (generous 40h cap); the contract caps at 1h
+    // and must win, since it is the deliberate, effective-dated limit.
+    const pool = makePool(
+      [{ max_hours_per_week: 40, max_consecutive_days: 5 }],
+      [],
+      [],
+      [
+        {
+          user_id: 42,
+          id: 1,
+          name: 'Part-time',
+          description: null,
+          max_hours_per_week: 1,
+          min_hours_per_week: null,
+          max_hours_per_day: null,
+          max_consecutive_days: null,
+          min_hours_between_shifts: null,
+          min_consecutive_days_off: null,
+          is_active: 1,
+          created_at: '2026-01-01T00:00:00.000Z',
+          updated_at: '2026-01-01T00:00:00.000Z',
+        },
+      ]
+    );
+    const result = await evaluateAssignmentCompliance(pool, 42, {
+      date: '2026-06-01',
+      startTime: '09:00',
+      endTime: '17:00',
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.violations.some((v) => v.code === 'MAX_WEEKLY_HOURS')).toBe(true);
     }
   });
 });
