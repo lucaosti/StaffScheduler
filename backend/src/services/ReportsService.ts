@@ -47,7 +47,10 @@ export interface FairnessReport {
 const HOURS_EXPR = SHIFT_HOURS_SQL;
 
 export class ReportsService {
-  constructor(private pool: Pool) {}
+  // Entirely read-only, so it takes a single pool — the caller passes the
+  // read pool (a replica when #323 configures one, otherwise the same pool
+  // as always; see config/database.ts's createReadPool).
+  constructor(private readPool: Pool) {}
 
   async hoursWorkedByUser(
     rangeStart: string,
@@ -63,7 +66,7 @@ export class ReportsService {
       conditions.push('s.department_id = ?');
       params.push(departmentId);
     }
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT u.id AS user_id,
               CONCAT(u.first_name, ' ', u.last_name) AS full_name,
               COALESCE(SUM(${HOURS_EXPR}), 0) AS hours
@@ -86,7 +89,7 @@ export class ReportsService {
     rangeStart: string,
     rangeEnd: string
   ): Promise<CostByDepartmentRow[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT d.id AS department_id, d.name AS department_name,
               COALESCE(SUM(${HOURS_EXPR}), 0) AS hours,
               COALESCE(SUM(${HOURS_EXPR} * COALESCE(u.hourly_rate, 0)), 0) AS cost
@@ -108,7 +111,7 @@ export class ReportsService {
   }
 
   async fairnessForSchedule(scheduleId: number): Promise<FairnessReport> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT u.id AS user_id,
               CONCAT(u.first_name, ' ', u.last_name) AS full_name,
               SUM(${HOURS_EXPR}) AS hours

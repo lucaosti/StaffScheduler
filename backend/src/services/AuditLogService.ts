@@ -122,7 +122,11 @@ const clampOffset = (raw: number | undefined): number => {
 };
 
 export class AuditLogService {
-  constructor(private pool: Pool) {}
+  // list/getById/exportAll are read-only and go through readPool (a replica
+  // when #323 configures one, otherwise the same pool as always — see
+  // config/database.ts's createReadPool); write() always uses the primary
+  // pool, since a replica lags and this is the one method that mutates.
+  constructor(private pool: Pool, private readPool: Pool = pool) {}
 
   async list(filters: AuditLogFilters = {}): Promise<AuditLogPage> {
     const conditions: string[] = [];
@@ -162,7 +166,7 @@ export class AuditLogService {
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
 
-    const [countRows] = await this.pool.execute<RowDataPacket[]>(
+    const [countRows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT COUNT(*) AS c FROM audit_logs${where}`,
       params
     );
@@ -175,7 +179,7 @@ export class AuditLogService {
     // the same reasoning the export query and OutboxWorker already rely on.
     const limit = clampLimit(filters.limit);
     const offset = clampOffset(filters.offset);
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where}
         ORDER BY created_at DESC
         LIMIT ${limit} OFFSET ${offset}`,
@@ -186,7 +190,7 @@ export class AuditLogService {
   }
 
   async getById(id: number): Promise<AuditLogEntry | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs WHERE id = ? LIMIT 1`,
       [id]
     );
@@ -230,7 +234,7 @@ export class AuditLogService {
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     // Fetch one row beyond the cap: its presence is the overflow signal, and it
     // costs one row rather than a second COUNT(*) pass over the table.
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where} ORDER BY created_at ASC LIMIT ${EXPORT_MAX_ROWS + 1}`,
       params
     );

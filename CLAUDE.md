@@ -256,6 +256,7 @@ Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev prox
 | `METRICS_TOKEN` | Bearer token required to scrape `GET /metrics`. Unset leaves it open (dev only). |
 | `OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Starts OpenTelemetry tracing; spans carry `request.id`. |
 | `EMAIL_HOST` + `EMAIL_USER` + `EMAIL_PASSWORD` | Enables real email delivery via the outbox. Without them no email intent is recorded at all. |
+| `DB_REPLICA_HOST` | Routes `ReportsService`/`CalendarService`/`AuditLogService` SELECTs to a MySQL read replica. Unset leaves `createReadPool` returning the primary pool unchanged — see DOCUMENTATION.md §10a. |
 
 ## Observability and operations
 
