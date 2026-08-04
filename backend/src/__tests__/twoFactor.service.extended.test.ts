@@ -193,13 +193,9 @@ describe('TwoFactorService — unregistered method type', () => {
   it('rejects verifyCode/isEnabled/disable/confirmEnable for a method with no registered provider', async () => {
     const { pool } = makePool();
     const service = new TwoFactorService(pool);
-    await expect(service.verifyCode(7, '000000', 'webauthn')).rejects.toThrow(
-      "Two-factor method 'webauthn' is not available"
-    );
+    await expect(service.verifyCode(7, '000000', 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
     await expect(service.isEnabled(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
     await expect(service.disable(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
-    await expect(service.confirmEnable(7, '000000', 'webauthn')).rejects.toThrow(
-      "Two-factor method 'webauthn' is not available"
-    );
+    await expect(service.confirmEnable(7, '000000', 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
   });
 });
