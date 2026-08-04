@@ -107,6 +107,89 @@ describe('ApprovalEngineService.resolveApprover', () => {
   });
 });
 
+describe('ApprovalEngineService.decidePendingApproval — webhook dispatch (#315)', () => {
+  const pendingRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    change_request_id: null,
+    time_off_request_id: null,
+    employee_loan_id: null,
+    shift_swap_request_id: null,
+    workflow_id: 1,
+    step_id: 1,
+    step_order: 1,
+    // Deciding user IS the assignee — isAuthorizedToDecide's cheap path, no extra query.
+    assigned_to_user_id: 9,
+    assigned_to_org_unit_id: null,
+    open_to_structure: 0,
+    decided_by_user_id: null,
+    status: 'pending',
+    decided_at: null,
+    decision_note: null,
+    escalated_at: null,
+    created_at: new Date(),
+    updated_at: new Date(),
+    ...overrides,
+  });
+
+  it('dispatches an approval.decided webhook event on a rejection, given an organization', async () => {
+    const { pool, execute } = makePool();
+    // dispatch() is called without `await` (fire-and-forget, same as the
+    // schedule/assignment call sites) — its own SELECT is issued
+    // synchronously before decidePendingApproval continues to its final
+    // getPendingApprovalById, but the resulting INSERT only happens once
+    // that SELECT's promise resolves, in a later microtask. The mock queue
+    // order below reflects the actual call ORDER, not dispatch's logical
+    // position in the source.
+    execute
+      .mockResolvedValueOnce([[pendingRow()], null]) // getPendingApprovalById (initial)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE pending_approvals
+      .mockResolvedValueOnce([[{ id: 1, event_types: 'approval.decided' }], null]) // dispatch: matching subscriptions
+      .mockResolvedValueOnce([[pendingRow({ status: 'rejected' })], null]) // getPendingApprovalById (updated)
+      .mockResolvedValueOnce([{ insertId: 1 }, null]); // INSERT webhook_deliveries (resolves after the method returns)
+
+    const svc = new ApprovalEngineService(pool);
+    const result = await svc.decidePendingApproval(1, 9, 'rejected', null, async () => ({}) as never, 'Acme');
+    // Flush the microtask queue so dispatch's continuation (the INSERT) runs.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.decision).toBe('rejected');
+    const dispatchInsert = execute.mock.calls.find((c) => /INSERT INTO webhook_deliveries/.test(c[0]));
+    expect(dispatchInsert).toBeDefined();
+    expect(dispatchInsert![1][1]).toBe('approval.decided');
+    expect(JSON.parse(dispatchInsert![1][2])).toMatchObject({ pendingApprovalId: 1, decision: 'rejected' });
+  });
+
+  it('does not let a webhook dispatch failure surface — the decision already resolved', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[pendingRow()], null]) // getPendingApprovalById (initial)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE pending_approvals
+      .mockRejectedValueOnce(new Error('subscriptions table unavailable')) // dispatch's own SELECT
+      .mockResolvedValueOnce([[pendingRow({ status: 'rejected' })], null]); // getPendingApprovalById (updated)
+
+    const svc = new ApprovalEngineService(pool);
+    const result = await svc.decidePendingApproval(1, 9, 'rejected', null, async () => ({}) as never, 'Acme');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.decision).toBe('rejected');
+  });
+
+  it('does not dispatch when no organization is given', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[pendingRow()], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[pendingRow({ status: 'rejected' })], null]);
+
+    await new ApprovalEngineService(pool).decidePendingApproval(1, 9, 'rejected', null, async () => ({}) as never);
+    await Promise.resolve();
+
+    expect(execute.mock.calls.some((c) => /webhook_deliveries|webhook_subscriptions/.test(c[0]))).toBe(false);
+  });
+});
+
 describe('ApprovalEngineService.processEscalations', () => {
   it('escalates overdue pending approvals and returns a summary', async () => {
     const { pool, execute } = makePool();

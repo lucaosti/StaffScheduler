@@ -90,13 +90,13 @@ export const createTimeOffRouter = (pool: Pool): Router => {
 
   router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
-    const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 
   router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
-    const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
+    const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 

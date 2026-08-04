@@ -57,6 +57,42 @@ describe('AssignmentService.confirmAssignment', () => {
     expect(out.status).toBe('confirmed');
     expect(conn.commit).toHaveBeenCalled();
   });
+
+  it('dispatches an assignment.confirmed webhook event when the actor resolves to an organization (#315)', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[buildAssignmentRow({ status: 'confirmed' })], null]) // orchestrator's read-back
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit.write's INSERT
+      .mockResolvedValueOnce([[{ organization_name: 'Acme' }], null]) // resolveOrganization(actorId)
+      .mockResolvedValueOnce([[{ id: 1, event_types: 'assignment.confirmed' }], null]) // dispatch: matching subscriptions
+      .mockResolvedValueOnce([{ insertId: 1 }, null]); // INSERT webhook_deliveries
+
+    await new AssignmentService(pool).confirmAssignment(1, 9);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const dispatchInsert = execute.mock.calls.find((c) => /INSERT INTO webhook_deliveries/.test(c[0]));
+    expect(dispatchInsert).toBeDefined();
+    expect(dispatchInsert![1][1]).toBe('assignment.confirmed');
+    expect(JSON.parse(dispatchInsert![1][2])).toMatchObject({ assignmentId: 1 });
+  });
+
+  it('does not let a webhook dispatch failure surface — confirmAssignment already resolved (#315)', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[buildAssignmentRow({ status: 'confirmed' })], null]) // orchestrator's read-back
+      .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit.write's INSERT
+      .mockResolvedValueOnce([[{ organization_name: 'Acme' }], null]) // resolveOrganization(actorId)
+      .mockRejectedValueOnce(new Error('subscriptions table unavailable')); // WebhookService.dispatch's own SELECT
+
+    const result = await new AssignmentService(pool).confirmAssignment(1, 9);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.status).toBe('confirmed');
+  });
 });
 
 describe('AssignmentService.cancelAssignment', () => {

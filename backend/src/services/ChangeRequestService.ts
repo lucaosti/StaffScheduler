@@ -351,7 +351,8 @@ export class ChangeRequestService {
     pendingApprovalId: number,
     userId: number,
     decision: 'approved' | 'rejected',
-    note?: string | null
+    note?: string | null,
+    organizationName: string | null = null
   ): Promise<{ pendingApproval: PendingApproval; changeRequest: ChangeRequest }> {
     const pa = await this.engine.getPendingApprovalById(pendingApprovalId);
     if (!pa || pa.changeRequestId === null) throw new NotFoundError('Pending approval not found');
@@ -372,7 +373,8 @@ export class ChangeRequestService {
           subjectDepartmentIds: proposerCtx.subjectDepartmentIds,
           subjectRoleIds: proposerCtx.subjectRoleIds,
         };
-      }
+      },
+      organizationName
     );
 
     if (result.isFinalStep) {

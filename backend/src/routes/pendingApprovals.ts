@@ -56,14 +56,15 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
     id: number,
     userId: number,
     decision: 'approved' | 'rejected',
-    note: string | null
-  ): Promise<unknown> => dispatchPendingApprovalDecision(pool, id, userId, decision, note);
+    note: string | null,
+    organizationName: string | null
+  ): Promise<unknown> => dispatchPendingApprovalDecision(pool, id, userId, decision, note, organizationName);
 
   // POST /:id/approve — approve, whichever entity this decision belongs to
   router.post('/:id/approve', authenticate, validateParams(idParam), validateBody(decisionBody), async (req, res) => {
     const id = Number(req.params.id);
     const note = res.locals.body.note ?? null;
-    const result = await dispatchDecision(id, req.user!.id, 'approved', note);
+    const result = await dispatchDecision(id, req.user!.id, 'approved', note, req.user!.organizationName ?? null);
     res.json({ success: true, data: result });
   });
 
@@ -71,7 +72,7 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   router.post('/:id/reject', authenticate, validateParams(idParam), validateBody(decisionBody), async (req, res) => {
     const id = Number(req.params.id);
     const note = res.locals.body.note ?? null;
-    const result = await dispatchDecision(id, req.user!.id, 'rejected', note);
+    const result = await dispatchDecision(id, req.user!.id, 'rejected', note, req.user!.organizationName ?? null);
     res.json({ success: true, data: result });
   });
 

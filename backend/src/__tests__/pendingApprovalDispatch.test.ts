@@ -55,7 +55,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (ChangeRequestService.prototype.advancePendingApproval as jest.Mock).mockResolvedValueOnce({ id: 5 });
 
     const result = await dispatchPendingApprovalDecision(pool, 1, 9, 'approved', 'note');
-    expect(ChangeRequestService.prototype.advancePendingApproval).toHaveBeenCalledWith(1, 9, 'approved', 'note');
+    expect(ChangeRequestService.prototype.advancePendingApproval).toHaveBeenCalledWith(1, 9, 'approved', 'note', null);
     expect(result).toEqual({ id: 5 });
   });
 
@@ -67,7 +67,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (TimeOffService.prototype.approve as jest.Mock).mockResolvedValueOnce({ id: 7 });
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null);
-    expect(TimeOffService.prototype.approve).toHaveBeenCalledWith(7, 9, null);
+    expect(TimeOffService.prototype.approve).toHaveBeenCalledWith(7, 9, null, null);
     expect(TimeOffService.prototype.reject).not.toHaveBeenCalled();
   });
 
@@ -79,7 +79,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (TimeOffService.prototype.reject as jest.Mock).mockResolvedValueOnce({ id: 7 });
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'rejected', 'no');
-    expect(TimeOffService.prototype.reject).toHaveBeenCalledWith(7, 9, 'no');
+    expect(TimeOffService.prototype.reject).toHaveBeenCalledWith(7, 9, 'no', null);
   });
 
   it('dispatches approved to EmployeeLoanService.approve (previously untested branch)', async () => {
@@ -90,7 +90,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (EmployeeLoanService.prototype.approve as jest.Mock).mockResolvedValueOnce({ id: 3 });
 
     const result = await dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null);
-    expect(EmployeeLoanService.prototype.approve).toHaveBeenCalledWith(3, 9, null);
+    expect(EmployeeLoanService.prototype.approve).toHaveBeenCalledWith(3, 9, null, null);
     expect(result).toEqual({ id: 3 });
   });
 
@@ -102,7 +102,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (EmployeeLoanService.prototype.reject as jest.Mock).mockResolvedValueOnce({ id: 3 });
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'rejected', null);
-    expect(EmployeeLoanService.prototype.reject).toHaveBeenCalledWith(3, 9, null);
+    expect(EmployeeLoanService.prototype.reject).toHaveBeenCalledWith(3, 9, null, null);
   });
 
   it('dispatches approved to ShiftSwapService.approve', async () => {
@@ -113,7 +113,7 @@ describe('dispatchPendingApprovalDecision', () => {
     (ShiftSwapService.prototype.approve as jest.Mock).mockResolvedValueOnce({ id: 2 });
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null);
-    expect(ShiftSwapService.prototype.approve).toHaveBeenCalledWith(2, 9, null);
+    expect(ShiftSwapService.prototype.approve).toHaveBeenCalledWith(2, 9, null, null);
   });
 
   it('dispatches rejected to ShiftSwapService.decline, not .reject', async () => {
@@ -124,6 +124,6 @@ describe('dispatchPendingApprovalDecision', () => {
     (ShiftSwapService.prototype.decline as jest.Mock).mockResolvedValueOnce({ id: 2 });
 
     await dispatchPendingApprovalDecision(pool, 1, 9, 'rejected', null);
-    expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(2, 9, null);
+    expect(ShiftSwapService.prototype.decline).toHaveBeenCalledWith(2, 9, null, null);
   });
 });
