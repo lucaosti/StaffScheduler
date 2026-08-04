@@ -75,12 +75,9 @@ export const createOrgRouter = (pool: Pool): Router => {
   });
 
   router.put('/units/:id', requirePermission('org_unit.manage'), validateParams(idParam), validateBody(updateOrgUnitBody), async (req: Request, res: Response) => {
-    const updated = await units.update(res.locals.params.id, res.locals.body);
-    await audit.write({
-      actorId: req.user!.id, action: 'org_unit.update',
-      entityType: 'org_unit', entityId: res.locals.params.id,
-      after: res.locals.body,
-    });
+    // Audited inside the service, not here: it needs the pre-update row to
+    // record a real `before`, not just the raw (possibly partial) request body.
+    const updated = await units.update(res.locals.params.id, res.locals.body, req.user!.id);
     res.json({ success: true, data: updated });
   });
 

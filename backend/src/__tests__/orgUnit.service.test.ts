@@ -85,6 +85,32 @@ describe('OrgUnitService.update', () => {
     const service = new OrgUnitService(pool);
     await expect(service.update(1, { parentId: 1 })).rejects.toThrow(/cannot equal id/);
   });
+
+  it('audits the RESOLVED before/after state, not the raw (possibly partial) patch — #327', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildUnit({ id: 1, manager_user_id: 10 })], null] as Tuple) // getById (existing)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // UPDATE
+      .mockResolvedValueOnce([[buildUnit({ id: 1, manager_user_id: 42 })], null] as Tuple); // getById (refresh)
+
+    const service = new OrgUnitService(pool);
+    // Only managerUserId is sent — an appointment — leaving name/description/
+    // parentId/isActive untouched.
+    await service.update(1, { managerUserId: 42 }, 99);
+
+    const auditCall = execute.mock.calls.find((call) => String(call[0]).includes('INSERT INTO audit_logs'));
+    expect(auditCall).toBeDefined();
+    const [, params] = auditCall as [string, unknown[]];
+    expect(params[2]).toBe('org_unit.update'); // action
+    const before = JSON.parse(params[7] as string);
+    const after = JSON.parse(params[8] as string);
+    expect(before.managerUserId).toBe(10);
+    expect(after.managerUserId).toBe(42);
+    // The unresolved-in-the-patch fields still round-trip to their unchanged
+    // value, so "what did this unit look like before/after" is answerable in
+    // full from the trail alone, not just the touched field.
+    expect(before.name).toBe(after.name);
+  });
 });
 
 describe('OrgUnitService.setPrimary', () => {
