@@ -33,6 +33,8 @@ import type {
   TimeOffRequest,
   ShiftSwapRequest,
   ShiftAssignment,
+  Geofence,
+  GeoPoint,
 } from '@staff-scheduler/shared';
 export type {
   Permission,
@@ -48,6 +50,8 @@ export type {
   TimeOffRequest,
   ShiftSwapRequest,
   ShiftAssignment,
+  Geofence,
+  GeoPoint,
 };
 
 
@@ -105,6 +109,8 @@ export interface AttendanceRecord {
   shiftAssignmentId?: ID | null;
   clockIn: string | Date;
   clockOut?: string | Date | null;
+  latitude?: number | null;
+  longitude?: number | null;
   status: 'pending' | 'approved' | 'rejected';
   reviewerId?: ID | null;
   reviewedAt?: string | Date | null;

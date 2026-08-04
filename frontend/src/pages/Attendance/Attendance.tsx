@@ -60,10 +60,31 @@ const Attendance: React.FC = () => {
 
   const openRecord = myRecords.find((r) => !r.clockOut) ?? null;
 
+  /**
+   * Best-effort geolocation: if the browser or the user denies it, clock-in
+   * still proceeds with no coordinates. Whether that's actually acceptable is
+   * a server-side decision (AttendanceService.clockIn) based on whether the
+   * caller's department has an active geofence — the client doesn't need to
+   * know that in advance, it just sends what it has.
+   */
+  const getLocation = (): Promise<{ latitude: number; longitude: number } | undefined> =>
+    new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(undefined);
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+        () => resolve(undefined),
+        { timeout: 5000 }
+      );
+    });
+
   const handleClockIn = async () => {
     setActionError(null);
     try {
-      await clockInMutation.mutateAsync();
+      const location = await getLocation();
+      await clockInMutation.mutateAsync(location);
     } catch (e) {
       setActionError((e as Error).message ?? 'Clock-in failed.');
     }

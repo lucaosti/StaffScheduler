@@ -57,7 +57,9 @@ export const createAttendanceRouter = (pool: Pool): Router => {
   router.use(authenticate, requireModuleForUser('attendance'));
 
   router.post('/clock-in', validateBody(clockInBody), asyncHandler(async (req: Request, res: Response) => {
-    const created = await service.clockIn(req.user!.id, res.locals.body.notes ?? null);
+    const { notes, latitude, longitude } = res.locals.body;
+    const location = latitude !== undefined && longitude !== undefined ? { lat: latitude, lng: longitude } : null;
+    const created = await service.clockIn(req.user!.id, notes ?? null, location);
     res.status(201).json({ success: true, data: created });
   }));
 
