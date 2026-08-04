@@ -22,6 +22,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { DateUtils } from '../utils';
+import { EmploymentContractService } from './EmploymentContractService';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
 export interface CandidateShift {
@@ -300,11 +301,17 @@ export const checkCompliance = (input: ComplianceInput): ComplianceResult => {
  * against `candidate`. Used by `AssignmentService.createAssignment`.
  *
  * Policy resolution order (first match wins per field):
- *   1. `user_preferences` row for the user
- *   2. `system_settings` keys (`scheduling.max_shifts_per_week` is the
+ *   1. The user's employment contract in force on the candidate's date
+ *      (`EmploymentContractService.resolveLimitsForPeriod`) — the same,
+ *      single resolution the optimizer already uses (#330). Checked FIRST:
+ *      a contract is a deliberate, effective-dated limit a manager set, and
+ *      a stale `user_preferences` value must not override it.
+ *   2. `user_preferences` row for the user (legacy; still the answer for
+ *      anyone with no contract assigned)
+ *   3. `system_settings` keys (`scheduling.max_shifts_per_week` is the
  *      legacy proxy for `max_hours_per_week / 8`; we ignore it and read
  *      the explicit keys when present)
- *   3. `DEFAULT_COMPLIANCE_POLICY`
+ *   4. `DEFAULT_COMPLIANCE_POLICY`
  */
 export const evaluateAssignmentCompliance = async (
   pool: Pool,
@@ -330,16 +337,25 @@ export const evaluateAssignmentCompliance = async (
   for (const row of settingRows) settings[row.key as string] = row.value as string;
 
   const pref = prefRows[0] as { max_hours_per_week?: number; max_consecutive_days?: number } | undefined;
+  const contracts = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    [userId],
+    candidate.date,
+    candidate.date
+  );
+  const contract = contracts.get(userId);
 
   const policy: CompliancePolicy = {
     maxConsecutiveDays:
+      contract?.maxConsecutiveDays ??
       pref?.max_consecutive_days ??
       (Number(settings.max_consecutive_days) ||
         DEFAULT_COMPLIANCE_POLICY.maxConsecutiveDays),
     minRestHoursBetweenShifts:
-      Number(settings.min_hours_between_shifts) ||
-      DEFAULT_COMPLIANCE_POLICY.minRestHoursBetweenShifts,
+      contract?.minHoursBetweenShifts ??
+      (Number(settings.min_hours_between_shifts) ||
+        DEFAULT_COMPLIANCE_POLICY.minRestHoursBetweenShifts),
     maxHoursPerWeek:
+      contract?.maxHoursPerWeek ??
       pref?.max_hours_per_week ??
       (Number(settings.max_hours_per_week) ||
         DEFAULT_COMPLIANCE_POLICY.maxHoursPerWeek),
