@@ -428,6 +428,11 @@ export const auditLogExportQuery = z.object({
   requestId: shortString.optional(),
 });
 
+/** Required "as of" calendar date for a person-history projection (#600). */
+export const personHistoryQuery = z.object({
+  asOf: dateString,
+});
+
 /**
  * Calendar feeds authenticate by opaque token, not by session cookie.
  *
