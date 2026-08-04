@@ -267,7 +267,7 @@ describe('delegations (real DB) — regression for the missing delegation.manage
   it('revoking the delegation removes the permission', async () => {
     const adminCookie = await authCookie();
     const del = await request(app)
-      .delete(`/api/delegations/${delegationId}`)
+      .delete(`/api/v1/delegations/${delegationId}`)
       .set('Cookie', adminCookie);
     expect(del.status).toBe(200);
 
@@ -1336,7 +1336,7 @@ describe('self-service preferences run against the real schema', () => {
     // self-service body must not have removed the capability itself.
     const cookie = await authCookie();
     const res = await request(app)
-      .put(`/api/preferences/${userId}`)
+      .put(`/api/v1/preferences/${userId}`)
       .set('Cookie', cookie)
       .send({ maxHoursPerWeek: 36, maxConsecutiveDays: 5 });
 
@@ -1368,7 +1368,7 @@ describe('skills catalogue runs against the real schema', () => {
     expect(created.body.data).toMatchObject({ employeeCount: 0, shiftRequirementCount: 0 });
 
     const removed = await request(app)
-      .delete(`/api/skills/${created.body.data.id}`)
+      .delete(`/api/v1/skills/${created.body.data.id}`)
       .set('Cookie', cookie);
     // Nothing references it, so deleting is safe and a typo is not permanent.
     expect(removed.status).toBe(200);
@@ -1391,12 +1391,12 @@ describe('skills catalogue runs against the real schema', () => {
     const skillId = created.body.data.id;
     await admin.query(`INSERT INTO user_skills (user_id, skill_id) VALUES (?, ?)`, [userId, skillId]);
 
-    const read = await request(app).get(`/api/skills/${skillId}`).set('Cookie', cookie);
+    const read = await request(app).get(`/api/v1/skills/${skillId}`).set('Cookie', cookie);
     expect(read.body.data.employeeCount).toBe(1);
 
     // The foreign key cascades, so without this guard the delete would succeed
     // and strip the skill from the person holding it.
-    const refused = await request(app).delete(`/api/skills/${skillId}`).set('Cookie', cookie);
+    const refused = await request(app).delete(`/api/v1/skills/${skillId}`).set('Cookie', cookie);
     expect(refused.status).toBe(409);
   });
 
@@ -1409,7 +1409,7 @@ describe('skills catalogue runs against the real schema', () => {
     const skillId = created.body.data.id;
 
     const retired = await request(app)
-      .put(`/api/skills/${skillId}`)
+      .put(`/api/v1/skills/${skillId}`)
       .set('Cookie', cookie)
       .send({ isActive: false });
     expect(retired.status).toBe(200);
@@ -1435,7 +1435,7 @@ describe('timeline runs against the real schema', () => {
   const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
 
   const bars = async (cookie: string, query = 'from=2033-04-01&to=2033-04-07') => {
-    const res = await request(app).get(`/api/timeline?${query}`).set('Cookie', cookie);
+    const res = await request(app).get(`/api/v1/timeline?${query}`).set('Cookie', cookie);
     expect(res.status).toBe(200);
     return res.body.data;
   };
@@ -1544,7 +1544,7 @@ describe('schedule predecessors run against the real schema', () => {
     const current = await makeSchedule('2040-04-01', '2040-04-30', 'draft');
 
     const res = await request(app)
-      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .get(`/api/v1/schedules/${current}/predecessor-candidates`)
       .set('Cookie', cookie);
     expect(res.status).toBe(200);
 
@@ -1564,14 +1564,14 @@ describe('schedule predecessors run against the real schema', () => {
     const current = await makeSchedule('2041-04-01', '2041-04-30', 'draft');
 
     const saved = await request(app)
-      .put(`/api/schedules/${current}`)
+      .put(`/api/v1/schedules/${current}`)
       .set('Cookie', cookie)
       .send({ previousScheduleId: abandoned });
     expect(saved.status).toBe(200);
     expect(saved.body.data.previousScheduleId).toBe(abandoned);
 
     const res = await request(app)
-      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .get(`/api/v1/schedules/${current}/predecessor-candidates`)
       .set('Cookie', cookie);
     const byId = Object.fromEntries(res.body.data.map((c: { id: number }) => [c.id, c]));
     expect(byId[abandoned].isCurrent).toBe(true);
@@ -1593,7 +1593,7 @@ describe('schedule predecessors run against the real schema', () => {
     const current = await makeSchedule('2042-04-01', '2042-04-30', 'draft');
 
     const res = await request(app)
-      .put(`/api/schedules/${current}`)
+      .put(`/api/v1/schedules/${current}`)
       .set('Cookie', cookie)
       .send({ previousScheduleId: foreign.insertId });
     // Continuity is about the same people.
@@ -1606,7 +1606,7 @@ describe('schedule predecessors run against the real schema', () => {
     const current = await makeSchedule('2043-04-01', '2043-04-30', 'draft', published);
 
     const cleared = await request(app)
-      .put(`/api/schedules/${current}`)
+      .put(`/api/v1/schedules/${current}`)
       .set('Cookie', cookie)
       .send({ previousScheduleId: null });
     expect(cleared.status).toBe(200);
@@ -1615,7 +1615,7 @@ describe('schedule predecessors run against the real schema', () => {
     // Null restores the default rather than saying there is no predecessor,
     // so the published schedule is offered again as such.
     const res = await request(app)
-      .get(`/api/schedules/${current}/predecessor-candidates`)
+      .get(`/api/v1/schedules/${current}/predecessor-candidates`)
       .set('Cookie', cookie);
     const byId = Object.fromEntries(res.body.data.map((c: { id: number }) => [c.id, c]));
     expect(byId[published].isDefault).toBe(true);
@@ -1693,7 +1693,7 @@ describe('replanning a published schedule', () => {
     });
 
     const applied = await request(app)
-      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .post(`/api/v1/schedules/${scheduleId}/replan-proposals/${id}/apply`)
       .set('Cookie', cookie)
       .send({ reason: 'Approved' });
     expect(applied.status).toBe(200);
@@ -1740,7 +1740,7 @@ describe('replanning a published schedule', () => {
     });
 
     const res = await request(app)
-      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .post(`/api/v1/schedules/${scheduleId}/replan-proposals/${id}/apply`)
       .set('Cookie', cookie)
       .send({});
     expect(res.status).toBe(409);
@@ -1766,13 +1766,13 @@ describe('replanning a published schedule', () => {
     });
 
     const first = await request(app)
-      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/reject`)
+      .post(`/api/v1/schedules/${scheduleId}/replan-proposals/${id}/reject`)
       .set('Cookie', cookie)
       .send({ reason: 'Too disruptive' });
     expect(first.status).toBe(200);
 
     const second = await request(app)
-      .post(`/api/schedules/${scheduleId}/replan-proposals/${id}/apply`)
+      .post(`/api/v1/schedules/${scheduleId}/replan-proposals/${id}/apply`)
       .set('Cookie', cookie)
       .send({});
     expect(second.status).toBe(409);
@@ -1791,7 +1791,7 @@ describe('replanning a published schedule', () => {
 
     // Without this check the schedule segment would be decoration.
     const res = await request(app)
-      .post(`/api/schedules/${mine.scheduleId}/replan-proposals/${id}/apply`)
+      .post(`/api/v1/schedules/${mine.scheduleId}/replan-proposals/${id}/apply`)
       .set('Cookie', cookie)
       .send({});
     expect(res.status).toBe(404);
@@ -1808,7 +1808,7 @@ describe('replanning a published schedule', () => {
     });
 
     const res = await request(app)
-      .get(`/api/schedules/${scheduleId}/replan-proposals`)
+      .get(`/api/v1/schedules/${scheduleId}/replan-proposals`)
       .set('Cookie', cookie);
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -1884,7 +1884,7 @@ describe('publishing commits the schedule', () => {
     expect(await isPinned(assignmentId)).toBe(false);
 
     const published = await request(app)
-      .patch(`/api/schedules/${scheduleId}/publish`)
+      .patch(`/api/v1/schedules/${scheduleId}/publish`)
       .set('Cookie', cookie);
     expect(published.status).toBe(200);
 
@@ -1895,7 +1895,7 @@ describe('publishing commits the schedule', () => {
     const cookie = await authCookie();
     const { scheduleId, assignmentId } = await draftWithAssignment('cancelled');
 
-    await request(app).patch(`/api/schedules/${scheduleId}/publish`).set('Cookie', cookie);
+    await request(app).patch(`/api/v1/schedules/${scheduleId}/publish`).set('Cookie', cookie);
 
     // Nobody is relying on work they are not doing, and pinning it would ask
     // the optimizer to preserve it.
@@ -1905,7 +1905,7 @@ describe('publishing commits the schedule', () => {
   it('pins an assignment added to an already published schedule', async () => {
     const cookie = await authCookie();
     const { scheduleId, shiftId } = await draftWithAssignment();
-    await request(app).patch(`/api/schedules/${scheduleId}/publish`).set('Cookie', cookie);
+    await request(app).patch(`/api/v1/schedules/${scheduleId}/publish`).set('Cookie', cookie);
 
     const added = await request(app)
       .post('/api/v1/assignments')
@@ -1979,7 +1979,7 @@ describe('pairing rules run against the real schema', () => {
     // Filtering on `user_id` alone would make this rule invisible to the
     // person named second, whose constraint it equally is.
     const seen = await request(app)
-      .get(`/api/employee-pairings?userId=${delegateeId}`)
+      .get(`/api/v1/employee-pairings?userId=${delegateeId}`)
       .set('Cookie', cookie);
     expect(seen.status).toBe(200);
     expect(seen.body.data).toHaveLength(1);
@@ -2056,15 +2056,15 @@ describe('pairing rules run against the real schema', () => {
     const id = created.body.data.id;
 
     const edited = await request(app)
-      .put(`/api/employee-pairings/${id}`)
+      .put(`/api/v1/employee-pairings/${id}`)
       .set('Cookie', cookie)
       .send({ reason: null });
     expect(edited.status).toBe(200);
     expect(edited.body.data.reason).toBeNull();
 
-    const removed = await request(app).delete(`/api/employee-pairings/${id}`).set('Cookie', cookie);
+    const removed = await request(app).delete(`/api/v1/employee-pairings/${id}`).set('Cookie', cookie);
     expect(removed.status).toBe(200);
-    const gone = await request(app).get(`/api/employee-pairings/${id}`).set('Cookie', cookie);
+    const gone = await request(app).get(`/api/v1/employee-pairings/${id}`).set('Cookie', cookie);
     expect(gone.status).toBe(404);
   });
 });
@@ -2098,13 +2098,13 @@ describe('employment contracts run against the real schema', () => {
     const contractId = created.body.data.id;
 
     const assigned = await request(app)
-      .post(`/api/employment-contracts/users/${userId}`)
+      .post(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2040-01-01', effectiveTo: '2040-06-30' });
     expect(assigned.status).toBe(201);
 
     const history = await request(app)
-      .get(`/api/employment-contracts/users/${userId}`)
+      .get(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie);
     expect(history.status).toBe(200);
     expect(history.body.data.some((a: { contractId: number }) => a.contractId === contractId)).toBe(true);
@@ -2119,7 +2119,7 @@ describe('employment contracts run against the real schema', () => {
     const contractId = created.body.data.id;
 
     const first = await request(app)
-      .post(`/api/employment-contracts/users/${userId}`)
+      .post(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2041-01-01', effectiveTo: '2041-12-31' });
     expect(first.status).toBe(201);
@@ -2127,7 +2127,7 @@ describe('employment contracts run against the real schema', () => {
     // Half-overlapping: starts inside the first period. MySQL has no exclusion
     // constraint, so this is the service's own check running against real rows.
     const clash = await request(app)
-      .post(`/api/employment-contracts/users/${userId}`)
+      .post(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2041-06-01', effectiveTo: '2042-01-31' });
     expect(clash.status).toBe(400);
@@ -2142,7 +2142,7 @@ describe('employment contracts run against the real schema', () => {
     const contractId = created.body.data.id;
 
     const open = await request(app)
-      .post(`/api/employment-contracts/users/${userId}`)
+      .post(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2045-01-01' });
     expect(open.status).toBe(201);
@@ -2150,7 +2150,7 @@ describe('employment contracts run against the real schema', () => {
     // `effective_to IS NULL` means still in force, so a later period overlaps
     // it. Getting this wrong in SQL would silently allow two live contracts.
     const later = await request(app)
-      .post(`/api/employment-contracts/users/${userId}`)
+      .post(`/api/v1/employment-contracts/users/${userId}`)
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2046-01-01' });
     expect(later.status).toBe(400);
