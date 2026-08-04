@@ -17,6 +17,7 @@ import CalendarSection from '../Settings/CalendarSection';
 import FieldPolicySection from '../Settings/FieldPolicySection';
 import TwoFactorSection from '../Settings/TwoFactorSection';
 import GeofenceSection from '../Settings/GeofenceSection';
+import KioskDevicesSection from '../Settings/KioskDevicesSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
@@ -47,7 +48,7 @@ const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -214,6 +215,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {isAdmin && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'kiosks' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('kiosks')}
+                >
+                  <i className="bi bi-tablet me-2"></i>Kiosk Devices
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -251,6 +262,8 @@ const Settings: React.FC = () => {
       )}
 
       {activeTab === 'geofences' && isAdmin && <GeofenceSection />}
+
+      {activeTab === 'kiosks' && isAdmin && <KioskDevicesSection />}
     </div>
   );
 };

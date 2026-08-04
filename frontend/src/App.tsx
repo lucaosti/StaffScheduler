@@ -85,6 +85,7 @@ const EmploymentContracts = lazy(() => import('./pages/Admin/EmploymentContracts
 const ShiftTemplates = lazy(() => import('./pages/Shifts/ShiftTemplates'));
 const UserAccounts = lazy(() => import('./pages/Admin/UserAccounts'));
 const Directory = lazy(() => import('./pages/Directory/Directory'));
+const Kiosk = lazy(() => import('./pages/Kiosk/Kiosk'));
 
 /**
  * Main Application Component
@@ -116,6 +117,8 @@ const App: React.FC = () => {
         <Routes>
         {/* Public Routes - Accessible without authentication */}
         <Route path="/login" element={<Login />} />
+        {/* Shared-tablet kiosk: authenticates by device token, not a user session. */}
+        <Route path="/kiosk" element={<Kiosk />} />
         
         {/* Protected Routes - Require authentication */}
         <Route path="/" element={
