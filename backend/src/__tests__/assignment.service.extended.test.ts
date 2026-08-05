@@ -569,9 +569,9 @@ describe('AssignmentService.getAvailableEmployeesForShift', () => {
   });
 
   /**
-   * Issue #602: a person on an approved loan into the shift's department's
-   * bridged org unit must be offered as a candidate even without a
-   * `user_departments` row of their own.
+   * A person on an approved loan into the shift's department's bridged org
+   * unit must be offered as a candidate even without a `user_departments`
+   * row of their own.
    */
   it('folds the org-unit loan pool into the candidate query when the department has a bridge', async () => {
     const { pool, conn, execute } = makePool();

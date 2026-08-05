@@ -232,9 +232,8 @@ export class AssignmentOrchestrator {
       const shiftDate = DateUtils.toDateString(shift.date as string | Date);
 
       // Department members, PLUS anyone on an approved loan into the
-      // department's org unit for this shift's date — see
-      // EmployeeLoanService and issue #602. A department with no
-      // `org_unit_id` bridge has no loan pool to add.
+      // department's org unit for this shift's date — see EmployeeLoanService.
+      // A department with no `org_unit_id` bridge has no loan pool to add.
       const orgUnitId = shift.org_unit_id as number | null;
       const loanedInUserIds = orgUnitId
         ? await this.loans.listLoanedInUserIds(orgUnitId, shiftDate, shiftDate)

@@ -81,7 +81,8 @@ const loanPendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
 // the spy-based suite in services.extended.test.ts, alongside the workflow
 // attachment/decision-arm tests they now share instance-boundary spying
 // with — see PolicyExceptionService.approve/reject's engine.decidePendingApproval
-// call. Only `cancel`, which the #603 migration left untouched, stays here.
+// call. Only `cancel`, which the approval-workflow migration left untouched,
+// stays here.
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('PolicyExceptionService.cancel — null refresh', () => {
