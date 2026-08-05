@@ -38,6 +38,7 @@ const LIMITS: Array<{ key: keyof EmploymentContract; label: string }> = [
   { key: 'maxConsecutiveDays', label: 'Max consecutive days' },
   { key: 'minHoursBetweenShifts', label: 'Min rest between shifts' },
   { key: 'minConsecutiveDaysOff', label: 'Min consecutive days off' },
+  { key: 'minDaysOffPerPeriod', label: 'Min days off per 7-day period' },
 ];
 
 

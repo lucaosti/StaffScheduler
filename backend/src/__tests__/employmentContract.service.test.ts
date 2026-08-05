@@ -31,6 +31,7 @@ const contractRow = (over: Record<string, unknown> = {}) => ({
   max_consecutive_days: 5,
   min_hours_between_shifts: 11,
   min_consecutive_days_off: 2,
+  min_days_off_per_period: 3,
   ...over,
 });
 
@@ -52,6 +53,7 @@ describe('resolveLimitsForPeriod', () => {
       maxConsecutiveDays: 5,
       minHoursBetweenShifts: 11,
       minConsecutiveDaysOff: 2,
+      minDaysOffPerPeriod: 3,
     });
   });
 
@@ -91,8 +93,8 @@ describe('resolveLimitsForPeriod', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([
       [
-        { user_id: 7, ...contractRow({ id: 1, min_hours_between_shifts: 8, min_hours_per_week: 0 }) },
-        { user_id: 7, ...contractRow({ id: 2, min_hours_between_shifts: 12, min_hours_per_week: 16 }) },
+        { user_id: 7, ...contractRow({ id: 1, min_hours_between_shifts: 8, min_hours_per_week: 0, min_days_off_per_period: 1 }) },
+        { user_id: 7, ...contractRow({ id: 2, min_hours_between_shifts: 12, min_hours_per_week: 16, min_days_off_per_period: 3 }) },
       ],
       [],
     ]);
@@ -103,7 +105,7 @@ describe('resolveLimitsForPeriod', () => {
       '2033-04-30'
     );
 
-    expect(limits.get(7)).toMatchObject({ minHoursBetweenShifts: 12, minHoursPerWeek: 16 });
+    expect(limits.get(7)).toMatchObject({ minHoursBetweenShifts: 12, minHoursPerWeek: 16, minDaysOffPerPeriod: 3 });
   });
 
   /**
@@ -250,7 +252,7 @@ describe('contract CRUD', () => {
     const [, params] = execute.mock.calls[0];
     // `null` is "this contract does not constrain it" — distinct from zero, so
     // an unstated limit must not become one.
-    expect(params).toEqual(['Casual', null, null, null, null, null, null, null]);
+    expect(params).toEqual(['Casual', null, null, null, null, null, null, null, null]);
   });
 
   it('keeps current values for fields an update omits', async () => {
@@ -264,8 +266,8 @@ describe('contract CRUD', () => {
 
     const [, params] = execute.mock.calls[1];
     // name, description, isActive, weekly, minWeekly, daily, consecutive,
-    // rest-between-shifts, consecutive-days-off, id
-    expect(params).toEqual(['Full time', null, true, 24, 0, 8, 5, 11, 2, 1]);
+    // rest-between-shifts, consecutive-days-off, days-off-per-period, id
+    expect(params).toEqual(['Full time', null, true, 24, 0, 8, 5, 11, 2, 3, 1]);
   });
 
   it('distinguishes clearing a limit from omitting it', async () => {
