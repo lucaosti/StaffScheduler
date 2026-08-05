@@ -30,6 +30,7 @@ import {
   findOverCommitments,
   restShortfalls,
   timeOffAdjacencies,
+  daysOffShortfalls,
   weekendLoads,
   weekendSpread,
   nightLoads,
@@ -196,6 +197,63 @@ describe('timeOffAdjacencies', () => {
 
   it('stays silent for an employee with no approved time off', () => {
     expect(timeOffAdjacencies(problem, [{ employeeId: 'e2', shiftId: 's1' }])).toEqual([]);
+  });
+});
+
+describe('daysOffShortfalls', () => {
+  const week = Array.from({ length: 7 }, (_, i) => ({
+    id: `s${i}`,
+    date: `2026-06-0${i + 1}`,
+    start_time: '09:00',
+    end_time: '17:00',
+    min_staff: 1,
+    max_staff: 1,
+  }));
+
+  const problem = (rate?: number) => ({
+    shifts: week,
+    employees: [
+      { id: 'e1', max_hours_per_week: 60, skills: [], unavailable_dates: [], ...(rate ? { min_days_off_per_period: rate } : {}) },
+    ],
+    constraints: {},
+  });
+
+  it('flags a shortfall when the rate is not met over the period', () => {
+    // Rate 2/7 over a 7-day period requires 2 days off; only 1 is taken.
+    const worked = week.slice(0, 6).map((s) => ({ employeeId: 'e1', shiftId: s.id }));
+    const shortfalls = daysOffShortfalls(problem(2), worked);
+    expect(shortfalls).toEqual([{ employeeId: 'e1', periodDays: 7, required: 2, actual: 1 }]);
+  });
+
+  it('stays silent once the rate is met', () => {
+    const worked = week.slice(0, 5).map((s) => ({ employeeId: 'e1', shiftId: s.id }));
+    expect(daysOffShortfalls(problem(2), worked)).toEqual([]);
+  });
+
+  it('does not measure an employee whose contract sets no rate', () => {
+    const worked = week.map((s) => ({ employeeId: 'e1', shiftId: s.id }));
+    expect(daysOffShortfalls(problem(), worked)).toEqual([]);
+  });
+
+  it('counts external work within the period, and ignores it outside the period', () => {
+    const withExternal = {
+      ...problem(2),
+      employees: [
+        {
+          ...problem(2).employees[0],
+          existing_assignments: [
+            { date: '2026-06-01', start_time: '09:00', end_time: '17:00' },
+            // Outside the 06-01..06-07 span — must not count against this period.
+            { date: '2026-07-01', start_time: '09:00', end_time: '17:00' },
+          ],
+        },
+      ],
+    };
+    // Only 06-01 counts as worked from external assignments; assigned shifts
+    // add five more distinct days, leaving one day off — short of the rate of 2.
+    const worked = week.slice(1, 6).map((s) => ({ employeeId: 'e1', shiftId: s.id }));
+    const shortfalls = daysOffShortfalls(withExternal, worked);
+    expect(shortfalls).toEqual([{ employeeId: 'e1', periodDays: 7, required: 2, actual: 1 }]);
   });
 });
 

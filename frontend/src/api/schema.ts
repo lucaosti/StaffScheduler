@@ -10057,6 +10057,7 @@ export interface paths {
                         maxConsecutiveDays?: number | null;
                         minHoursBetweenShifts?: number | null;
                         minConsecutiveDaysOff?: number | null;
+                        minDaysOffPerPeriod?: number | null;
                     };
                 };
             };
@@ -10135,6 +10136,7 @@ export interface paths {
                         maxConsecutiveDays?: number | null;
                         minHoursBetweenShifts?: number | null;
                         minConsecutiveDaysOff?: number | null;
+                        minDaysOffPerPeriod?: number | null;
                     };
                 };
             };
