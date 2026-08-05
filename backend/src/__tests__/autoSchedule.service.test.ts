@@ -754,4 +754,46 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(problem.shifts[0].qualified_staff).toEqual({ Triage: { level: 5, count: 1 } });
     expect(problem.employees[0].skill_levels).toEqual({ Triage: 4 });
   });
+
+  /**
+   * `hourly_rate` steers the solver's search only — it must reach the
+   * problem handed to the optimizer (so the objective can use it), but must
+   * never reach anything an unprivileged caller can read: the method's own
+   * return value, which is what routes actually send back as the HTTP
+   * response.
+   */
+  describe('hourly_rate: internal to the solver, never returned to the caller', () => {
+    it('carries the rate into the problem given to the optimizer', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { employees: [{ ...EMPLOYEE_ROW, hourly_rate: '15.50' }] });
+      conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 1);
+
+      // DECIMAL columns arrive from mysql2 as strings; the service must
+      // convert, not forward the raw string as if it were the number.
+      expect(lastProblemGiven().employees[0].hourly_rate).toBe(15.5);
+    });
+
+    it('omits the field rather than inventing zero when the column is null', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { employees: [{ ...EMPLOYEE_ROW, hourly_rate: null }] });
+      conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 1);
+
+      expect(lastProblemGiven().employees[0].hourly_rate).toBeUndefined();
+    });
+
+    it('never appears anywhere in what generate() returns to its caller', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { employees: [{ ...EMPLOYEE_ROW, hourly_rate: '99.00' }] });
+      conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+      const result = await new AutoScheduleService(pool).generate(1, 1);
+
+      expect(JSON.stringify(result)).not.toContain('99');
+      expect(result).not.toHaveProperty('hourly_rate');
+    });
+  });
 });
