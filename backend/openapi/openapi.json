@@ -9825,6 +9825,183 @@
         }
       }
     },
+    "/shift-swap/open": {
+      "get": {
+        "tags": [
+          "Shift Swap"
+        ],
+        "summary": "List open shift-board offers",
+        "description": "Offers currently open to be claimed, scoped to the org units the caller may see (the same scope SwapCandidateService uses), enriched with the offered shift's details. `mine=1` restricts the list to the caller's own posted offers instead — there is no reason to show someone their own offer as something to claim, so the default excludes it.",
+        "responses": {
+          "200": {
+            "description": "Open offer list."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "mine",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "0",
+                "1"
+              ]
+            }
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Shift Swap"
+        ],
+        "summary": "Post one of the caller's own assignments as an open offer",
+        "description": "Puts a live (pending/confirmed), not-yet-past assignment the caller owns onto the open shift board, without naming a specific counterpart. Refuses a second concurrent open offer on the same assignment.",
+        "responses": {
+          "201": {
+            "description": "Open offer created."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Assignment does not belong to the caller, is not in a swappable status, has already run, or already has an open offer."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assignmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "assignmentId"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shift-swap/open/{id}/claim": {
+      "post": {
+        "tags": [
+          "Shift Swap"
+        ],
+        "summary": "Claim an open shift-board offer",
+        "description": "Claims an open offer by pairing it with one of the claimer's own assignments, producing a real shift-swap request already at 'pending' (awaiting manager approval) — offering a specific assignment back is the claimer's consent, so unlike the targeted flow there is no separate accept step. Runs the exact same approval-gate and workflow-attachment checks `POST /shift-swap` does.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Shift swap request created from the claim."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Offer is not open, the claimer already owns it, the claimer's assignment doesn't belong to them, or no approver could be resolved for the swap."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "assignmentId": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 2000
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "assignmentId"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/shift-swap/open/{id}/cancel": {
+      "post": {
+        "tags": [
+          "Shift Swap"
+        ],
+        "summary": "Cancel the caller's own open offer",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "Offer is not in 'open' status."
+          }
+        }
+      }
+    },
     "/shift-swap/{id}": {
       "get": {
         "tags": [

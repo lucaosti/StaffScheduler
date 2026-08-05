@@ -607,6 +607,11 @@ export const shiftSwapListQuery = z.object({
   status: shortString.optional(),
 });
 
+/** `1` restricts the open-shift board to the caller's own posted offers. */
+export const shiftSwapOpenListQuery = z.object({
+  mine: z.enum(['0', '1']).optional(),
+});
+
 export const notificationListQuery = z.object({
   /** `1` means "unread only"; kept as the historical spelling. */
   unreadOnly: z.enum(['0', '1']).optional(),
@@ -787,6 +792,16 @@ export const createShiftSwapBody = z.object({
   requesterAssignmentId: z.number().int().positive(),
   targetAssignmentId: z.number().int().positive(),
   notes: z.string().optional(),
+});
+
+export const createShiftSwapOfferBody = z.object({
+  assignmentId: z.number().int().positive(),
+  notes: z.string().max(2000).nullable().optional(),
+});
+
+export const claimShiftSwapOfferBody = z.object({
+  assignmentId: z.number().int().positive(),
+  notes: z.string().max(2000).nullable().optional(),
 });
 
 export const createDelegationBody = z.object({
