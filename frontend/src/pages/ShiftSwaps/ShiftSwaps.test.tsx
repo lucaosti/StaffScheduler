@@ -45,6 +45,10 @@ const respondToSwap = jest.fn();
 const approveSwap = jest.fn();
 const declineSwap = jest.fn();
 const cancelSwap = jest.fn();
+const getOpenOffers = jest.fn();
+const createOpenOffer = jest.fn();
+const claimOpenOffer = jest.fn();
+const cancelOpenOffer = jest.fn();
 
 jest.mock('../../services/shiftSwapService', () => ({
   __esModule: true,
@@ -55,6 +59,10 @@ jest.mock('../../services/shiftSwapService', () => ({
   approveSwap: (...a: unknown[]) => approveSwap(...a),
   declineSwap: (...a: unknown[]) => declineSwap(...a),
   cancelSwap: (...a: unknown[]) => cancelSwap(...a),
+  getOpenOffers: (...a: unknown[]) => getOpenOffers(...a),
+  createOpenOffer: (...a: unknown[]) => createOpenOffer(...a),
+  claimOpenOffer: (...a: unknown[]) => claimOpenOffer(...a),
+  cancelOpenOffer: (...a: unknown[]) => cancelOpenOffer(...a),
 }));
 
 const myShift = {
@@ -78,6 +86,21 @@ const candidate = {
   endTime: '21:00:00',
   departmentName: 'Ward B',
 };
+
+const offer = (over: Record<string, unknown> = {}) => ({
+  id: 4,
+  assignmentId: 20,
+  userId: 9,
+  userName: 'Grace Hopper',
+  notes: null,
+  status: 'open',
+  shiftId: 21,
+  date: '2033-04-03',
+  startTime: '07:00:00',
+  endTime: '15:00:00',
+  departmentName: 'Ward C',
+  ...over,
+});
 
 const swapRequest = (over: Record<string, unknown> = {}) => ({
   id: 3,
@@ -112,6 +135,12 @@ beforeEach(() => {
     .mockReset()
     .mockImplementation(() => okResponse(swapRequest({ status: 'declined', declinedBy: 'manager' })));
   cancelSwap.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'cancelled' })));
+  // Default to an empty board — most existing suites are about the targeted
+  // flow and shouldn't have to account for an unrelated section.
+  getOpenOffers.mockReset().mockImplementation(() => okResponse([]));
+  createOpenOffer.mockReset().mockImplementation(() => okResponse(offer()));
+  claimOpenOffer.mockReset().mockImplementation(() => okResponse(swapRequest({ status: 'pending' })));
+  cancelOpenOffer.mockReset().mockImplementation(() => okResponse(offer({ status: 'cancelled' })));
 });
 
 describe('proposing', () => {
@@ -301,5 +330,49 @@ describe('deciding (the manager step, after the target has accepted)', () => {
     render(<ShiftSwaps />);
     await screen.findByText('approved');
     expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
+  });
+});
+
+describe('open shift board', () => {
+  it('posts one of the caller shifts to the board', async () => {
+    render(<ShiftSwaps />);
+    const select = await screen.findByLabelText('Post a shift to the board');
+    await waitFor(() => expect(select.querySelector('option[value="1"]')).not.toBeNull());
+    await userEvent.selectOptions(select, '1');
+    await userEvent.click(screen.getByRole('button', { name: 'Post' }));
+    await waitFor(() => expect(createOpenOffer).toHaveBeenCalledWith(1, undefined));
+  });
+
+  it('lists open offers from others and claims one by offering a shift back', async () => {
+    getOpenOffers.mockImplementation((mine: boolean) => okResponse(mine ? [] : [offer()]));
+    render(<ShiftSwaps />);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Claim' }));
+    await userEvent.selectOptions(
+      await screen.findByLabelText('Offer one of your shifts back'),
+      '1'
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm claim' }));
+
+    await waitFor(() =>
+      expect(claimOpenOffer).toHaveBeenCalledWith(4, 1, undefined)
+    );
+  });
+
+  it('withdraws one of the caller own posted offers', async () => {
+    getOpenOffers.mockImplementation((mine: boolean) => okResponse(mine ? [offer()] : []));
+    render(<ShiftSwaps />);
+
+    // "Withdraw" also labels the unrelated targeted-request cancel button
+    // below; the offer's own appears first, in the "Your posted offers"
+    // section above the requests table.
+    const [withdrawOffer] = await screen.findAllByRole('button', { name: 'Withdraw' });
+    await userEvent.click(withdrawOffer);
+    await waitFor(() => expect(cancelOpenOffer).toHaveBeenCalledWith(4));
+  });
+
+  it('shows an empty state when the board has nothing open', async () => {
+    render(<ShiftSwaps />);
+    expect(await screen.findByText('No open offers right now.')).toBeInTheDocument();
   });
 });
