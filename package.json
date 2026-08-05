@@ -29,11 +29,27 @@
     "crosses a major boundary to reach code that would no longer be installed",
     "at all. Plain `npm audit fix` does not resolve this — gaxios 7.1.3 is a",
     "hard pin from gcp-metadata. Remove once the OpenTelemetry packages",
-    "themselves depend on gaxios >= 7.3.0."
+    "themselves depend on gaxios >= 7.3.0.",
+    "",
+    "exceljs -> archiver -> archiver-utils -> glob pulls minimatch@3.1.5 ->",
+    "brace-expansion@1.1.16 into the PRODUCTION tree, matching the same",
+    "high-severity DoS advisories above. Keyed on 'minimatch@3.1.5' (an exact",
+    "version selector, not a path) rather than on brace-expansion directly:",
+    "every minimatch@3.1.5 anywhere in the tree wants brace-expansion ^1.1.7,",
+    "so 1.1.18 satisfies it with no major-version jump, while minimatch's 5.x",
+    "and later lines — which depend on the incompatible 2.x line of",
+    "brace-expansion and appear elsewhere in this same tree — are untouched",
+    "because their version does not match the selector. A path-shaped override",
+    "was tried first and rejected: hoisting placed the real brace-expansion",
+    "node somewhere the declared nesting didn't reach, so npm installed it",
+    "unmodified and flagged it invalid instead of applying the override."
   ],
   "overrides": {
     "gcp-metadata": {
       "gaxios": "^7.3.0"
+    },
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.18"
     }
   }
 }
