@@ -59,5 +59,9 @@ export const handlers = [
   http.get(`${apiUrl}/employees`, ok([])),
   http.get(`${apiUrl}/schedules`, ok([])),
   http.get(`${apiUrl}/shifts`, ok([])),
+  http.get(
+    `${apiUrl}/shifts/staffing-suggestion`,
+    ok({ suggestedMinStaff: 1, basedOnOccurrences: 0, lookbackWeeks: 12 })
+  ),
   http.get(`${apiUrl}/notifications`, ok([])),
 ];

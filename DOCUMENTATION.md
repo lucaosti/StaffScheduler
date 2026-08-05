@@ -525,6 +525,25 @@ locally it self-skips when OR-Tools is not installed. Coverage is deliberately
 not treated as a hard violation (the greedy is best-effort and may leave a shift
 short where CP-SAT would prove infeasibility); it is reported separately.
 
+### Staffing suggestions (seasonal baseline)
+
+`DemandForecastService` (`backend/src/services/DemandForecastService.ts`)
+suggests a `min_staff` for the schedule editor from recent history — a
+statistical seasonal baseline, not a model. For a department, weekday and
+exact start/end time window, it averages how many distinct employees actually
+worked matching shifts on **PUBLISHED** schedules (a draft is not what
+happened) over the last `FORECAST_LOOKBACK_WEEKS` (12 by default), rounding
+the average up. When there is no matching history, it falls back to the
+matching active shift template's own `min_staff`, or to `1` if neither exists
+— and always reports `basedOnOccurrences`, so the caller can tell a measured
+suggestion from a fallback.
+
+`GET /api/shifts/staffing-suggestion?departmentId=&date=&startTime=&endTime=`
+(requires `schedule.read`) returns `{ suggestedMinStaff, basedOnOccurrences,
+lookbackWeeks }`. The schedule editor shows this as a non-blocking hint next
+to the min-staff input ("Suggested: 4 staff, based on 8 past occurrences") —
+it is never auto-filled, so it cannot silently override what a planner typed.
+
 ### Running optimization as a background job
 
 Optimization can run for minutes, so it executes as a **background job** when

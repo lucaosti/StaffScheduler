@@ -32,8 +32,10 @@ jest.mock('../middleware/auth', () => ({
 }));
 
 jest.mock('../services/ShiftService');
+jest.mock('../services/DemandForecastService');
 
 import { ShiftService } from '../services/ShiftService';
+import { DemandForecastService } from '../services/DemandForecastService';
 import { createShiftsRouter } from '../routes/shifts';
 import { NotFoundError } from '../errors';
 import { errorHandler } from '../middleware/errorHandler';
@@ -303,6 +305,50 @@ describe('shifts router GET /', () => {
     await request(mountApp()).get('/api/shifts');
 
     expect(getAllShifts).toHaveBeenCalledWith({});
+  });
+});
+
+describe('shifts router GET /staffing-suggestion', () => {
+  it('returns 200 with the computed suggestion', async () => {
+    (DemandForecastService.prototype.suggestMinStaff as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ suggestedMinStaff: 4, basedOnOccurrences: 8, lookbackWeeks: 12 });
+
+    const res = await request(mountApp()).get('/api/shifts/staffing-suggestion').query({
+      departmentId: 3,
+      date: '2026-08-10',
+      startTime: '08:00',
+      endTime: '16:00',
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data).toEqual({ suggestedMinStaff: 4, basedOnOccurrences: 8, lookbackWeeks: 12 });
+  });
+
+  it('returns 400 for missing required query parameters', async () => {
+    const res = await request(mountApp()).get('/api/shifts/staffing-suggestion').query({
+      departmentId: 3,
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('returns 500 on service error', async () => {
+    (DemandForecastService.prototype.suggestMinStaff as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new Error('db error'));
+
+    const res = await request(mountApp()).get('/api/shifts/staffing-suggestion').query({
+      departmentId: 3,
+      date: '2026-08-10',
+      startTime: '08:00',
+      endTime: '16:00',
+    });
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
 });
 
