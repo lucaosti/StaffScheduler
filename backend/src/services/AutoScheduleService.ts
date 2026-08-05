@@ -322,7 +322,8 @@ export class AutoScheduleService {
               ) AS skill_levels,
               COALESCE(up.max_hours_per_week, 40) AS max_hours_per_week,
               COALESCE(up.min_hours_per_week, 0)  AS min_hours_per_week,
-              COALESCE(up.max_consecutive_days, 5) AS max_consecutive_days
+              COALESCE(up.max_consecutive_days, 5) AS max_consecutive_days,
+              u.hourly_rate
          FROM users u
          LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
          LEFT JOIN user_skills us ON u.id = us.user_id
@@ -521,6 +522,10 @@ export class AutoScheduleService {
         max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
         min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
         min_days_off_per_period: limits?.minDaysOffPerPeriod ?? undefined,
+        // Steers the solver's search only — see the field's own doc comment
+        // in optimization/types.ts for why this must never reach a log line
+        // or an API response.
+        hourly_rate: e.hourly_rate != null ? Number(e.hourly_rate) : undefined,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         skill_levels: parseSkillLevels(e.skill_levels as string | null),
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],

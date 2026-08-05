@@ -948,6 +948,98 @@ describeOrtools('CP-SAT engine does not over-staff to look fair', () => {
 });
 
 /**
+ * Labour cost: a tie-breaker below every existing objective, never a reason
+ * to leave a shift short or unbalance the team to save money.
+ */
+describeOrtools('CP-SAT engine prefers cheaper labour, but never at the expense of coverage or fairness', () => {
+  it('prefers the cheaper of two otherwise-equal candidates', () => {
+    // One shift, both employees equally eligible and equally fair either way
+    // (whichever one is picked ends up with the same 8h load) — cost is the
+    // only thing left to decide between them.
+    const problem = {
+      shifts: [
+        {
+          id: 's1',
+          date: '2033-07-01',
+          start_time: '09:00',
+          end_time: '17:00',
+          min_staff: 1,
+          max_staff: 1,
+          department_id: 1,
+        },
+      ],
+      employees: [
+        { id: 'cheap', max_hours_per_week: 40, skills: [], unavailable_dates: [], hourly_rate: 10 },
+        { id: 'pricey', max_hours_per_week: 40, skills: [], unavailable_dates: [], hourly_rate: 50 },
+      ],
+      skills: {},
+      preferences: {},
+      constraints: {},
+    };
+    const assignments = runPython(problem);
+    expect(assignments).toEqual([{ employeeId: 'cheap', shiftId: 's1' }]);
+  });
+
+  it('never leaves a shift unstaffed to save cost', () => {
+    // Only the expensive employee can cover this shift (skill-gated) — cost
+    // sits below MEDIUM, so coverage must still win.
+    const problem = {
+      shifts: [
+        {
+          id: 's1',
+          date: '2033-07-01',
+          start_time: '09:00',
+          end_time: '17:00',
+          min_staff: 1,
+          max_staff: 1,
+          department_id: 1,
+          required_skills: ['RN'],
+        },
+      ],
+      employees: [
+        { id: 'cheap', max_hours_per_week: 40, skills: [], unavailable_dates: [], hourly_rate: 10 },
+        { id: 'pricey', max_hours_per_week: 40, skills: ['RN'], unavailable_dates: [], hourly_rate: 200 },
+      ],
+      skills: {},
+      preferences: {},
+      constraints: {},
+    };
+    const assignments = runPython(problem);
+    expect(assignments).toEqual([{ employeeId: 'pricey', shiftId: 's1' }]);
+  });
+
+  it('never unbalances workload to save cost', () => {
+    // Same 2-employee / 4-shift split fixture that proves fairness, but with
+    // wildly different rates — an even 2/2 split must still win over a
+    // cost-minimising 4/0 split, since SOFT (fairness) outranks COST.
+    const problem = {
+      shifts: [0, 1, 2, 3].map((i) => ({
+        id: `s${i}`,
+        date: `2033-07-0${i + 1}`,
+        start_time: '09:00',
+        end_time: '17:00',
+        min_staff: 1,
+        max_staff: 1,
+        department_id: 1,
+      })),
+      employees: [
+        { id: 'cheap', max_hours_per_week: 60, max_consecutive_days: 7, min_hours_between_shifts: 8, skills: [], unavailable_dates: [], hourly_rate: 5 },
+        { id: 'pricey', max_hours_per_week: 60, max_consecutive_days: 7, min_hours_between_shifts: 8, skills: [], unavailable_dates: [], hourly_rate: 500 },
+      ],
+      skills: {},
+      preferences: {},
+      constraints: {},
+    };
+    const assignments = runPython(problem);
+    const perEmployee = new Map<string, number>();
+    for (const a of assignments) {
+      perEmployee.set(a.employeeId, (perEmployee.get(a.employeeId) ?? 0) + 1);
+    }
+    expect([...perEmployee.values()].sort()).toEqual([2, 2]);
+  });
+});
+
+/**
  * Over-commitment: the one thing that can still make the problem unsolvable.
  *
  * Measured rather than assumed. Once coverage became a minimised shortfall,
