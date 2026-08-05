@@ -3878,6 +3878,23 @@
         }
       }
     },
+    "/dashboard/attention-items": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "summary": "Understaffed shifts and aging pending approvals",
+        "description": "A short, capped shortlist rather than a report: shifts in the next two weeks that are below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Visibility mirrors the rest of the app — without `report.read`, understaffed shifts are limited to the org units the caller belongs to; pending-approval aging needs no separate scoping, since it already only includes items assigned to the caller or their structure. `truncated: true` on the shift list means more matched than the cap shows.",
+        "responses": {
+          "200": {
+            "description": "OK."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/dashboard/stats": {
       "get": {
         "tags": [

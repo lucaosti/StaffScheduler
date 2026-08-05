@@ -27,8 +27,11 @@ import {
   userHasPermission,
 } from '../middleware/auth';
 import { validateQuery } from '../middleware/validation';
-import { SHIFT_HOURS_SQL } from '../utils/sql';
+import { SHIFT_HOURS_SQL, inClause } from '../utils/sql';
 import { dashboardActivitiesQuery } from '../schemas';
+import { RbacService } from '../services/RbacService';
+import { PendingApprovalService } from '../services/PendingApprovalService';
+import { DateUtils } from '../utils';
 
 /** Feed size when the caller does not ask for one. Unchanged from the hardcoded value. */
 const DEFAULT_ACTIVITY_LIMIT = 10;
@@ -37,6 +40,17 @@ const DEFAULT_ACTIVITY_LIMIT = 10;
 // Keeps idx_date usable, unlike MONTH(...)/YEAR(...) predicates.
 const MONTH_WINDOW = `s.date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
         AND s.date < DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')`;
+
+// How far ahead an understaffed shift is worth flagging — long enough to act
+// on (swap it, post it to the open board, escalate it) before it happens,
+// short enough that the list stays a short, actionable read.
+const ATTENTION_WINDOW_DAYS = 14;
+
+// Caps on the item lists inside /attention-items — this is a glance, not a
+// report; /api/reports and /api/shifts are where the full picture lives.
+const MAX_ATTENTION_ITEMS = 20;
+
+const AGE_BUCKET_HOURS = { day: 24, twoDays: 48, week: 24 * 7 } as const;
 
 export const createDashboardRouter = (pool: Pool) => {
   const router = Router();
@@ -319,6 +333,98 @@ export const createDashboardRouter = (pool: Pool) => {
         success: true,
         data: departments
       });
+  });
+
+  /**
+   * Attention items: understaffed shifts coming up, and this caller's own
+   * pending approvals sorted by how long they have been waiting. Both are a
+   * *shortlist*, not a report — capped, and pointing at the endpoint that
+   * has the whole picture rather than trying to be it.
+   *
+   * Visibility mirrors the rest of the app: someone without `report.read`
+   * sees only the org units they belong to (their own subtree), the same
+   * membership-bound scope `resolveVisibleOrgUnits` computes elsewhere;
+   * `report.read` lifts that bound the same way it already does for
+   * `monthlyCost` above. Pending-approval aging needs no separate scoping —
+   * `PendingApprovalService.listForUser` already answers "assigned to this
+   * person, or their structure", which is exactly the right set here.
+   */
+  router.get('/attention-items', authenticate, async (req: Request, res: Response) => {
+    const canSeeAll = userHasPermission(req.user, 'report.read');
+    const orgUnitIds = canSeeAll
+      ? null
+      : await new RbacService(pool).getUserOrgUnitSubtreeIds(req.user!.id);
+
+    // An empty (non-null) scope means the caller belongs to no org unit at
+    // all — visible to nobody, not "unfiltered" — so the shift query is
+    // skipped rather than asked to match `IN ()`, which is invalid SQL.
+    const understaffedRows =
+      orgUnitIds !== null && orgUnitIds.length === 0
+        ? []
+        : await queryAll<{
+            id: number;
+            date: string;
+            start_time: string;
+            end_time: string;
+            min_staff: number;
+            assigned_staff: number;
+            department_name: string;
+          }>(`
+            SELECT s.id, s.date, s.start_time, s.end_time, s.min_staff,
+                   d.name AS department_name,
+                   COUNT(DISTINCT sa.id) AS assigned_staff
+              FROM shifts s
+              JOIN departments d ON d.id = s.department_id
+              LEFT JOIN shift_assignments sa
+                ON sa.shift_id = s.id AND sa.status IN ('pending', 'confirmed')
+             WHERE s.date >= CURDATE()
+               AND s.date <= DATE_ADD(CURDATE(), INTERVAL ${ATTENTION_WINDOW_DAYS} DAY)
+               AND s.status IN ('open', 'assigned', 'confirmed')
+               ${orgUnitIds !== null ? `AND d.org_unit_id IN (${inClause(orgUnitIds)})` : ''}
+             GROUP BY s.id, s.date, s.start_time, s.end_time, s.min_staff, d.name
+            HAVING assigned_staff < s.min_staff
+             ORDER BY s.date ASC, s.start_time ASC
+             LIMIT ${MAX_ATTENTION_ITEMS + 1}
+          `);
+
+    const understaffedTruncated = understaffedRows.length > MAX_ATTENTION_ITEMS;
+    const understaffedShifts = {
+      count: understaffedRows.length,
+      truncated: understaffedTruncated,
+      items: understaffedRows.slice(0, MAX_ATTENTION_ITEMS).map((row) => ({
+        id: row.id,
+        date: DateUtils.toDateString(row.date),
+        startTime: row.start_time,
+        endTime: row.end_time,
+        departmentName: row.department_name,
+        assignedStaff: row.assigned_staff,
+        minStaff: row.min_staff,
+      })),
+    };
+
+    const pending = await new PendingApprovalService(pool).listForUser(req.user!.id, 'pending');
+    const now = Date.now();
+    const ageHours = (createdAt: string) => (now - new Date(createdAt).getTime()) / (1000 * 60 * 60);
+    const sortedByAge = [...pending].sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+    const pendingApprovalsAging = {
+      count: pending.length,
+      overDay: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.day).length,
+      overTwoDays: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.twoDays).length,
+      overWeek: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.week).length,
+      items: sortedByAge.slice(0, MAX_ATTENTION_ITEMS).map((p) => ({
+        id: p.id,
+        changeType: p.changeType,
+        createdAt: p.createdAt,
+        ageHours: Math.round(ageHours(p.createdAt)),
+      })),
+    };
+
+    res.json({
+      success: true,
+      data: { understaffedShifts, pendingApprovalsAging },
+    });
   });
 
   return router;

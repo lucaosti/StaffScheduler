@@ -25,8 +25,8 @@
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { formatCurrency, formatPercentage as fmtPct } from '../../utils/format';
-import { useDashboardData } from '../../hooks/useDashboard';
+import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
+import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -46,6 +46,11 @@ const Dashboard: React.FC = () => {
   const error = dashboardQuery.isError
     ? 'Failed to load dashboard data. Please ensure the backend is running and database is populated.'
     : null;
+
+  // Kept off the main loading/error gate above: a slow or failed attention-items
+  // fetch should not block the stat cards, which is what one combined query would do.
+  const attentionQuery = useAttentionItems();
+  const attention = attentionQuery.data ?? null;
 
   const formatPct = (value: number) => fmtPct(value / 100);
 
@@ -233,6 +238,68 @@ const Dashboard: React.FC = () => {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Attention items — a shortlist, not a report; see /api/reports and
+          /shifts for the full picture behind each one. */}
+      {attention && (attention.understaffedShifts.count > 0 || attention.pendingApprovalsAging.count > 0) && (
+        <div className="row g-4 mb-4">
+          {attention.understaffedShifts.count > 0 && (
+            <div className="col-md-6">
+              <div className="card border-0 shadow-sm h-100">
+                <div className="card-header bg-transparent border-bottom d-flex justify-content-between align-items-center">
+                  <h5 className="card-title mb-0">Understaffed shifts</h5>
+                  <span className="badge bg-warning text-dark">{attention.understaffedShifts.count}</span>
+                </div>
+                <div className="card-body p-0">
+                  <ul className="list-group list-group-flush">
+                    {attention.understaffedShifts.items.map((s) => (
+                      <li key={s.id} className="list-group-item px-3 py-2 d-flex justify-content-between">
+                        <span>
+                          {s.date} {formatTime(s.startTime)}–{formatTime(s.endTime)} — {s.departmentName}
+                        </span>
+                        <span className="text-danger text-nowrap ms-2">
+                          {s.assignedStaff}/{s.minStaff} staffed
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {attention.understaffedShifts.truncated && (
+                    <p className="text-muted small px-3 py-2 mb-0">More than shown — see the full shift list.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {attention.pendingApprovalsAging.count > 0 && (
+            <div className="col-md-6">
+              <div className="card border-0 shadow-sm h-100">
+                <div className="card-header bg-transparent border-bottom d-flex justify-content-between align-items-center">
+                  <h5 className="card-title mb-0">Pending approvals — aging</h5>
+                  <span className="badge bg-warning text-dark">{attention.pendingApprovalsAging.count}</span>
+                </div>
+                <div className="card-body">
+                  <div className="d-flex gap-3 mb-3 small text-muted">
+                    <span>Over 24h: <strong className="text-body">{attention.pendingApprovalsAging.overDay}</strong></span>
+                    <span>Over 48h: <strong className="text-body">{attention.pendingApprovalsAging.overTwoDays}</strong></span>
+                    <span>Over 7d: <strong className="text-body">{attention.pendingApprovalsAging.overWeek}</strong></span>
+                  </div>
+                </div>
+                <ul className="list-group list-group-flush">
+                  {attention.pendingApprovalsAging.items.map((p) => (
+                    <li key={p.id} className="list-group-item px-3 py-2 d-flex justify-content-between">
+                      <span>{p.changeType}</span>
+                      <span className="text-muted small text-nowrap ms-2">
+                        {p.ageHours < 24 ? `${p.ageHours}h waiting` : `${Math.floor(p.ageHours / 24)}d waiting`}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

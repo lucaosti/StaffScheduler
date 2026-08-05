@@ -176,6 +176,39 @@ export interface DashboardStats {
   employeeSatisfaction: number;
 }
 
+export interface AttentionUnderstaffedShift {
+  id: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  departmentName: string;
+  assignedStaff: number;
+  minStaff: number;
+}
+
+export interface AttentionPendingApproval {
+  id: number;
+  changeType: string;
+  createdAt: string;
+  ageHours: number;
+}
+
+/** A shortlist, not a report — see `GET /dashboard/attention-items`. */
+export interface AttentionItems {
+  understaffedShifts: {
+    count: number;
+    truncated: boolean;
+    items: AttentionUnderstaffedShift[];
+  };
+  pendingApprovalsAging: {
+    count: number;
+    overDay: number;
+    overTwoDays: number;
+    overWeek: number;
+    items: AttentionPendingApproval[];
+  };
+}
+
 
 export interface Module {
   id: number;

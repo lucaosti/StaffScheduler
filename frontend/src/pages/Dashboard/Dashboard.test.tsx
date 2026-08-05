@@ -64,4 +64,57 @@ describe('<Dashboard />', () => {
       screen.getByText(String(defaultDashboardStats.totalEmployees))
     ).toBeInTheDocument();
   });
+
+  it('says nothing about attention items when there are none', async () => {
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() =>
+      expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
+    );
+    expect(screen.queryByText('Understaffed shifts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pending approvals — aging')).not.toBeInTheDocument();
+  });
+
+  it('shows understaffed shifts and pending-approval aging when there are some', async () => {
+    server.use(
+      http.get(`${API_URL}/dashboard/attention-items`, () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            understaffedShifts: {
+              count: 1,
+              truncated: false,
+              items: [
+                {
+                  id: 1,
+                  date: '2026-05-01',
+                  startTime: '08:00:00',
+                  endTime: '16:00:00',
+                  departmentName: 'ER',
+                  assignedStaff: 1,
+                  minStaff: 3,
+                },
+              ],
+            },
+            pendingApprovalsAging: {
+              count: 1,
+              overDay: 1,
+              overTwoDays: 0,
+              overWeek: 0,
+              items: [{ id: 9, changeType: 'Policy.Update', createdAt: '2026-04-30T00:00:00.000Z', ageHours: 30 }],
+            },
+          },
+        })
+      )
+    );
+
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+
+    expect(await screen.findByText('Understaffed shifts')).toBeInTheDocument();
+    expect(screen.getByText(/ER/)).toBeInTheDocument();
+    expect(screen.getByText('1/3 staffed')).toBeInTheDocument();
+
+    expect(screen.getByText('Pending approvals — aging')).toBeInTheDocument();
+    expect(screen.getByText('Policy.Update')).toBeInTheDocument();
+    expect(screen.getByText('1d waiting')).toBeInTheDocument();
+  });
 });
