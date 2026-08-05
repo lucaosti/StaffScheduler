@@ -258,6 +258,23 @@ describe('daysOffShortfalls', () => {
     const shortfalls = daysOffShortfalls(withExternal, worked);
     expect(shortfalls).toEqual([{ employeeId: 'e1', periodDays: 7, required: 2, actual: 1 }]);
   });
+
+  it('returns nothing for a problem with no shifts at all', () => {
+    expect(daysOffShortfalls({ ...problem(2), shifts: [] }, [])).toEqual([]);
+  });
+
+  it('ignores an assignment belonging to a different employee', () => {
+    // e2 has no contract rate, so its own worked day should not affect e1's count.
+    const twoEmployees = {
+      ...problem(2),
+      employees: [...problem(2).employees, { id: 'e2', max_hours_per_week: 60, skills: [], unavailable_dates: [] }],
+    };
+    const worked = [
+      ...week.slice(0, 5).map((s) => ({ employeeId: 'e1', shiftId: s.id })),
+      { employeeId: 'e2', shiftId: week[5].id },
+    ];
+    expect(daysOffShortfalls(twoEmployees, worked)).toEqual([]);
+  });
 });
 
 describe('startTimeSpreads', () => {
@@ -485,6 +502,29 @@ describe('illegalTurnarounds', () => {
       { employeeId: 'e1', shiftId: 's1' },
       { employeeId: 'e1', shiftId: 's2' },
     ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('ignores an assignment referencing a shift that no longer exists', () => {
+    const problem = {
+      shifts: [shift('s1', '2026-06-01', '22:00', '06:00')],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 'gone' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('says nothing about an employee with no assignments at all', () => {
+    const problem = {
+      shifts: [shift('s1', '2026-06-01', '22:00', '06:00')],
+      employees: [employee('e1'), employee('e2')],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
     expect(illegalTurnarounds(problem, worked)).toEqual([]);
   });
 });
