@@ -2213,6 +2213,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dashboard/attention-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Understaffed shifts and aging pending approvals
+         * @description A short, capped shortlist rather than a report: shifts in the next two weeks that are below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Visibility mirrors the rest of the app — without `report.read`, understaffed shifts are limited to the org units the caller belongs to; pending-approval aging needs no separate scoping, since it already only includes items assigned to the caller or their structure. `truncated: true` on the shift list means more matched than the cap shows.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dashboard/stats": {
         parameters: {
             query?: never;
