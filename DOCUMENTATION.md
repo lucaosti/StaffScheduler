@@ -743,6 +743,8 @@ Configurable rules (`policies` table, `PolicyService`/`PolicyValidator`) scoped 
 
 Implication: an administrator who creates a `max_hours_week` (or `staffing_min` / `skill_required`) policy through the Policies UI gets no error, but the policy has no effect — this is a known gap, not yet surfaced in the UI. Extending `PolicyValidator.evaluate()` to cover the remaining keys (or wiring `ComplianceEngine`'s thresholds to read from `policies` instead of `system_settings`) is open work; `manual_assignment_locked` is the only key to treat as load-bearing today.
 
+**Every violation `evaluateAssignmentCompliance` detects is now persisted**, one row per rule broken (not per check — a single candidate can fail more than one rule at once) in `compliance_violations`, written at the single point every caller already routes through rather than at each call site. This exists because a rejected attempt previously left no trace anywhere: the caller saw an error and nothing was written, so a "compliance violations trend" had no data to be a trend of. `GET /api/reports/compliance-violations-trend` (`report.read`, same gate as the rest of the reports router) aggregates the count per day and rule code over a range — day-and-code granularity rather than a single running total, since a planner needs to see *which* rule is recurring and *when*. No frontend chart consumes it yet; this is the backend shape landing first.
+
 ---
 
 ## 7c. Notifications

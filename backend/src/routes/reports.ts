@@ -125,5 +125,17 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
     res.json({ success: true, data });
   });
 
+  // No `/export` sibling yet and no frontend chart: this is the backend shape
+  // for the decision-support dashboard's compliance-trend slice, landing on
+  // its own before anything is built to consume it.
+  router.get('/compliance-violations-trend', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+    const { start, end } = resolveRange(res.locals.query);
+    if (!start || !end) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
+    }
+    const data = await service.complianceViolationsTrend(start, end);
+    res.json({ success: true, data });
+  });
+
   return router;
 };
