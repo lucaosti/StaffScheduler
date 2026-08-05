@@ -138,6 +138,12 @@ export const config = {
       address: process.env.EMAIL_FROM_ADDRESS || 'noreply@staffscheduler.com',
     },
   },
+  sms: {
+    // No SMS vendor is implemented yet (see SmsService.ts's SmsProvider) —
+    // this field only reserves the shape a future vendor's config lands in,
+    // mirroring `email` above. `isSmsConfigured()` does not gate on it yet.
+    provider: process.env.SMS_PROVIDER,
+  },
   upload: {
     maxSize: parseInt(process.env.UPLOAD_MAX_SIZE || '10485760'), // 10MB
     allowedTypes: (process.env.UPLOAD_ALLOWED_TYPES || 'image/jpeg,image/png,application/pdf').split(','),

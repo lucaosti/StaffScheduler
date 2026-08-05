@@ -203,7 +203,11 @@ describe('TwoFactorService.requestChallenge', () => {
   it('rejects an unregistered method type', async () => {
     const { pool } = makePool();
     const service = new TwoFactorService(pool);
-    await expect(service.requestChallenge(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
+    // All four TwoFactorMethodType members have a registered provider today,
+    // so an "unregistered" method type has to be forced past the type system
+    // — this exercises resolveProvider's fallback branch, not a real value.
+    const unregistered = 'push' as unknown as Parameters<typeof service.requestChallenge>[1];
+    await expect(service.requestChallenge(7, unregistered)).rejects.toThrow("Two-factor method 'push' is not available");
   });
 });
 
@@ -211,9 +215,10 @@ describe('TwoFactorService — unregistered method type', () => {
   it('rejects verifyCode/isEnabled/disable/confirmEnable for a method with no registered provider', async () => {
     const { pool } = makePool();
     const service = new TwoFactorService(pool);
-    await expect(service.verifyCode(7, '000000', 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
-    await expect(service.isEnabled(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
-    await expect(service.disable(7, 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
-    await expect(service.confirmEnable(7, '000000', 'sms')).rejects.toThrow("Two-factor method 'sms' is not available");
+    const unregistered = 'push' as unknown as Parameters<typeof service.verifyCode>[2];
+    await expect(service.verifyCode(7, '000000', unregistered)).rejects.toThrow("Two-factor method 'push' is not available");
+    await expect(service.isEnabled(7, unregistered)).rejects.toThrow("Two-factor method 'push' is not available");
+    await expect(service.disable(7, unregistered)).rejects.toThrow("Two-factor method 'push' is not available");
+    await expect(service.confirmEnable(7, '000000', unregistered)).rejects.toThrow("Two-factor method 'push' is not available");
   });
 });

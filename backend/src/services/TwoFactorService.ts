@@ -1,12 +1,13 @@
 /**
- * Two-factor authentication service (F15) — method-registry dispatcher (#586, part of #331).
+ * Two-factor authentication service (F15) — method-registry dispatcher.
  *
  * Delegates enrollment/verification to a `TwoFactorMethodProvider` keyed by
- * `TwoFactorMethodType` (TOTP #586, email #588, and WebAuthn #587 are
- * registered so far — SMS #589 adds its own provider to the same map, with
- * no change needed here or in the routes). Recovery codes stay here,
- * centrally, one set per user regardless of how many methods are enrolled —
- * they prove account ownership, not possession of a specific method.
+ * `TwoFactorMethodType`. TOTP, email, WebAuthn and SMS are all registered —
+ * a further method type is a new class implementing the interface plus one
+ * line in this map, with no change needed here or in the routes. Recovery
+ * codes stay here, centrally, one set per user regardless of how many
+ * methods are enrolled — they prove account ownership, not possession of a
+ * specific method.
  *
  * Every public method defaults `methodType` to `'totp'`, so this refactor is
  * a no-op from every existing call site's perspective (routes/auth.ts,
@@ -26,6 +27,7 @@ import { TwoFactorMethodProvider, TwoFactorMethodType, TwoFactorSetupPayload } f
 import { TotpProvider } from './TotpProvider';
 import { EmailCodeProvider } from './EmailCodeProvider';
 import { WebAuthnProvider } from './WebAuthnProvider';
+import { SmsCodeProvider } from './SmsCodeProvider';
 
 interface TwoFactorEnablePayload {
   /** Only non-empty the FIRST time any method is enabled for the user — a second method reuses the existing recovery codes. */
@@ -36,13 +38,16 @@ export class TwoFactorService {
   private readonly providers: Partial<Record<TwoFactorMethodType, TwoFactorMethodProvider>>;
 
   constructor(private pool: Pool) {
-    // Partial: SMS doesn't have a provider registered yet (#589) —
-    // resolveProvider throws a clear error for it rather than a Record
-    // forcing a placeholder entry into existence.
+    // Partial: SmsCodeProvider is registered with no SmsProvider injected —
+    // no vendor is implemented yet, so isSmsConfigured() is always false and
+    // every send-capable operation on it refuses before it would need one.
+    // The Partial type itself stays, ready for a future method that has no
+    // provider registered at all, the way SMS looked before this.
     this.providers = {
       totp: new TotpProvider(pool),
       email: new EmailCodeProvider(pool),
       webauthn: new WebAuthnProvider(pool),
+      sms: new SmsCodeProvider(pool),
     };
   }
 
@@ -53,10 +58,10 @@ export class TwoFactorService {
   }
 
   /**
-   * Requests a fresh challenge for an already-enabled method (email #588,
-   * SMS #589 send it out of band and return nothing; WebAuthn #587 has no
-   * delivery channel — the challenge itself is what the caller returns to
-   * the client). Throws for a method whose provider doesn't implement this,
+   * Requests a fresh challenge for an already-enabled method (email and SMS
+   * send it out of band and return nothing; WebAuthn has no delivery
+   * channel — the challenge itself is what the caller returns to the
+   * client). Throws for a method whose provider doesn't implement this,
    * same as an unregistered method type.
    */
   async requestChallenge(userId: number, methodType: TwoFactorMethodType): Promise<Record<string, unknown> | void> {
