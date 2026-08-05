@@ -69,12 +69,13 @@ export const createTimeOffRouter = (pool: Pool): Router => {
   router.get('/export', validateQuery(timeOffListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const rows = await service.list(filters);
-    await exporter.sendCsv(res, {
+    await exporter.send(res, {
       actorId: req.user?.id ?? null,
       dataset: 'time-off',
       rows,
       columns: timeOffColumns,
       filters,
+      format: res.locals.query.format,
     });
   });
 

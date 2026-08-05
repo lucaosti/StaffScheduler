@@ -43,6 +43,11 @@
  * worth more than the memory it saves. Revisit when a single export exceeds
  * roughly a hundred thousand rows; the seam is `toCsv`, which would become an
  * async generator with the callers unchanged.
+ *
+ * `CsvColumn`, `defuseFormula` and `exportFilename` are also what
+ * `utils/xlsx.ts` builds on: one column list, one injection guard and one
+ * naming rule serve both formats, so a dataset's shape and its defenses are
+ * declared once regardless of which file a caller asks for.
  */
 
 /** One output column: its header text and how to read it from a row. */
@@ -60,6 +65,18 @@ const NEEDS_QUOTES = /[",\r\n]/;
 export const CSV_BOM = '﻿';
 
 /**
+ * Prefixes a leading tab onto a value a spreadsheet would evaluate as a
+ * formula, leaving every other value untouched.
+ *
+ * Shared by the CSV and XLSX writers so the guard is defined once: a defused
+ * value stringified for CSV and a defused value written into an XLSX string
+ * cell must be defused by the identical rule, or one format would be the
+ * unguarded one.
+ */
+export const defuseFormula = (text: string): string =>
+  text.length > 0 && FORMULA_PREFIXES.includes(text[0]) ? `\t${text}` : text;
+
+/**
  * A single field, escaped and — if a spreadsheet would evaluate it — defused.
  *
  * `null` and `undefined` become empty rather than the strings "null"/"undefined",
@@ -69,14 +86,13 @@ export const CSV_BOM = '﻿';
  */
 export const csvField = (value: unknown): string => {
   if (value === null || value === undefined) return '';
-  let text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const original = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  const text = defuseFormula(original);
 
   // The guard forces quoting as well as prefixing. A bare leading tab is legal
   // CSV, but it is also what a tab-delimited import would split on, so leaving
   // it unquoted trades one silent misreading for another.
-  const defused = text.length > 0 && FORMULA_PREFIXES.includes(text[0]);
-  if (defused) text = `\t${text}`;
-
+  const defused = text !== original;
   return defused || NEEDS_QUOTES.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
@@ -95,15 +111,19 @@ export const toCsv = <T>(rows: readonly T[], columns: readonly CsvColumn<T>[]): 
 };
 
 /**
- * A download filename: `<base>_<YYYY-MM-DD>.csv`, with the base slugified.
+ * A download filename: `<base>_<YYYY-MM-DD>.<extension>`, with the base
+ * slugified.
  *
  * Dated because these files accumulate in a downloads folder, and
  * `hours-worked.csv (3)` is not something anyone can identify later. Slugified
  * because a base assembled from user-controlled text could otherwise carry a
  * quote or a newline into the `Content-Disposition` header, which is header
  * injection — the filename is the one part of an export a caller can influence.
+ *
+ * Shared by the CSV and XLSX writers so the naming rule cannot drift between
+ * the two formats a caller can choose between.
  */
-export const csvFilename = (base: string, on: Date = new Date()): string => {
+export const exportFilename = (base: string, extension: string, on: Date = new Date()): string => {
   const slug = base
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
@@ -111,5 +131,8 @@ export const csvFilename = (base: string, on: Date = new Date()): string => {
   const y = on.getFullYear();
   const m = String(on.getMonth() + 1).padStart(2, '0');
   const d = String(on.getDate()).padStart(2, '0');
-  return `${slug || 'export'}_${y}-${m}-${d}.csv`;
+  return `${slug || 'export'}_${y}-${m}-${d}.${extension}`;
 };
+
+export const csvFilename = (base: string, on: Date = new Date()): string =>
+  exportFilename(base, 'csv', on);
