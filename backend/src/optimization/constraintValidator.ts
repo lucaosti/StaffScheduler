@@ -827,6 +827,103 @@ export const isNightWork = (
 const isNightShift = (problem: OptimizationProblem, shift: ShiftTimes): boolean =>
   isNightWork(shift, problem.constraints?.night_window);
 
+/** How long an employee actually rested between a night shift and the one immediately after it. */
+export interface IllegalTurnaround {
+  employeeId: string;
+  /** The night shift that precedes the turnaround. */
+  nightShiftId: string;
+  /** The shift worked immediately after it. */
+  nextShiftId: string;
+  /** Rest actually taken between the two, in hours. */
+  restHours: number;
+  /** Minimum turnaround required after a night shift, in hours. */
+  requiredHours: number;
+}
+
+/** Minimum rest after a night shift, applied when the problem does not say otherwise. */
+export const DEFAULT_NIGHT_TURNAROUND_HOURS = 11;
+
+/**
+ * Illegal shift-pattern sequences: specifically, a night shift immediately
+ * followed by a morning shift with too little rest between them.
+ *
+ * WHY THIS IS NOT ALREADY CAUGHT BY `min-rest`. The general minimum-rest hard
+ * constraint is calibrated for an ordinary turnaround, not the specific
+ * fatigue a night shift leaves behind — a gap that clears the general figure
+ * can still be the canonical unsafe pattern (finish a night shift, come back a
+ * few hours later for an early morning one) that a rota is expected to avoid.
+ * This checks the SAME pair of adjacent shifts against a SEPARATE, normally
+ * higher, threshold that only applies when the earlier one was night work.
+ *
+ * WHY NOT HARD. Made hard, an already-tight rota with one person able to
+ * cover the gap becomes unsolvable — the same reasoning that keeps coverage,
+ * rest blocks and every other item in this family soft.
+ *
+ * WHY ONLY THE IMMEDIATELY NEXT SHIFT. The pattern this exists to catch is
+ * about adjacency, not general workload — a night shift followed three days
+ * later by a morning one is not the same complaint. Shifts are sorted by
+ * actual start time and only consecutive pairs are examined, the same way
+ * `findConstraintViolations` walks pairwise rest. Work held on OTHER
+ * schedules is included in the sort, since the fatigue and the following
+ * shift are real regardless of which schedule either one belongs to.
+ *
+ * Overlapping or double-booked pairs are skipped here — `findConstraintViolations`
+ * already reports those as `double-booking`, and a negative gap is not "not
+ * enough rest", it is a different, harder problem.
+ */
+export function illegalTurnarounds(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): IllegalTurnaround[] {
+  const findings: IllegalTurnaround[] = [];
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+  const requiredHours =
+    typeof problem.constraints?.min_hours_after_night_shift === 'number'
+      ? problem.constraints.min_hours_after_night_shift
+      : DEFAULT_NIGHT_TURNAROUND_HOURS;
+
+  const decisionShiftsByEmployee = new Map<string, IdentifiedShift[]>();
+  for (const a of assignments) {
+    const shift = shiftsById.get(a.shiftId);
+    if (!shift) continue;
+    const list = decisionShiftsByEmployee.get(a.employeeId) ?? [];
+    list.push(shift);
+    decisionShiftsByEmployee.set(a.employeeId, list);
+  }
+
+  for (const emp of problem.employees) {
+    const decisionShifts = decisionShiftsByEmployee.get(emp.id) ?? [];
+    const externalShifts: IdentifiedShift[] = (emp.existing_assignments ?? []).map((e, i) => ({
+      id: `ext:${emp.id}:${i}`,
+      date: e.date,
+      start_time: e.start_time,
+      end_time: e.end_time,
+    }));
+    const worked = [...decisionShifts, ...externalShifts].sort(
+      (a, b) => shiftBoundsMs(a)[0] - shiftBoundsMs(b)[0]
+    );
+
+    for (let i = 0; i < worked.length - 1; i++) {
+      if (!isNightShift(problem, worked[i])) continue;
+      const [, nightEnd] = shiftBoundsMs(worked[i]);
+      const [nextStart] = shiftBoundsMs(worked[i + 1]);
+      const restHours = (nextStart - nightEnd) / 3_600_000;
+      if (restHours < 0) continue; // overlap — a different problem, reported elsewhere
+      if (restHours < requiredHours) {
+        findings.push({
+          employeeId: emp.id,
+          nightShiftId: worked[i].id,
+          nextShiftId: worked[i + 1].id,
+          restHours: Math.round(restHours * 10) / 10,
+          requiredHours,
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
 /**
  * Days of a given shift category worked per employee.
  *
