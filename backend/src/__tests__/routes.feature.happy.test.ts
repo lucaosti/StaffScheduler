@@ -44,6 +44,7 @@ import { PreferencesService } from '../services/PreferencesService';
 import { AuditLogService } from '../services/AuditLogService';
 import { SkillGapService } from '../services/SkillGapService';
 import { ReportsService } from '../services/ReportsService';
+import { AttendanceService } from '../services/AttendanceService';
 import { NotificationService } from '../services/NotificationService';
 import { CalendarService } from '../services/CalendarService';
 import { TwoFactorService } from '../services/TwoFactorService';
@@ -222,6 +223,25 @@ describe('reports router', () => {
       .get('/api/reports/compliance-violations-trend?start=2026-05-01&end=2026-05-31');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([{ date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: 3 }]);
+  });
+
+  it('GET /attendance-anomalies requires start and end', async () => {
+    const res = await request(mountApp('/api/reports', createReportsRouter(fakePool)))
+      .get('/api/reports/attendance-anomalies');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /attendance-anomalies returns flagged punches', async () => {
+    (AttendanceService.prototype.detectAnomalies as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([
+        { attendanceRecordId: 1, userId: 5, type: 'late_clock_in', minutes: 25, clockIn: '2026-05-01 09:25:00', clockOut: '2026-05-01 17:00:00' },
+      ]);
+    const res = await request(mountApp('/api/reports', createReportsRouter(fakePool)))
+      .get('/api/reports/attendance-anomalies?start=2026-05-01&end=2026-05-31');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].type).toBe('late_clock_in');
   });
 });
 
