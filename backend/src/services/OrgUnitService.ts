@@ -46,9 +46,9 @@ interface OrgUnitMemberDetail {
   isPrimary: boolean;
   /**
    * True when this person is not a `user_org_units` member of the unit but is
-   * here on an approved loan active today (see EmployeeLoanService and issue
-   * #602). Never true together with `isPrimary`, which only ever describes
-   * real membership.
+   * here on an approved loan active today (see EmployeeLoanService). Never
+   * true together with `isPrimary`, which only ever describes real
+   * membership.
    */
   onLoan: boolean;
 }
@@ -288,9 +288,8 @@ export class OrgUnitService {
    * Includes anyone on an approved loan into this unit active today,
    * appended after real members and flagged `onLoan` — a manager borrowing a
    * person for two weeks wants to see them on the roster, not just have them
-   * pass eligibility checks invisibly (issue #602). A membership row always
-   * wins over a loan for the same user, since real membership is the more
-   * specific fact.
+   * pass eligibility checks invisibly. A membership row always wins over a
+   * loan for the same user, since real membership is the more specific fact.
    */
   async listMembersDetailed(orgUnitId: number): Promise<OrgUnitMemberDetail[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(

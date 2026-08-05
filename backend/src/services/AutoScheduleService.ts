@@ -290,10 +290,10 @@ export class AutoScheduleService {
     //
     // Loans are scoped to `org_units`, scheduling to `departments` — two
     // separate hierarchies bridged only by `departments.org_unit_id`. Without
-    // this, approving a loan changed nothing but the loan's own status: the
-    // borrowed person never became a candidate for the borrowing department's
-    // shifts (issue #602). A department with no `org_unit_id` set simply has
-    // no bridge yet, so it degrades to its previous department-only pool.
+    // this, approving a loan would change nothing but the loan's own status:
+    // the borrowed person would never become a candidate for the borrowing
+    // department's shifts. A department with no `org_unit_id` set simply has
+    // no bridge yet, so it degrades to the plain department-only pool.
     const [deptRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT org_unit_id FROM departments WHERE id = ? LIMIT 1`,
       [schedule.department_id]
