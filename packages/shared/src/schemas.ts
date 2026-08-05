@@ -387,6 +387,18 @@ export const shiftListQuery = z.object({
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 /**
+ * Inputs for the seasonal-baseline staffing suggestion: the department, the
+ * date the suggestion is for (its weekday drives the match), and the exact
+ * time window a shift or shift template would use.
+ */
+export const staffingSuggestionQuery = z.object({
+  departmentId: positiveInt,
+  date: dateString,
+  startTime: timeString,
+  endTime: timeString,
+}).refine(timeOrder, TIME_ORDER_MESSAGE);
+
+/**
  * Reporting date range.
  *
  * The spec published `startDate`/`endDate` while the handlers read `start`/`end`,

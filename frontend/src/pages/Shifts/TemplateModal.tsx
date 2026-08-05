@@ -4,10 +4,11 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Shift, Schedule } from '../../types';
 import type { Department } from '../../services/departmentService';
 import { toLocalDateString, todayIso } from '../../utils/format';
+import { useStaffingSuggestion } from '../../hooks/useStaffingSuggestion';
 
 interface Props {
   show: boolean;
@@ -30,9 +31,29 @@ const TemplateModal: React.FC<Props> = ({
   onClose,
   onSubmit,
 }) => {
-  if (!show) return null;
-
   const editingDateDefault = toLocalDateString(editingShift?.date) || todayIso();
+
+  // Tracked separately from the rest of the (uncontrolled) form, purely to
+  // feed the staffing suggestion — the fields that decide which historical
+  // shifts match. Submission itself still reads everything from FormData.
+  const [departmentId, setDepartmentId] = useState(
+    editingShift?.departmentId ? String(editingShift.departmentId) : ''
+  );
+  const [date, setDate] = useState(editingDateDefault);
+  const [startTime, setStartTime] = useState(editingShift?.startTime || '');
+  const [endTime, setEndTime] = useState(editingShift?.endTime || '');
+
+  const { data: suggestion, isLoading: suggestionLoading } = useStaffingSuggestion(
+    {
+      departmentId: departmentId ? Number(departmentId) : undefined,
+      date: date || undefined,
+      startTime: startTime || undefined,
+      endTime: endTime || undefined,
+    },
+    show
+  );
+
+  if (!show) return null;
 
   return (
     <div
@@ -96,9 +117,8 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-department"
                     name="departmentId"
                     className="form-select"
-                    defaultValue={
-                      editingShift?.departmentId ? String(editingShift.departmentId) : ''
-                    }
+                    value={departmentId}
+                    onChange={(e) => setDepartmentId(e.target.value)}
                     required
                     disabled={submitting || departments.length === 0}
                   >
@@ -126,7 +146,8 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-date"
                     name="date"
                     className="form-control"
-                    defaultValue={editingDateDefault}
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
                     required
                     disabled={submitting}
                   />
@@ -143,7 +164,8 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-start"
                     name="startTime"
                     className="form-control"
-                    defaultValue={editingShift?.startTime || ''}
+                    value={startTime}
+                    onChange={(e) => setStartTime(e.target.value)}
                     required
                     disabled={submitting}
                   />
@@ -157,7 +179,8 @@ const TemplateModal: React.FC<Props> = ({
                     id="shift-end"
                     name="endTime"
                     className="form-control"
-                    defaultValue={editingShift?.endTime || ''}
+                    value={endTime}
+                    onChange={(e) => setEndTime(e.target.value)}
                     required
                     disabled={submitting}
                   />
@@ -183,6 +206,20 @@ const TemplateModal: React.FC<Props> = ({
                     required
                     disabled={submitting}
                   />
+                  {suggestionLoading && (
+                    <div className="form-text">Checking staffing history…</div>
+                  )}
+                  {!suggestionLoading && suggestion && (
+                    <div className="form-text">
+                      {suggestion.basedOnOccurrences > 0
+                        ? `Suggested: ${suggestion.suggestedMinStaff} staff, based on ` +
+                          `${suggestion.basedOnOccurrences} past occurrence` +
+                          `${suggestion.basedOnOccurrences === 1 ? '' : 's'} in the last ` +
+                          `${suggestion.lookbackWeeks} weeks.`
+                        : `Suggested: ${suggestion.suggestedMinStaff} staff (no matching history yet — ` +
+                          'this is a default, not a measurement).'}
+                    </div>
+                  )}
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-max" className="form-label">
