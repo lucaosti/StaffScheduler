@@ -520,6 +520,7 @@ export class AutoScheduleService {
         // historical derived formula rather than leaving the day uncapped.
         max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
         min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
+        min_days_off_per_period: limits?.minDaysOffPerPeriod ?? undefined,
         skills: (e.skill_names as string | null)?.split(',').filter(Boolean) ?? [],
         skill_levels: parseSkillLevels(e.skill_levels as string | null),
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],

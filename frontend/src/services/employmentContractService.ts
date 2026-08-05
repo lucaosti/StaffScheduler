@@ -29,6 +29,7 @@ export interface EmploymentContract {
   maxConsecutiveDays: number | null;
   minHoursBetweenShifts: number | null;
   minConsecutiveDaysOff: number | null;
+  minDaysOffPerPeriod: number | null;
 }
 
 export interface ContractAssignment {

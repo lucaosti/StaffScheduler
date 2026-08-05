@@ -1182,6 +1182,14 @@ const contractLimitFields = {
    * measured over — asking for 8 would be unsatisfiable by construction.
    */
   minConsecutiveDaysOff: z.number().int().positive().max(7).nullable().optional(),
+  /**
+   * Minimum total days off per 7-day reference period, independent of how
+   * they're distributed — a rate, not an absolute count, prorated against
+   * whatever period a schedule actually spans. Bounded at 7 for the same
+   * reason as `minConsecutiveDaysOff`: a rate above the reference period it's
+   * measured against is unsatisfiable by construction.
+   */
+  minDaysOffPerPeriod: z.number().int().positive().max(7).nullable().optional(),
 };
 
 export const createEmploymentContractBody = z.object({

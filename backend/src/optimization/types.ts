@@ -73,6 +73,14 @@ export interface Employee {
    * together. Optional because a contract need not constrain it.
    */
   min_consecutive_days_off?: number;
+  /**
+   * Minimum total days off per 7-day reference period, independent of how
+   * they're distributed — a rate, not an absolute count, prorated against
+   * whatever period a schedule actually spans. Distinct from
+   * `min_consecutive_days_off`, which asks for one consecutive block per
+   * rolling week and says nothing about the total.
+   */
+  min_days_off_per_period?: number;
   skills: string[];
   /**
    * Proficiency per skill, 1–5, for the skills in `skills`.

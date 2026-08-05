@@ -12808,6 +12808,18 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "minDaysOffPerPeriod": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 7
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -12954,6 +12966,18 @@
                     ]
                   },
                   "minConsecutiveDaysOff": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 7
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "minDaysOffPerPeriod": {
                     "anyOf": [
                       {
                         "type": "integer",
