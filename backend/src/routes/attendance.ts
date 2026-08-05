@@ -110,12 +110,13 @@ export const createAttendanceRouter = (pool: Pool): Router => {
   router.get('/export', validateQuery(attendanceListQuery), async (req: Request, res: Response) => {
     const filters = listFilters(req, res.locals.query);
     const rows = await service.list(filters);
-    await exporter.sendCsv(res, {
+    await exporter.send(res, {
       actorId: req.user?.id ?? null,
       dataset: 'attendance',
       rows,
       columns: attendanceColumns,
       filters,
+      format: res.locals.query.format,
     });
   });
 

@@ -58,7 +58,7 @@ const exporter = new ExportService(new AuditLogService(pool));
  */
 const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
   const scope = req.user?.allowedOrgUnitIds;
-  const { date, startDate, endDate, page: _page, pageSize: _pageSize, ...rest } = query;
+  const { date, startDate, endDate, page: _page, pageSize: _pageSize, format: _format, ...rest } = query;
   // `date` is the documented single-day convenience form. An explicit range wins
   // if both are supplied.
   return {
@@ -156,12 +156,13 @@ router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(
 router.get('/export', authenticate, requirePermission('schedule.read'), validateQuery(shiftListQuery), async (req: Request, res: Response) => {
   const filters = listFilters(req, res.locals.query);
   const shifts = await shiftService.getAllShifts(filters);
-  await exporter.sendCsv(res, {
+  await exporter.send(res, {
     actorId: req.user?.id ?? null,
     dataset: 'shifts',
     rows: shifts,
     columns: shiftColumns,
     filters,
+    format: res.locals.query.format,
   });
 });
 
