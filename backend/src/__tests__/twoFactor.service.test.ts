@@ -179,8 +179,12 @@ describe('TwoFactorService — unregistered method type', () => {
   it('rejects beginSetup for a method with no registered provider', async () => {
     const { pool } = makePool();
     const service = new TwoFactorService(pool);
-    await expect(service.beginSetup(7, 'jane@example.com', 'sms')).rejects.toThrow(
-      "Two-factor method 'sms' is not available"
+    // Every TwoFactorMethodType member has a registered provider today, so
+    // an "unregistered" type has to be forced past the type system — this
+    // exercises resolveProvider's fallback branch, not a real value.
+    const unregistered = 'push' as unknown as Parameters<typeof service.beginSetup>[2];
+    await expect(service.beginSetup(7, 'jane@example.com', unregistered)).rejects.toThrow(
+      "Two-factor method 'push' is not available"
     );
   });
 });
