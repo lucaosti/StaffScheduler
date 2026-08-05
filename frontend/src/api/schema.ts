@@ -10878,6 +10878,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/shifts/staffing-suggestion": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Suggest a minimum staffing level from history
+         * @description Requires `schedule.read`. Seasonal-baseline suggestion: averages actual staffing on matching PUBLISHED shifts (same department, same start/end time, same weekday) over the last `FORECAST_LOOKBACK_WEEKS`. `basedOnOccurrences` is 0 when the number returned is a fallback rather than a measurement.
+         */
+        get: {
+            parameters: {
+                query: {
+                    departmentId: number;
+                    date: string;
+                    startTime: string;
+                    endTime: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The suggested minimum staffing level and its confidence. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            data?: {
+                                suggestedMinStaff?: number;
+                                basedOnOccurrences?: number;
+                                lookbackWeeks?: number;
+                            };
+                        };
+                    };
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/shifts/export": {
         parameters: {
             query?: never;

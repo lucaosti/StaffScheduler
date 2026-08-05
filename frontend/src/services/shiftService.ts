@@ -106,3 +106,24 @@ export const updateShiftTemplate = (
 
 export const deleteShiftTemplate = (id: number): Promise<ApiResponse<void>> =>
   apiClient.delete<void, '/shifts/templates/{id}'>('/shifts/templates/{id}', { params: { id } });
+
+/**
+ * Seasonal-baseline staffing suggestion — see `DemandForecastService` on the
+ * backend. A hint for the editor, never an auto-fill: the caller decides
+ * whether/how to show it next to the `min_staff` input.
+ */
+export type StaffingSuggestionQuery = NonNullable<
+  paths['/shifts/staffing-suggestion']['get']['parameters']['query']
+>;
+export interface StaffingSuggestion {
+  suggestedMinStaff: number;
+  basedOnOccurrences: number;
+  lookbackWeeks: number;
+}
+
+export const getStaffingSuggestion = (
+  query: StaffingSuggestionQuery
+): Promise<ApiResponse<StaffingSuggestion>> =>
+  apiClient.get<StaffingSuggestion, '/shifts/staffing-suggestion'>('/shifts/staffing-suggestion', {
+    query,
+  });

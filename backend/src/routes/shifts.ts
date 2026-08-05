@@ -24,6 +24,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
+import { DemandForecastService } from '../services/DemandForecastService';
 import { z } from 'zod';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
@@ -40,11 +41,13 @@ import {
   createShiftTemplateBody,
   updateShiftTemplateBody,
   shiftListQuery,
+  staffingSuggestionQuery,
 } from '../schemas';
 
 export const createShiftsRouter = (pool: Pool) => {
   const router = Router();
   const shiftService = new ShiftService(pool);
+const forecastService = new DemandForecastService(pool);
 const exporter = new ExportService(new AuditLogService(pool));
 
 /**
@@ -160,6 +163,12 @@ router.get('/export', authenticate, requirePermission('schedule.read'), validate
     columns: shiftColumns,
     filters,
   });
+});
+
+// Before `/:id`, so "staffing-suggestion" is not read as a shift id.
+router.get('/staffing-suggestion', authenticate, requirePermission('schedule.read'), validateQuery(staffingSuggestionQuery), async (_req: Request, res: Response) => {
+  const suggestion = await forecastService.suggestMinStaff(res.locals.query);
+  res.json({ success: true, data: suggestion });
 });
 
 router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
