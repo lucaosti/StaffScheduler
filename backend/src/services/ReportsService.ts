@@ -37,6 +37,13 @@ export interface FairnessReport {
   stats: { count: number; min: number; max: number; mean: number; stddev: number };
 }
 
+/** One rule code's violation count on one day, within a requested range. */
+export interface ComplianceViolationTrendRow {
+  date: string;
+  code: string;
+  count: number;
+}
+
 /**
  * Shift duration in hours. Was a local CASE expression that split an overnight
  * shift into "until midnight" plus "after midnight"; identical in result to
@@ -142,5 +149,33 @@ export class ReportsService {
     const stddev = Math.sqrt(variance);
 
     return { scheduleId, perUser, stats: { count, min, max, mean, stddev } };
+  }
+
+  /**
+   * Compliance violations detected in a range, grouped by day and rule code.
+   *
+   * The granularity is deliberately day + code, not a single running total:
+   * a planner reading a trend needs to see WHICH rule is recurring and WHEN,
+   * not just that violations happened. `detected_at` is a TIMESTAMP; `DATE()`
+   * buckets it to a calendar day in whatever timezone the connection uses
+   * (UTC, per this codebase's convention).
+   */
+  async complianceViolationsTrend(
+    rangeStart: string,
+    rangeEnd: string
+  ): Promise<ComplianceViolationTrendRow[]> {
+    const [rows] = await this.readPool.execute<RowDataPacket[]>(
+      `SELECT DATE(detected_at) AS date, code, COUNT(*) AS count
+         FROM compliance_violations
+        WHERE detected_at >= ? AND detected_at < DATE_ADD(?, INTERVAL 1 DAY)
+        GROUP BY DATE(detected_at), code
+        ORDER BY date ASC, code ASC`,
+      [rangeStart, rangeEnd]
+    );
+    return rows.map((r: any) => ({
+      date: typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10),
+      code: r.code,
+      count: Number(r.count) || 0,
+    }));
   }
 }

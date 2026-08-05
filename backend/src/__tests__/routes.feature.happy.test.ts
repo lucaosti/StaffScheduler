@@ -207,6 +207,22 @@ describe('reports router', () => {
       .get('/api/reports/fairness/1');
     expect(res.status).toBe(200);
   });
+
+  it('GET /compliance-violations-trend requires start and end', async () => {
+    const res = await request(mountApp('/api/reports', createReportsRouter(fakePool)))
+      .get('/api/reports/compliance-violations-trend');
+    expect(res.status).toBe(400);
+  });
+
+  it('GET /compliance-violations-trend returns rows grouped by day and code', async () => {
+    (ReportsService.prototype.complianceViolationsTrend as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue([{ date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: 3 }]);
+    const res = await request(mountApp('/api/reports', createReportsRouter(fakePool)))
+      .get('/api/reports/compliance-violations-trend?start=2026-05-01&end=2026-05-31');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([{ date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: 3 }]);
+  });
 });
 
 describe('notifications router', () => {
