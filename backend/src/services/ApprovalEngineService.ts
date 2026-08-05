@@ -324,10 +324,39 @@ export class ApprovalEngineService {
     return null;
   }
 
+  /**
+   * Resolves whether `changeType`'s FIRST step would auto-approve for this
+   * actor, and who the resolved approver is either way — the same question
+   * `ApprovalMatrixService.resolve()` answers, sourced from the workflow the
+   * request is about to be attached to instead of a second, parallel
+   * configuration table (#606). Unlike `resolveApprover` (which walks past
+   * every auto-approving step and returns `null` once everything auto-approves,
+   * discarding who each step resolved to along the way), this is specifically
+   * for a caller that is about to INSERT its entity and needs to know, for
+   * the one step it will actually attach, both facts at once: does this
+   * auto-approve, and who is `approver_user_id`/`reviewer_user_id` either way.
+   * Returns the workflow too, so a caller that needs it next (to attach the
+   * pending-approval step when this does NOT auto-approve) does not re-fetch it.
+   */
+  async resolveFirstStepAutoApprove(
+    changeType: string,
+    ctx: ResolveContext
+  ): Promise<{ workflow: ApprovalWorkflow; approverUserId: number | null; autoApprove: boolean }> {
+    const workflow = await this.getWorkflowByChangeType(changeType);
+    if (!workflow || workflow.steps.length === 0) {
+      throw new ConflictError(`No approval workflow configured for change type '${changeType}'`);
+    }
+    const step = workflow.steps[0];
+    const approverUserId = await this.resolveStepApprover(step, ctx);
+    const autoApprove =
+      step.autoApproveForOwner && approverUserId !== null && approverUserId === ctx.actorUserId;
+    return { workflow, approverUserId, autoApprove };
+  }
+
   // --------------------------------------------------------------------------
   // Generic pending_approval lifecycle — shared by change requests, time-off,
-  // loans, and shift swaps (the four entity types a pending_approvals row can
-  // decide on; see PendingApprovalEntityRef).
+  // loans, shift swaps, and policy exceptions (the five entity types a
+  // pending_approvals row can decide on; see PendingApprovalEntityRef).
   // --------------------------------------------------------------------------
 
   async getPendingApprovalById(id: number): Promise<PendingApproval | null> {
