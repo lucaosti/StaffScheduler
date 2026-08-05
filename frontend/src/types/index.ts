@@ -176,7 +176,7 @@ export interface DashboardStats {
   employeeSatisfaction: number;
 }
 
-export interface AttentionUnderstaffedShift {
+interface AttentionUnderstaffedShift {
   id: number;
   date: string;
   startTime: string;
@@ -186,7 +186,7 @@ export interface AttentionUnderstaffedShift {
   minStaff: number;
 }
 
-export interface AttentionPendingApproval {
+interface AttentionPendingApproval {
   id: number;
   changeType: string;
   createdAt: string;
