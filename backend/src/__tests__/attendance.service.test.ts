@@ -534,3 +534,133 @@ describe('AttendanceService — residual default/fallback branches', () => {
     expect(estimate.actualCost).toBe(0);
   });
 });
+
+describe('AttendanceService.detectAnomalies', () => {
+  const anomalyRow = (overrides: Record<string, unknown> = {}) => ({
+    id: 1,
+    user_id: 5,
+    clock_in: '2026-07-10 09:00:00',
+    clock_out: '2026-07-10 17:00:00',
+    shift_assignment_id: 10,
+    late_minutes: 0,
+    early_minutes: null,
+    overdue_minutes: null,
+    ...overrides,
+  });
+
+  it('flags a punch with no matching assignment, and nothing else', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // thresholds: none configured
+      .mockResolvedValueOnce([
+        [anomalyRow({ shift_assignment_id: null, late_minutes: null })],
+        null,
+      ] as Tuple);
+
+    const anomalies = await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31');
+
+    expect(anomalies).toEqual([
+      { attendanceRecordId: 1, userId: 5, type: 'unmatched_punch', minutes: null, clockIn: '2026-07-10 09:00:00', clockOut: '2026-07-10 17:00:00' },
+    ]);
+  });
+
+  it('flags a late clock-in past the default grace', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[anomalyRow({ late_minutes: 25 })], null] as Tuple);
+
+    const anomalies = await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31');
+
+    expect(anomalies).toEqual([
+      { attendanceRecordId: 1, userId: 5, type: 'late_clock_in', minutes: 25, clockIn: '2026-07-10 09:00:00', clockOut: '2026-07-10 17:00:00' },
+    ]);
+  });
+
+  it('does not flag a clock-in within the grace threshold', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[anomalyRow({ late_minutes: 5 })], null] as Tuple);
+
+    expect(await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31')).toEqual([]);
+  });
+
+  it('flags an early clock-out past the grace', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[anomalyRow({ early_minutes: 45 })], null] as Tuple);
+
+    const anomalies = await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31');
+
+    expect(anomalies).toEqual([
+      { attendanceRecordId: 1, userId: 5, type: 'early_clock_out', minutes: 45, clockIn: '2026-07-10 09:00:00', clockOut: '2026-07-10 17:00:00' },
+    ]);
+  });
+
+  it('flags a clock-out still open well past the shift end', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([
+        [anomalyRow({ clock_out: null, early_minutes: null, overdue_minutes: 90 })],
+        null,
+      ] as Tuple);
+
+    const anomalies = await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31');
+
+    expect(anomalies).toEqual([
+      { attendanceRecordId: 1, userId: 5, type: 'missing_clock_out', minutes: null, clockIn: '2026-07-10 09:00:00', clockOut: null },
+    ]);
+  });
+
+  it('does not flag an open punch still within its shift window', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([
+        [anomalyRow({ clock_out: null, early_minutes: null, overdue_minutes: -60 })],
+        null,
+      ] as Tuple);
+
+    expect(await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31')).toEqual([]);
+  });
+
+  it('flags both a late arrival and an early departure on the same punch', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[anomalyRow({ late_minutes: 30, early_minutes: 30 })], null] as Tuple);
+
+    const anomalies = await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31');
+
+    expect(anomalies.map((a) => a.type).sort()).toEqual(['early_clock_out', 'late_clock_in']);
+  });
+
+  it('applies organization-configured thresholds instead of the defaults', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          { key: 'late_clock_in_grace_minutes', value: '30' },
+          { key: 'early_clock_out_grace_minutes', value: '30' },
+        ],
+        null,
+      ] as Tuple)
+      // 20 minutes late would fail the default 10-minute grace, but not a
+      // configured 30-minute one.
+      .mockResolvedValueOnce([[anomalyRow({ late_minutes: 20 })], null] as Tuple);
+
+    expect(await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31')).toEqual([]);
+  });
+
+  it('reports nothing for a fully unremarkable punch', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[anomalyRow()], null] as Tuple);
+
+    expect(await new AttendanceService(pool).detectAnomalies('2026-07-01', '2026-07-31')).toEqual([]);
+  });
+});

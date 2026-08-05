@@ -10,6 +10,7 @@ import { authenticate, requirePermission, requireModuleForUser } from '../middle
 import { validateParams, validateQuery } from '../middleware/validation';
 import { scheduleIdParam, reportRangeQuery, fairnessExportQuery } from '../schemas';
 import { ReportsService } from '../services/ReportsService';
+import { AttendanceService } from '../services/AttendanceService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { costByDepartmentColumns, hoursWorkedColumns } from '../services/exportColumns';
@@ -22,6 +23,9 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router => {
   const router = Router();
   const service = new ReportsService(readPool);
+  // Read-only in this router (detectAnomalies never writes), so the read
+  // replica is the right pool even though the class also has write methods.
+  const attendance = new AttendanceService(readPool);
   const exporter = new ExportService(new AuditLogService(pool));
 
   /**
@@ -134,6 +138,17 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
     const data = await service.complianceViolationsTrend(start, end);
+    res.json({ success: true, data });
+  });
+
+  // Same shape as compliance-violations-trend: backend aggregation first, no
+  // frontend surface until this is settled.
+  router.get('/attendance-anomalies', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+    const { start, end } = resolveRange(res.locals.query);
+    if (!start || !end) {
+      return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
+    }
+    const data = await attendance.detectAnomalies(start, end);
     res.json({ success: true, data });
   });
 

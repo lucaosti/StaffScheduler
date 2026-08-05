@@ -24,6 +24,7 @@ import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { GeofenceService } from './GeofenceService';
 import type { GeoPoint } from '../utils/geo';
+import { SHIFT_ABS_END_SQL } from '../utils/sql';
 
 type AttendanceStatus = 'pending' | 'approved' | 'rejected';
 
@@ -66,6 +67,46 @@ interface CostEstimate {
   actualHours: number;
   actualCost: number;
 }
+
+export type AttendanceAnomalyType =
+  | 'late_clock_in'
+  | 'missing_clock_out'
+  | 'early_clock_out'
+  | 'unmatched_punch';
+
+/**
+ * One flagged pattern on one punch. References the underlying record rather
+ * than existing only as a computed dashboard figure, so a later
+ * payroll-authorization step can act on the exact punch — reconcile it
+ * against what was expected, or approve it for payment — instead of
+ * re-deriving which record an aggregate number came from.
+ */
+export interface AttendanceAnomaly {
+  attendanceRecordId: number;
+  userId: number;
+  type: AttendanceAnomalyType;
+  /** Minutes past the configured grace threshold; null where a minute figure does not apply. */
+  minutes: number | null;
+  clockIn: string;
+  clockOut: string | null;
+}
+
+interface AttendanceAnomalyThresholds {
+  lateClockInGraceMinutes: number;
+  earlyClockOutGraceMinutes: number;
+}
+
+/**
+ * This system prefers configurable thresholds over hardcoded ones elsewhere
+ * (contracts, policies, approval workflows), so a bare "10 minutes late" is
+ * the wrong default to hardcode without an escape hatch — these are read from
+ * `system_settings` (category `attendance`) with these as the fallback when
+ * an organization has not set its own.
+ */
+const DEFAULT_ANOMALY_THRESHOLDS: AttendanceAnomalyThresholds = {
+  lateClockInGraceMinutes: 10,
+  earlyClockOutGraceMinutes: 10,
+};
 
 const HOURS_EXPR = `
   CASE
@@ -357,5 +398,102 @@ export class AttendanceService {
       actualHours: Number(actualRows[0].hours) || 0,
       actualCost: Number(actualRows[0].cost) || 0,
     };
+  }
+
+  private async resolveAnomalyThresholds(): Promise<AttendanceAnomalyThresholds> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT \`key\`, value FROM system_settings
+        WHERE category = 'attendance'
+          AND \`key\` IN ('late_clock_in_grace_minutes', 'early_clock_out_grace_minutes')`
+    );
+    const settings: Record<string, string> = {};
+    for (const row of rows) settings[row.key as string] = row.value as string;
+    return {
+      lateClockInGraceMinutes:
+        Number(settings.late_clock_in_grace_minutes) ||
+        DEFAULT_ANOMALY_THRESHOLDS.lateClockInGraceMinutes,
+      earlyClockOutGraceMinutes:
+        Number(settings.early_clock_out_grace_minutes) ||
+        DEFAULT_ANOMALY_THRESHOLDS.earlyClockOutGraceMinutes,
+    };
+  }
+
+  /**
+   * Flags every anomalous punch in a range: a late clock-in, a clock-out
+   * still open well past the shift's end, an early clock-out, or a punch
+   * with no matching assignment at all. All four in one pass, per the
+   * product decision to record everything rather than guess which pattern
+   * matters most before a reconciliation/authorization step exists to judge.
+   *
+   * Computed at query time, not persisted: nothing here is at risk of being
+   * lost the way an unrecorded compliance violation was (see
+   * `ComplianceEngine`'s `compliance_violations` table) — `attendance_records`
+   * and `shifts` already hold everything an anomaly is derived from, so a
+   * second table would only be a cache of a query, not a record of a fact
+   * that would otherwise vanish.
+   *
+   * The arithmetic runs in SQL, not JavaScript: `TIMESTAMPDIFF` avoids ever
+   * having to parse a MySQL DATETIME string back into a `Date` and guess its
+   * timezone, the same reasoning `SHIFT_HOURS_SQL`/`SHIFT_ABS_END_SQL` exist
+   * for elsewhere in this codebase.
+   *
+   * One row per anomaly, not per punch — the same "one row per broken rule"
+   * shape `compliance_violations` uses, since a single punch can be both
+   * late AND leave early.
+   */
+  async detectAnomalies(rangeStart: string, rangeEnd: string): Promise<AttendanceAnomaly[]> {
+    const thresholds = await this.resolveAnomalyThresholds();
+
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT ar.id, ar.user_id, ar.clock_in, ar.clock_out, ar.shift_assignment_id,
+              TIMESTAMPDIFF(MINUTE, TIMESTAMP(s.date, s.start_time), ar.clock_in) AS late_minutes,
+              CASE WHEN ar.clock_out IS NOT NULL
+                   THEN TIMESTAMPDIFF(MINUTE, ar.clock_out, ${SHIFT_ABS_END_SQL})
+                   ELSE NULL END AS early_minutes,
+              CASE WHEN ar.clock_out IS NULL
+                   THEN TIMESTAMPDIFF(MINUTE, ${SHIFT_ABS_END_SQL}, NOW())
+                   ELSE NULL END AS overdue_minutes
+         FROM attendance_records ar
+         LEFT JOIN shift_assignments sa ON sa.id = ar.shift_assignment_id
+         LEFT JOIN shifts s ON s.id = sa.shift_id
+        WHERE DATE(ar.clock_in) BETWEEN ? AND ?`,
+      [rangeStart, rangeEnd]
+    );
+
+    const anomalies: AttendanceAnomaly[] = [];
+    for (const row of rows) {
+      const attendanceRecordId = row.id as number;
+      const userId = row.user_id as number;
+      const clockIn = row.clock_in as string;
+      const clockOut = (row.clock_out as string | null) ?? null;
+
+      // No linked assignment at all — every other comparison needs one, so
+      // this is the one anomaly type that stands alone rather than combining
+      // with the others.
+      if (row.shift_assignment_id == null) {
+        anomalies.push({ attendanceRecordId, userId, type: 'unmatched_punch', minutes: null, clockIn, clockOut });
+        continue;
+      }
+
+      const lateMinutes = row.late_minutes != null ? Number(row.late_minutes) : null;
+      if (lateMinutes !== null && lateMinutes > thresholds.lateClockInGraceMinutes) {
+        anomalies.push({ attendanceRecordId, userId, type: 'late_clock_in', minutes: lateMinutes, clockIn, clockOut });
+      }
+
+      if (clockOut === null) {
+        const overdueMinutes = row.overdue_minutes != null ? Number(row.overdue_minutes) : null;
+        if (overdueMinutes !== null && overdueMinutes > thresholds.earlyClockOutGraceMinutes) {
+          anomalies.push({ attendanceRecordId, userId, type: 'missing_clock_out', minutes: null, clockIn, clockOut });
+        }
+        continue; // nothing to compare for "early" without a clock-out
+      }
+
+      const earlyMinutes = row.early_minutes != null ? Number(row.early_minutes) : null;
+      if (earlyMinutes !== null && earlyMinutes > thresholds.earlyClockOutGraceMinutes) {
+        anomalies.push({ attendanceRecordId, userId, type: 'early_clock_out', minutes: earlyMinutes, clockIn, clockOut });
+      }
+    }
+
+    return anomalies;
   }
 }
