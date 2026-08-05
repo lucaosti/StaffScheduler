@@ -5920,6 +5920,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/attendance-anomalies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Attendance anomalies
+         * @description Flags late clock-ins, clock-outs left open past the shift's end, early clock-outs, and punches with no matching assignment, in the given range.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    startDate?: string;
+                    endDate?: string;
+                    start?: string;
+                    end?: string;
+                    departmentId?: number;
+                    format?: "csv" | "xlsx";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Anomalous punches in the range. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/compliance-violations-trend": {
         parameters: {
             query?: never;
