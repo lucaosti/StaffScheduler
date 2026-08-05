@@ -8,8 +8,7 @@
  * enforced). A dedicated `valid_from`/`valid_to` table set would be a second
  * write path recording the same facts a mutation already reports — the
  * "unwired second capability sitting next to the real one" shape this project
- * has reversed elsewhere. See issue #600 / #327's decision record for the
- * full comparison against a schema-level alternative.
+ * has reversed elsewhere.
  *
  * WHY ROLES AND MEMBERSHIP REPLAY CLEANLY BUT HEADSHIP DOESN'T. A role grant
  * and an org-unit membership join are both INSERT-shaped actions — every one
@@ -48,8 +47,8 @@
  * events key `entity_id` on the subject user directly (indexed via
  * `idx_entity`). Membership events key it on the ORG UNIT — the subject's id
  * lives inside the JSON `before`/`after` payload, which has no index. This is
- * the unindexed-but-bounded scan #600 explicitly left as an implementation
- * choice pending real data volume: at today's scale (a few thousand audit
+ * the unindexed-but-bounded scan left as a deliberate implementation choice
+ * pending real data volume: at today's scale (a few thousand audit
  * rows per organization at most) a full scan of membership-action rows is
  * fast; if that stops being true, a generated column projecting the JSON
  * `userId` for indexing is the documented next step, not a schema rewrite.

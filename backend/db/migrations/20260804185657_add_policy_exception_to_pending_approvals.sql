@@ -2,7 +2,7 @@
 
 -- Fifth entity FK on pending_approvals: policy exceptions were the one
 -- request type still routed exclusively through the legacy approval_matrix
--- (see PolicyExceptionService), never through this table at all. #603.
+-- (see PolicyExceptionService), never through this table at all.
 ALTER TABLE pending_approvals
   ADD COLUMN policy_exception_id INT NULL AFTER shift_swap_request_id,
   ADD CONSTRAINT fk_pending_approvals_policy_exception

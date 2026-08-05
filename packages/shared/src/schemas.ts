@@ -428,7 +428,7 @@ export const auditLogExportQuery = z.object({
   requestId: shortString.optional(),
 });
 
-/** Required "as of" calendar date for a person-history projection (#600). */
+/** Required "as of" calendar date for a person-history projection. */
 export const personHistoryQuery = z.object({
   asOf: dateString,
 });

@@ -329,7 +329,7 @@ export class ApprovalEngineService {
    * actor, and who the resolved approver is either way — the same question
    * `ApprovalMatrixService.resolve()` answers, sourced from the workflow the
    * request is about to be attached to instead of a second, parallel
-   * configuration table (#606). Unlike `resolveApprover` (which walks past
+   * configuration table. Unlike `resolveApprover` (which walks past
    * every auto-approving step and returns `null` once everything auto-approves,
    * discarding who each step resolved to along the way), this is specifically
    * for a caller that is about to INSERT its entity and needs to know, for

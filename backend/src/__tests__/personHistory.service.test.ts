@@ -1,5 +1,5 @@
 /**
- * PersonHistoryService — as-of projection from the audit trail (#600).
+ * PersonHistoryService — as-of projection from the audit trail.
  *
  * `getSnapshot` runs its three dimensions (roles, membership, headship)
  * concurrently via `Promise.all`, and headship additionally goes through the
