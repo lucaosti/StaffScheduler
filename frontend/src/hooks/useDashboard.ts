@@ -11,8 +11,8 @@
  */
 
 import { useQuery } from '@tanstack/react-query';
-import type { DashboardStats, AuditLogEntry } from '../types';
-import { getDashboardStats, getRecentActivity } from '../services/dashboardService';
+import type { DashboardStats, AttentionItems, AuditLogEntry } from '../types';
+import { getDashboardStats, getAttentionItems, getRecentActivity } from '../services/dashboardService';
 
 interface DashboardData {
   stats: DashboardStats;
@@ -32,6 +32,25 @@ export function useDashboardData() {
         throw new Error('Failed to load dashboard statistics');
       }
       return { stats: dashboardResponse.data, recentActivity: activity };
+    },
+  });
+}
+
+/**
+ * Separate from `useDashboardData`: attention items run their own,
+ * potentially heavier query (an org-unit-scoped shift scan plus the
+ * caller's pending-approval list) and a slow response here should not hold
+ * up the stat cards, which is what one combined query would do.
+ */
+export function useAttentionItems() {
+  return useQuery({
+    queryKey: ['dashboard', 'attention-items'],
+    queryFn: async (): Promise<AttentionItems> => {
+      const response = await getAttentionItems();
+      if (!response.success || !response.data) {
+        throw new Error('Failed to load attention items');
+      }
+      return response.data;
     },
   });
 }

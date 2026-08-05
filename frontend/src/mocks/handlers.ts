@@ -45,8 +45,14 @@ export const defaultDashboardStats = {
   employeeSatisfaction: 4.4,
 };
 
+const defaultAttentionItems = {
+  understaffedShifts: { count: 0, truncated: false, items: [] },
+  pendingApprovalsAging: { count: 0, overDay: 0, overTwoDays: 0, overWeek: 0, items: [] },
+};
+
 export const handlers = [
   http.get(`${apiUrl}/dashboard/stats`, ok(defaultDashboardStats)),
+  http.get(`${apiUrl}/dashboard/attention-items`, ok(defaultAttentionItems)),
   http.get(`${apiUrl}/audit-logs`, ok([])),
   http.get(`${apiUrl}/system/info`, ok({ mode: 'demo', appVersion: 'test', features: {} })),
   http.get(`${apiUrl}/auth/me`, ok({ id: 1, email: 'admin@demo.staffscheduler.local', role: 'admin' })),

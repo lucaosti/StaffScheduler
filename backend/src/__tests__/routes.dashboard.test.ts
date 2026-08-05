@@ -245,6 +245,110 @@ describe('GET /api/dashboard/upcoming-shifts', () => {
   });
 });
 
+describe('GET /api/dashboard/attention-items', () => {
+  const pendingApprovalRow = (over: Record<string, unknown> = {}) => ({
+    id: 1,
+    change_request_id: 9,
+    time_off_request_id: null,
+    employee_loan_id: null,
+    shift_swap_request_id: null,
+    policy_exception_id: null,
+    workflow_id: 1,
+    step_id: 1,
+    step_order: 1,
+    assigned_to_user_id: 1,
+    assigned_to_org_unit_id: null,
+    open_to_structure: 0,
+    decided_by_user_id: null,
+    status: 'pending',
+    decided_at: null,
+    decision_note: null,
+    escalated_at: null,
+    created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z',
+    cr_change_type: 'Policy.Update',
+    cr_target_entity_type: null,
+    cr_target_entity_id: null,
+    cr_proposed_payload: '{}',
+    cr_justification: null,
+    cr_proposer_user_id: 5,
+    ...over,
+  });
+
+  it('reports understaffed shifts and pending-approval aging for a report.read holder', async () => {
+    execute
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 10,
+            date: '2026-05-01',
+            start_time: '08:00',
+            end_time: '16:00',
+            min_staff: 3,
+            assigned_staff: 1,
+            department_name: 'ER',
+          },
+        ],
+        null,
+      ]) // understaffed shifts (report.read -> unscoped, no RBAC query first)
+      .mockResolvedValueOnce([[pendingApprovalRow()], null]); // PendingApprovalService.listForUser
+
+    const res = await request(mountApp()).get('/api/dashboard/attention-items');
+    expect(res.status).toBe(200);
+    expect(res.body.data.understaffedShifts.count).toBe(1);
+    expect(res.body.data.understaffedShifts.items[0].departmentName).toBe('ER');
+    expect(res.body.data.pendingApprovalsAging.count).toBe(1);
+    expect(res.body.data.pendingApprovalsAging.items[0].changeType).toBe('Policy.Update');
+  });
+
+  it('does not scope the shift query for a report.read holder', async () => {
+    await request(mountApp()).get('/api/dashboard/attention-items');
+    const [shiftSql] = execute.mock.calls[0];
+    expect(String(shiftSql)).not.toMatch(/org_unit_id IN/);
+  });
+
+  it('scopes understaffed shifts to the caller org units without report.read, and skips the query entirely when they belong to none', async () => {
+    currentPermissions = ['schedule.read']; // no report.read
+    execute
+      .mockResolvedValueOnce([[], null]) // RbacService.getUserOrgUnitSubtreeIds -> no memberships
+      .mockResolvedValueOnce([[], null]); // PendingApprovalService.listForUser
+
+    const res = await request(mountApp()).get('/api/dashboard/attention-items');
+    expect(res.status).toBe(200);
+    expect(res.body.data.understaffedShifts).toEqual({ count: 0, truncated: false, items: [] });
+    // Exactly two queries: the subtree lookup, then pending approvals — the
+    // shift query is skipped rather than sent as an invalid `IN ()`.
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('buckets pending approvals by how long they have been waiting', async () => {
+    const old = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(); // 8 days
+    const recent = new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(); // 1 hour
+    execute
+      .mockResolvedValueOnce([[], null]) // no understaffed shifts
+      .mockResolvedValueOnce([
+        [pendingApprovalRow({ id: 1, created_at: old }), pendingApprovalRow({ id: 2, created_at: recent })],
+        null,
+      ]);
+
+    const res = await request(mountApp()).get('/api/dashboard/attention-items');
+    expect(res.status).toBe(200);
+    const aging = res.body.data.pendingApprovalsAging;
+    expect(aging.count).toBe(2);
+    expect(aging.overDay).toBe(1);
+    expect(aging.overTwoDays).toBe(1);
+    expect(aging.overWeek).toBe(1);
+    // Oldest first.
+    expect(aging.items[0].id).toBe(1);
+  });
+
+  it('returns 500 on database error', async () => {
+    execute.mockRejectedValueOnce(new Error('oops'));
+    const res = await request(mountApp()).get('/api/dashboard/attention-items');
+    expect(res.status).toBe(500);
+  });
+});
+
 describe('GET /api/dashboard/departments', () => {
   it('returns departments aggregation', async () => {
     execute.mockResolvedValueOnce([[{ department: 'ER', total_employees: 10 }], null]);

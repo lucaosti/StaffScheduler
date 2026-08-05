@@ -15,12 +15,15 @@
  * @author Luca Ostinelli
  */
 
-import { ApiResponse, DashboardStats, AuditLogEntry } from '../types';
+import { ApiResponse, DashboardStats, AttentionItems, AuditLogEntry } from '../types';
 import { getAuthHeaders, API_BASE_URL } from './apiUtils';
 import { apiClient } from '../api/client';
 
 export const getDashboardStats = (): Promise<ApiResponse<DashboardStats>> =>
   apiClient.get<DashboardStats, '/dashboard/stats'>('/dashboard/stats');
+
+export const getAttentionItems = (): Promise<ApiResponse<AttentionItems>> =>
+  apiClient.get<AttentionItems, '/dashboard/attention-items'>('/dashboard/attention-items');
 
 export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
   try {
