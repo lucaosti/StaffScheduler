@@ -23,6 +23,11 @@ import {
   getSwapCandidates,
   getSwapRequests,
   respondToSwap,
+  getOpenOffers,
+  createOpenOffer,
+  claimOpenOffer,
+  cancelOpenOffer,
+  ShiftSwapOffer,
   SwapCandidates,
   SwapFilters,
 } from '../services/shiftSwapService';
@@ -31,6 +36,7 @@ const swapKeys = {
   all: ['shift-swap'] as const,
   list: (filters: SwapFilters) => ['shift-swap', filters] as const,
   candidates: (assignmentId: number) => ['shift-swap', 'candidates', assignmentId] as const,
+  openOffers: (mine: boolean) => ['shift-swap', 'open', mine] as const,
 };
 
 export function useSwapRequestsQuery(filters: SwapFilters = {}) {
@@ -79,5 +85,31 @@ export function useSwapMutations() {
       onSuccess: invalidate,
     }),
     cancel: useMutation({ mutationFn: (id: number) => cancelSwap(id), onSuccess: invalidate }),
+  };
+}
+
+export function useOpenOffersQuery(mine = false) {
+  return useQuery({
+    queryKey: swapKeys.openOffers(mine),
+    queryFn: async (): Promise<ShiftSwapOffer[]> => (await getOpenOffers(mine)).data ?? [],
+  });
+}
+
+export function useOpenOfferMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: swapKeys.all });
+
+  return {
+    post: useMutation({
+      mutationFn: ({ assignmentId, notes }: { assignmentId: number; notes?: string }) =>
+        createOpenOffer(assignmentId, notes),
+      onSuccess: invalidate,
+    }),
+    claim: useMutation({
+      mutationFn: ({ id, assignmentId, notes }: { id: number; assignmentId: number; notes?: string }) =>
+        claimOpenOffer(id, assignmentId, notes),
+      onSuccess: invalidate,
+    }),
+    cancel: useMutation({ mutationFn: (id: number) => cancelOpenOffer(id), onSuccess: invalidate }),
   };
 }

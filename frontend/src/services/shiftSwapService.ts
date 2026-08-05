@@ -24,6 +24,13 @@ type DecisionBody = NonNullable<
 type RespondBody = NonNullable<
   paths['/shift-swap/{id}/respond']['post']['requestBody']
 >['content']['application/json'];
+type OpenOfferQuery = NonNullable<paths['/shift-swap/open']['get']['parameters']['query']>;
+type CreateOpenOfferBody = NonNullable<
+  paths['/shift-swap/open']['post']['requestBody']
+>['content']['application/json'];
+type ClaimOpenOfferBody = NonNullable<
+  paths['/shift-swap/open/{id}/claim']['post']['requestBody']
+>['content']['application/json'];
 
 export interface SwapCandidate {
   assignmentId: number;
@@ -89,4 +96,56 @@ export const getSwapCandidates = (assignmentId: number): Promise<ApiResponse<Swa
   apiClient.get<SwapCandidates, '/assignments/{id}/swap-candidates'>(
     '/assignments/{id}/swap-candidates',
     { params: { id: assignmentId } }
+  );
+
+/**
+ * A shift posted on the open board — the offer itself, plus the shift
+ * details the board displays alongside it. `mine` on the listing call
+ * decides whether this is one of the caller's own posted offers or a peer's
+ * to claim; the two are never mixed in a single response.
+ */
+export interface ShiftSwapOffer {
+  id: number;
+  assignmentId: number;
+  userId: number;
+  userName: string;
+  notes: string | null;
+  status: 'open' | 'claimed' | 'cancelled';
+  shiftId: number;
+  date: string;
+  startTime: string;
+  endTime: string;
+  departmentName: string;
+}
+
+export const getOpenOffers = (mine = false): Promise<ApiResponse<ShiftSwapOffer[]>> =>
+  apiClient.get<ShiftSwapOffer[], '/shift-swap/open'>('/shift-swap/open', {
+    query: { mine: mine ? '1' : undefined } as OpenOfferQuery,
+  });
+
+export const createOpenOffer = (
+  assignmentId: number,
+  notes?: string | null
+): Promise<ApiResponse<ShiftSwapOffer>> =>
+  apiClient.post<ShiftSwapOffer, '/shift-swap/open'>(
+    '/shift-swap/open',
+    { assignmentId, notes } satisfies CreateOpenOfferBody
+  );
+
+export const claimOpenOffer = (
+  id: number,
+  assignmentId: number,
+  notes?: string | null
+): Promise<ApiResponse<ShiftSwapRequest>> =>
+  apiClient.post<ShiftSwapRequest, '/shift-swap/open/{id}/claim'>(
+    '/shift-swap/open/{id}/claim',
+    { assignmentId, notes } satisfies ClaimOpenOfferBody,
+    { params: { id } }
+  );
+
+export const cancelOpenOffer = (id: number): Promise<ApiResponse<ShiftSwapOffer>> =>
+  apiClient.post<ShiftSwapOffer, '/shift-swap/open/{id}/cancel'>(
+    '/shift-swap/open/{id}/cancel',
+    undefined,
+    { params: { id } }
   );
