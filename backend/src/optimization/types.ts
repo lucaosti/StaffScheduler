@@ -81,6 +81,14 @@ export interface Employee {
    * rolling week and says nothing about the total.
    */
   min_days_off_per_period?: number;
+  /**
+   * Cost per hour worked, used only to steer CP-SAT's search toward cheaper
+   * schedules among otherwise-equal candidates (see `_labour_cost_terms` in
+   * schedule_optimizer.py) — never reported back, logged, or echoed in any
+   * API response. Absent or zero simply means this employee contributes no
+   * cost signal, not that they are free.
+   */
+  hourly_rate?: number;
   skills: string[];
   /**
    * Proficiency per skill, 1–5, for the skills in `skills`.

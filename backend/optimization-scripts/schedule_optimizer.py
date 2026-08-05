@@ -1093,10 +1093,55 @@ class ScheduleOptimizerORTools:
 
         return [-spread * scale], cap * scale
 
+    def _labour_cost_terms(self) -> Tuple[List, int]:
+        """
+        LOWEST: total labour cost, in cents.
+
+        WHY THIS DOES NOT FIT THE constraintValidator.ts CHECKER SHAPE.
+        Everything else in the catalogue is measured after the fact — did the
+        finished solution obey a rule, or how far did it miss. Cost is a
+        PREFERENCE the search should be steered by, not a property to report
+        once solving is done, so it can only live inside the objective
+        function, and only on the CP-SAT side — the greedy engine has no
+        objective to add a term to, so it is not steered by cost at all (the
+        same asymmetry that already exists for workload fairness).
+
+        WHY THE LOWEST LEVEL, AND NOT WEIGHTED INTO SOFT. Cost must never
+        outrank coverage, a published commitment, or the equity goals already
+        in place — always assigning the cheapest eligible person would defeat
+        fairness outright, which is exactly the risk of folding it into a
+        shared weighted sum. As its own level BELOW everything else, cost can
+        only choose BETWEEN solutions that are already equally good on every
+        other measure this model has. `_build_objective_function` rescales
+        every higher level so this invariant is structural, the same way it
+        already is for DISRUPTION and MEDIUM.
+
+        WHY CENTS, AND WHY A MISSING OR ZERO RATE CONTRIBUTES NOTHING.
+        `hourly_rate` arrives as a float; CP-SAT coefficients must be
+        integers, so the rate is converted to integer cents per hour before
+        multiplying by shift minutes, rounding once at the end rather than
+        accumulating fractional error per assignment. An employee with no
+        rate on record is not treated as free labour — they simply carry no
+        cost signal, so the solver's choice among them is undisturbed by this
+        term, exactly like `min_days_off_per_period`'s "unstated does not
+        mean zero" convention.
+        """
+        terms, bound = [], 0
+        for (emp_id, shift_id), var in self.assignments.items():
+            rate = self.employees[emp_id].get('hourly_rate')
+            if not rate:
+                continue
+            cost_cents = round(rate * 100 * self._shift_minutes(self.shifts[shift_id]) / 60)
+            if cost_cents <= 0:
+                continue
+            terms.append(-var * cost_cents)
+            bound += cost_cents
+        return terms, bound
+
     def _build_objective_function(self):
         """
-        Three lexicographic levels — MEDIUM > DISRUPTION > SOFT — emulated on
-        the single scalar CP-SAT optimises.
+        Four lexicographic levels — MEDIUM > DISRUPTION > SOFT > COST —
+        emulated on the single scalar CP-SAT optimises.
 
         WHY LEVELS INSTEAD OF WEIGHTS. Priority expressed as a ratio between
         magnitudes is not a guarantee: at the original coverage-100 /
@@ -1108,7 +1153,13 @@ class ScheduleOptimizerORTools:
 
         MEDIUM      coverage shortfall below min_staff.
         DISRUPTION  keeping published assignments.
-        SOFT        preferences, workload fairness, surplus-staffing charge.
+        SOFT        preferences, workload fairness, surplus-staffing charge,
+                    rest blocks, weekend/night equity.
+        COST        total labour cost — chosen only between solutions already
+                    tied on everything above. See `_labour_cost_terms` for why
+                    this is a separate, lowest level rather than a SOFT weight:
+                    always preferring the cheapest eligible person would defeat
+                    the equity goals SOFT already protects.
 
         HOW THE ORDERING IS ENFORCED, AND WHY IT IS BUILT THIS WAY. Each level
         is scaled strictly above the total magnitude every lower level can
@@ -1135,8 +1186,13 @@ class ScheduleOptimizerORTools:
         """
         fairness_scale = max(1, int(self.weights.get('workload_fairness', 40.0)))
 
-        # Lowest level first. Each entry is (terms, bound) for one contributor;
-        # contributors within a level share it and are simply concatenated.
+        # Lowest level first. COST establishes the floor; every level above it
+        # is then rescaled to exceed whatever COST alone could total, so no
+        # amount of cost saving can ever buy a unit of a higher level.
+        cost_terms, cost_bound = self._labour_cost_terms()
+
+        # Each entry is (terms, bound) for one contributor; contributors within
+        # a level share it and are simply concatenated.
         soft_terms, soft_bound = [], 0
         for terms, bound in (
             self._preference_terms(),
@@ -1160,12 +1216,29 @@ class ScheduleOptimizerORTools:
             soft_terms.extend(terms)
             soft_bound += bound
 
-        # DISRUPTION sits above SOFT: its unit scale must exceed everything
-        # SOFT can total.
-        disruption_terms, disruption_bound = self._commitment_terms(soft_bound + 1)
+        # SOFT sits above COST: rescale every SOFT term (not just its bound) so
+        # the accumulated magnitude of the whole level moves with it — the same
+        # mistake that once let fairness silently outrank preferences, this
+        # time guarded against by scaling the terms themselves rather than
+        # trusting a separately-tracked total to stay in step.
+        cost_scale = max(1, cost_bound + 1)
+        soft_terms = [term * cost_scale for term in soft_terms]
+        soft_bound *= cost_scale
 
-        # MEDIUM sits above both.
-        medium_scale = soft_bound + disruption_bound + 1
+        # Every level above SOFT must exceed SOFT *and* COST combined — COST is
+        # summed into the final objective independently (it is its own level,
+        # not folded into `soft_terms`), so a bound that only accounted for the
+        # rescaled SOFT total was short by exactly `cost_bound`. Missing this
+        # reintroduced the exact failure this whole mechanism exists to
+        # prevent: a real fixture left a shift unstaffed because leaving it
+        # empty scored better than paying a below-margin cost to fill it.
+        soft_and_cost_bound = soft_bound + cost_bound
+
+        # DISRUPTION sits above SOFT+COST: its unit scale must exceed both.
+        disruption_terms, disruption_bound = self._commitment_terms(soft_and_cost_bound + 1)
+
+        # MEDIUM sits above all three.
+        medium_scale = soft_and_cost_bound + disruption_bound + 1
 
         objective_terms = []
         # Minimise unstaffed seats, so negate to fit the maximisation.
@@ -1177,6 +1250,7 @@ class ScheduleOptimizerORTools:
             objective_terms.append(-shortfall * medium_scale)
         objective_terms.extend(disruption_terms)
         objective_terms.extend(soft_terms)
+        objective_terms.extend(cost_terms)
 
         # Note: consecutive-days is a HARD constraint
         # (_add_max_consecutive_days_constraints), so it is not expressed as a
