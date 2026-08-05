@@ -51,14 +51,6 @@ const loanRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-// Loan matrix row (orgUnit-based)
-const loanMatrixRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 2, change_type: 'Loan.Request',
-  approver_scope: 'unit_manager', approver_role_id: null, approver_user_id: null,
-  auto_approve_for_owner: 0, description: null,
-  ...overrides,
-});
-
 const loanPendingApprovalRow = (overrides: Record<string, unknown> = {}) => ({
   id: 501,
   change_request_id: null,
@@ -121,13 +113,17 @@ describe('EmployeeLoanService.create — early validation throws', () => {
 describe('EmployeeLoanService.create — post-insert null', () => {
   it('throws Failed to create loan when getById returns null after insert', async () => {
     const { pool, execute } = makePool();
-    // approvals.getByChangeType (matrix) → unit_manager scope → no extra pool calls for policy_owner
     execute
-      .mockResolvedValueOnce([[loanMatrixRow({ approver_scope: 'policy_owner', approver_user_id: 8 })], null] as Tuple) // matrix
-      .mockResolvedValueOnce([[], null] as Tuple)                // getWorkflowByChangeType -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple)  // INSERT loan
       .mockResolvedValueOnce([[], null] as Tuple);               // getById → null
     const svc = new EmployeeLoanService(pool);
+    // Auto-approve path (see employeeLoan.service.test.ts for the same
+    // instance-boundary spying): the workflow/matrix resolution has its own
+    // dedicated test suite, so this pins only the post-insert null check.
+    jest.spyOn(
+      (svc as unknown as { engine: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } }).engine,
+      'resolveFirstStepAutoApprove'
+    ).mockResolvedValue({ workflow: null, approverUserId: 8, autoApprove: true } as never);
     await expect(svc.create({
       userId: 5, fromOrgUnitId: 1, toOrgUnitId: 2,
       startDate: '2026-01-01', endDate: '2026-01-31', requestedBy: 7,
