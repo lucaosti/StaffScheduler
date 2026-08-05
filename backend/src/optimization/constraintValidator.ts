@@ -551,6 +551,79 @@ export function restShortfalls(
   return shortfalls;
 }
 
+/** A shift scheduled on the day immediately before or after the employee's own approved time off. */
+export interface TimeOffAdjacency {
+  employeeId: string;
+  shiftId: string;
+  /** Date of the shift that abuts the absence. */
+  shiftDate: string;
+  /** Date of the approved absence it sits next to. */
+  timeOffDate: string;
+  /** Whether the absence falls the day before or the day after the shift. */
+  timeOffSide: 'before' | 'after';
+}
+
+/**
+ * Shifts worked the day immediately before or after an employee's own
+ * approved time off.
+ *
+ * WHY THIS IS SEPARATE FROM `unavailability`. That rule rejects a shift ON a
+ * day the employee is unavailable — it says nothing about the days framing
+ * one. An approved absence is meant to be uninterrupted time away, and
+ * scheduling the eve or the return day back-to-back with it erodes that even
+ * though neither shift falls on the covered date itself.
+ *
+ * WHY SOFT. Forbidding it outright can make an already-tight period
+ * infeasible — the same reasoning that keeps coverage and rest blocks soft.
+ * Both engines are measured by this; neither is required to reach zero.
+ *
+ * Only the employee's OWN unavailable dates are considered — the same field
+ * `unavailability` already reads for the hard check, not a second source.
+ */
+export function timeOffAdjacencies(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): TimeOffAdjacency[] {
+  const findings: TimeOffAdjacency[] = [];
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+
+  for (const emp of problem.employees) {
+    if (!emp.unavailable_dates?.length) continue;
+    const offDays = new Set(emp.unavailable_dates);
+
+    for (const a of assignments) {
+      if (a.employeeId !== emp.id) continue;
+      const shift = shiftsById.get(a.shiftId);
+      if (!shift) continue;
+
+      const shiftDayMs = dateToMs(shift.date);
+      const dayBefore = new Date(shiftDayMs - DAY_MS).toISOString().slice(0, 10);
+      const dayAfter = new Date(shiftDayMs + DAY_MS).toISOString().slice(0, 10);
+
+      if (offDays.has(dayBefore)) {
+        findings.push({
+          employeeId: emp.id,
+          shiftId: shift.id,
+          shiftDate: shift.date,
+          timeOffDate: dayBefore,
+          timeOffSide: 'before',
+        });
+      }
+      if (offDays.has(dayAfter)) {
+        findings.push({
+          employeeId: emp.id,
+          shiftId: shift.id,
+          shiftDate: shift.date,
+          timeOffDate: dayAfter,
+          timeOffSide: 'after',
+        });
+      }
+    }
+  }
+
+  return findings;
+}
+
 /** Default weekend, applied when the problem does not say otherwise. */
 export const DEFAULT_WEEKEND_DAYS = [0, 6];
 

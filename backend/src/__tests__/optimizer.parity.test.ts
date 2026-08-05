@@ -29,6 +29,7 @@ import {
   coverageShortfalls,
   findOverCommitments,
   restShortfalls,
+  timeOffAdjacencies,
   weekendLoads,
   weekendSpread,
   nightLoads,
@@ -156,6 +157,45 @@ describe('coverageShortfalls', () => {
         { employeeId: 'e2', shiftId: second.id },
       ])
     ).toEqual([]);
+  });
+});
+
+describe('timeOffAdjacencies', () => {
+  const problem = {
+    shifts: [
+      { id: 's1', date: '2026-06-01', start_time: '09:00', end_time: '17:00', min_staff: 1, max_staff: 1 },
+      { id: 's2', date: '2026-06-03', start_time: '09:00', end_time: '17:00', min_staff: 1, max_staff: 1 },
+      { id: 's3', date: '2026-06-10', start_time: '09:00', end_time: '17:00', min_staff: 1, max_staff: 1 },
+    ],
+    employees: [
+      { id: 'e1', max_hours_per_week: 40, skills: [], unavailable_dates: ['2026-06-02'] },
+      { id: 'e2', max_hours_per_week: 40, skills: [], unavailable_dates: [] },
+    ],
+    constraints: {},
+  };
+
+  it('flags a shift the day before the absence, worked as the eve of it', () => {
+    // e1's day off is 06-02; s1 (06-01) is the eve of it.
+    const findings = timeOffAdjacencies(problem, [{ employeeId: 'e1', shiftId: 's1' }]);
+    expect(findings).toEqual([
+      { employeeId: 'e1', shiftId: 's1', shiftDate: '2026-06-01', timeOffDate: '2026-06-02', timeOffSide: 'after' },
+    ]);
+  });
+
+  it('flags a shift the day after the absence, worked as the return day', () => {
+    // e1's day off is 06-02; s2 (06-03) is the day they come back.
+    const findings = timeOffAdjacencies(problem, [{ employeeId: 'e1', shiftId: 's2' }]);
+    expect(findings).toEqual([
+      { employeeId: 'e1', shiftId: 's2', shiftDate: '2026-06-03', timeOffDate: '2026-06-02', timeOffSide: 'before' },
+    ]);
+  });
+
+  it('stays silent on a shift with no nearby absence', () => {
+    expect(timeOffAdjacencies(problem, [{ employeeId: 'e1', shiftId: 's3' }])).toEqual([]);
+  });
+
+  it('stays silent for an employee with no approved time off', () => {
+    expect(timeOffAdjacencies(problem, [{ employeeId: 'e2', shiftId: 's1' }])).toEqual([]);
   });
 });
 
