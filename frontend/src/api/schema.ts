@@ -261,6 +261,7 @@ export interface paths {
                     page?: number;
                     /** @description Rows per page (max 200, default 25). */
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -3238,6 +3239,7 @@ export interface paths {
                     isActive?: boolean | ("true" | "false");
                     page?: number;
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -5852,6 +5854,7 @@ export interface paths {
                     start?: string;
                     end?: string;
                     departmentId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -5933,6 +5936,7 @@ export interface paths {
                     start?: string;
                     end?: string;
                     departmentId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -8023,6 +8027,7 @@ export interface paths {
                     status?: "open" | "assigned" | "confirmed" | "cancelled";
                     page?: number;
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -8525,6 +8530,7 @@ export interface paths {
                 query?: {
                     status?: string;
                     userId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -8823,6 +8829,7 @@ export interface paths {
                     status?: string;
                     startDate?: string;
                     endDate?: string;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -10711,6 +10718,7 @@ export interface paths {
                     start?: string;
                     end?: string;
                     departmentId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -10759,6 +10767,7 @@ export interface paths {
                     start?: string;
                     end?: string;
                     departmentId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -10801,7 +10810,9 @@ export interface paths {
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    format?: "csv" | "xlsx";
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -10849,6 +10860,7 @@ export interface paths {
                     isActive?: boolean | ("true" | "false");
                     page?: number;
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -10954,6 +10966,7 @@ export interface paths {
                     status?: "open" | "assigned" | "confirmed" | "cancelled";
                     page?: number;
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -11006,6 +11019,7 @@ export interface paths {
                     endDate?: string;
                     page?: number;
                     pageSize?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -11053,6 +11067,7 @@ export interface paths {
                     status?: string;
                     startDate?: string;
                     endDate?: string;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;
@@ -11098,6 +11113,7 @@ export interface paths {
                 query?: {
                     status?: string;
                     userId?: number;
+                    format?: "csv" | "xlsx";
                 };
                 header?: never;
                 path?: never;

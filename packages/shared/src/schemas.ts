@@ -330,6 +330,18 @@ export const paginationQuery = {
   pageSize: z.coerce.number().int().positive().max(200).optional(),
 };
 
+/**
+ * The file format an `/export` endpoint writes. Composed into the query
+ * schema each export endpoint already validates with (its list filters),
+ * rather than declared as a schema of its own, so a single `validateQuery`
+ * call covers both the filters and the format on every export route.
+ * Defaults to `'csv'` in the route handler, not here, matching how the
+ * legacy `start`/`end` aliases resolve in `reportRangeQuery`.
+ */
+export const exportFormatQuery = {
+  format: z.enum(['csv', 'xlsx']).optional(),
+};
+
 export const departmentListQuery = z.object({
   search: shortString.optional(),
   isActive: booleanFlag,
@@ -365,6 +377,7 @@ export const employeeListQuery = z.object({
   department: shortString.optional(),
   isActive: booleanFlag,
   ...paginationQuery,
+  ...exportFormatQuery,
 });
 
 export const userListQuery = z.object({
@@ -384,6 +397,7 @@ export const shiftListQuery = z.object({
   endDate: dateString.optional(),
   status: z.enum(['open', 'assigned', 'confirmed', 'cancelled']).optional(),
   ...paginationQuery,
+  ...exportFormatQuery,
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 /**
@@ -411,6 +425,16 @@ export const reportRangeQuery = z.object({
   start: dateString.optional(),
   end: dateString.optional(),
   departmentId: positiveInt.optional(),
+  ...exportFormatQuery,
+});
+
+/**
+ * The fairness export's own query contract: just the format, since the
+ * schedule id already arrives as a path parameter (`scheduleIdParam`) and the
+ * report itself takes no filters.
+ */
+export const fairnessExportQuery = z.object({
+  ...exportFormatQuery,
 });
 
 export const auditLogListQuery = z.object({
@@ -565,6 +589,7 @@ export const skillGapQuery = z.object({
 export const timeOffListQuery = z.object({
   status: shortString.optional(),
   userId: positiveInt.optional(),
+  ...exportFormatQuery,
 });
 
 /**
@@ -703,6 +728,7 @@ export const attendanceListQuery = z.object({
   status: shortString.optional(),
   startDate: dateString.optional(),
   endDate: dateString.optional(),
+  ...exportFormatQuery,
 });
 
 export const costEstimateQuery = z.object({
@@ -731,6 +757,7 @@ export const assignmentListQuery = z.object({
   startDate: dateString.optional(),
   endDate: dateString.optional(),
   ...paginationQuery,
+  ...exportFormatQuery,
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
 
 export const createShiftTemplateBody = z.object({
