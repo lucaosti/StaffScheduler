@@ -147,7 +147,7 @@ export const createOrgRouter = (pool: Pool): Router => {
    * "As of a past date, what was true about this person" — roles held, org
    * units belonged to (with primary), and org units headed — projected from
    * the audit trail. See PersonHistoryService for why this is a projection
-   * rather than a dedicated temporal schema (#600).
+   * rather than a dedicated temporal schema.
    *
    * Same visibility rule as `/authority`: your own history is not privileged
    * information, someone else's is gated behind `org_unit.read`.

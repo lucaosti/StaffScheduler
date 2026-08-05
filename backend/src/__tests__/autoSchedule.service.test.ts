@@ -236,11 +236,12 @@ describe('AutoScheduleService.generate', () => {
   });
 
   /**
-   * Issue #602: approving an employee loan used to change nothing but the
-   * loan's own status. `departments.org_unit_id` bridges a loan's org-unit
-   * scope to the shift's department scope, so a person on an approved loan
-   * INTO that org unit must be a scheduling candidate exactly like a real
-   * department member — even though they have no `user_departments` row.
+   * Approving an employee loan must actually change who is schedulable, not
+   * just the loan row's own status. `departments.org_unit_id` bridges a
+   * loan's org-unit scope to the shift's department scope, so a person on an
+   * approved loan INTO that org unit must be a scheduling candidate exactly
+   * like a real department member — even though they have no
+   * `user_departments` row.
    */
   it('admits a person on an approved loan into the bridged org unit as a candidate', async () => {
     const { pool, conn, execute } = makePool();

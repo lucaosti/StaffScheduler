@@ -5,14 +5,12 @@
  * decides auto-approval (actor is already the resolved policy owner) via
  * `ApprovalEngineService.resolveFirstStepAutoApprove` — resolved from the
  * same `Policy.Exception` workflow the request is about to be attached to,
- * not a second, parallel `approval_matrix` lookup — the same fast path
- * `EmployeeLoanService` uses (#606; before that, this was the legacy
- * matrix's one remaining live use here). Otherwise the request is routed
- * through the modern `approval_workflows`/`pending_approvals` engine,
- * exactly like time-off, loans, and shift-swap decisions: this was the one
- * request type that used to route exclusively through the legacy matrix,
- * with none of the ordered multi-step routing, structure delegation, or
- * responsibility rules the other four get (#603).
+ * not a second, parallel `approval_matrix` lookup, the same fast path
+ * `EmployeeLoanService` uses. Otherwise the request is routed through the
+ * modern `approval_workflows`/`pending_approvals` engine, exactly like
+ * time-off, loans, and shift-swap decisions, with the same ordered
+ * multi-step routing, structure delegation, and responsibility rules those
+ * request types get.
  *
  * Scheduling code uses `hasApproved()` to know whether a policy violation
  * has been waived for the target.

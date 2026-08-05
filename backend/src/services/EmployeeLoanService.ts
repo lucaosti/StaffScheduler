@@ -5,9 +5,8 @@
  * date range. Creation decides auto-approval (actor is already the
  * resolved approver) via `ApprovalEngineService.resolveFirstStepAutoApprove`
  * — resolved from the same `Loan.Request` workflow the request is about to
- * be attached to, not a second, parallel `approval_matrix` lookup (#606;
- * before that, this was the legacy matrix's one remaining live use here).
- * Otherwise the request is routed through the modern `approval_workflows`/
+ * be attached to, not a second, parallel `approval_matrix` lookup. Otherwise
+ * the request is routed through the modern `approval_workflows`/
  * `pending_approvals` engine exactly like time-off and shift-swap
  * decisions — supporting structure-level assignment and delegation, not
  * just a single hardcoded approver.
@@ -18,9 +17,7 @@
  * consult to extend a department's scheduling candidate pool to staff on an
  * approved loan into it — `departments.org_unit_id` is the bridge from a
  * loan's org-unit scope to a shift's department scope. Approving a loan is
- * what actually makes the person schedulable in the destination unit; see
- * issue #602 for the gap this closed (the methods previously had no callers
- * at all).
+ * what actually makes the person schedulable in the destination unit.
  *
  * @author Luca Ostinelli
  */
