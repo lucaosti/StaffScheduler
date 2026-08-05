@@ -53,6 +53,7 @@ const contract = (over: Record<string, unknown> = {}) => ({
   maxConsecutiveDays: 5,
   minHoursBetweenShifts: 11,
   minConsecutiveDaysOff: 2,
+  minDaysOffPerPeriod: 3,
   ...over,
 });
 

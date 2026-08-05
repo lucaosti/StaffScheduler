@@ -624,6 +624,81 @@ export function timeOffAdjacencies(
   return findings;
 }
 
+/** How far an employee's total days off in the period falls short of the contract's rate. */
+export interface DaysOffShortfall {
+  employeeId: string;
+  /** Distinct days spanned by the schedule's own shifts. */
+  periodDays: number;
+  /** `min_days_off_per_period` prorated to `periodDays`, rounded up. */
+  required: number;
+  /** Days off actually achieved in the period. */
+  actual: number;
+}
+
+/**
+ * Whether each employee gets enough days off in TOTAL across the period,
+ * however they're distributed.
+ *
+ * WHY THIS IS SEPARATE FROM `restShortfalls`. That rule asks for one
+ * consecutive rest BLOCK per rolling 7-day window and says nothing about the
+ * total — a contract can guarantee a weekend every week while staying silent
+ * on whether four weeks of exactly one rest day each adds up to enough time
+ * off overall. This rule asks the opposite question: a plain count, blind to
+ * how it's distributed. A schedule can satisfy one without the other.
+ *
+ * WHY THE CONTRACT STORES A RATE, NOT AN ABSOLUTE COUNT. A contract has no
+ * fixed schedule length to be absolute about — the period is decided per run.
+ * `min_days_off_per_period` is a rate per 7-day reference period, prorated
+ * here against whatever the schedule's own span turns out to be
+ * (`ceil(rate * periodDays / 7)`), the same way `min_consecutive_days_off` is
+ * evaluated against whatever period the schedule spans rather than a fixed
+ * one.
+ *
+ * WHY SOFT. Made hard, an understaffed period becomes unsolvable — the same
+ * reasoning that keeps coverage and rest blocks soft. Both engines are
+ * measured by this; neither is required to reach zero.
+ */
+export function daysOffShortfalls(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): DaysOffShortfall[] {
+  const shortfalls: DaysOffShortfall[] = [];
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+
+  const allDays = [...new Set(problem.shifts.map((s) => s.date))].sort();
+  if (allDays.length === 0) return shortfalls;
+  const firstDay = dateToMs(allDays[0]) / DAY_MS;
+  const lastDay = dateToMs(allDays[allDays.length - 1]) / DAY_MS;
+  const periodDays = lastDay - firstDay + 1;
+
+  for (const emp of problem.employees) {
+    const rate = emp.min_days_off_per_period;
+    if (!rate) continue;
+    const required = Math.ceil((rate * periodDays) / 7);
+
+    const workedDays = new Set<number>();
+    for (const a of assignments) {
+      if (a.employeeId !== emp.id) continue;
+      const shift = shiftsById.get(a.shiftId);
+      if (shift) workedDays.add(dateToMs(shift.date) / DAY_MS);
+    }
+    // Work on other schedules occupies the day just as much — but only the
+    // portion that actually falls inside this period's own span; an external
+    // shift outside it says nothing about this period's days off.
+    for (const ext of emp.existing_assignments ?? []) {
+      const extDay = dateToMs(ext.date) / DAY_MS;
+      if (extDay >= firstDay && extDay <= lastDay) workedDays.add(extDay);
+    }
+
+    const actual = periodDays - workedDays.size;
+    if (actual < required) {
+      shortfalls.push({ employeeId: emp.id, periodDays, required, actual });
+    }
+  }
+
+  return shortfalls;
+}
+
 /** Default weekend, applied when the problem does not say otherwise. */
 export const DEFAULT_WEEKEND_DAYS = [0, 6];
 
