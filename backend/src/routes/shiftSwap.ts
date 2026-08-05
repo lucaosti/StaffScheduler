@@ -1,15 +1,26 @@
 /**
- * Shift swap routes (F01).
+ * Shift swap routes (F01), plus the open shift board.
  *
  * @author Luca Ostinelli
  */
 
 import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
+import { User } from '../types';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { createShiftSwapBody, optionalNotesBody, respondToShiftSwapBody, idParam, shiftSwapListQuery } from '../schemas';
+import {
+  createShiftSwapBody,
+  createShiftSwapOfferBody,
+  claimShiftSwapOfferBody,
+  optionalNotesBody,
+  respondToShiftSwapBody,
+  idParam,
+  shiftSwapListQuery,
+  shiftSwapOpenListQuery,
+} from '../schemas';
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { RbacService } from '../services/RbacService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -18,6 +29,7 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createShiftSwapRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new ShiftSwapService(pool);
+  const rbac = new RbacService(pool);
 
   router.use(authenticate);
 
@@ -29,6 +41,48 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
       notes: res.locals.body.notes,
     });
     res.status(201).json({ success: true, data: created });
+  });
+
+  // ------------- Open shift board — declared before /:id so "open" is
+  // never captured as a numeric :id. -------------
+
+  router.post('/open', validateBody(createShiftSwapOfferBody), async (req: Request, res: Response) => {
+    const created = await service.createOpenOffer(
+      req.user!.id,
+      res.locals.body.assignmentId,
+      (res.locals.body.notes as string | null | undefined) ?? null
+    );
+    res.status(201).json({ success: true, data: created });
+  });
+
+  router.get('/open', validateQuery(shiftSwapOpenListQuery), async (req: Request, res: Response) => {
+    const actor = req.user as User;
+    const mine = res.locals.query.mine === '1';
+    // Same "units this caller may see" scope SwapCandidateService uses for
+    // its own candidate search — null means unrestricted, narrowed by a
+    // scoped role where one applies.
+    const scoped = actor.allowedOrgUnitIds ?? null;
+    const own = await rbac.getUserOrgUnitSubtreeIds(actor.id);
+    const orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
+    const offers = await service.listOpenOffers(actor.id, orgUnitIds, mine);
+    res.json({ success: true, data: offers });
+  });
+
+  router.post('/open/:id/claim', validateParams(idParam), validateBody(claimShiftSwapOfferBody), async (req: Request, res: Response) => {
+    const { id } = res.locals.params;
+    const created = await service.claimOpenOffer(
+      id,
+      req.user!.id,
+      res.locals.body.assignmentId,
+      (res.locals.body.notes as string | null | undefined) ?? null
+    );
+    res.status(201).json({ success: true, data: created });
+  });
+
+  router.post('/open/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
+    const { id } = res.locals.params;
+    const updated = await service.cancelOpenOffer(id, req.user!.id);
+    res.json({ success: true, data: updated });
   });
 
   router.get('/', validateQuery(shiftSwapListQuery), async (req: Request, res: Response) => {
