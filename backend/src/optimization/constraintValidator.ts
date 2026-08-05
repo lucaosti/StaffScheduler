@@ -699,6 +699,71 @@ export function daysOffShortfalls(
   return shortfalls;
 }
 
+/** How much an individual employee's own shift start times vary across the period. */
+export interface StartTimeSpread {
+  employeeId: string;
+  /** Distinct start times (minutes past midnight) the employee was assigned. */
+  distinctStartTimes: number;
+  /** Max − min start time actually worked, in minutes. */
+  spreadMinutes: number;
+}
+
+/**
+ * How much an employee's shift start times bounce around within the period.
+ *
+ * WHY THIS IS NOT THE SAME SHAPE AS WEEKEND/NIGHT EQUITY. Those measure the
+ * gap BETWEEN employees for a shared category of shift — who loses more
+ * weekends than whom. This measures variation WITHIN one employee's own
+ * shifts: someone whose start time bounces between 06:00, 14:00 and 22:00
+ * across one period has their daily rhythm reshuffled week to week even
+ * though every individual shift is otherwise perfectly legal and nobody else
+ * is affected. There is no meaningful "spread across the team" version of
+ * this question, so it is reported per employee rather than as one team-wide
+ * number.
+ *
+ * WHY MAX − MIN AND NOT A BUCKETED OR STATISTICAL MEASURE. The same choice
+ * `weekendSpread`/`nightSpread` already make elsewhere in this file: exactly
+ * expressible with no invented boundaries. A bucket scheme (morning/afternoon/
+ * night) would need someone to decide where the boundaries sit, which is
+ * arbitrary and sector-specific; a standard deviation is harder to read at a
+ * glance than "your earliest and latest starts are 16 hours apart."
+ *
+ * WHY EVERY EMPLOYEE WITH AT LEAST ONE ASSIGNMENT IS REPORTED, WITH NO PASS/
+ * FAIL THRESHOLD. There is no working-time-regulation precedent here the way
+ * there was for a weekly rest block, so inventing a cutoff would assert a
+ * judgment call as if it were policy. Reporting the raw number and leaving the
+ * threshold to whoever reads it keeps this a measurement, not an opinion.
+ */
+export function startTimeSpreads(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): StartTimeSpread[] {
+  const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
+  const startTimesByEmployee = new Map<string, Set<number>>();
+
+  for (const a of assignments) {
+    const shift = shiftsById.get(a.shiftId);
+    if (!shift) continue;
+    const minutes = timeToMinutes(shift.start_time);
+    const times = startTimesByEmployee.get(a.employeeId) ?? new Set<number>();
+    times.add(minutes);
+    startTimesByEmployee.set(a.employeeId, times);
+  }
+
+  const results: StartTimeSpread[] = [];
+  for (const emp of problem.employees) {
+    const times = startTimesByEmployee.get(emp.id);
+    if (!times || times.size === 0) continue;
+    const values = [...times];
+    results.push({
+      employeeId: emp.id,
+      distinctStartTimes: values.length,
+      spreadMinutes: Math.max(...values) - Math.min(...values),
+    });
+  }
+  return results;
+}
+
 /** Default weekend, applied when the problem does not say otherwise. */
 export const DEFAULT_WEEKEND_DAYS = [0, 6];
 

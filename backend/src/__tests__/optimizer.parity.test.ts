@@ -31,6 +31,7 @@ import {
   restShortfalls,
   timeOffAdjacencies,
   daysOffShortfalls,
+  startTimeSpreads,
   weekendLoads,
   weekendSpread,
   nightLoads,
@@ -254,6 +255,80 @@ describe('daysOffShortfalls', () => {
     const worked = week.slice(1, 6).map((s) => ({ employeeId: 'e1', shiftId: s.id }));
     const shortfalls = daysOffShortfalls(withExternal, worked);
     expect(shortfalls).toEqual([{ employeeId: 'e1', periodDays: 7, required: 2, actual: 1 }]);
+  });
+});
+
+describe('startTimeSpreads', () => {
+  const shift = (id: string, date: string, startTime: string) => ({
+    id,
+    date,
+    start_time: startTime,
+    end_time: '17:00',
+    min_staff: 1,
+    max_staff: 1,
+  });
+
+  const problem = {
+    shifts: [
+      shift('s1', '2026-06-01', '06:00'),
+      shift('s2', '2026-06-02', '14:00'),
+      shift('s3', '2026-06-03', '22:00'),
+      shift('s4', '2026-06-04', '06:00'),
+    ],
+    employees: [
+      { id: 'e1', max_hours_per_week: 60, skills: [], unavailable_dates: [] },
+      { id: 'e2', max_hours_per_week: 60, skills: [], unavailable_dates: [] },
+    ],
+    constraints: {},
+  };
+
+  it('reports the gap between the earliest and latest start time worked', () => {
+    // e1 works 06:00, 14:00 and 22:00 — a 16-hour (960-minute) spread.
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+      { employeeId: 'e1', shiftId: 's3' },
+    ];
+    expect(startTimeSpreads(problem, worked)).toEqual([
+      { employeeId: 'e1', distinctStartTimes: 3, spreadMinutes: 960 },
+    ]);
+  });
+
+  it('is zero for a steady start time, even across several shifts', () => {
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's4' },
+    ];
+    expect(startTimeSpreads(problem, worked)).toEqual([
+      { employeeId: 'e1', distinctStartTimes: 1, spreadMinutes: 0 },
+    ]);
+  });
+
+  it('omits an employee with no assignments rather than reporting a false zero', () => {
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(startTimeSpreads(problem, worked)).toEqual([
+      { employeeId: 'e1', distinctStartTimes: 1, spreadMinutes: 0 },
+    ]);
+    expect(startTimeSpreads(problem, worked).find((r) => r.employeeId === 'e2')).toBeUndefined();
+  });
+
+  it('measures each employee independently', () => {
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's3' },
+      { employeeId: 'e2', shiftId: 's2' },
+    ];
+    const results = startTimeSpreads(problem, worked);
+    expect(results.find((r) => r.employeeId === 'e1')).toEqual({
+      employeeId: 'e1',
+      distinctStartTimes: 2,
+      spreadMinutes: 960,
+    });
+    expect(results.find((r) => r.employeeId === 'e2')).toEqual({
+      employeeId: 'e2',
+      distinctStartTimes: 1,
+      spreadMinutes: 0,
+    });
   });
 });
 
