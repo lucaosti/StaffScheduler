@@ -19,6 +19,15 @@
  * `shiftswap.approve`) become available. A target decline ends the request
  * immediately — there is nothing left for a manager to approve.
  *
+ * THE OPEN BOARD IS A DISCOVERY LAYER, NOT A THIRD FLOW. Proposing a swap
+ * above requires already knowing who to ask. Posting a shift to the board
+ * instead makes it visible to anyone eligible; claiming one immediately
+ * pairs it with an assignment of the claimer's own and produces the exact
+ * same kind of swap request as the targeted flow — already at "awaiting
+ * approval", since offering a specific assignment back is the claimer's
+ * consent in one action. The requests table above is where that swap then
+ * shows up; the board never displays its own separate status.
+ *
  * @author Luca Ostinelli
  */
 
@@ -30,9 +39,11 @@ import {
   useSwapRequestsQuery,
   useSwapCandidatesQuery,
   useSwapMutations,
+  useOpenOffersQuery,
+  useOpenOfferMutations,
 } from '../../hooks/useShiftSwaps';
 import type { ShiftAssignment, ShiftSwapRequest } from '../../types';
-import type { SwapCandidate } from '../../services/shiftSwapService';
+import type { SwapCandidate, ShiftSwapOffer } from '../../services/shiftSwapService';
 import { formatTime } from '../../utils/format';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 
@@ -59,6 +70,9 @@ const describe = (a: ShiftAssignment): string =>
 const describeCandidate = (c: SwapCandidate): string =>
   `${c.date} ${shiftTime(c.startTime)}–${shiftTime(c.endTime)}`;
 
+const describeOffer = (o: ShiftSwapOffer): string =>
+  `${o.date} ${shiftTime(o.startTime)}–${shiftTime(o.endTime)}`;
+
 const ShiftSwaps: React.FC = () => {
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
@@ -66,12 +80,17 @@ const ShiftSwaps: React.FC = () => {
   const canDecide = (user?.permissions ?? []).includes('shiftswap.approve');
 
   const [giving, setGiving] = useState<ShiftAssignment | null>(null);
+  const [posting, setPosting] = useState<ShiftAssignment | null>(null);
+  const [claimingOfferId, setClaimingOfferId] = useState<number | null>(null);
+  const [claimWith, setClaimWith] = useState<ShiftAssignment | null>(null);
 
   const mine = useMyAssignmentsQuery(myId);
   const requests = useSwapRequestsQuery();
   const candidates = useSwapCandidatesQuery(giving ? Number(giving.id) : null);
   const { propose, respond, approve, decline, cancel } = useSwapMutations();
-
+  const myOffers = useOpenOffersQuery(true);
+  const openOffers = useOpenOffersQuery(false);
+  const { post: postOffer, claim: claimOffer, cancel: cancelOffer } = useOpenOfferMutations();
 
   const swappable = (mine.data ?? []).filter(
     (a: ShiftAssignment) => a.status === 'pending' || a.status === 'confirmed'
@@ -170,6 +189,156 @@ const ShiftSwaps: React.FC = () => {
           )}
         </QueryState>
       )}
+
+      <h2 className="h6 mt-4">Open shift board</h2>
+      <p className="text-muted small">
+        Don't know who to ask? Post one of your shifts here for anyone eligible to claim, or claim
+        one someone else has posted by offering one of yours back.
+      </p>
+
+      <div className="mb-3">
+        <label className="form-label" htmlFor="board-posting">Post a shift to the board</label>
+        <div className="d-flex gap-2">
+          <select
+            id="board-posting"
+            className="form-select"
+            value={posting ? String(posting.id) : ''}
+            onChange={(e) =>
+              setPosting(swappable.find((a) => String(a.id) === e.target.value) ?? null)
+            }
+          >
+            <option value="">Choose one of your shifts…</option>
+            {swappable.map((a) => (
+              <option key={String(a.id)} value={String(a.id)}>
+                {describe(a)} — {a.departmentName ?? ''}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-outline-primary text-nowrap"
+            disabled={!posting || postOffer.isPending}
+            onClick={() =>
+              posting &&
+              act(postOffer.mutateAsync({ assignmentId: Number(posting.id) }).then(() => setPosting(null)))
+            }
+          >
+            Post
+          </button>
+        </div>
+      </div>
+
+      {(myOffers.data?.length ?? 0) > 0 && (
+        <QueryState
+          isLoading={myOffers.isLoading}
+          isError={myOffers.isError}
+          error={myOffers.error}
+          onRetry={myOffers.refetch}
+          isEmpty={false}
+        >
+          <p className="text-muted small mb-1">Your posted offers</p>
+          <ul className="list-group mb-3">
+            {(myOffers.data ?? []).map((o) => (
+              <li key={o.id} className="list-group-item d-flex justify-content-between align-items-center">
+                <span>
+                  {describeOffer(o)} — {o.departmentName}
+                  {o.status !== 'open' && (
+                    <span className="badge bg-secondary ms-2">{o.status}</span>
+                  )}
+                </span>
+                {o.status === 'open' && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => act(cancelOffer.mutateAsync(o.id))}
+                    disabled={cancelOffer.isPending}
+                  >
+                    Withdraw
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </QueryState>
+      )}
+
+      <QueryState
+        isLoading={openOffers.isLoading}
+        isError={openOffers.isError}
+        error={openOffers.error}
+        onRetry={openOffers.refetch}
+        isEmpty={(openOffers.data?.length ?? 0) === 0}
+        loadingMessage="Loading the open shift board…"
+        empty={<p className="text-muted">No open offers right now.</p>}
+      >
+        <ul className="list-group mb-2">
+          {(openOffers.data ?? []).map((o) => (
+            <li key={o.id} className="list-group-item">
+              <div className="d-flex justify-content-between align-items-center">
+                <span>
+                  <strong>{describeOffer(o)}</strong> ({o.departmentName}) — posted by {o.userName}
+                </span>
+                {claimingOfferId !== o.id && (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-primary"
+                    onClick={() => {
+                      setClaimingOfferId(o.id);
+                      setClaimWith(null);
+                    }}
+                  >
+                    Claim
+                  </button>
+                )}
+              </div>
+              {claimingOfferId === o.id && (
+                <div className="mt-2 d-flex gap-2 align-items-center">
+                  <select
+                    className="form-select form-select-sm"
+                    aria-label="Offer one of your shifts back"
+                    value={claimWith ? String(claimWith.id) : ''}
+                    onChange={(e) =>
+                      setClaimWith(swappable.find((a) => String(a.id) === e.target.value) ?? null)
+                    }
+                  >
+                    <option value="">Offer one of your shifts back…</option>
+                    {swappable.map((a) => (
+                      <option key={String(a.id)} value={String(a.id)}>
+                        {describe(a)} — {a.departmentName ?? ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary text-nowrap"
+                    disabled={!claimWith || claimOffer.isPending}
+                    onClick={() =>
+                      claimWith &&
+                      act(
+                        claimOffer
+                          .mutateAsync({ id: o.id, assignmentId: Number(claimWith.id) })
+                          .then(() => {
+                            setClaimingOfferId(null);
+                            setClaimWith(null);
+                          })
+                      )
+                    }
+                  >
+                    Confirm claim
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={() => setClaimingOfferId(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </QueryState>
 
       <h2 className="h6 mt-4">Swap requests</h2>
       <QueryState
