@@ -32,6 +32,8 @@ import {
   timeOffAdjacencies,
   daysOffShortfalls,
   startTimeSpreads,
+  illegalTurnarounds,
+  DEFAULT_NIGHT_TURNAROUND_HOURS,
   weekendLoads,
   weekendSpread,
   nightLoads,
@@ -329,6 +331,161 @@ describe('startTimeSpreads', () => {
       distinctStartTimes: 1,
       spreadMinutes: 0,
     });
+  });
+});
+
+describe('illegalTurnarounds', () => {
+  const shift = (id: string, date: string, startTime: string, endTime: string) => ({
+    id,
+    date,
+    start_time: startTime,
+    end_time: endTime,
+    min_staff: 1,
+    max_staff: 1,
+  });
+
+  const employee = (id: string) => ({
+    id,
+    max_hours_per_week: 60,
+    min_hours_between_shifts: 4, // clears the GENERAL minimum, so only the night-specific rule can catch this
+    skills: [],
+    unavailable_dates: [],
+  });
+
+  it('flags a night shift followed too soon by a morning one', () => {
+    // Night shift ends 2026-06-02 06:00; next shift starts 08:00 — 2h rest.
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '22:00', '06:00'),
+        shift('s2', '2026-06-02', '08:00', '16:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([
+      {
+        employeeId: 'e1',
+        nightShiftId: 's1',
+        nextShiftId: 's2',
+        restHours: 2,
+        requiredHours: DEFAULT_NIGHT_TURNAROUND_HOURS,
+      },
+    ]);
+  });
+
+  it('stays silent once the turnaround clears the required rest', () => {
+    // Night shift ends 06:00; next shift starts the following day at 09:00 — 27h rest.
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '22:00', '06:00'),
+        shift('s2', '2026-06-03', '09:00', '17:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('does not flag a morning-then-morning pair, even with a short gap', () => {
+    // Neither shift is night work — the general min-rest rule owns this case.
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '08:00', '16:00'),
+        shift('s2', '2026-06-01', '18:00', '22:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('honours a configured turnaround threshold', () => {
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '22:00', '06:00'),
+        shift('s2', '2026-06-02', '08:00', '16:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: { min_hours_after_night_shift: 1 }, // 2h rest now clears it
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('only examines the immediately next shift, not every later one', () => {
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '22:00', '06:00'),
+        // A well-rested shift sits between the night shift and a third one.
+        shift('s2', '2026-06-03', '09:00', '17:00'),
+        shift('s3', '2026-06-03', '19:00', '20:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+      { employeeId: 'e1', shiftId: 's3' },
+    ];
+    // s1→s2 clears the threshold; s2 is not night work, so s2→s3 is never examined.
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+
+  it('counts work held on other schedules toward the turnaround', () => {
+    const problem = {
+      shifts: [shift('s2', '2026-06-02', '08:00', '16:00')],
+      employees: [
+        {
+          ...employee('e1'),
+          existing_assignments: [
+            { date: '2026-06-01', start_time: '22:00', end_time: '06:00' },
+          ],
+        },
+      ],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's2' }];
+    expect(illegalTurnarounds(problem, worked)).toEqual([
+      {
+        employeeId: 'e1',
+        nightShiftId: 'ext:e1:0',
+        nextShiftId: 's2',
+        restHours: 2,
+        requiredHours: DEFAULT_NIGHT_TURNAROUND_HOURS,
+      },
+    ]);
+  });
+
+  it('skips an overlapping pair rather than reporting a negative rest', () => {
+    const problem = {
+      shifts: [
+        shift('s1', '2026-06-01', '22:00', '08:00'),
+        shift('s2', '2026-06-02', '06:00', '14:00'),
+      ],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [
+      { employeeId: 'e1', shiftId: 's1' },
+      { employeeId: 'e1', shiftId: 's2' },
+    ];
+    expect(illegalTurnarounds(problem, worked)).toEqual([]);
   });
 });
 
