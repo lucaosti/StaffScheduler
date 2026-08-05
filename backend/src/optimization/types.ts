@@ -219,6 +219,14 @@ export interface OptimizationProblem {
      * reason as the weekend: what counts as unsocial is sector-specific.
      */
     night_window?: { start: string; end: string };
+    /**
+     * Minimum rest required specifically after a night shift, in hours.
+     * Distinct from the general `min_hours_between_shifts`: a turnaround that
+     * clears the general minimum can still be an unsafe night-then-morning
+     * pattern, since the general figure is not calibrated for the specific
+     * fatigue a night shift leaves behind.
+     */
+    min_hours_after_night_shift?: number;
   };
   weights?: Record<string, number>;
 }
