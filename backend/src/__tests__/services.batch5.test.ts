@@ -159,15 +159,6 @@ describe('AssignmentService.createAssignment — null after INSERT throws', () =
 describe('EmployeeLoanService.create — pending loan with approverUserId covers fanOut line 285', () => {
   it('adds approverUserId to notification targets when status is pending and approverUserId is set', async () => {
     const { pool, execute } = makePool();
-    const matrixRow = {
-      id: 1,
-      change_type: 'Loan.Request',
-      approver_scope: 'company_user',
-      approver_role_id: null,
-      approver_user_id: 8,
-      auto_approve_for_owner: 0,
-      description: null,
-    };
     const loanRow = {
       id: 5,
       user_id: 10,
@@ -185,8 +176,6 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
       updated_at: 't',
     };
     execute
-      .mockResolvedValueOnce([[matrixRow], null] as Tuple)            // ApprovalMatrixService.getByChangeType
-      .mockResolvedValueOnce([[], null] as Tuple)                     // getWorkflowByChangeType -> not found (checked before insert)
       .mockResolvedValueOnce([{ insertId: 5, affectedRows: 1 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow], null] as Tuple)              // getById
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)       // audit INSERT for loan.create
@@ -198,6 +187,23 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
     execute.mockImplementation(() => Promise.resolve([{ insertId: 99, affectedRows: 1 }, null]));
 
     const svc = new EmployeeLoanService(pool);
+    // pending, not auto-approved, resolved approver is user 8 — same shape
+    // ApprovalMatrixService's company_user scope used to produce; see
+    // employeeLoan.service.test.ts for the dedicated workflow-attachment suite.
+    const internals = svc as unknown as {
+      engine: {
+        resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
+        canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+        createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
+      };
+    };
+    const workflow = { id: 1, changeType: 'Loan.Request', requireAll: false, description: null, steps: [{ id: 1, workflowId: 1, stepOrder: 1, approverScope: 'company_user' }] };
+    jest.spyOn(internals.engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+      workflow, approverUserId: 8, autoApprove: false,
+    } as never);
+    jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
+
     const result = await svc.create({
       userId: 10,
       fromOrgUnitId: 1,

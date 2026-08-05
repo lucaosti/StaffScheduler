@@ -37,17 +37,6 @@ const exceptionRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-const matrixRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 1,
-  change_type: 'Policy.Exception',
-  approver_scope: 'policy_owner',
-  approver_role: null,
-  approver_user_id: null,
-  auto_approve_for_owner: 1,
-  description: '',
-  ...overrides,
-});
-
 const makePool = () => {
   const execute = jest.fn();
   return { pool: { execute, getConnection: jest.fn() } as never, execute };
@@ -88,11 +77,18 @@ describe('PolicyExceptionService', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 7 })], null] as Tuple) // PolicyService.getById
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple) // matrix lookup
       .mockResolvedValueOnce([{ insertId: 5 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[exceptionRow({ id: 5, status: 'approved', reviewer_user_id: 7 })], null] as Tuple);
 
     const service = new PolicyExceptionService(pool);
+    // Auto-approve path — see services.extended.test.ts for the dedicated
+    // workflow-attachment/decision-arm suite.
+    const workflow = { id: 1, changeType: 'Policy.Exception', requireAll: false, description: null, steps: [{ id: 1, workflowId: 1, stepOrder: 1, approverScope: 'policy_owner' }] };
+    jest.spyOn(
+      (service as unknown as { engine: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } }).engine,
+      'resolveFirstStepAutoApprove'
+    ).mockResolvedValue({ workflow, approverUserId: 7, autoApprove: true } as never);
+
     const created = await service.create({
       policyId: 1,
       targetType: 'shift_assignment',
