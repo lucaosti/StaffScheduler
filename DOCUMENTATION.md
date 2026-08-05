@@ -334,6 +334,8 @@ or request a page.
 | `/api/settings` | System settings | `settings.manage` |
 | `/api/health` | Health check (unauthenticated) | — |
 
+**`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives.
+
 **Batch endpoints (#316)**: `POST /api/employees/batch` and `POST /api/assignments/batch` accept up to 200 rows per request and report one outcome per row instead of aborting the whole batch on the first failure — the shape a high-volume integration needs to retry only what actually failed. Both return HTTP 207 with the shared envelope from `packages/shared/src/batch.ts`:
 
 ```json
@@ -462,7 +464,7 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `timeoff.approve` | Approve time-off |
 | `shiftswap.approve` | Approve shift swaps |
 | `preferences.manage` | Manage preferences |
-| `report.read` | Reports (also gates the dashboard's monthly labor cost) |
+| `report.read` | Reports (also gates the dashboard's monthly labor cost, and lifts `GET /dashboard/attention-items`'s understaffed-shift list from the caller's own org units to unrestricted) |
 | `audit.read` | Audit logs (including the dashboard recent-activity feed) |
 | `user.read` / `user.manage` | User accounts |
 | `user.read_all` | List the complete, unscoped user directory (Administrator only by default; managers without it get a department-scoped list) |
