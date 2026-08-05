@@ -7567,6 +7567,186 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/shift-swap/open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List open shift-board offers
+         * @description Offers currently open to be claimed, scoped to the org units the caller may see (the same scope SwapCandidateService uses), enriched with the offered shift's details. `mine=1` restricts the list to the caller's own posted offers instead — there is no reason to show someone their own offer as something to claim, so the default excludes it.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    mine?: "0" | "1";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Open offer list. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        /**
+         * Post one of the caller's own assignments as an open offer
+         * @description Puts a live (pending/confirmed), not-yet-past assignment the caller owns onto the open shift board, without naming a specific counterpart. Refuses a second concurrent open offer on the same assignment.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        assignmentId: number;
+                        notes?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Open offer created. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                /** @description Assignment does not belong to the caller, is not in a swappable status, has already run, or already has an open offer. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shift-swap/open/{id}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim an open shift-board offer
+         * @description Claims an open offer by pairing it with one of the claimer's own assignments, producing a real shift-swap request already at 'pending' (awaiting manager approval) — offering a specific assignment back is the claimer's consent, so unlike the targeted flow there is no separate accept step. Runs the exact same approval-gate and workflow-attachment checks `POST /shift-swap` does.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        assignmentId: number;
+                        notes?: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Shift swap request created from the claim. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+                404: components["responses"]["NotFound"];
+                /** @description Offer is not open, the claimer already owns it, the claimer's assignment doesn't belong to them, or no approver could be resolved for the swap. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/shift-swap/open/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel the caller's own open offer */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: components["parameters"]["id"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                /** @description Offer is not in 'open' status. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/shift-swap/{id}": {
         parameters: {
             query?: never;
