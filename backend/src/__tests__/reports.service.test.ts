@@ -85,3 +85,43 @@ describe('ReportsService.costByDepartment', () => {
     ]);
   });
 });
+
+describe('ReportsService.complianceViolationsTrend', () => {
+  it('groups violation counts by day and rule code', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        { date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: 3 },
+        { date: '2026-05-01', code: 'MIN_REST_HOURS', count: '1' },
+        { date: '2026-05-02', code: 'MAX_WEEKLY_HOURS', count: 2 },
+      ],
+      null,
+    ]);
+    const service = new ReportsService(pool);
+    const rows = await service.complianceViolationsTrend('2026-05-01', '2026-05-31');
+    expect(rows).toEqual([
+      { date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: 3 },
+      { date: '2026-05-01', code: 'MIN_REST_HOURS', count: 1 },
+      { date: '2026-05-02', code: 'MAX_WEEKLY_HOURS', count: 2 },
+    ]);
+    expect(execute.mock.calls[0][1]).toEqual(['2026-05-01', '2026-05-31']);
+  });
+
+  it('normalises a Date object in the date column to YYYY-MM-DD', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ date: new Date('2026-05-01T00:00:00Z'), code: 'MAX_WEEKLY_HOURS', count: 1 }],
+      null,
+    ]);
+    const service = new ReportsService(pool);
+    const rows = await service.complianceViolationsTrend('2026-05-01', '2026-05-31');
+    expect(rows[0].date).toBe('2026-05-01');
+  });
+
+  it('returns an empty trend when nothing was recorded', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    const service = new ReportsService(pool);
+    expect(await service.complianceViolationsTrend('2026-05-01', '2026-05-31')).toEqual([]);
+  });
+});

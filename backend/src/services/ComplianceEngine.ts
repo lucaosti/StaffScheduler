@@ -383,5 +383,19 @@ export const evaluateAssignmentCompliance = async (
       endTime: row.end_time,
     }));
 
-  return checkCompliance({ candidate, existing, policy });
+  const result = checkCompliance({ candidate, existing, policy });
+
+  // Recorded here, the single point every caller already routes through,
+  // rather than at each of the (currently two) call sites — a third caller
+  // gets the history for free instead of having to remember to add it.
+  if (!result.ok && result.violations.length > 0) {
+    await pool.execute(
+      `INSERT INTO compliance_violations (user_id, code, message) VALUES ${result.violations
+        .map(() => '(?, ?, ?)')
+        .join(', ')}`,
+      result.violations.flatMap((v) => [userId, v.code, v.message])
+    );
+  }
+
+  return result;
 };

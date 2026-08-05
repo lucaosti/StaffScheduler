@@ -5920,6 +5920,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/compliance-violations-trend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Compliance violations trend
+         * @description Every compliance-rule violation ComplianceEngine detected in the range, grouped by day and rule code.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    startDate?: string;
+                    endDate?: string;
+                    start?: string;
+                    end?: string;
+                    departmentId?: number;
+                    format?: "csv" | "xlsx";
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Violation counts grouped by day and rule code. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/reports/hours-worked": {
         parameters: {
             query?: never;

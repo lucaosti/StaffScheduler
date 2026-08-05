@@ -221,5 +221,78 @@ describe('evaluateAssignmentCompliance', () => {
       expect(result.violations.some((v) => v.code === 'MAX_WEEKLY_HOURS')).toBe(true);
     }
   });
+
+  describe('recording a violation for the trend', () => {
+    it('writes one row per violation, at the point they are detected', async () => {
+      // A cap of 1h/week AND a max of... only one rule fires here
+      // (weekly hours); a fixture with two rules failing is below.
+      const execute = jest
+        .fn()
+        .mockResolvedValueOnce([[{ max_hours_per_week: 1, max_consecutive_days: 5 }], null])
+        .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // the INSERT
+      const pool = { execute } as unknown as import('mysql2/promise').Pool;
+
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+
+      expect(result.ok).toBe(false);
+      expect(execute).toHaveBeenCalledTimes(5);
+      const [sql, params] = execute.mock.calls[4];
+      expect(sql).toContain('INSERT INTO compliance_violations');
+      expect(params).toEqual([42, 'MAX_WEEKLY_HOURS', expect.any(String)]);
+    });
+
+    it('writes one row for each rule broken by the same candidate', async () => {
+      // Weekly-hours cap of 1h AND an existing shift the same day that busts
+      // both consecutive-days (limit 1) and min-rest.
+      const execute = jest
+        .fn()
+        .mockResolvedValueOnce([
+          [{ max_hours_per_week: 1, max_consecutive_days: 1 }],
+          null,
+        ])
+        .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([
+          [{ id: 1, date: '2026-05-31', start_time: '09:00', end_time: '17:00' }],
+          null,
+        ])
+        .mockResolvedValueOnce([{ affectedRows: 3 }, null]); // the INSERT
+      const pool = { execute } as unknown as import('mysql2/promise').Pool;
+
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+
+      expect(result.ok).toBe(false);
+      const violationCount = !result.ok ? result.violations.length : 0;
+      expect(violationCount).toBeGreaterThan(1);
+      const [sql, params] = execute.mock.calls[4];
+      // One `(?, ?, ?)` group per violation, all tagged with the same user.
+      expect(sql.match(/\(\?, \?, \?\)/g)).toHaveLength(violationCount);
+      expect(params).toHaveLength(violationCount * 3);
+      expect(params[0]).toBe(42);
+    });
+
+    it('writes nothing when the candidate is compliant', async () => {
+      const pool = makePool([], [], []);
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(true);
+      // The 4 reads only — no 5th call, since there is nothing to record.
+      expect((pool.execute as jest.Mock)).toHaveBeenCalledTimes(4);
+    });
+  });
 });
 
