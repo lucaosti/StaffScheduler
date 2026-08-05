@@ -87,17 +87,18 @@ router.get('/', authenticate, requirePermission('assignment.manage'), validateQu
 
 // Before `/:id`, so "export" is not read as an assignment id.
 router.get('/export', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), async (req: Request, res: Response) => {
-  const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
+  const { page: _page, pageSize: _pageSize, format, ...filters } = res.locals.query;
   // The unpaginated listing refuses an oversized result rather than truncating
   // it (see AssignmentService); the export inherits that, which is the right
   // failure — a silently truncated file is a wrong answer that looks complete.
   const assignments = await assignmentService.getAllAssignments(filters);
-  await exporter.sendCsv(res, {
+  await exporter.send(res, {
     actorId: req.user?.id ?? null,
     dataset: 'assignments',
     rows: assignments,
     columns: assignmentColumns,
     filters,
+    format,
   });
 });
 

@@ -124,12 +124,13 @@ router.get('/export', authenticate, requirePermission('employee.read'), validate
   // Unpaginated on purpose: a file is the one place where "all of it" is the
   // point, and the caller's scope still bounds it.
   const employees = await employeeService.getAllEmployees(filters);
-  await exporter.sendCsv(res, {
+  await exporter.send(res, {
     actorId: req.user?.id ?? null,
     dataset: 'employees',
     rows: employees,
     columns: employeeColumns,
     filters: filters ?? {},
+    format: res.locals.query.format,
   });
 });
 

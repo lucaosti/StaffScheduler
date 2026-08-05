@@ -29,19 +29,30 @@
  * deliberate, and the same call is available with `throwOnFailure` if a
  * deployment decides otherwise.
  *
+ * WHY ONE METHOD FOR BOTH FORMATS. `sendCsv` and a hypothetical `sendXlsx`
+ * would duplicate every line of this class except the serializer and the two
+ * response headers — the audited-rows contract, the filename rule and the
+ * before/after ordering are not format-specific and must not be given a
+ * second chance to disagree between formats. `format` defaults to `'csv'` so
+ * the seven call sites that predate XLSX support keep behaving exactly as
+ * they did without passing anything new.
+ *
  * @author Luca Ostinelli
  */
 
 import { AuditLogService } from './AuditLogService';
-import { CsvColumn, csvFilename, toCsv } from '../utils/csv';
+import { CsvColumn, csvFilename, exportFilename, toCsv } from '../utils/csv';
+import { toXlsxBuffer } from '../utils/xlsx';
+
+export type ExportFormat = 'csv' | 'xlsx';
 
 /**
  * The minimum of `express.Response` this needs, so the serialization layer does
  * not drag a web framework into anything that wants to test it.
  */
-export interface CsvResponse {
+export interface ExportResponse {
   setHeader(name: string, value: string): void;
-  send(body: string): unknown;
+  send(body: string | Buffer): unknown;
 }
 
 export interface ExportRequest<T> {
@@ -53,7 +64,14 @@ export interface ExportRequest<T> {
   columns: readonly CsvColumn<T>[];
   /** The filters that produced these rows, recorded so the export is reproducible. */
   filters?: Record<string, unknown>;
+  /** Defaults to `'csv'`. */
+  format?: ExportFormat;
 }
+
+const CONTENT_TYPES: Record<ExportFormat, string> = {
+  csv: 'text/csv; charset=utf-8',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
 
 export class ExportService {
   private readonly audit: AuditLogService;
@@ -63,7 +81,8 @@ export class ExportService {
   }
 
   /**
-   * Serializes the rows, records the export, and writes the response.
+   * Serializes the rows in the requested format, records the export, and
+   * writes the response.
    *
    * The audit entry is written BEFORE the body is sent. If the send then fails,
    * the log over-reports — an export recorded that the caller may not have
@@ -71,23 +90,28 @@ export class ExportService {
    * delivered file is a hole in the audit trail, while a record of an
    * undelivered one is a question someone can answer.
    */
-  async sendCsv<T>(res: CsvResponse, request: ExportRequest<T>): Promise<void> {
-    const { actorId, dataset, rows, columns, filters } = request;
-    const csv = toCsv(rows, columns);
-    const filename = csvFilename(dataset);
+  async send<T>(res: ExportResponse, request: ExportRequest<T>): Promise<void> {
+    const { actorId, dataset, rows, columns, filters, format = 'csv' } = request;
+    const filename =
+      format === 'xlsx' ? exportFilename(dataset, 'xlsx') : csvFilename(dataset);
 
     await this.audit.write({
       actorId,
       action: 'export',
       entityType: dataset,
-      description: `Exported ${rows.length} row(s) of ${dataset} as CSV`,
-      after: { format: 'csv', rowCount: rows.length, filters: filters ?? {} },
+      description: `Exported ${rows.length} row(s) of ${dataset} as ${format.toUpperCase()}`,
+      after: { format, rowCount: rows.length, filters: filters ?? {} },
     });
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    // The filename is built by `csvFilename`, which slugifies — so no caller
-    // input reaches this header unescaped.
+    res.setHeader('Content-Type', CONTENT_TYPES[format]);
+    // The filename is built by `csvFilename`/`exportFilename`, which slugify —
+    // so no caller input reaches this header unescaped.
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(csv);
+
+    if (format === 'xlsx') {
+      res.send(await toXlsxBuffer(rows, columns, dataset));
+      return;
+    }
+    res.send(toCsv(rows, columns));
   }
 }

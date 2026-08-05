@@ -127,6 +127,17 @@ const expectCsvAttachment = (res: request.Response, filenameStem: string) => {
   expect(res.text.charCodeAt(0)).toBe(0xfeff);
 };
 
+/** The `?format=xlsx` counterpart. */
+const expectXlsxAttachment = (res: request.Response, filenameStem: string) => {
+  expect(res.status).toBe(200);
+  expect(res.headers['content-type']).toContain(
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  expect(res.headers['content-disposition']).toMatch(
+    new RegExp(`^attachment; filename="${filenameStem}_\\d{4}-\\d{2}-\\d{2}\\.xlsx"$`)
+  );
+};
+
 describe('report exports', () => {
   const app = () => mount('createReportsRouter', '../routes/reports', '/api/reports');
 
@@ -267,6 +278,12 @@ describe('shift export', () => {
     expect(filters).not.toHaveProperty('page');
     expect(filters).not.toHaveProperty('pageSize');
   });
+
+  it('does not leak the format parameter into the SQL filters', async () => {
+    await request(app()).get('/api/shifts/export?format=xlsx');
+    const filters = shifts.getAllShifts.mock.calls[0][0];
+    expect(filters).not.toHaveProperty('format');
+  });
 });
 
 describe('assignment export', () => {
@@ -280,6 +297,13 @@ describe('assignment export', () => {
     expect(filters).toMatchObject({ userId: 1 });
     expect(filters).not.toHaveProperty('page');
     expect(assignments.getAllAssignments.mock.calls[0]).toHaveLength(1);
+  });
+
+  it('does not leak the format parameter into the SQL filters or the audit record', async () => {
+    await request(app()).get('/api/assignments/export?userId=1&format=xlsx');
+    const filters = assignments.getAllAssignments.mock.calls[0][0];
+    expect(filters).not.toHaveProperty('format');
+    expect(auditWrite.mock.calls[0][0].after.filters).not.toHaveProperty('format');
   });
 });
 
@@ -345,5 +369,67 @@ describe('every export is audited', () => {
       entityType: 'employees',
     });
     expect(auditWrite.mock.calls[0][0].after.rowCount).toBe(1);
+  });
+});
+
+describe('?format=xlsx, on every export route', () => {
+  it('serves employees as an XLSX attachment', async () => {
+    const res = await request(mount('createEmployeesRouter', '../routes/employees', '/api/employees')).get(
+      '/api/employees/export?format=xlsx'
+    );
+    expectXlsxAttachment(res, 'employees');
+    expect(auditWrite.mock.calls[0][0].after.format).toBe('xlsx');
+  });
+
+  it('serves shifts as an XLSX attachment', async () => {
+    const res = await request(mount('createShiftsRouter', '../routes/shifts', '/api/shifts')).get(
+      '/api/shifts/export?format=xlsx'
+    );
+    expectXlsxAttachment(res, 'shifts');
+  });
+
+  it('serves assignments as an XLSX attachment', async () => {
+    const res = await request(mount('createAssignmentsRouter', '../routes/assignments', '/api/assignments')).get(
+      '/api/assignments/export?format=xlsx'
+    );
+    expectXlsxAttachment(res, 'assignments');
+  });
+
+  it('serves attendance as an XLSX attachment', async () => {
+    const res = await request(mount('createAttendanceRouter', '../routes/attendance', '/api/attendance')).get(
+      '/api/attendance/export?format=xlsx'
+    );
+    expectXlsxAttachment(res, 'attendance');
+  });
+
+  it('serves time off as an XLSX attachment', async () => {
+    const res = await request(mount('createTimeOffRouter', '../routes/timeOff', '/api/time-off')).get(
+      '/api/time-off/export?format=xlsx'
+    );
+    expectXlsxAttachment(res, 'time-off');
+  });
+
+  it('serves the reports (hours-worked, cost-by-department, fairness) as XLSX', async () => {
+    const app = mount('createReportsRouter', '../routes/reports', '/api/reports');
+
+    const hoursWorked = await request(app).get(
+      '/api/reports/hours-worked/export?startDate=2026-07-01&endDate=2026-07-31&format=xlsx'
+    );
+    expectXlsxAttachment(hoursWorked, 'hours-worked');
+
+    const costByDepartment = await request(app).get(
+      '/api/reports/cost-by-department/export?startDate=2026-07-01&endDate=2026-07-31&format=xlsx'
+    );
+    expectXlsxAttachment(costByDepartment, 'cost-by-department');
+
+    const fairness = await request(app).get('/api/reports/fairness/5/export?format=xlsx');
+    expectXlsxAttachment(fairness, 'fairness');
+  });
+
+  it('rejects a format outside csv/xlsx', async () => {
+    const res = await request(mount('createEmployeesRouter', '../routes/employees', '/api/employees')).get(
+      '/api/employees/export?format=pdf'
+    );
+    expect(res.status).toBe(400);
   });
 });
