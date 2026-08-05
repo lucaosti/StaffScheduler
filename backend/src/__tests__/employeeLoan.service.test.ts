@@ -1,24 +1,13 @@
 /**
  * EmployeeLoanService unit tests.
  *
- * The service composes ApprovalMatrixService + NotificationService so the
- * mock pool needs to satisfy queries from all three.
+ * The service composes ApprovalEngineService + NotificationService, so the
+ * mock pool needs to satisfy queries from both.
  */
 
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 
 type Tuple = [unknown, unknown];
-
-const matrixRow = (overrides: Record<string, unknown> = {}) => ({
-  id: 1,
-  change_type: 'Loan.Request',
-  approver_scope: 'unit_manager',
-  approver_role: null,
-  approver_user_id: null,
-  auto_approve_for_owner: 1,
-  description: '',
-  ...overrides,
-});
 
 const unitRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
@@ -69,8 +58,6 @@ describe('EmployeeLoanService.create', () => {
   it('auto-approves when actor is the receiving unit manager', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple) // approval matrix lookup
-      .mockResolvedValueOnce([[unitRow({ id: 2, manager_user_id: 99 })], null] as Tuple) // unit_manager lookup
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow({ id: 42, status: 'approved' })], null] as Tuple) // SELECT created
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT for loan.create
@@ -94,6 +81,11 @@ describe('EmployeeLoanService.create', () => {
       ] as Tuple);
 
     const service = new EmployeeLoanService(pool);
+    jest.spyOn(internalsOf(service).engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+      workflow: loanWorkflow,
+      approverUserId: 99,
+      autoApprove: true,
+    } as never);
     const created = await service.create({
       userId: 7,
       fromOrgUnitId: 1,
@@ -103,7 +95,7 @@ describe('EmployeeLoanService.create', () => {
       requestedBy: 99,
     });
     expect(created.status).toBe('approved');
-    expect(execute.mock.calls[2][0]).toMatch(/INSERT INTO employee_loans/);
+    expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO employee_loans/);
   });
 });
 
@@ -169,11 +161,11 @@ const internalsOf = (service: EmployeeLoanService) =>
   service as unknown as {
     engine: {
       getWorkflowByChangeType: (t: string) => unknown;
+      resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
       canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
       createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       decidePendingApproval: (...a: unknown[]) => unknown;
     };
-    approvals: { resolve: (t: string, c: unknown) => unknown };
   };
 
 const loanWorkflow = {
@@ -187,9 +179,8 @@ const loanWorkflow = {
 const spyLoanCreation = (service: EmployeeLoanService) => {
   const internals = internalsOf(service);
   jest
-    .spyOn(internals.approvals, 'resolve')
-    .mockResolvedValue({ autoApprove: false, approverUserId: 99 } as never);
-  jest.spyOn(internals.engine, 'getWorkflowByChangeType').mockResolvedValue(loanWorkflow as never);
+    .spyOn(internals.engine, 'resolveFirstStepAutoApprove')
+    .mockResolvedValue({ workflow: loanWorkflow, autoApprove: false, approverUserId: 99 } as never);
   jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
   return internals;
 };

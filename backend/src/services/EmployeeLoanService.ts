@@ -2,13 +2,15 @@
  * Employee loans (cross-unit temporary assignments).
  *
  * A target unit manager can borrow an employee from another unit for a
- * date range. The legacy `approval_matrix` (`ApprovalMatrixService`) is
- * still consulted at *creation* time only, to decide whether the request
- * auto-approves immediately (actor is already the resolved approver).
+ * date range. Creation decides auto-approval (actor is already the
+ * resolved approver) via `ApprovalEngineService.resolveFirstStepAutoApprove`
+ * — resolved from the same `Loan.Request` workflow the request is about to
+ * be attached to, not a second, parallel `approval_matrix` lookup (#606;
+ * before that, this was the legacy matrix's one remaining live use here).
  * Otherwise the request is routed through the modern `approval_workflows`/
- * `pending_approvals` engine (see ApprovalEngineService) exactly like
- * time-off and shift-swap decisions — supporting structure-level assignment
- * and delegation, not just a single hardcoded approver.
+ * `pending_approvals` engine exactly like time-off and shift-swap
+ * decisions — supporting structure-level assignment and delegation, not
+ * just a single hardcoded approver.
  *
  * Querying for "is user X eligible in unit Y on date D" is done via
  * `isOnLoan()`. Its range counterpart, `listLoanedInUserIds()`, is what
@@ -26,7 +28,6 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
-import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { ApprovalEngineService } from './ApprovalEngineService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
@@ -88,13 +89,11 @@ const mapRow = (row: RowDataPacket): EmployeeLoan => ({
 });
 
 export class EmployeeLoanService {
-  private approvals: ApprovalMatrixService;
   private engine: ApprovalEngineService;
   private notifications: NotificationService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
-    this.approvals = new ApprovalMatrixService(pool);
     this.engine = new ApprovalEngineService(pool);
     this.notifications = new NotificationService(pool);
     this.audit = new AuditLogService(pool);
@@ -102,7 +101,8 @@ export class EmployeeLoanService {
 
   /**
    * Creates a loan request. If the actor is the resolved approver and the
-   * matrix allows auto-approval, the loan is created already approved.
+   * workflow's first step allows auto-approval, the loan is created already
+   * approved.
    */
   async create(input: CreateLoanInput): Promise<EmployeeLoan> {
     if (!input.startDate || !input.endDate) throw new ConflictError('startDate/endDate required');
@@ -111,10 +111,8 @@ export class EmployeeLoanService {
       throw new ConflictError('source and target unit must differ');
     }
 
-    const resolved = await this.approvals.resolve('Loan.Request', {
-      orgUnitId: input.toOrgUnitId,
-      actorUserId: input.requestedBy,
-    });
+    const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
+    const resolved = await this.engine.resolveFirstStepAutoApprove('Loan.Request', workflowCtx);
 
     const status: LoanStatus = resolved.autoApprove ? 'approved' : 'pending';
     const approverId = resolved.approverUserId;
@@ -124,9 +122,10 @@ export class EmployeeLoanService {
     // whose configured workflow cannot attach an approver (e.g. the target
     // unit has no manager for a unit-scoped step) would otherwise be
     // inserted with no pending_approvals row — permanently undecidable by
-    // anyone. Fail loudly instead.
-    const workflow = resolved.autoApprove ? null : await this.engine.getWorkflowByChangeType('Loan.Request');
-    const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
+    // anyone. Fail loudly instead. `resolved.workflow` is reused rather than
+    // re-fetched — resolveFirstStepAutoApprove already loaded it to answer
+    // the auto-approve question above.
+    const workflow = resolved.autoApprove ? null : resolved.workflow;
     if (workflow && workflow.steps.length > 0) {
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(

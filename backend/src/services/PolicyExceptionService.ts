@@ -1,16 +1,18 @@
 /**
  * Policy exception requests (deroghe).
  *
- * A user requests a per-target derogation to a specific policy. The legacy
- * `approval_matrix` (`ApprovalMatrixService`) is still consulted at
- * *creation* time only, to decide whether the request auto-approves
- * immediately (actor is already the resolved policy owner) — the same
- * narrow use `EmployeeLoanService` makes of it. Otherwise the request is
- * routed through the modern `approval_workflows`/`pending_approvals` engine
- * (see `ApprovalEngineService`), exactly like time-off, loans, and shift-swap
- * decisions: this was the one request type that used to route exclusively
- * through the legacy matrix, with none of the ordered multi-step routing,
- * structure delegation, or responsibility rules the other four get (#603).
+ * A user requests a per-target derogation to a specific policy. Creation
+ * decides auto-approval (actor is already the resolved policy owner) via
+ * `ApprovalEngineService.resolveFirstStepAutoApprove` — resolved from the
+ * same `Policy.Exception` workflow the request is about to be attached to,
+ * not a second, parallel `approval_matrix` lookup — the same fast path
+ * `EmployeeLoanService` uses (#606; before that, this was the legacy
+ * matrix's one remaining live use here). Otherwise the request is routed
+ * through the modern `approval_workflows`/`pending_approvals` engine,
+ * exactly like time-off, loans, and shift-swap decisions: this was the one
+ * request type that used to route exclusively through the legacy matrix,
+ * with none of the ordered multi-step routing, structure delegation, or
+ * responsibility rules the other four get (#603).
  *
  * Scheduling code uses `hasApproved()` to know whether a policy violation
  * has been waived for the target.
@@ -21,7 +23,6 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
-import { ApprovalMatrixService } from './ApprovalMatrixService';
 import { ApprovalEngineService } from './ApprovalEngineService';
 import { NotificationService } from './NotificationService';
 import { PolicyService } from './PolicyService';
@@ -76,14 +77,12 @@ const mapRow = (row: RowDataPacket): PolicyExceptionRequest => ({
 });
 
 export class PolicyExceptionService {
-  private approvals: ApprovalMatrixService;
   private engine: ApprovalEngineService;
   private notifications: NotificationService;
   private policies: PolicyService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
-    this.approvals = new ApprovalMatrixService(pool);
     this.engine = new ApprovalEngineService(pool);
     this.notifications = new NotificationService(pool);
     this.policies = new PolicyService(pool);
@@ -92,28 +91,25 @@ export class PolicyExceptionService {
 
   /**
    * Creates an exception request. If the actor is the resolved policy owner
-   * and the matrix allows auto-approval, the request is created already
-   * approved. Otherwise it is attached to the `Policy.Exception` workflow's
-   * first step.
+   * and the workflow's first step allows auto-approval, the request is
+   * created already approved. Otherwise it is attached to that first step.
    */
   async create(input: CreateExceptionInput): Promise<PolicyExceptionRequest> {
     const policy = await this.policies.getById(input.policyId);
     if (!policy) throw new NotFoundError('Policy not found');
 
-    const resolved = await this.approvals.resolve('Policy.Exception', {
-      policyOwnerId: policy.imposedByUserId,
-      actorUserId: input.requestedByUserId,
-    });
+    const workflowCtx = { actorUserId: input.requestedByUserId, policyOwnerId: policy.imposedByUserId };
+    const resolved = await this.engine.resolveFirstStepAutoApprove('Policy.Exception', workflowCtx);
     const status: ExceptionStatus = resolved.autoApprove ? 'approved' : 'pending';
-    const reviewerId = resolved.autoApprove ? input.requestedByUserId : null;
+    const reviewerId = resolved.autoApprove ? resolved.approverUserId : null;
 
     // Resolve the approval gate BEFORE inserting the request — same
     // reasoning as EmployeeLoanService.create: a pending request whose
     // configured workflow cannot attach an approver (e.g. the policy has no
     // owner who can decide it) would otherwise be inserted with no
     // pending_approvals row, permanently undecidable by anyone.
-    const workflow = resolved.autoApprove ? null : await this.engine.getWorkflowByChangeType('Policy.Exception');
-    const workflowCtx = { actorUserId: input.requestedByUserId, policyOwnerId: policy.imposedByUserId };
+    // `resolved.workflow` is reused rather than re-fetched.
+    const workflow = resolved.autoApprove ? null : resolved.workflow;
     if (workflow && workflow.steps.length > 0) {
       if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(

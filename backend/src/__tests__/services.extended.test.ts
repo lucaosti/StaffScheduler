@@ -272,11 +272,11 @@ const policyExceptionInternalsOf = (service: PolicyExceptionService) =>
   service as unknown as {
     engine: {
       getWorkflowByChangeType: (t: string) => unknown;
+      resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
       canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
       createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       decidePendingApproval: (...a: unknown[]) => unknown;
     };
-    approvals: { resolve: (t: string, c: unknown) => unknown };
   };
 
 const policyExceptionWorkflow = {
@@ -290,9 +290,8 @@ const policyExceptionWorkflow = {
 const spyPolicyExceptionCreation = (service: PolicyExceptionService) => {
   const internals = policyExceptionInternalsOf(service);
   jest
-    .spyOn(internals.approvals, 'resolve')
-    .mockResolvedValue({ autoApprove: false, approverUserId: 8 } as never);
-  jest.spyOn(internals.engine, 'getWorkflowByChangeType').mockResolvedValue(policyExceptionWorkflow as never);
+    .spyOn(internals.engine, 'resolveFirstStepAutoApprove')
+    .mockResolvedValue({ workflow: policyExceptionWorkflow, autoApprove: false, approverUserId: 8 } as never);
   jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
   return internals;
 };
@@ -333,14 +332,16 @@ describe('PolicyExceptionService extended', () => {
 
   it('throws Failed to create exception request when getById returns null after insert (auto-approve path)', async () => {
     const { pool, execute } = makePool();
-    // matrixRow()/policyRow() defaults resolve auto-approve (actor 1 === policy owner 1):
-    // the workflow lookup is skipped entirely, matching the pre-#603 query shape.
     execute
-      .mockResolvedValueOnce([[policyRow()], null] as Tuple) // policies.getById
-      .mockResolvedValueOnce([[matrixRow()], null] as Tuple) // approvals.resolve
+      .mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 1 })], null] as Tuple) // policies.getById
       .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[], null] as Tuple); // getById → null
     const svc = new PolicyExceptionService(pool);
+    jest.spyOn(policyExceptionInternalsOf(svc).engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+      workflow: policyExceptionWorkflow,
+      approverUserId: 1,
+      autoApprove: true,
+    } as never);
     await expect(
       svc.create({ policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 1 })
     ).rejects.toThrow('Failed to create exception request');

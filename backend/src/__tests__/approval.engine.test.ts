@@ -107,6 +107,65 @@ describe('ApprovalEngineService.resolveApprover', () => {
   });
 });
 
+describe('ApprovalEngineService.resolveFirstStepAutoApprove', () => {
+  it('reports autoApprove=true and the approver when the actor resolves the first step', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[wfRow], null]);
+    execute.mockResolvedValueOnce([[{
+      id: 1, workflow_id: 1, step_order: 1,
+      approver_scope: 'unit_manager', approver_role_id: null,
+      approver_user_id: null, auto_approve_for_owner: 1, escalate_after_hours: 48,
+    }], null]);
+    execute.mockResolvedValueOnce([[{ manager_user_id: 7 }], null]); // findUnitManager -> actor themselves
+
+    const svc = new ApprovalEngineService(pool);
+    const result = await svc.resolveFirstStepAutoApprove('TimeOff.Request', { orgUnitId: 5, actorUserId: 7 });
+
+    expect(result.autoApprove).toBe(true);
+    expect(result.approverUserId).toBe(7);
+    expect(result.workflow.id).toBe(1);
+  });
+
+  it('reports autoApprove=false, and the resolved approver, for a second-step multi-step workflow — unlike resolveApprover it never walks past the first step', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[wfRow], null]);
+    execute.mockResolvedValueOnce([[
+      { id: 1, workflow_id: 1, step_order: 1, approver_scope: 'unit_manager',
+        approver_role_id: null, approver_user_id: null, auto_approve_for_owner: 1, escalate_after_hours: 48 },
+      { id: 2, workflow_id: 1, step_order: 2, approver_scope: 'company_role',
+        approver_role_id: 3, approver_user_id: null, auto_approve_for_owner: 0, escalate_after_hours: 72 },
+    ], null]);
+    execute.mockResolvedValueOnce([[{ manager_user_id: 10 }], null]); // step 1 resolves to someone else
+
+    const svc = new ApprovalEngineService(pool);
+    const result = await svc.resolveFirstStepAutoApprove('TimeOff.Request', { orgUnitId: 5, actorUserId: 7 });
+
+    expect(result.autoApprove).toBe(false);
+    expect(result.approverUserId).toBe(10);
+  });
+
+  it('throws when no workflow is configured for the change type', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new ApprovalEngineService(pool);
+    await expect(svc.resolveFirstStepAutoApprove('UnknownType', { actorUserId: 1 })).rejects.toThrow(
+      /No approval workflow configured/
+    );
+  });
+
+  it('throws when the workflow has no steps', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[wfRow], null]);
+    execute.mockResolvedValueOnce([[], null]); // no steps
+
+    const svc = new ApprovalEngineService(pool);
+    await expect(svc.resolveFirstStepAutoApprove('TimeOff.Request', { actorUserId: 1 })).rejects.toThrow(
+      /No approval workflow configured/
+    );
+  });
+});
+
 describe('ApprovalEngineService.decidePendingApproval — webhook dispatch (#315)', () => {
   const pendingRow = (overrides: Record<string, unknown> = {}) => ({
     id: 1,
