@@ -6997,6 +6997,53 @@
         }
       }
     },
+    "/policies/presets": {
+      "get": {
+        "tags": [
+          "Policies"
+        ],
+        "summary": "List compliance rule-set presets",
+        "description": "Named bundles of policy rules an organization can load and then edit or remove individually — a starting template, not a fixed ruleset.",
+        "responses": {
+          "200": {
+            "description": "Available presets."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/policies/presets/{code}/apply": {
+      "post": {
+        "tags": [
+          "Policies"
+        ],
+        "summary": "Apply a compliance rule-set preset",
+        "description": "Loads a preset's rules as ordinary global policy rows. Upserts by key: re-applying (or applying after a matching global policy already exists) updates that row in place instead of creating a duplicate.",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy rows the preset created or updated."
+          },
+          "400": {
+            "description": "Unknown preset key."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/policies": {
       "get": {
         "tags": [

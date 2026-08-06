@@ -17,9 +17,11 @@ import {
   listPolicies,
   listExceptions,
   listMatrix,
+  listPresets,
   type Policy,
   type PolicyExceptionRequest,
   type ApprovalMatrixRow,
+  type CompliancePreset,
 } from '../services/policyService';
 import { listRoles } from '../services/rbacService';
 import type { Role } from '../types';
@@ -29,6 +31,7 @@ interface PoliciesPageData {
   exceptions: PolicyExceptionRequest[];
   matrix: ApprovalMatrixRow[];
   roles: Role[];
+  presets: CompliancePreset[];
 }
 
 export const policiesKey = ['policies-page'] as const;
@@ -39,7 +42,7 @@ export function usePoliciesPageData(isAdmin: boolean) {
     // isAdmin is part of the key so switching privilege re-fetches the right shape.
     queryKey: [...policiesKey, { isAdmin }],
     queryFn: async (): Promise<PoliciesPageData> => {
-      const [p, e, m, r] = await Promise.all([
+      const [p, e, m, r, pr] = await Promise.all([
         listPolicies(),
         listExceptions({}),
         isAdmin
@@ -48,12 +51,16 @@ export function usePoliciesPageData(isAdmin: boolean) {
         isAdmin
           ? listRoles()
           : Promise.resolve({ success: true as const, data: [] as Role[] }),
+        // Static seed data, same read gate as the policy list itself
+        // (policy.read) — no reason to withhold it from a non-admin reader.
+        listPresets(),
       ]);
       return {
         policies: p.data ?? [],
         exceptions: e.data ?? [],
         matrix: m.data ?? [],
         roles: r.data ?? [],
+        presets: pr.data ?? [],
       };
     },
   });

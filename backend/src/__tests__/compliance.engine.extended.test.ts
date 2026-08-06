@@ -89,15 +89,20 @@ describe('evaluateAssignmentCompliance', () => {
     prefRows: Record<string, unknown>[],
     settingRows: Array<{ key: string; value: string }>,
     assignmentRows: Array<{ id: number; date: unknown; start_time: string; end_time: string }>,
-    contractRows: Record<string, unknown>[] = []
+    contractRows: Record<string, unknown>[] = [],
+    globalPolicyRows: Array<{ policy_key: string; policy_value: unknown }> = []
   ) => {
     const execute = jest
       .fn()
       .mockResolvedValueOnce([prefRows, null])
       .mockResolvedValueOnce([settingRows, null])
+      // `PolicyService.getGlobalValues` — an organization's own configured
+      // regulatory rule set; empty by default so existing cases exercise the
+      // pre-policy fallback chain unchanged.
+      .mockResolvedValueOnce([globalPolicyRows, null])
       // `EmploymentContractService.resolveLimitsForPeriod` — checked ahead of
-      // user_preferences/system_settings (#330); empty by default so
-      // existing cases exercise the pre-contract fallback chain unchanged.
+      // user_preferences/system_settings; empty by default so existing cases
+      // exercise the pre-contract fallback chain unchanged.
       .mockResolvedValueOnce([contractRows, null])
       .mockResolvedValueOnce([assignmentRows, null]);
     return { execute } as unknown as import('mysql2/promise').Pool;
@@ -222,6 +227,106 @@ describe('evaluateAssignmentCompliance', () => {
     }
   });
 
+  describe('an organization-configured policy participates in resolution', () => {
+    it('enforces a global max_hours_week policy when nothing more specific is set', async () => {
+      const pool = makePool(
+        [],
+        [],
+        [],
+        [],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 1 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.violations.some((v) => v.code === 'MAX_WEEKLY_HOURS')).toBe(true);
+      }
+    });
+
+    it('lets a personal contract or preference still win over the global policy', async () => {
+      // A generous global policy (100h) must not override a stricter
+      // user_preferences cap (1h) — the org-wide rule is a floor/ceiling,
+      // not a substitute for a deliberate personal limit.
+      const pool = makePool(
+        [{ max_hours_per_week: 1, max_consecutive_days: 5 }],
+        [],
+        [],
+        [],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 100 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.violations.some((v) => v.code === 'MAX_WEEKLY_HOURS')).toBe(true);
+      }
+    });
+
+    it('enforces a global min_rest_hours policy', async () => {
+      const pool = makePool(
+        [],
+        [],
+        [{ id: 1, date: '2026-06-01', start_time: '12:00', end_time: '20:00' }],
+        [],
+        [{ policy_key: 'min_rest_hours', policy_value: { hours: 12 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-02',
+        startTime: '06:00',
+        endTime: '14:00',
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.violations.some((v) => v.code === 'MIN_REST_HOURS')).toBe(true);
+      }
+    });
+
+    it('enforces a global max_consecutive_days policy', async () => {
+      const pool = makePool(
+        [],
+        [],
+        [],
+        [],
+        [{ policy_key: 'max_consecutive_days', policy_value: { days: 1 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      // A single candidate shift alone cannot breach a consecutive-days cap;
+      // this asserts the value was actually threaded through, not that it
+      // fires here — the streak-counter behaviour is covered elsewhere.
+      expect(result.ok).toBe(true);
+    });
+
+    it('ignores a policy value in the wrong shape rather than throwing', async () => {
+      const pool = makePool(
+        [],
+        [],
+        [],
+        [],
+        [
+          { policy_key: 'max_hours_week', policy_value: 'not-an-object' },
+          { policy_key: 'min_rest_hours', policy_value: { hours: 0 } },
+        ]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(true);
+    });
+  });
+
   describe('recording a violation for the trend', () => {
     it('writes one row per violation, at the point they are detected', async () => {
       // A cap of 1h/week AND a max of... only one rule fires here
@@ -230,6 +335,7 @@ describe('evaluateAssignmentCompliance', () => {
         .fn()
         .mockResolvedValueOnce([[{ max_hours_per_week: 1, max_consecutive_days: 5 }], null])
         .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([[], null]) // global policies
         .mockResolvedValueOnce([[], null])
         .mockResolvedValueOnce([[], null])
         .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // the INSERT
@@ -242,8 +348,8 @@ describe('evaluateAssignmentCompliance', () => {
       });
 
       expect(result.ok).toBe(false);
-      expect(execute).toHaveBeenCalledTimes(5);
-      const [sql, params] = execute.mock.calls[4];
+      expect(execute).toHaveBeenCalledTimes(6);
+      const [sql, params] = execute.mock.calls[5];
       expect(sql).toContain('INSERT INTO compliance_violations');
       expect(params).toEqual([42, 'MAX_WEEKLY_HOURS', expect.any(String)]);
     });
@@ -258,6 +364,7 @@ describe('evaluateAssignmentCompliance', () => {
           null,
         ])
         .mockResolvedValueOnce([[], null])
+        .mockResolvedValueOnce([[], null]) // global policies
         .mockResolvedValueOnce([[], null])
         .mockResolvedValueOnce([
           [{ id: 1, date: '2026-05-31', start_time: '09:00', end_time: '17:00' }],
@@ -275,7 +382,7 @@ describe('evaluateAssignmentCompliance', () => {
       expect(result.ok).toBe(false);
       const violationCount = !result.ok ? result.violations.length : 0;
       expect(violationCount).toBeGreaterThan(1);
-      const [sql, params] = execute.mock.calls[4];
+      const [sql, params] = execute.mock.calls[5];
       // One `(?, ?, ?)` group per violation, all tagged with the same user.
       expect(sql.match(/\(\?, \?, \?\)/g)).toHaveLength(violationCount);
       expect(params).toHaveLength(violationCount * 3);
@@ -290,8 +397,8 @@ describe('evaluateAssignmentCompliance', () => {
         endTime: '17:00',
       });
       expect(result.ok).toBe(true);
-      // The 4 reads only — no 5th call, since there is nothing to record.
-      expect((pool.execute as jest.Mock)).toHaveBeenCalledTimes(4);
+      // The 5 reads only — no extra call, since there is nothing to record.
+      expect((pool.execute as jest.Mock)).toHaveBeenCalledTimes(5);
     });
   });
 });

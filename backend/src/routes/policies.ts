@@ -23,11 +23,12 @@ import { Pool } from 'mysql2/promise';
 import { Router, Request, Response } from 'express';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam, policyExceptionListQuery } from '../schemas';
+import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam, codeParam, policyExceptionListQuery } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
 import { PolicyValidator } from '../services/PolicyValidator';
+import { CompliancePresetService } from '../services/CompliancePresetService';
 import { AuditLogService } from '../services/AuditLogService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -40,9 +41,28 @@ export const createPoliciesRouter = (pool: Pool): Router => {
   const exceptions = new PolicyExceptionService(pool);
   const matrix = new ApprovalMatrixService(pool);
   const validator = new PolicyValidator(pool);
+  const presets = new CompliancePresetService(pool);
   const audit = new AuditLogService(pool);
 
   router.use(authenticate);
+
+  // ------------- Compliance presets (declared before /:id) -------------
+
+  router.get('/presets', requirePermission('policy.read'), async (_req: Request, res: Response) => {
+    res.json({ success: true, data: presets.list() });
+  });
+
+  router.post('/presets/:code/apply', requirePermission('policy.manage'), validateParams(codeParam), async (req: Request, res: Response) => {
+    const applied = await presets.apply(res.locals.params.code, req.user!.id);
+    await audit.write({
+      actorId: req.user!.id,
+      action: 'policy.preset_applied',
+      entityType: 'policy',
+      entityId: null,
+      after: { presetKey: res.locals.params.code, rules: applied.map((p) => ({ id: p.id, key: p.policyKey })) },
+    });
+    res.json({ success: true, data: applied, message: 'Preset applied' });
+  });
 
   // ------------- Validation -------------
 

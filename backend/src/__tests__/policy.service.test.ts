@@ -70,6 +70,39 @@ describe('PolicyService', () => {
     const ids = result.map((p) => p.id).sort();
     expect(ids).toEqual([1, 2]);
   });
+
+  describe('getGlobalValues', () => {
+    it('returns active global policy values keyed by policy_key', async () => {
+      const { pool, execute } = makePool();
+      execute.mockResolvedValueOnce([
+        [
+          { policy_key: 'max_hours_week', policy_value: '{"hours":48}' },
+          { policy_key: 'min_rest_hours', policy_value: '{"hours":11}' },
+        ],
+        null,
+      ] as Tuple);
+
+      const values = await new PolicyService(pool).getGlobalValues([
+        'max_hours_week',
+        'min_rest_hours',
+      ]);
+
+      expect(values).toEqual({
+        max_hours_week: { hours: 48 },
+        min_rest_hours: { hours: 11 },
+      });
+      const [sql, params] = execute.mock.calls[0];
+      expect(sql).toContain("scope_type = 'global'");
+      expect(sql).toContain('is_active = 1');
+      expect(params).toEqual(['max_hours_week', 'min_rest_hours']);
+    });
+
+    it('does not query at all for an empty key list', async () => {
+      const { pool, execute } = makePool();
+      expect(await new PolicyService(pool).getGlobalValues([])).toEqual({});
+      expect(execute).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('PolicyExceptionService', () => {
