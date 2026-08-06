@@ -1332,3 +1332,54 @@ export const createPayrollExportBody = z.object({
   endDate: dateString,
   provider: z.string().min(1).max(40).optional(),
 }).refine(dateOrder, DATE_ORDER_MESSAGE);
+
+// ── SSO providers ────────────────────────────────────────────────────────────
+
+/**
+ * Shared limits for an SSO provider's configuration fields. `.url()` on every
+ * endpoint URL, since a malformed one fails at login time in a way that is
+ * hard to diagnose from the outside — better to reject it at configuration
+ * time.
+ */
+const ssoProviderFields = {
+  organizationName: z.string().max(255).nullable().optional(),
+  name: shortString,
+  issuer: z.string().max(255),
+  clientId: z.string().min(1).max(255),
+  clientSecret: z.string().min(1).max(255),
+  authorizationUrl: z.string().url().max(500),
+  tokenUrl: z.string().url().max(500),
+  jwksUrl: z.string().url().max(500),
+  jitProvisioningEnabled: z.boolean().optional(),
+  defaultRoleId: positiveInt.nullable().optional(),
+};
+
+export const createSsoProviderBody = z.object(ssoProviderFields);
+
+export const updateSsoProviderBody = z.object({
+  ...ssoProviderFields,
+  name: shortString.optional(),
+  issuer: z.string().max(255).optional(),
+  clientId: z.string().min(1).max(255).optional(),
+  clientSecret: z.string().min(1).max(255).optional(),
+  authorizationUrl: z.string().url().max(500).optional(),
+  tokenUrl: z.string().url().max(500).optional(),
+  jwksUrl: z.string().url().max(500).optional(),
+  isActive: z.boolean().optional(),
+});
+
+/** Narrows the public provider list to one organization's own login page. */
+export const ssoProvidersPublicQuery = z.object({
+  organizationName: z.string().max(255).optional(),
+});
+
+/**
+ * The identity provider's own redirect back to the callback endpoint.
+ * Both are genuinely optional at the schema level — an IdP can redirect back
+ * with neither (a user cancelling consent) or with `error`/`error_description`
+ * instead, and the route itself is what turns "missing" into a 400.
+ */
+export const ssoCallbackQuery = z.object({
+  code: z.string().max(2048).optional(),
+  state: z.string().max(255).optional(),
+});

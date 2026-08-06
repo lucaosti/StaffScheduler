@@ -82,6 +82,18 @@ jest.mock('../services/WebhookWorker', () => ({
   stopWebhookWorker: (...args: unknown[]) => mockStopWebhookWorker(...args),
 }));
 
+// Left unmocked once before (this is the exact #394 pattern, for a worker
+// added later): the happy path would otherwise call the REAL
+// startPayrollExportWorker(pool) against mockPool, which has no
+// getConnection(), arming a real 60-second setInterval that fires against
+// this fixture from an unrelated suite later in the same --runInBand run.
+const mockStartPayrollExportWorker = jest.fn();
+const mockStopPayrollExportWorker = jest.fn();
+jest.mock('../services/PayrollExportWorker', () => ({
+  startPayrollExportWorker: (...args: unknown[]) => mockStartPayrollExportWorker(...args),
+  stopPayrollExportWorker: (...args: unknown[]) => mockStopPayrollExportWorker(...args),
+}));
+
 import { startServer } from '../index';
 import { logger } from '../config/logger';
 import { buildApp } from '../app';
@@ -103,6 +115,8 @@ describe('startServer()', () => {
     mockStopPushWorker.mockReset();
     mockStartWebhookWorker.mockReset();
     mockStopWebhookWorker.mockReset();
+    mockStartPayrollExportWorker.mockReset();
+    mockStopPayrollExportWorker.mockReset();
 
     // Prevent process.exit from terminating the test runner.
     exitSpy = jest
@@ -187,6 +201,7 @@ describe('startServer()', () => {
       expect(mockStartOutboxWorker).not.toHaveBeenCalled();
       expect(mockStartPushWorker).not.toHaveBeenCalled();
       expect(mockStartWebhookWorker).not.toHaveBeenCalled();
+      expect(mockStartPayrollExportWorker).not.toHaveBeenCalled();
       expect(mockListen).not.toHaveBeenCalled();
     });
   });
@@ -211,6 +226,7 @@ describe('startServer()', () => {
       expect(mockStartOutboxWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartPushWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartWebhookWorker).toHaveBeenCalledWith(mockPool);
+      expect(mockStartPayrollExportWorker).toHaveBeenCalledWith(mockPool);
     });
   });
 });
