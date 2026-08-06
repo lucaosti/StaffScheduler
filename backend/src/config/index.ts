@@ -155,6 +155,15 @@ export const config = {
     // (e.g. to report abuse) — the VAPID spec requires a mailto: or https: URL.
     vapidSubject: process.env.VAPID_SUBJECT || 'mailto:admin@staffscheduler.com',
   },
+  gusto: {
+    // No production credentials ship with this repository — `isGustoConfigured()`
+    // (see GustoProvider.ts) gates on these being set, mirroring
+    // `isEmailConfigured()`. An operator wires their own Gusto account in via
+    // their runtime `.env`, the same as email/push.
+    apiKey: process.env.GUSTO_API_KEY,
+    companyId: process.env.GUSTO_COMPANY_ID,
+    apiBaseUrl: process.env.GUSTO_API_BASE_URL || 'https://api.gusto.com',
+  },
   reports: {
     storagePath: process.env.REPORT_STORAGE_PATH || './reports',
     cleanupDays: parseInt(process.env.REPORT_CLEANUP_DAYS || '30'),

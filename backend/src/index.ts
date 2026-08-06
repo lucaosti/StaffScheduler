@@ -21,6 +21,7 @@ import { initOptimizationWorker, closeOptimizationQueue } from './services/Optim
 import { startOutboxWorker, stopOutboxWorker } from './services/OutboxWorker';
 import { startPushWorker, stopPushWorker } from './services/PushWorker';
 import { startWebhookWorker, stopWebhookWorker } from './services/WebhookWorker';
+import { startPayrollExportWorker, stopPayrollExportWorker } from './services/PayrollExportWorker';
 import { initModuleCacheInvalidation } from './services/moduleCache';
 import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
@@ -84,6 +85,12 @@ export async function startServer(): Promise<void> {
     // unused deployment just polls an empty table.
     startWebhookWorker(pool);
 
+    // Start the payroll export delivery worker. Same no-config-gate
+    // reasoning as webhooks: it only has rows once an admin triggers an
+    // export, and the provider itself (e.g. Gusto) refuses to send until
+    // its own credentials are configured.
+    startPayrollExportWorker(pool);
+
     const server = app.listen(port, () => {
       logger.info(`Staff Scheduler API server is running on port ${port}`);
       logger.info(`Health check: http://localhost:${port}/api/health`);
@@ -96,6 +103,7 @@ export async function startServer(): Promise<void> {
         try { stopOutboxWorker(); } catch { /* ignore */ }
         try { stopPushWorker(); } catch { /* ignore */ }
         try { stopWebhookWorker(); } catch { /* ignore */ }
+        try { stopPayrollExportWorker(); } catch { /* ignore */ }
         try { await closeOptimizationQueue(); } catch { /* ignore */ }
         try { await pool.end(); } catch { /* ignore */ }
         // Only end readPool when it's a distinct pool (a replica was
