@@ -102,6 +102,13 @@ interface PolicyViolation {
   imposedByUserId: number;
 }
 
+export interface CompliancePreset {
+  key: string;
+  name: string;
+  description: string;
+  rules: Array<{ policyKey: string; policyValue: unknown; description: string }>;
+}
+
 // -------- Policies --------
 
 export const listPolicies = (): Promise<ApiResponse<Policy[]>> =>
@@ -121,6 +128,24 @@ export const updatePolicy = (
 
 export const deletePolicy = (id: number): Promise<ApiResponse<void>> =>
   apiClient.delete<void, '/policies/{id}'>('/policies/{id}', { params: { id } });
+
+// -------- Compliance presets --------
+
+export const listPresets = (): Promise<ApiResponse<CompliancePreset[]>> =>
+  apiClient.get<CompliancePreset[], '/policies/presets'>('/policies/presets');
+
+/**
+ * Loads a preset's rules as ordinary global policies — a starting template,
+ * not a fixed ruleset. The caller re-fetches the policy list afterward the
+ * same way any other mutation here does; the response also carries the
+ * created/updated rows if a caller wants them directly.
+ */
+export const applyPreset = (code: string): Promise<ApiResponse<Policy[]>> =>
+  apiClient.post<Policy[], '/policies/presets/{code}/apply'>(
+    '/policies/presets/{code}/apply',
+    undefined,
+    { params: { code } }
+  );
 
 // -------- Exceptions --------
 

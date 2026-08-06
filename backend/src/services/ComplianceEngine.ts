@@ -23,6 +23,7 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { DateUtils } from '../utils';
 import { EmploymentContractService } from './EmploymentContractService';
+import { PolicyService } from './PolicyService';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
 export interface CandidateShift {
@@ -303,15 +304,27 @@ export const checkCompliance = (input: ComplianceInput): ComplianceResult => {
  * Policy resolution order (first match wins per field):
  *   1. The user's employment contract in force on the candidate's date
  *      (`EmploymentContractService.resolveLimitsForPeriod`) — the same,
- *      single resolution the optimizer already uses (#330). Checked FIRST:
- *      a contract is a deliberate, effective-dated limit a manager set, and
- *      a stale `user_preferences` value must not override it.
+ *      single resolution the optimizer already uses. Checked FIRST: a
+ *      contract is a deliberate, effective-dated limit a manager set, and a
+ *      stale `user_preferences` value must not override it.
  *   2. `user_preferences` row for the user (legacy; still the answer for
  *      anyone with no contract assigned)
- *   3. `system_settings` keys (`scheduling.max_shifts_per_week` is the
+ *   3. An active GLOBAL `policies` row for the matching key
+ *      (`min_rest_hours`/`max_hours_week`/`max_consecutive_days`) — an
+ *      organization's own configured regulatory rule set, which an admin can
+ *      populate by hand through `POST /api/policies` or in bulk by applying a
+ *      jurisdiction preset (`CompliancePresetService`). This is the layer
+ *      #312 exists to wire in: the `policies` table and its CRUD already
+ *      existed, and `PolicyValidator` already documented that "the heavy
+ *      lifting... is performed by the existing ComplianceEngine" — but
+ *      nothing here had ever actually read a `policies` row. A configured
+ *      rule now genuinely participates in enforcement rather than sitting in
+ *      the table as an unenforced record of intent.
+ *   4. `system_settings` keys (`scheduling.max_shifts_per_week` is the
  *      legacy proxy for `max_hours_per_week / 8`; we ignore it and read
- *      the explicit keys when present)
- *   4. `DEFAULT_COMPLIANCE_POLICY`
+ *      the explicit keys when present) — the older, non-configurable-per-
+ *      scope fallback that `policies` is meant to supersede over time.
+ *   5. `DEFAULT_COMPLIANCE_POLICY`
  */
 export const evaluateAssignmentCompliance = async (
   pool: Pool,
@@ -336,6 +349,23 @@ export const evaluateAssignmentCompliance = async (
   const settings: Record<string, string> = {};
   for (const row of settingRows) settings[row.key as string] = row.value as string;
 
+  const globalPolicies = await new PolicyService(pool).getGlobalValues([
+    'min_rest_hours',
+    'max_hours_week',
+    'max_consecutive_days',
+  ]);
+  // `policy_value` is `{ hours: number }` / `{ days: number }` per
+  // PolicyValidator's documented shape for these keys; a malformed or
+  // missing field reads as absent rather than throwing, consistent with
+  // every other layer in this chain treating "not set" as fall-through.
+  const asNumber = (value: unknown, field: string): number | undefined => {
+    const n = (value as Record<string, unknown> | undefined)?.[field];
+    return typeof n === 'number' && n > 0 ? n : undefined;
+  };
+  const globalMinRestHours = asNumber(globalPolicies.min_rest_hours, 'hours');
+  const globalMaxHoursPerWeek = asNumber(globalPolicies.max_hours_week, 'hours');
+  const globalMaxConsecutiveDays = asNumber(globalPolicies.max_consecutive_days, 'days');
+
   const pref = prefRows[0] as { max_hours_per_week?: number; max_consecutive_days?: number } | undefined;
   const contracts = await new EmploymentContractService(pool).resolveLimitsForPeriod(
     [userId],
@@ -348,15 +378,18 @@ export const evaluateAssignmentCompliance = async (
     maxConsecutiveDays:
       contract?.maxConsecutiveDays ??
       pref?.max_consecutive_days ??
+      globalMaxConsecutiveDays ??
       (Number(settings.max_consecutive_days) ||
         DEFAULT_COMPLIANCE_POLICY.maxConsecutiveDays),
     minRestHoursBetweenShifts:
       contract?.minHoursBetweenShifts ??
+      globalMinRestHours ??
       (Number(settings.min_hours_between_shifts) ||
         DEFAULT_COMPLIANCE_POLICY.minRestHoursBetweenShifts),
     maxHoursPerWeek:
       contract?.maxHoursPerWeek ??
       pref?.max_hours_per_week ??
+      globalMaxHoursPerWeek ??
       (Number(settings.max_hours_per_week) ||
         DEFAULT_COMPLIANCE_POLICY.maxHoursPerWeek),
   };

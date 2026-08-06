@@ -14,6 +14,8 @@ const mockCancelException = jest.fn();
 const mockListMatrix = jest.fn();
 const mockUpdateMatrix = jest.fn();
 const mockListRoles = jest.fn();
+const mockListPresets = jest.fn();
+const mockApplyPreset = jest.fn();
 
 jest.mock('../../services/policyService', () => ({
   __esModule: true,
@@ -28,6 +30,8 @@ jest.mock('../../services/policyService', () => ({
   cancelException: (...args: unknown[]) => mockCancelException(...args),
   listMatrix: (...args: unknown[]) => mockListMatrix(...args),
   updateMatrix: (...args: unknown[]) => mockUpdateMatrix(...args),
+  listPresets: (...args: unknown[]) => mockListPresets(...args),
+  applyPreset: (...args: unknown[]) => mockApplyPreset(...args),
 }));
 
 jest.mock('../../services/rbacService', () => ({
@@ -104,6 +108,17 @@ describe('<Policies />', () => {
     mockListRoles.mockResolvedValue(
       ok([{ id: 7, name: 'Administrator', isSystem: true }])
     );
+    mockListPresets.mockResolvedValue(
+      ok([
+        {
+          key: 'eu_working_time_directive',
+          name: 'EU Working Time Directive',
+          description: 'Baseline rest and weekly-hours limits.',
+          rules: [{ policyKey: 'min_rest_hours', policyValue: { hours: 11 }, description: 'x' }],
+        },
+      ])
+    );
+    mockApplyPreset.mockResolvedValue(ok([{ id: 1 }]));
   });
 
   afterEach(() => {
@@ -156,5 +171,21 @@ describe('<Policies />', () => {
     expect(boxes.length).toBeGreaterThan(0);
     await userEvent.click(boxes[0]);
     expect(mockUpdateMatrix).toHaveBeenCalled();
+  });
+
+  it('loads a compliance preset after confirmation', async () => {
+    render(<Policies />);
+    await screen.findByPlaceholderText(/policy key/i);
+
+    await userEvent.selectOptions(
+      screen.getByLabelText(/load compliance preset/i),
+      'eu_working_time_directive'
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^load$/i }));
+
+    const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
+    await userEvent.click(confirmBtn);
+
+    expect(mockApplyPreset).toHaveBeenCalledWith('eu_working_time_directive');
   });
 });
