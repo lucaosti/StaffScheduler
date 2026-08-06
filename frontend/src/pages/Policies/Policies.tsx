@@ -73,8 +73,38 @@ const Policies: React.FC = () => {
   const exceptions = pageQuery.data?.exceptions ?? [];
   const matrix = pageQuery.data?.matrix ?? [];
   const roles = pageQuery.data?.roles ?? [];
+  const presets = pageQuery.data?.presets ?? [];
   const loading = pageQuery.isLoading;
   const refresh = () => queryClient.invalidateQueries({ queryKey: policiesKey });
+
+  const [selectedPreset, setSelectedPreset] = useState('');
+
+  const handleApplyPreset = () => {
+    if (!selectedPreset) return;
+    const preset = presets.find((p) => p.key === selectedPreset);
+    setConfirm({
+      show: true,
+      title: 'Load compliance preset',
+      message:
+        `Load "${preset?.name ?? selectedPreset}"? This creates or updates ` +
+        `${preset?.rules.length ?? 'its'} global polic${preset?.rules.length === 1 ? 'y' : 'ies'} — ` +
+        'each one stays fully editable afterward, like any other policy.',
+      onConfirm: async () => {
+        setConfirm((prev) => ({ ...prev, show: false }));
+        setBusy(true);
+        setError(null);
+        try {
+          await policyService.applyPreset(selectedPreset);
+          setSelectedPreset('');
+          await refresh();
+        } catch (err) {
+          setError((err as Error).message);
+        } finally {
+          setBusy(false);
+        }
+      },
+    });
+  };
 
   const handleCreatePolicy = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -283,6 +313,41 @@ const Policies: React.FC = () => {
           </li>
         )}
       </ul>
+
+      {activeTab === 'policies' && isAdmin && presets.length > 0 && (
+        <div className="card mb-3">
+          <div className="card-body d-flex align-items-center gap-2">
+            <label className="form-label mb-0 me-2" htmlFor="compliance-preset-select">
+              Load compliance preset
+            </label>
+            <select
+              id="compliance-preset-select"
+              className="form-select form-select-sm w-auto"
+              value={selectedPreset}
+              onChange={(e) => setSelectedPreset(e.target.value)}
+              disabled={busy}
+            >
+              <option value="">Choose a preset…</option>
+              {presets.map((p) => (
+                <option key={p.key} value={p.key}>{p.name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-primary"
+              disabled={busy || !selectedPreset}
+              onClick={handleApplyPreset}
+            >
+              Load
+            </button>
+            {selectedPreset && (
+              <span className="text-muted small">
+                {presets.find((p) => p.key === selectedPreset)?.description}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {activeTab === 'policies' && (
         <PolicyList
