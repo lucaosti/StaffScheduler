@@ -399,6 +399,30 @@ The SPA refreshes proactively before expiry and falls back to a refresh on page
 load, so an active session is never interrupted. See `RefreshTokenService` and
 `backend/db/migrations/*_add_refresh_tokens.sql` for the schema rationale.
 
+### SSO federation (OIDC)
+
+Enterprise identity-provider login alongside password auth: `sso_providers` (per-organization IdP configuration, administered via `POST/PUT/DELETE /api/sso/providers` behind `settings.manage`) and `sso_identities` (links a `(provider, IdP-subject)` pair to a local account). OIDC only for now — SAML is a second provider through the same `sso_providers` shape later, not a redesign of it.
+
+**Why a DB table, not `.env` credentials.** Email/push/SMS/Gusto are "one account, one deployment" — a single `.env` credential is right for those. An identity provider is per-tenant: every organization has its own Google Workspace or Okta tenant, so an administrator configures it through the API, the same way a policy or an employment contract is data rather than a deployment setting. `organization_name` scopes a provider the same soft-multi-tenant way `webhook_subscriptions` already does; a `NULL` row is a platform-wide provider available to any organization.
+
+**Why hand-rolled OIDC, not `passport`.** `passport`'s strategy model assumes `req.session`/`req.login()`; this application has no `express-session` anywhere — JWT cookies are the entire session model, by design — and every `sso_providers` row is a different, per-organization IdP configuration resolved at request time, not a strategy registered once at startup the way passport expects. The actual protocol work (build the authorization URL, exchange a code, verify a JWT against a JWKS endpoint) follows the exact `fetch` + `AbortController` shape `WebhookWorker`/`GustoProvider` already use for their own outbound calls, kept in `SsoAuthService`.
+
+**Why manual endpoint configuration, not `.well-known/openid-configuration` discovery.** Discovery is one more runtime network call and one more trust decision. An administrator configuring a provider already knows which IdP they're pointing at; typing the three URLs discovery would otherwise resolve is a modest extra step for a meaningfully smaller runtime attack surface, and every major IdP (Google, Microsoft Entra ID, Okta, Auth0) publishes them plainly.
+
+**The flow** (`routes/auth.ts`, alongside password login so it can reuse the same session-issuance code):
+1. `GET /api/auth/sso/providers` — public; lists active providers (id/name only, never the client secret) available to a login page.
+2. `GET /api/auth/sso/:id/login` — redirects to the IdP with a random `state` (CSRF) and `nonce` (ID-token replay protection), each set as a short-lived, path-scoped httpOnly cookie rather than server-side session state, since there is none.
+3. `GET /api/auth/sso/:id/callback` — the IdP redirects the browser back here. Verifies `state` against the cookie, exchanges the code for an ID token, verifies the token, resolves the result to a local account, and issues the SAME `setAccessCookie`/`setRefreshCookie` pair `/login` issues on a password sign-in — this is a top-level browser navigation, not an XHR call, so on success it redirects to the frontend rather than returning JSON.
+
+**Security properties the ID-token verification depends on, stated explicitly:**
+- Signature verified against the provider's OWN JWKS endpoint (`jwks-rsa`), with the algorithm PINNED to `RS256` rather than trusted from the token's own `alg` header — the standard defense against algorithm-confusion attacks.
+- `iss` and `aud` verified against the configured provider, so a validly-signed token from a different client registration on the same IdP cannot be replayed here.
+- `nonce` checked against the login attempt's own cookie — without it, a previously-issued, still-valid ID token could be replayed against a fresh login.
+
+**The state/nonce cookies are `SameSite=Lax`, not `Strict`** — the one deliberate exception to this codebase's usual cookie policy. Every other cookie here is `Strict` (first-party XHR/fetch only), but this cookie must survive the trip TO the identity provider and back: a cross-SITE, top-level redirect FROM the IdP's own domain. `Strict` is never sent on a cross-site navigation, even a top-level GET, so a `Strict` state cookie would make every SSO login fail with a false "state mismatch" — indistinguishable from an actual CSRF attempt. `Lax` is sent on top-level cross-site GETs (exactly what an IdP redirect is) while still refusing it on a cross-site POST or embed.
+
+**Account resolution** (`SsoAuthService.findOrCreateUser`), in order: (1) an existing `sso_identities` link — the ordinary returning-user case; (2) an existing local account matched by email — account linking, recorded as a link so future logins skip to (1); (3) a newly-created account, ONLY when the provider has `jit_provisioning_enabled` — an access-control decision an administrator opts into per provider, defaulting off, never assumed. A JIT-provisioned account gets a random, never-revealed password (it only ever authenticates through the IdP) and the provider's configured `default_role_id`, if set. An inactive account is refused at every branch — successfully authenticating at the IdP is not by itself a reason to override an administrator having deactivated the local account.
+
 ### Model
 
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
