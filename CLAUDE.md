@@ -257,6 +257,7 @@ Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev prox
 | `OTEL_ENABLED` / `OTEL_EXPORTER_OTLP_ENDPOINT` | Starts OpenTelemetry tracing; spans carry `request.id`. |
 | `EMAIL_HOST` + `EMAIL_USER` + `EMAIL_PASSWORD` | Enables real email delivery via the outbox. Without them no email intent is recorded at all. |
 | `DB_REPLICA_HOST` | Routes `ReportsService`/`CalendarService`/`AuditLogService` SELECTs to a MySQL read replica. Unset leaves `createReadPool` returning the primary pool unchanged — see DOCUMENTATION.md §10a. |
+| `GUSTO_API_KEY` + `GUSTO_COMPANY_ID` | Enables payroll export to Gusto. Without them `GustoProvider` refuses to run rather than sending anywhere — see DOCUMENTATION.md §7e. |
 
 ## Observability and operations
 

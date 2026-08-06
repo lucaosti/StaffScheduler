@@ -112,6 +112,7 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'directory.ts', variable: 'router', prefix: '/directory' },
   { file: 'skillGap.ts', variable: 'router', prefix: '/skill-gap' },
   { file: 'reports.ts', variable: 'router', prefix: '/reports' },
+  { file: 'integrations.ts', variable: 'router', prefix: '/integrations' },
   { file: 'notifications.ts', variable: 'router', prefix: '/notifications' },
   { file: 'webhooks.ts', variable: 'router', prefix: '/webhooks' },
   { file: 'bulkImport.ts', variable: 'router', prefix: '/import' },
