@@ -1319,3 +1319,16 @@ export const assignEmploymentContractBody = z.object({
   effectiveFrom: dateString,
   effectiveTo: dateString.nullable().optional(),
 });
+
+/**
+ * Triggers a payroll export job for a pay period. `provider` defaults to the
+ * only one implemented today (`gusto`) but is not hardcoded to it — the
+ * provider abstraction is additive, and a caller naming a provider with no
+ * registered implementation gets a clear error from the worker rather than
+ * the option not existing at the API layer.
+ */
+export const createPayrollExportBody = z.object({
+  startDate: dateString,
+  endDate: dateString,
+  provider: z.string().min(1).max(40).optional(),
+}).refine(dateOrder, DATE_ORDER_MESSAGE);

@@ -477,6 +477,7 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `responsibility.read` / `responsibility.manage` | View / manage responsibility matrix |
 | `change_request.create` | Submit a change request |
 | `change_request.review` | Approve, reject, apply, and list change requests |
+| `payroll.manage` | Trigger and view payroll export jobs to external providers (Administrator only by default) |
 
 ### Anti-escalation
 
@@ -670,7 +671,7 @@ Runtime feature flags persisted in the `modules` table. All 11 default modules a
 | `reporting` | Reports and analytics |
 | `analytics` | Advanced workforce analytics |
 | `forecasting` | Demand forecasting |
-| `integrations` | Third-party integrations |
+| `integrations` | Third-party integrations — gates `/api/integrations`, currently payroll export |
 | `audit` | Audit log viewer |
 | `compliance` | Policies and exception tracking |
 | `attendance` | Clock-in/clock-out punches and approval — see [7a](#7a-attendance-tracking) |
@@ -795,6 +796,16 @@ All routes require `settings.manage` and are scoped to the caller's own `organiz
 **`organizationName` threading**: `ApprovalEngineService.decidePendingApproval` is invoked by `TimeOffService`, `ShiftSwapService`, `EmployeeLoanService`, `PolicyExceptionService`, and `ChangeRequestService`, all of which now accept `organizationName` as a trailing optional parameter (default `null`, meaning "skip dispatch") and forward it unchanged. Routes supply it from `req.user.organizationName` — already resolved by `authenticate` — so no extra query is needed at the HTTP boundary either.
 
 **Signing and delivery**: `signPayload(secret, rawBody)` produces `X-Webhook-Signature: sha256=<hex>` via HMAC-SHA256, so a subscriber can verify the request came from this deployment. The secret is stored in **plaintext** in `webhook_subscriptions` — deliberately, unlike the kiosk/refresh-token pattern: `WebhookWorker` must reproduce the same signature the subscriber verifies, which needs the raw secret at delivery time, not a one-way hash of it (the standard shape for webhook secrets, e.g. Stripe, GitHub). `WebhookWorker` polls `webhook_deliveries` the same way `OutboxWorker`/`PushWorker` poll their tables (interval poll, `FOR UPDATE SKIP LOCKED` batch claim, unref'd timer), but backs off exponentially on failure instead of retrying every poll: `next_attempt_at` is pushed forward by `min(2^attempts, 60)` minutes, since an endpoint that's down tends to stay down, up to `MAX_ATTEMPTS = 6` before a delivery is marked `failed`. Unlike email/push, there is no "is this configured" gate — a delivery row only exists because `dispatch()` already found a matching active subscription, so the worker always polls.
+
+---
+
+## 7e. Payroll export
+
+`POST /api/integrations/payroll/export` (`payroll.manage`, behind the `integrations` module) queues a `payroll_export_jobs` row for a pay period; it never blocks on an outbound call itself. `PayrollExportWorker` delivers it — same shape as `WebhookWorker` (interval poll, `FOR UPDATE SKIP LOCKED`, unref'd timer, exponential backoff up to `MAX_ATTEMPTS = 6`), reused rather than a second delivery mechanism, since a payroll export is exactly the same kind of thing a webhook delivery is: an outbound call to a third party that can be slow or transiently down.
+
+**The provider abstraction is additive by design**: `PayrollProvider` (`services/PayrollProvider.ts`) declares one method, `export(batch): Promise<{ providerReference }>`; a new vendor (ADP, Workday) is a new class implementing it plus one entry in the worker's provider registry, never a change to the queue, the route, or the batch-building logic. **Gusto is the first provider**, chosen over ADP/Workday because its REST API is reachable with a developer sandbox rather than an enterprise partner agreement. No production credentials ship with this repository — `isGustoConfigured()` gates every export attempt on `GUSTO_API_KEY`/`GUSTO_COMPANY_ID` and fails loudly rather than silently when unset, the same posture `EmailCodeProvider`/`SmsCodeProvider` take for "nothing to send with yet." Employees are matched to Gusto by **email**, not a stored Gusto employee id — there is no id-mapping table yet, and email is the one identifier both systems already agree on.
+
+**The batch is rebuilt at delivery time, not stored on the job row**: hours and gross pay per employee come from confirmed/completed `shift_assignments` and `users.hourly_rate`, the same overnight-safe hours expression `ReportsService`/`AttendanceService` already use. The source data stays authoritative if it changes before the job runs, avoiding the question of whether a late correction should retroactively change an already-queued export.
 
 ---
 

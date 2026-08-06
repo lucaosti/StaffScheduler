@@ -45,6 +45,7 @@ import { AuditLogService } from '../services/AuditLogService';
 import { SkillGapService } from '../services/SkillGapService';
 import { ReportsService } from '../services/ReportsService';
 import { AttendanceService } from '../services/AttendanceService';
+import { PayrollExportService } from '../services/PayrollExportService';
 import { NotificationService } from '../services/NotificationService';
 import { CalendarService } from '../services/CalendarService';
 import { TwoFactorService } from '../services/TwoFactorService';
@@ -58,6 +59,7 @@ import { createPreferencesRouter } from '../routes/preferences';
 import { createAuditLogsRouter } from '../routes/auditLogs';
 import { createSkillGapRouter } from '../routes/skillGap';
 import { createReportsRouter } from '../routes/reports';
+import { createIntegrationsRouter } from '../routes/integrations';
 import { createNotificationsRouter } from '../routes/notifications';
 import { createCalendarRouter } from '../routes/calendar';
 import { createTwoFactorRouter } from '../routes/twoFactor';
@@ -242,6 +244,58 @@ describe('reports router', () => {
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].type).toBe('late_clock_in');
+  });
+});
+
+describe('integrations router', () => {
+  it('GET /payroll/export lists jobs', async () => {
+    (PayrollExportService.prototype.list as jest.Mock) = jest.fn().mockResolvedValue([
+      { id: 1, provider: 'gusto', status: 'pending' },
+    ]);
+    const res = await request(mountApp('/api/integrations', createIntegrationsRouter(fakePool)))
+      .get('/api/integrations/payroll/export');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+  });
+
+  it('GET /payroll/export/:id 404s for an unknown job', async () => {
+    (PayrollExportService.prototype.getById as jest.Mock) = jest.fn().mockResolvedValue(null);
+    const res = await request(mountApp('/api/integrations', createIntegrationsRouter(fakePool)))
+      .get('/api/integrations/payroll/export/99');
+    expect(res.status).toBe(404);
+  });
+
+  it('GET /payroll/export/:id returns the job when found', async () => {
+    (PayrollExportService.prototype.getById as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 1, provider: 'gusto', status: 'sent' });
+    const res = await request(mountApp('/api/integrations', createIntegrationsRouter(fakePool)))
+      .get('/api/integrations/payroll/export/1');
+    expect(res.status).toBe(200);
+    expect(res.body.data.status).toBe('sent');
+  });
+
+  it('POST /payroll/export queues a job and defaults the provider to gusto', async () => {
+    (PayrollExportService.prototype.createJob as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ id: 5, provider: 'gusto', status: 'pending' });
+    const res = await request(mountApp('/api/integrations', createIntegrationsRouter(fakePool)))
+      .post('/api/integrations/payroll/export')
+      .send({ startDate: '2026-05-01', endDate: '2026-05-31' });
+    expect(res.status).toBe(202);
+    expect(PayrollExportService.prototype.createJob).toHaveBeenCalledWith(
+      'gusto',
+      '2026-05-01',
+      '2026-05-31',
+      1
+    );
+  });
+
+  it('POST /payroll/export 400s when endDate is before startDate', async () => {
+    const res = await request(mountApp('/api/integrations', createIntegrationsRouter(fakePool)))
+      .post('/api/integrations/payroll/export')
+      .send({ startDate: '2026-05-31', endDate: '2026-05-01' });
+    expect(res.status).toBe(400);
   });
 });
 
