@@ -358,3 +358,56 @@ describe('policies CRUD', () => {
     });
   });
 });
+
+describe('compliance presets', () => {
+  it('GET /presets lists the available presets without touching the DB', async () => {
+    const res = await request(mountApp()).get('/api/policies/presets');
+    expect(res.status).toBe(200);
+    expect(res.body.data.some((p: { key: string }) => p.key === 'eu_working_time_directive')).toBe(true);
+    expect(PolicyService.prototype.list).not.toHaveBeenCalled();
+  });
+
+  it('POST /presets/:code/apply creates a row per rule when none exists yet', async () => {
+    (PolicyService.prototype.list as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (PolicyService.prototype.create as jest.Mock) = jest
+      .fn()
+      .mockImplementation((input) => Promise.resolve({ id: Math.random(), ...input }));
+
+    const res = await request(mountApp()).post('/api/policies/presets/eu_working_time_directive/apply');
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(3);
+    expect(PolicyService.prototype.create).toHaveBeenCalledTimes(3);
+    // Every rule lands as a global policy, not scoped to a schedule/org unit.
+    for (const call of (PolicyService.prototype.create as jest.Mock).mock.calls) {
+      expect(call[0].scopeType).toBe('global');
+    }
+  });
+
+  it('POST /presets/:code/apply updates the existing global policy instead of duplicating it', async () => {
+    (PolicyService.prototype.list as jest.Mock) = jest.fn().mockResolvedValue([
+      { id: 5, scopeType: 'global', policyKey: 'min_rest_hours', policyValue: { hours: 8 } },
+    ]);
+    (PolicyService.prototype.update as jest.Mock) = jest
+      .fn()
+      .mockImplementation((id, patch) => Promise.resolve({ id, scopeType: 'global', policyKey: 'min_rest_hours', ...patch }));
+    (PolicyService.prototype.create as jest.Mock) = jest
+      .fn()
+      .mockImplementation((input) => Promise.resolve({ id: Math.random(), ...input }));
+
+    const res = await request(mountApp()).post('/api/policies/presets/eu_working_time_directive/apply');
+
+    expect(res.status).toBe(200);
+    expect(PolicyService.prototype.update).toHaveBeenCalledWith(
+      5,
+      expect.objectContaining({ policyValue: { hours: 11 } })
+    );
+    // The other two rules (no existing row) still go through create.
+    expect(PolicyService.prototype.create).toHaveBeenCalledTimes(2);
+  });
+
+  it('POST /presets/:code/apply 400s for an unknown preset key', async () => {
+    const res = await request(mountApp()).post('/api/policies/presets/not-a-real-preset/apply');
+    expect(res.status).toBe(400);
+  });
+});

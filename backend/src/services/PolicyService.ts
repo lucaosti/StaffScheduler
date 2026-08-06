@@ -172,6 +172,30 @@ export class PolicyService {
     return refreshed;
   }
 
+  /**
+   * Active GLOBAL policy values for the given keys, keyed by `policy_key`.
+   *
+   * The seam that lets an organization's own regulatory rule set — including
+   * one seeded from a jurisdiction preset (see `CompliancePresetService`) —
+   * participate in `ComplianceEngine`'s policy resolution chain the same way
+   * a personal contract or preference already does. Scoped to `global` only:
+   * per-org-unit regulatory layering is a real future need, but adding it
+   * here without a caller that resolves a user's org unit would be an
+   * unused, untested branch.
+   */
+  async getGlobalValues(keys: string[]): Promise<Record<string, unknown>> {
+    if (keys.length === 0) return {};
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT policy_key, policy_value FROM policies
+        WHERE scope_type = 'global' AND is_active = 1
+          AND policy_key IN (${keys.map(() => '?').join(', ')})`,
+      keys
+    );
+    const out: Record<string, unknown> = {};
+    for (const row of rows) out[row.policy_key as string] = parseValue(row.policy_value);
+    return out;
+  }
+
   async remove(id: number): Promise<void> {
     const existing = await this.getById(id);
     if (!existing) throw new NotFoundError('Policy not found');
