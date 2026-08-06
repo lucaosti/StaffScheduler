@@ -423,6 +423,8 @@ Enterprise identity-provider login alongside password auth: `sso_providers` (per
 
 **Account resolution** (`SsoAuthService.findOrCreateUser`), in order: (1) an existing `sso_identities` link — the ordinary returning-user case; (2) an existing local account matched by email — account linking, recorded as a link so future logins skip to (1); (3) a newly-created account, ONLY when the provider has `jit_provisioning_enabled` — an access-control decision an administrator opts into per provider, defaulting off, never assumed. A JIT-provisioned account gets a random, never-revealed password (it only ever authenticates through the IdP) and the provider's configured `default_role_id`, if set. An inactive account is refused at every branch — successfully authenticating at the IdP is not by itself a reason to override an administrator having deactivated the local account.
 
+**Trust assumption in step (2), stated explicitly**: linking by email trusts that the identity provider verifies email ownership before asserting an `email` claim — true of every mainstream IdP (Google, Microsoft Entra ID, Okta, Auth0), and the reason "Sign in with Google" account-linking works the same way everywhere. It would NOT be safe for a self-service IdP that lets a user register any email unverified. An administrator configuring a `sso_providers` row is vouching for that IdP's own email verification, the same trust already extended by choosing to enable JIT provisioning at all.
+
 ### Model
 
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.

@@ -214,6 +214,16 @@ export class SsoAuthService {
    * granted a session — successfully authenticating at the IdP is not by
    * itself a reason to override an administrator having deactivated the
    * local account.
+   *
+   * TRUST ASSUMPTION IN STEP 2, STATED EXPLICITLY: linking by email trusts
+   * that the identity provider verifies email ownership before asserting an
+   * `email` claim — true of every mainstream IdP (Google, Microsoft Entra
+   * ID, Okta, Auth0) and the reason "Sign in with Google" account-linking
+   * works the same way everywhere. It would NOT be safe for a self-service
+   * IdP that lets a user register any email unverified — an administrator
+   * configuring `sso_providers` is vouching for the IdP's own email
+   * verification when they enable it, the same trust an administrator
+   * already extends by choosing to enable JIT provisioning at all.
    */
   async findOrCreateUser(provider: SsoProvider, profile: OidcProfile): Promise<User> {
     const userService = new UserService(this.pool);
