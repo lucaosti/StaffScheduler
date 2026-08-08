@@ -296,6 +296,23 @@ export const policySchema = z.object({
 export type Policy = z.infer<typeof policySchema>;
 
 /**
+ * A cost plan: the fixed labor-cost target an administrator set for one
+ * department over one period, compared against the actual cost computed
+ * from `shift_assignments` / `users.hourly_rate`.
+ */
+export const costPlanSchema = z.object({
+  id: z.number().int(),
+  departmentId: z.number().int(),
+  startDate: z.string(),
+  endDate: z.string(),
+  targetAmount: z.number(),
+  setByUserId: z.number().int(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+export type CostPlan = z.infer<typeof costPlanSchema>;
+
+/**
  * A time-off request.
  *
  * The hand-written component published `reviewedBy`, which does not exist —

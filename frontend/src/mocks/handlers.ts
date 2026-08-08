@@ -41,6 +41,7 @@ export const defaultDashboardStats = {
   pendingApprovals: 2,
   monthlyHours: 1280,
   monthlyCost: 24600,
+  monthlyCostPlan: 25000,
   coverageRate: 92.0,
   employeeSatisfaction: 4.4,
 };
