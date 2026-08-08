@@ -72,7 +72,7 @@ const OnCall: React.FC = () => {
   };
 
   return (
-    <div className="container-fluid py-3">
+    <div className="container-fluid py-3 oncall-page">
       <h1 className="h4 mb-3">{t('onCall.title')}</h1>
 
       {message && (
@@ -136,50 +136,54 @@ const OnCall: React.FC = () => {
             loadingMessage={t('onCall.loadingPeriods')}
             empty={<p className="text-muted">{t('onCall.emptyPeriods')}</p>}
           >
-            <table className="table table-sm align-middle">
-              <thead>
-                <tr>
-                  <th>{t('onCall.columns.date')}</th>
-                  <th>{t('onCall.columns.hours')}</th>
-                  <th>{t('onCall.columns.department')}</th>
-                  <th>{t('onCall.columns.covered')}</th>
-                  <th>{t('onCall.columns.status')}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {(periods.data ?? []).map((p) => (
-                  <tr key={p.id}>
-                    <td>{p.date}</td>
-                    <td>
-                      {t('common.timeRange', { start: shiftTime(p.startTime), end: shiftTime(p.endTime) })}
-                    </td>
-                    <td>{p.departmentName ?? p.departmentId}</td>
-                    <td>{coverage(p)}</td>
-                    <td>{p.status}</td>
-                    <td className="text-end">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary me-2"
-                        onClick={() => setOpenPeriod(openPeriod?.id === p.id ? null : p)}
-                      >
-                        {t('onCall.who')}
-                      </button>
-                      {canManage && (
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-danger"
-                          onClick={() => act(remove.mutateAsync(p.id))}
-                          disabled={remove.isPending}
-                        >
-                          {t('common.delete')}
-                        </button>
-                      )}
-                    </td>
+            <div className="table-responsive">
+              <table className="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{t('onCall.columns.date')}</th>
+                    <th>{t('onCall.columns.hours')}</th>
+                    <th>{t('onCall.columns.department')}</th>
+                    <th>{t('onCall.columns.covered')}</th>
+                    <th>{t('onCall.columns.status')}</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(periods.data ?? []).map((p) => (
+                    <tr key={p.id}>
+                      <td>{p.date}</td>
+                      <td>
+                        {t('common.timeRange', { start: shiftTime(p.startTime), end: shiftTime(p.endTime) })}
+                      </td>
+                      <td>{p.departmentName ?? p.departmentId}</td>
+                      <td>{coverage(p)}</td>
+                      <td>{p.status}</td>
+                      <td className="text-end">
+                        <div className="d-flex flex-wrap justify-content-end gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => setOpenPeriod(openPeriod?.id === p.id ? null : p)}
+                          >
+                            {t('onCall.who')}
+                          </button>
+                          {canManage && (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={() => act(remove.mutateAsync(p.id))}
+                              disabled={remove.isPending}
+                            >
+                              {t('common.delete')}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </QueryState>
         </>
       )}
@@ -207,7 +211,7 @@ const OnCall: React.FC = () => {
                 {(assignments.data ?? []).map((a) => (
                   <li
                     key={a.id}
-                    className="list-group-item d-flex justify-content-between align-items-center"
+                    className="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2"
                   >
                     <span>
                       {a.userName ?? t('onCall.userFallback', { id: a.userId })}{' '}
