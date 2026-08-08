@@ -38,6 +38,12 @@ const I18N_ENFORCED_FILES = [
   'src/pages/Attendance/Attendance.tsx',
   'src/pages/orgManagement/OrgTree.tsx',
   'src/pages/orgManagement/MemberList.tsx',
+  'src/pages/Policies/Policies.tsx',
+  'src/pages/Policies/PolicyList.tsx',
+  'src/pages/Policies/ExceptionList.tsx',
+  'src/pages/Directory/Directory.tsx',
+  'src/pages/Reports/Reports.tsx',
+  'src/pages/OrgChart/OrgChart.tsx',
 ];
 
 module.exports = [
