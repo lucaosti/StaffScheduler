@@ -81,7 +81,15 @@ type RequestOptions<P extends keyof paths, M extends HttpMethod> =
   (PathParams<P, M> extends undefined ? { params?: undefined } : { params: PathParams<P, M> }) &
     (QueryParams<P, M> extends undefined
       ? { query?: undefined }
-      : { query?: QueryParams<P, M> });
+      : { query?: QueryParams<P, M> }) & {
+      /**
+       * Extra headers merged on top of the default authenticated request
+       * headers. Not part of the generated contract (headers aren't a Zod
+       * concern) — the one current use is the auth service sending
+       * `X-Client-Type: mobile` on login/refresh from inside Capacitor.
+       */
+      headers?: Record<string, string>;
+    };
 
 /**
  * Substitutes `{name}` placeholders in a path template with param values.
@@ -124,12 +132,17 @@ const buildQuery = (query?: Record<string, unknown>): string => {
 const request = async <T>(
   method: HttpMethod,
   path: string,
-  options?: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown }
+  options?: {
+    params?: Record<string, unknown>;
+    query?: Record<string, unknown>;
+    body?: unknown;
+    headers?: Record<string, string>;
+  }
 ): Promise<ApiResponse<T>> => {
   const url = `${API_BASE_URL}${buildPath(path, options?.params)}${buildQuery(options?.query)}`;
   const init: RequestInit = {
     method: method.toUpperCase(),
-    ...getAuthHeaders(),
+    ...getAuthHeaders(options?.headers),
   };
   if (options?.body !== undefined) init.body = JSON.stringify(options.body);
   const response = await fetch(url, init);
