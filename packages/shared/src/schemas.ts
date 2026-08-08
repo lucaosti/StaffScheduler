@@ -1078,6 +1078,20 @@ export const loginBody = z.object({
   methodType: twoFactorMethodType.optional(),
 });
 
+/**
+ * Body for `POST /auth/refresh`. Every field is optional because the web
+ * client sends none of them: its refresh token travels solely via the
+ * path-scoped httpOnly cookie, exactly as before this endpoint accepted a
+ * body at all. `refreshToken` is only consulted when the request also
+ * carries the mobile-client signal (a native WebView cannot reliably rely on
+ * the cookie jar reaching this endpoint) — on an ordinary web request it is
+ * ignored even if present, which is what keeps the web path's cookie-only
+ * contract unchanged.
+ */
+export const refreshBody = z.object({
+  refreshToken: z.string().min(1).optional(),
+});
+
 export const optionalNotesBody = z.object({
   notes: z.string().max(2000).nullable().optional(),
 });

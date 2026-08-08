@@ -193,6 +193,12 @@ POST /api/auth/refresh           (cookie) → rotates cookie; body: { user }
 POST /api/auth/logout            blacklists the JTI and clears the cookie
 ```
 
+With `X-Client-Type: mobile` (see "Mobile client: token-based variant" below),
+`/login` and `/refresh` additionally set `accessToken`/`refreshToken` on the
+response body, alongside the cookies above rather than instead of them; and
+`/refresh` also accepts `{ refreshToken }` in the body as a fallback when the
+cookie is absent. Neither behavior is present without that header.
+
 JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry. The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
 
 **Two-factor authentication**: when an account has ANY method enabled (`POST /api/auth/2fa/setup` + `/enable`, with an optional `methodType` — see the method registry below), login additionally requires `code` (and, when the enrolled method isn't TOTP, `methodType`) — that method's code/assertion, or an unused recovery code. A password-valid login without `code` answers 401 `TWO_FACTOR_REQUIRED`, whose response carries `data.methods` (the account's enabled method types, so the client knows what to offer); a wrong code answers 401 `TWO_FACTOR_INVALID`. Disabling one method (`POST /api/auth/2fa/disable`) likewise requires a valid code for that method, or a recovery code. Accepted codes are single-use: TOTP's matched time-step counter and email/WebAuthn's challenge are cleared via a compare-and-set update on verification, so an intercepted code/challenge cannot be replayed; recovery-code consumption uses the same compare-and-set pattern.
@@ -402,6 +408,59 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
 The SPA refreshes proactively before expiry and falls back to a refresh on page
 load, so an active session is never interrupted. See `RefreshTokenService` and
 `backend/db/migrations/*_add_refresh_tokens.sql` for the schema rationale.
+
+### Mobile client: token-based variant
+
+The Capacitor mobile app (`mobile/`, wrapping the built `frontend/` bundle)
+authenticates against the SAME `POST /api/auth/login` and `POST /api/auth/refresh`
+endpoints as the web SPA, but cannot use the cookie-only model above as its sole
+mechanism.
+
+**Why it differs: the cross-origin WebView cookie-reliability problem.** The
+mobile app's content is served from a local/custom-scheme WebView origin
+(`capacitor://localhost` or similar) while API calls go to the real backend
+domain — a cross-origin relationship from the WebView's perspective, where
+`SameSite` cookie behavior and WKWebView/Android WebView third-party-cookie
+handling are unreliable and vary by OS version. Relying on the cookie jar here
+is a known fragile pattern in the Capacitor/Ionic ecosystem; the standard
+mitigation (mobile OWASP guidance, and the Capacitor community) is to capture
+the token values explicitly and hold them in the client, sending them back as
+an `Authorization: Bearer` header instead of depending on the browser's cookie
+handling.
+
+**The mechanism is an explicit, additive opt-in — not a second set of
+endpoints.** A request carrying `X-Client-Type: mobile` gets the SAME cookies
+`/login` and `/refresh` always set, PLUS the raw `accessToken`/`refreshToken`
+values in the JSON response body, so the two client types share one endpoint
+rather than diverging into parallel auth implementations. Without that header
+— every existing caller, including the web SPA — the response body is exactly
+what it was before this existed; the cookie-only web contract does not change
+at all.
+
+`POST /api/auth/refresh` additionally accepts the refresh token from the
+request body (`refreshToken`) instead of the cookie, but ONLY when
+`X-Client-Type: mobile` is present; the cookie is still tried first even then
+(harmless if the WebView happens to have it), and the web path never reads the
+body at all. Rotation, reuse detection and revocation are enforced identically
+either way — only where the token is read from differs.
+
+**Storage on-device**: `frontend/src/services/mobileAuthStorage.ts` persists
+the token pair via `@capacitor/preferences` and keeps an in-memory cache so
+`getAuthHeaders` can attach `Authorization: Bearer` synchronously on every
+request while running under `Capacitor.isNativePlatform()`. This is a
+deliberate first-version tradeoff: `@capacitor/preferences` is NOT
+hardware-backed Keychain/Android Keystore encryption by itself on every
+platform (Android backs it with SharedPreferences; iOS with UserDefaults, not
+Keychain) — a plugin such as `capacitor-secure-storage-plugin`, which wraps
+Keychain/Keystore directly, is the harder-guarantee option, deferred rather
+than taken on without an environment to build and verify its native pieces
+end-to-end.
+
+**Deferred**: biometric unlock (Face ID / Touch ID / Android biometric prompt)
+gating access to the already-stored token is an explicit fast-follow, not part
+of this version — it protects the on-device secret rather than authenticating
+against the server a second time, so it composes with the storage above
+without changing this section's contract.
 
 ### SSO federation (OIDC)
 
