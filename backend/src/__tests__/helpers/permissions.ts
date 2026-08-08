@@ -25,7 +25,7 @@ export const ALL_PERMISSIONS: string[] = [
   'loan.request', 'loan.approve',
   'timeoff.approve', 'shiftswap.approve',
   'preferences.manage',
-  'report.read', 'audit.read',
+  'report.read', 'report.manage', 'audit.read',
   'user.read', 'user.read_all', 'user.manage',
   'settings.manage', 'role.manage',
   'responsibility.read', 'responsibility.manage',

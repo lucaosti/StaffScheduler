@@ -129,6 +129,7 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'changeRequests.ts', variable: 'router', prefix: '/change-requests' },
   { file: 'pendingApprovals.ts', variable: 'router', prefix: '/pending-approvals' },
   { file: 'employeeFieldPolicies.ts', variable: 'router', prefix: '/employee-field-policies' },
+  { file: 'costPlans.ts', variable: 'router', prefix: '/cost-plans' },
 ];
 
 /**
@@ -287,6 +288,7 @@ const DOMAIN_COMPONENTS: Record<string, z.ZodType> = {
   Geofence: sharedSchemas.geofenceSchema,
   KioskDevice: sharedSchemas.kioskDeviceSchema,
   WebhookSubscription: sharedSchemas.webhookSubscriptionSchema,
+  CostPlan: sharedSchemas.costPlanSchema,
 };
 
 const main = (): void => {

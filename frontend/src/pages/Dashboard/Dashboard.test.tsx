@@ -65,6 +65,45 @@ describe('<Dashboard />', () => {
     ).toBeInTheDocument();
   });
 
+  it('shows the cost plan target and how far actual cost is from it', async () => {
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() =>
+      expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
+    );
+    // defaultDashboardStats: monthlyCost 24600 < monthlyCostPlan 25000 -> under target
+    expect(screen.getByText(/^target:/i)).toBeInTheDocument();
+    expect(screen.getByText(/under target/i)).toBeInTheDocument();
+  });
+
+  it('shows over-target when actual cost exceeds the plan', async () => {
+    server.use(
+      http.get(`${API_URL}/dashboard/stats`, () =>
+        HttpResponse.json({
+          success: true,
+          data: { ...defaultDashboardStats, monthlyCost: 30000, monthlyCostPlan: 25000 },
+        })
+      )
+    );
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    expect(await screen.findByText(/over target/i)).toBeInTheDocument();
+  });
+
+  it('renders no target line when no cost plan has been set', async () => {
+    server.use(
+      http.get(`${API_URL}/dashboard/stats`, () =>
+        HttpResponse.json({
+          success: true,
+          data: { ...defaultDashboardStats, monthlyCostPlan: null },
+        })
+      )
+    );
+    render(<MemoryRouter><Dashboard /></MemoryRouter>);
+    await waitFor(() =>
+      expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
+    );
+    expect(screen.queryByText(/target/i)).not.toBeInTheDocument();
+  });
+
   it('says nothing about attention items when there are none', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await waitFor(() =>

@@ -1383,3 +1383,28 @@ export const ssoCallbackQuery = z.object({
   code: z.string().max(2048).optional(),
   state: z.string().max(255).optional(),
 });
+
+// ── Cost plans ───────────────────────────────────────────────────────────────
+
+/**
+ * A cost plan target, as the admin API accepts it: a fixed labor-cost figure
+ * for one department over one period, not derived from headcount or
+ * contracted hours. `startDate`/`endDate` follow the same period convention
+ * `schedules` already uses, so a caller who knows one knows the other.
+ */
+export const costPlanBody = z.object({
+  departmentId: positiveInt,
+  startDate: dateString,
+  endDate: dateString,
+  targetAmount: z.number().nonnegative(),
+}).refine(dateOrder, DATE_ORDER_MESSAGE);
+
+export const costPlanUpdateBody = z.object({
+  targetAmount: z.number().nonnegative(),
+});
+
+export const costPlanIdParam = z.object({ id: positiveInt });
+
+export const costPlanListQuery = z.object({
+  departmentId: positiveInt.optional(),
+});

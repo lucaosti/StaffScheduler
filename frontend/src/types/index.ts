@@ -172,6 +172,11 @@ export interface DashboardStats {
   monthlyHours: number;
   /** Labor cost for the month; null when the caller lacks `report.read`. */
   monthlyCost: number | null;
+  /**
+   * Admin-set cost plan target for the month, summed across departments;
+   * null under the same `report.read` gate as `monthlyCost`.
+   */
+  monthlyCostPlan: number | null;
   coverageRate: number;
   employeeSatisfaction: number;
 }
