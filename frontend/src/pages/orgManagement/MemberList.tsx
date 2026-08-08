@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { OrgUnit, UserOrgUnit } from '../../services/orgService';
 import EmptyState from '../../components/EmptyState';
 
@@ -34,18 +35,20 @@ const MemberList: React.FC<Props> = ({
   onAddMember,
   onSetPrimary,
   onRemoveMember,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  return (
   <div className="card">
     <div className="card-body">
       <div className="row g-2 mb-3">
         <div className="col-md-6">
-          <label className="form-label">Org unit</label>
+          <label className="form-label">{t('memberList.orgUnit')}</label>
           <select
             className="form-select"
             value={selectedUnitId ?? ''}
             onChange={(e) => onUnitSelect(e.target.value ? Number(e.target.value) : null)}
           >
-            <option value="">Select…</option>
+            <option value="">{t('memberList.select')}</option>
             {units.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name}
@@ -63,7 +66,7 @@ const MemberList: React.FC<Props> = ({
                 <input
                   type="number"
                   className="form-control"
-                  placeholder="User id"
+                  placeholder={t('memberList.userIdPlaceholder')}
                   value={memberForm.userId}
                   onChange={(e) => onMemberFormChange({ ...memberForm, userId: e.target.value })}
                   required
@@ -81,13 +84,13 @@ const MemberList: React.FC<Props> = ({
                     }
                   />
                   <label className="form-check-label" htmlFor="memberPrimary">
-                    Primary
+                    {t('memberList.primary')}
                   </label>
                 </div>
               </div>
               <div className="col-md-2">
                 <button className="btn btn-primary w-100" disabled={busy}>
-                  Add member
+                  {t('memberList.addMember')}
                 </button>
               </div>
             </form>
@@ -96,17 +99,17 @@ const MemberList: React.FC<Props> = ({
           {members.length === 0 ? (
             <EmptyState
               icon="bi-people"
-              title="No members"
-              message="Add members to this unit using the form above."
+              title={t('memberList.emptyTitle')}
+              message={t('memberList.emptyMessage')}
             />
           ) : (
             <table className="table">
               <thead>
                 <tr>
-                  <th scope="col">User</th>
-                  <th scope="col">Primary</th>
-                  <th scope="col">Assigned</th>
-                  <th scope="col" className="text-end">Actions</th>
+                  <th scope="col">{t('memberList.columns.user')}</th>
+                  <th scope="col">{t('memberList.columns.primary')}</th>
+                  <th scope="col">{t('memberList.columns.assigned')}</th>
+                  <th scope="col" className="text-end">{t('memberList.columns.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,7 +118,7 @@ const MemberList: React.FC<Props> = ({
                     <td>{m.userId}</td>
                     <td>
                       {m.isPrimary ? (
-                        <span className="badge bg-primary">primary</span>
+                        <span className="badge bg-primary">{t('memberList.primaryBadge')}</span>
                       ) : (
                         '-'
                       )}
@@ -128,7 +131,7 @@ const MemberList: React.FC<Props> = ({
                           onClick={() => onSetPrimary(m.userId)}
                           disabled={busy}
                         >
-                          Make primary
+                          {t('memberList.makePrimary')}
                         </button>
                       )}
                       {canManage && (
@@ -137,7 +140,7 @@ const MemberList: React.FC<Props> = ({
                           onClick={() => onRemoveMember(m.userId)}
                           disabled={busy}
                         >
-                          Remove
+                          {t('memberList.remove')}
                         </button>
                       )}
                     </td>
@@ -150,6 +153,7 @@ const MemberList: React.FC<Props> = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default MemberList;

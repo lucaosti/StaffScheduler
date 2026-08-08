@@ -16,6 +16,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import {
@@ -35,6 +36,7 @@ const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 
 const OnCall: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const permissions = user?.permissions ?? [];
@@ -64,14 +66,14 @@ const OnCall: React.FC = () => {
     return (
       <span className={short ? 'text-danger' : 'text-success'}>
         {p.assignedCount}/{p.minStaff}
-        {short ? ' — short' : ''}
+        {short ? ` — ${t('onCall.short')}` : ''}
       </span>
     );
   };
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">On call</h1>
+      <h1 className="h4 mb-3">{t('onCall.title')}</h1>
 
       {message && (
         <div className="alert alert-warning" role="alert">
@@ -81,7 +83,7 @@ const OnCall: React.FC = () => {
 
       <div className="row g-2 align-items-end mb-3">
         <div className="col-auto">
-          <label className="form-label" htmlFor="oncall-from">From</label>
+          <label className="form-label" htmlFor="oncall-from">{t('onCall.from')}</label>
           <input
             id="oncall-from"
             type="date"
@@ -91,7 +93,7 @@ const OnCall: React.FC = () => {
           />
         </div>
         <div className="col-auto">
-          <label className="form-label" htmlFor="oncall-to">To</label>
+          <label className="form-label" htmlFor="oncall-to">{t('onCall.to')}</label>
           <input
             id="oncall-to"
             type="date"
@@ -102,21 +104,21 @@ const OnCall: React.FC = () => {
         </div>
       </div>
 
-      <h2 className="h6">When I am on call</h2>
+      <h2 className="h6">{t('onCall.whenIAmOnCall')}</h2>
       <QueryState
         isLoading={mine.isLoading}
         isError={mine.isError}
         error={mine.error}
         onRetry={mine.refetch}
         isEmpty={(mine.data?.length ?? 0) === 0}
-        loadingMessage="Loading your on-call periods…"
-        empty={<p className="text-muted">You are not on call in this range.</p>}
+        loadingMessage={t('onCall.loadingMine')}
+        empty={<p className="text-muted">{t('onCall.emptyMine')}</p>}
       >
         <ul className="list-group mb-4">
           {(mine.data ?? []).map((p) => (
             <li key={p.id} className="list-group-item">
-              {p.date} {shiftTime(p.startTime)}–{shiftTime(p.endTime)}
-              {p.departmentName ? ` — ${p.departmentName}` : ''}
+              {p.date} {t('common.timeRange', { start: shiftTime(p.startTime), end: shiftTime(p.endTime) })}
+              {p.departmentName ? t('onCall.departmentSuffix', { department: p.departmentName }) : ''}
             </li>
           ))}
         </ul>
@@ -124,24 +126,24 @@ const OnCall: React.FC = () => {
 
       {canRead && (
         <>
-          <h2 className="h6">On-call periods</h2>
+          <h2 className="h6">{t('onCall.periodsTitle')}</h2>
           <QueryState
             isLoading={periods.isLoading}
             isError={periods.isError}
             error={periods.error}
             onRetry={periods.refetch}
             isEmpty={(periods.data?.length ?? 0) === 0}
-            loadingMessage="Loading periods…"
-            empty={<p className="text-muted">No on-call periods in this range.</p>}
+            loadingMessage={t('onCall.loadingPeriods')}
+            empty={<p className="text-muted">{t('onCall.emptyPeriods')}</p>}
           >
             <table className="table table-sm align-middle">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Hours</th>
-                  <th>Department</th>
-                  <th>Covered</th>
-                  <th>Status</th>
+                  <th>{t('onCall.columns.date')}</th>
+                  <th>{t('onCall.columns.hours')}</th>
+                  <th>{t('onCall.columns.department')}</th>
+                  <th>{t('onCall.columns.covered')}</th>
+                  <th>{t('onCall.columns.status')}</th>
                   <th />
                 </tr>
               </thead>
@@ -150,7 +152,7 @@ const OnCall: React.FC = () => {
                   <tr key={p.id}>
                     <td>{p.date}</td>
                     <td>
-                      {shiftTime(p.startTime)}–{shiftTime(p.endTime)}
+                      {t('common.timeRange', { start: shiftTime(p.startTime), end: shiftTime(p.endTime) })}
                     </td>
                     <td>{p.departmentName ?? p.departmentId}</td>
                     <td>{coverage(p)}</td>
@@ -161,7 +163,7 @@ const OnCall: React.FC = () => {
                         className="btn btn-sm btn-outline-secondary me-2"
                         onClick={() => setOpenPeriod(openPeriod?.id === p.id ? null : p)}
                       >
-                        Who
+                        {t('onCall.who')}
                       </button>
                       {canManage && (
                         <button
@@ -170,7 +172,7 @@ const OnCall: React.FC = () => {
                           onClick={() => act(remove.mutateAsync(p.id))}
                           disabled={remove.isPending}
                         >
-                          Delete
+                          {t('common.delete')}
                         </button>
                       )}
                     </td>
@@ -185,8 +187,11 @@ const OnCall: React.FC = () => {
       {openPeriod && (
         <div className="card">
           <div className="card-header">
-            Who is on call — {openPeriod.date} {shiftTime(openPeriod.startTime)}–
-            {shiftTime(openPeriod.endTime)}
+            {t('onCall.whoIsOnCall', {
+              date: openPeriod.date,
+              start: shiftTime(openPeriod.startTime),
+              end: shiftTime(openPeriod.endTime),
+            })}
           </div>
           <div className="card-body">
             <QueryState
@@ -195,8 +200,8 @@ const OnCall: React.FC = () => {
               error={assignments.error}
               onRetry={assignments.refetch}
               isEmpty={(assignments.data?.length ?? 0) === 0}
-              loadingMessage="Loading…"
-              empty={<p className="text-muted">Nobody is on call for this period.</p>}
+              loadingMessage={t('common.loading')}
+              empty={<p className="text-muted">{t('onCall.emptyAssignments')}</p>}
             >
               <ul className="list-group mb-3">
                 {(assignments.data ?? []).map((a) => (
@@ -205,7 +210,7 @@ const OnCall: React.FC = () => {
                     className="list-group-item d-flex justify-content-between align-items-center"
                   >
                     <span>
-                      {a.userName ?? `User ${a.userId}`}{' '}
+                      {a.userName ?? t('onCall.userFallback', { id: a.userId })}{' '}
                       <span className="badge bg-light text-dark">{a.status}</span>
                     </span>
                     {canManage && (
@@ -217,7 +222,7 @@ const OnCall: React.FC = () => {
                         }
                         disabled={unassign.isPending}
                       >
-                        Remove
+                        {t('onCall.remove')}
                       </button>
                     )}
                   </li>
@@ -238,7 +243,7 @@ const OnCall: React.FC = () => {
                 }}
               >
                 <div className="col-md-4">
-                  <label className="form-label" htmlFor="oncall-user">Person</label>
+                  <label className="form-label" htmlFor="oncall-user">{t('onCall.person')}</label>
                   <select
                     id="oncall-user"
                     className="form-select"
@@ -246,7 +251,7 @@ const OnCall: React.FC = () => {
                     onChange={(e) => setAssignUserId(e.target.value)}
                     required
                   >
-                    <option value="">Choose someone…</option>
+                    <option value="">{t('onCall.chooseSomeone')}</option>
                     {(employees.data ?? []).map((e) => (
                       <option key={String(e.id)} value={String(e.id)}>
                         {[e.firstName, e.lastName].filter(Boolean).join(' ') || e.email}
@@ -256,7 +261,7 @@ const OnCall: React.FC = () => {
                 </div>
                 <div className="col-auto">
                   <button type="submit" className="btn btn-primary" disabled={assign.isPending}>
-                    Add to rota
+                    {t('onCall.addToRota')}
                   </button>
                 </div>
               </form>

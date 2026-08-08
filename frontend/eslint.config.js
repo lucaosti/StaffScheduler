@@ -29,6 +29,15 @@ const I18N_ENFORCED_FILES = [
   'src/components/LocaleSwitcher.tsx',
   'src/pages/Auth/Login.tsx',
   'src/pages/Dashboard/Dashboard.tsx',
+  'src/pages/Kiosk/Kiosk.tsx',
+  'src/pages/Assignments/MyAssignments.tsx',
+  'src/pages/Assignments/ShiftAssignmentPanel.tsx',
+  'src/pages/Timeline/Timeline.tsx',
+  'src/pages/OnCall/OnCall.tsx',
+  'src/pages/TimeOff/TimeOff.tsx',
+  'src/pages/Attendance/Attendance.tsx',
+  'src/pages/orgManagement/OrgTree.tsx',
+  'src/pages/orgManagement/MemberList.tsx',
 ];
 
 module.exports = [
@@ -113,8 +122,10 @@ module.exports = [
             // must be repeated here explicitly or they're lost. Added on
             // top: react-router's `to` (a route path, not prose, and not
             // covered by the plugin's separate built-in skip for native-DOM
-            // -tag attributes because `Link` is a component, not a DOM tag)
-            // and Bootstrap's `data-bs-*` hooks.
+            // -tag attributes because `Link` is a component, not a DOM tag),
+            // `ExportCsvLink`'s `path` (an API route, same reasoning as
+            // `to`), `EmptyState`'s `icon` (a Bootstrap Icons class name, not
+            // prose), and Bootstrap's `data-bs-*` hooks.
             exclude: [
               'className',
               'styleName',
@@ -125,6 +136,8 @@ module.exports = [
               'width',
               'height',
               'to',
+              'path',
+              'icon',
               'data-bs-.*',
             ],
           },

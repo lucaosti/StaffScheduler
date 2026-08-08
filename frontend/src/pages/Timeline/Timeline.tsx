@@ -19,6 +19,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import QueryState from '../../components/QueryState';
 import { useTimelineQuery, useTimelineSourcesQuery } from '../../hooks/useTimeline';
 import type { TimelineBar } from '../../services/timelineService';
@@ -31,12 +32,14 @@ const SOURCE_CLASS: Record<string, string> = {
   'on-call': 'bg-warning',
 };
 
-const SOURCE_LABEL: Record<string, string> = {
-  shifts: 'Shifts',
-  'on-call': 'On call',
+const SOURCE_LABEL_KEY: Record<string, string> = {
+  shifts: 'timeline.sources.shifts',
+  'on-call': 'timeline.sources.onCall',
 };
 
 const Timeline: React.FC = () => {
+  const { t } = useTranslation();
+  const sourceLabel = (key: string): string => (SOURCE_LABEL_KEY[key] ? t(SOURCE_LABEL_KEY[key]) : key);
   const [from, setFrom] = useState(todayIso());
   const [to, setTo] = useState(todayIso(6));
   const [source, setSource] = useState('');
@@ -84,11 +87,11 @@ const Timeline: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">Timeline</h1>
+      <h1 className="h4 mb-3">{t('timeline.title')}</h1>
 
       <div className="row g-2 align-items-end mb-3">
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeline-from">From</label>
+          <label className="form-label" htmlFor="timeline-from">{t('timeline.from')}</label>
           <input
             id="timeline-from"
             type="date"
@@ -98,7 +101,7 @@ const Timeline: React.FC = () => {
           />
         </div>
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeline-to">To</label>
+          <label className="form-label" htmlFor="timeline-to">{t('timeline.to')}</label>
           <input
             id="timeline-to"
             type="date"
@@ -108,16 +111,16 @@ const Timeline: React.FC = () => {
           />
         </div>
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeline-source">Source</label>
+          <label className="form-label" htmlFor="timeline-source">{t('timeline.source')}</label>
           <select
             id="timeline-source"
             className="form-select"
             value={source}
             onChange={(e) => setSource(e.target.value)}
           >
-            <option value="">All sources</option>
+            <option value="">{t('timeline.allSources')}</option>
             {(sources.data ?? []).map((key) => (
-              <option key={key} value={key}>{SOURCE_LABEL[key] ?? key}</option>
+              <option key={key} value={key}>{sourceLabel(key)}</option>
             ))}
           </select>
         </div>
@@ -129,14 +132,14 @@ const Timeline: React.FC = () => {
         error={timeline.error}
         onRetry={timeline.refetch}
         isEmpty={(timeline.data?.lanes.length ?? 0) === 0}
-        loadingMessage="Loading timeline…"
-        empty={<p className="text-muted">Nothing scheduled in this range.</p>}
+        loadingMessage={t('timeline.loading')}
+        empty={<p className="text-muted">{t('timeline.empty')}</p>}
       >
         <div className="table-responsive">
           <table className="table table-sm align-middle">
             <thead>
               <tr>
-                <th style={{ width: '18%' }}>Person</th>
+                <th style={{ width: '18%' }}>{t('timeline.person')}</th>
                 <th>
                   <div className="d-flex justify-content-between small text-muted">
                     {days.map((day) => (
@@ -157,7 +160,11 @@ const Timeline: React.FC = () => {
                           key={`${bar.source}-${bar.start}-${i}`}
                           className={`position-absolute rounded ${SOURCE_CLASS[bar.source] ?? 'bg-secondary'}`}
                           style={{ ...geometry(bar), top: 2, height: 20 }}
-                          title={`${bar.label} — ${new Date(bar.start).toLocaleString()} to ${new Date(bar.end).toLocaleString()}`}
+                          title={t('timeline.barTitle', {
+                            label: bar.label,
+                            start: new Date(bar.start).toLocaleString(),
+                            end: new Date(bar.end).toLocaleString(),
+                          })}
                         />
                       ))}
                     </div>
@@ -175,7 +182,7 @@ const Timeline: React.FC = () => {
                 className={`d-inline-block rounded me-1 ${SOURCE_CLASS[key] ?? 'bg-secondary'}`}
                 style={{ width: 12, height: 12 }}
               />
-              {SOURCE_LABEL[key] ?? key}
+              {sourceLabel(key)}
             </span>
           ))}
         </div>
