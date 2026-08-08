@@ -1542,6 +1542,10 @@
     {
       "name": "System",
       "description": "Health check and runtime metadata."
+    },
+    {
+      "name": "I18n",
+      "description": "Organization translation overrides layered on the shipped catalogs."
     }
   ],
   "paths": {
@@ -11347,6 +11351,233 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
+    "/i18n/overrides": {
+      "get": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "Get the caller's own organization translation overrides",
+        "description": "Scoped to the caller's own organization (from the authenticated session), falling back to the platform-wide row when the organization has none. Any authenticated user may call this — it is what their own frontend uses to render itself, not an admin surface.",
+        "responses": {
+          "200": {
+            "description": "The override map for the requested locale, possibly empty."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "parameters": [
+          {
+            "name": "locale",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 10
+            }
+          }
+        ]
+      }
+    },
+    "/i18n/overrides/admin": {
+      "get": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "List translation overrides",
+        "description": "Every configured override row, across every organization — administration only. Requires settings.manage.",
+        "responses": {
+          "200": {
+            "description": "Translation override list."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "Create or replace a translation override",
+        "description": "Upserts by (organizationName, locale). Requires settings.manage.",
+        "responses": {
+          "201": {
+            "description": "The saved override row."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "organizationName": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "maxLength": 255
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 2,
+                    "maxLength": 10
+                  },
+                  "overrides": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  }
+                },
+                "required": [
+                  "locale",
+                  "overrides"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/i18n/overrides/admin/{id}": {
+      "get": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "Get a translation override",
+        "description": "Requires settings.manage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The override row."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "Update a translation override's map",
+        "description": "Requires settings.manage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The updated override row."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "overrides": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 200
+                    },
+                    "additionalProperties": {
+                      "type": "string",
+                      "maxLength": 2000
+                    }
+                  }
+                },
+                "required": [
+                  "overrides"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "I18n"
+        ],
+        "summary": "Delete a translation override",
+        "description": "Requires settings.manage.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Translation override deleted."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

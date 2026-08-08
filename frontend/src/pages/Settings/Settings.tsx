@@ -19,6 +19,7 @@ import TwoFactorSection from '../Settings/TwoFactorSection';
 import GeofenceSection from '../Settings/GeofenceSection';
 import KioskDevicesSection from '../Settings/KioskDevicesSection';
 import CostPlansSection from '../Settings/CostPlansSection';
+import TranslationOverridesSection from '../Settings/TranslationOverridesSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
@@ -53,7 +54,7 @@ const Settings: React.FC = () => {
   // separation the backend draws for cost plans.
   const canManageCostPlans = user?.permissions?.includes('report.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks' | 'costPlans'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks' | 'costPlans' | 'translations'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -240,6 +241,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {isAdmin && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'translations' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('translations')}
+                >
+                  <i className="bi bi-translate me-2"></i>Translations
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -281,6 +292,10 @@ const Settings: React.FC = () => {
       {activeTab === 'kiosks' && isAdmin && <KioskDevicesSection />}
 
       {activeTab === 'costPlans' && canManageCostPlans && <CostPlansSection />}
+
+      {activeTab === 'translations' && isAdmin && (
+        <TranslationOverridesSection organizationName={user?.organizationName ?? null} />
+      )}
     </div>
   );
 };
