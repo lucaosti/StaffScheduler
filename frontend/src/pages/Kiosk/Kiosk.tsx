@@ -12,12 +12,14 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { punchKiosk, KioskPunchResult } from '../../services/attendanceService';
 import { ApiError } from '../../services/apiUtils';
 
 const TOKEN_STORAGE_KEY = 'kioskDeviceToken';
 
 const Kiosk: React.FC = () => {
+  const { t } = useTranslation();
   const [deviceToken, setDeviceToken] = useState<string | null>(
     () => localStorage.getItem(TOKEN_STORAGE_KEY)
   );
@@ -53,9 +55,9 @@ const Kiosk: React.FC = () => {
       setEmployeeId('');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
-        setError('This device is not registered or its token was revoked. Ask an administrator to reconfigure it.');
+        setError(t('kiosk.deviceNotRegistered'));
       } else {
-        setError((err as Error).message || 'Punch failed. Please try again.');
+        setError((err as Error).message || t('kiosk.punchFailed'));
       }
     } finally {
       setSubmitting(false);
@@ -67,19 +69,19 @@ const Kiosk: React.FC = () => {
       <div className="d-flex align-items-center justify-content-center vh-100 bg-light">
         <div className="card shadow-sm" style={{ width: '24rem' }}>
           <div className="card-body">
-            <h5 className="card-title mb-3">Configure this kiosk</h5>
+            <h5 className="card-title mb-3">{t('kiosk.configureTitle')}</h5>
             <p className="text-muted small">
-              Enter the device token issued for this kiosk in Settings → Kiosk Devices.
+              {t('kiosk.configureHelp')}
             </p>
             <input
               className="form-control mb-3 font-monospace"
-              placeholder="Device token"
+              placeholder={t('kiosk.deviceTokenPlaceholder')}
               value={tokenDraft}
               onChange={(e) => setTokenDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && configureDevice()}
             />
             <button className="btn btn-primary w-100" onClick={configureDevice} disabled={!tokenDraft.trim()}>
-              Save Device
+              {t('kiosk.saveDevice')}
             </button>
           </div>
         </div>
@@ -91,11 +93,11 @@ const Kiosk: React.FC = () => {
     <div className="d-flex align-items-center justify-content-center vh-100 bg-light">
       <div className="card shadow-sm" style={{ width: '24rem' }}>
         <div className="card-body">
-          <h5 className="card-title mb-3">Clock In / Out</h5>
+          <h5 className="card-title mb-3">{t('kiosk.clockTitle')}</h5>
 
           {result && (
             <div className="alert alert-success" role="alert">
-              {result.employeeName}: {result.action === 'clocked_in' ? 'clocked in' : 'clocked out'} successfully.
+              {t(result.action === 'clocked_in' ? 'kiosk.clockedInMessage' : 'kiosk.clockedOutMessage', { name: result.employeeName })}
             </div>
           )}
 
@@ -108,19 +110,19 @@ const Kiosk: React.FC = () => {
           <form onSubmit={handlePunch}>
             <input
               className="form-control mb-3"
-              placeholder="Employee ID"
+              placeholder={t('kiosk.employeeIdPlaceholder')}
               value={employeeId}
               onChange={(e) => setEmployeeId(e.target.value)}
               autoFocus
               disabled={submitting}
             />
             <button type="submit" className="btn btn-primary w-100" disabled={submitting || !employeeId.trim()}>
-              {submitting ? 'Submitting…' : 'Punch'}
+              {submitting ? t('kiosk.submitting') : t('kiosk.punch')}
             </button>
           </form>
 
           <button type="button" className="btn btn-sm btn-link mt-3" onClick={forgetDevice}>
-            Reconfigure this device
+            {t('kiosk.reconfigure')}
           </button>
         </div>
       </div>

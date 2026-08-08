@@ -18,6 +18,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import QueryState from '../../components/QueryState';
 import {
   useAssignmentsQuery,
@@ -34,6 +35,7 @@ interface Props {
 }
 
 const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
+  const { t } = useTranslation();
   const { message, run: act } = useActionFeedback();
   const [picking, setPicking] = useState(false);
 
@@ -45,7 +47,7 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
 
 
   const nameOf = (person: { firstName?: string; lastName?: string; email?: string }): string =>
-    [person.firstName, person.lastName].filter(Boolean).join(' ') || person.email || 'Unnamed';
+    [person.firstName, person.lastName].filter(Boolean).join(' ') || person.email || t('shiftAssignmentPanel.unnamed');
 
   return (
     <div>
@@ -61,8 +63,8 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
         error={assigned.error}
         onRetry={assigned.refetch}
         isEmpty={(assigned.data?.length ?? 0) === 0}
-        loadingMessage="Loading assignments…"
-        empty={<p className="text-muted">Nobody is assigned to this shift.</p>}
+        loadingMessage={t('shiftAssignmentPanel.loading')}
+        empty={<p className="text-muted">{t('shiftAssignmentPanel.nobodyAssigned')}</p>}
       >
         <ul className="list-group mb-3">
           {(assigned.data ?? []).map((assignment: ShiftAssignment) => (
@@ -71,8 +73,8 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
               className="list-group-item d-flex justify-content-between align-items-center"
             >
               <span>
-                {assignment.userName ?? `User ${assignment.userId}`}{' '}
-                <span className="badge bg-light text-dark">{assignment.status}</span>
+                {assignment.userName ?? t('shiftAssignmentPanel.userFallback', { id: assignment.userId })}{' '}
+                <span className="badge bg-light text-dark">{t(`assignments.status.${assignment.status}`, assignment.status)}</span>
               </span>
               {canManage && (
                 <button
@@ -81,7 +83,7 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
                   onClick={() => act(remove.mutateAsync(Number(assignment.id)))}
                   disabled={remove.isPending}
                 >
-                  Remove
+                  {t('shiftAssignmentPanel.remove')}
                 </button>
               )}
             </li>
@@ -91,7 +93,7 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
 
       {canManage && !picking && (
         <button type="button" className="btn btn-sm btn-primary" onClick={() => setPicking(true)}>
-          Assign someone
+          {t('shiftAssignmentPanel.assignSomeone')}
         </button>
       )}
 
@@ -102,11 +104,10 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
           error={available.error}
           onRetry={available.refetch}
           isEmpty={(available.data?.length ?? 0) === 0}
-          loadingMessage="Finding who can work this shift…"
+          loadingMessage={t('shiftAssignmentPanel.findingAvailable')}
           empty={
             <p className="text-muted">
-              Nobody is available for this shift — everyone is either unqualified, already
-              committed, or unavailable.
+              {t('shiftAssignmentPanel.nobodyAvailable')}
             </p>
           }
         >
@@ -125,7 +126,7 @@ const ShiftAssignmentPanel: React.FC<Props> = ({ shiftId, canManage }) => {
                   }
                   disabled={create.isPending}
                 >
-                  Assign
+                  {t('shiftAssignmentPanel.assign')}
                 </button>
               </li>
             ))}
