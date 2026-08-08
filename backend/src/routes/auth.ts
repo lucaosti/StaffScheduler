@@ -23,7 +23,7 @@ import { RefreshTokenService } from '../services/RefreshTokenService';
 import { authenticate, addToBlacklist } from '../middleware/auth';
 import { createLoginLimiter } from '../middleware/rateLimit';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
-import { loginBody, twoFactorLoginChallengeBody, idParam, ssoProvidersPublicQuery, ssoCallbackQuery } from '../schemas';
+import { loginBody, refreshBody, twoFactorLoginChallengeBody, idParam, ssoProvidersPublicQuery, ssoCallbackQuery } from '../schemas';
 import { TwoFactorMethodType } from '../services/TwoFactorMethodProvider';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { logger } from '../config/logger';
@@ -36,6 +36,22 @@ const isProduction = config.server.env === 'production';
 
 const JWT_COOKIE_NAME = 'token';
 const REFRESH_COOKIE_NAME = 'refresh_token';
+
+// Explicit opt-in header the Capacitor mobile client sends on login/refresh.
+// A native WebView cannot rely on the cookie jar the way a same-origin
+// browser session can (cross-origin behavior between the app's local/custom
+// scheme origin and the real API domain is unreliable across iOS/Android
+// WebView versions), so the mobile client asks, explicitly, to also receive
+// the token VALUES in the JSON body so it can hand them to native secure
+// storage instead. This is checked as an opt-in signal only: its absence (the
+// default for every existing caller, including the web SPA) changes nothing
+// about the response, which is what keeps the web contract byte-for-byte the
+// same as before this existed.
+const MOBILE_CLIENT_HEADER = 'x-client-type';
+const MOBILE_CLIENT_VALUE = 'mobile';
+
+const isMobileClient = (req: Request): boolean =>
+  req.header(MOBILE_CLIENT_HEADER)?.toLowerCase() === MOBILE_CLIENT_VALUE;
 
 // Shared cookie hardening for both the access and refresh cookies.
 const BASE_COOKIE_OPTIONS = {
@@ -108,21 +124,33 @@ export const createAuthRouter = (pool: Pool) => {
     expiresIn: config.jwt.expiresIn as SignOptions['expiresIn']
   };
 
-  /** Issues a short-lived access JWT for a user id and sets the access cookie. */
-  const setAccessCookie = (res: Response, userId: number): void => {
+  /**
+   * Issues a short-lived access JWT for a user id and sets the access
+   * cookie. Returns the token value too — unused by the web caller (the
+   * cookie is authority enough for it) but needed by the mobile-client
+   * response mode, which puts the same value in the JSON body alongside the
+   * (harmless-if-unused) cookie.
+   */
+  const setAccessCookie = (res: Response, userId: number): string => {
     const jti = crypto.randomUUID();
     const token = jwt.sign({ userId, jti }, config.jwt.secret, jwtSignOptions);
     res.cookie(JWT_COOKIE_NAME, token, JWT_COOKIE_OPTIONS);
+    return token;
   };
 
-  /** Issues a fresh refresh token for a user and sets the (path-scoped) refresh cookie. */
+  /**
+   * Issues a fresh refresh token for a user and sets the (path-scoped)
+   * refresh cookie. Returns the token value for the same reason
+   * `setAccessCookie` does.
+   */
   const setRefreshCookie = async (
     req: Request,
     res: Response,
     userId: number
-  ): Promise<void> => {
+  ): Promise<string> => {
     const { token } = await refreshTokens.issue(userId);
     res.cookie(REFRESH_COOKIE_NAME, token, refreshCookieOptions(req));
+    return token;
   };
 
   // Brute-force protection: IP-keyed, counted in the shared store so the
@@ -145,12 +173,18 @@ export const createAuthRouter = (pool: Pool) => {
  * `POST /api/auth/login/challenge` with the same credentials.
  *
  * @route POST /api/auth/login
+ * @header [X-Client-Type]  Set to "mobile" to also receive the token values in the
+ *                          body (see below) — an explicit opt-in for the Capacitor
+ *                          app; absent for every other caller, including the web SPA.
  * @body  {string} email     User's email
  * @body  {string} password  User's password
  * @body  {string} [code]        Second-factor code/assertion (or a recovery code), required when 2FA is enabled
  * @body  {string} [methodType]  Which enrolled method `code` is for — defaults to 'totp'
  * @returns Sets an httpOnly "token" cookie and returns `{ success, data: { user } }`.
- *          The JWT is never exposed in the response body.
+ *          The JWT is never exposed in the response body — UNLESS `X-Client-Type: mobile`
+ *          was sent, in which case `data.accessToken`/`data.refreshToken` carry the raw
+ *          values too, alongside (not instead of) the cookies, for the native client to
+ *          hand to its own secure storage.
  *
  * @example Request
  * { "email": "admin@example.com", "password": "<password>" }
@@ -225,8 +259,8 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request
     // a rotating refresh token that carries the session's real longevity.
     // Only the user id is embedded in the access token; permissions are
     // resolved from the database on every request by the auth middleware.
-    setAccessCookie(res, user.id);
-    await setRefreshCookie(req, res, user.id);
+    const accessToken = setAccessCookie(res, user.id);
+    const refreshToken = await setRefreshCookie(req, res, user.id);
     res.json({
       success: true,
       data: {
@@ -237,7 +271,13 @@ router.post('/login', loginLimiter, validateBody(loginBody), async (req: Request
           lastName: user.lastName,
           roles,
           permissions
-        }
+        },
+        // Mobile-client response mode only (see MOBILE_CLIENT_HEADER): the
+        // cookies above are still set unconditionally, but a native client
+        // cannot rely on them, so it also gets the raw values to hand to its
+        // own secure storage. A plain web request never has these fields —
+        // isMobileClient(req) is false and the object is not spread in.
+        ...(isMobileClient(req) ? { accessToken, refreshToken } : {}),
       }
     });
   } catch (error) {
@@ -323,19 +363,38 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
 /**
  * Token refresh endpoint.
  *
- * Rotates the refresh token in the `refresh_token` cookie and issues a fresh
- * access token. Crucially it is NOT behind `authenticate`: the whole point is
- * to work when the access token has expired. Authority comes solely from the
- * refresh cookie, verified and rotated by RefreshTokenService (reuse of a
- * spent token revokes the family — see the service).
+ * Rotates the refresh token and issues a fresh access token. Crucially it is
+ * NOT behind `authenticate`: the whole point is to work when the access
+ * token has expired.
+ *
+ * Two ways to present the refresh token:
+ *  - Web (default): solely the `refresh_token` cookie. The body is ignored
+ *    even if it carries a `refreshToken` field — this path is completely
+ *    unchanged from before the mobile-client mode existed.
+ *  - Mobile (`X-Client-Type: mobile` present): the cookie is tried first
+ *    (harmless if a WebView happens to have it), falling back to
+ *    `refreshToken` in the JSON body when the cookie is absent — a native
+ *    client stores the token itself rather than relying on the cookie jar.
+ *
+ * Either way, rotation and validity are enforced identically by
+ * RefreshTokenService (reuse of a spent token revokes the family — see the
+ * service); only where the token is READ FROM differs, and only when the
+ * mobile signal is explicitly present.
  *
  * @route   POST /api/auth/refresh
- * @cookie  refresh_token  the current refresh token
- * @returns {Object} `{ success, data: { user } }`; 401 with a cleared cookie
- *          when the refresh token is missing, expired, revoked or reused.
+ * @cookie  refresh_token       the current refresh token (web, and mobile as a fallback source)
+ * @body    {string} [refreshToken]  the current refresh token — consulted only when
+ *                                   `X-Client-Type: mobile` is present and the cookie is absent
+ * @returns {Object} `{ success, data: { user } }`, plus `accessToken`/`refreshToken` in
+ *          `data` when the mobile-client signal is present; 401 with a cleared
+ *          cookie when the refresh token is missing, expired, revoked or reused.
  */
-router.post('/refresh', async (req: Request, res: Response) => {
-  const presented = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
+router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Response) => {
+  const mobile = isMobileClient(req);
+  const { refreshToken: bodyRefreshToken } = res.locals.body as { refreshToken?: string };
+  const presented =
+    (req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined) ??
+    (mobile ? bodyRefreshToken : undefined);
   const clearAndReject = () => {
     clearRefreshCookie(req, res);
     res.clearCookie(JWT_COOKIE_NAME);
@@ -363,7 +422,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
     rbacService.getUserRoles(user.id),
   ]);
 
-  setAccessCookie(res, user.id);
+  const accessToken = setAccessCookie(res, user.id);
   res.cookie(REFRESH_COOKIE_NAME, rotated.issued.token, refreshCookieOptions(req));
   res.json({
     success: true,
@@ -376,6 +435,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
         roles,
         permissions,
       },
+      // See /login: same mobile-only, additive token exposure.
+      ...(mobile ? { accessToken, refreshToken: rotated.issued.token } : {}),
     },
   });
 });

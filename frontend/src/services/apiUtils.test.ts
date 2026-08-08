@@ -3,6 +3,7 @@
  */
 
 import { ApiError, getAuthHeaders, handleResponse } from './apiUtils';
+import * as mobileAuthStorage from './mobileAuthStorage';
 
 const jsonResponse = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), {
@@ -52,5 +53,46 @@ describe('getAuthHeaders', () => {
     const init = getAuthHeaders();
     const headers = init.headers as Record<string, string>;
     expect(headers['Authorization']).toBeUndefined();
+  });
+
+  describe('on the Capacitor mobile platform', () => {
+    const isNativePlatformMock = jest.spyOn(mobileAuthStorage, 'isNativePlatform');
+    const getCachedAccessTokenMock = jest.spyOn(mobileAuthStorage, 'getCachedAccessToken');
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('attaches Authorization: Bearer when a token is cached', () => {
+      isNativePlatformMock.mockReturnValue(true);
+      getCachedAccessTokenMock.mockReturnValue('cached-access-token');
+
+      const init = getAuthHeaders();
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Authorization']).toBe('Bearer cached-access-token');
+    });
+
+    it('adds no Authorization header when native but no token is cached yet', () => {
+      isNativePlatformMock.mockReturnValue(true);
+      getCachedAccessTokenMock.mockReturnValue(null);
+
+      const init = getAuthHeaders();
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Authorization']).toBeUndefined();
+    });
+
+    it('never attaches Authorization on the web platform even if a token happened to be cached (regression guard)', () => {
+      isNativePlatformMock.mockReturnValue(false);
+      getCachedAccessTokenMock.mockReturnValue('should-be-ignored');
+
+      const init = getAuthHeaders();
+      const headers = init.headers as Record<string, string>;
+      expect(headers['Authorization']).toBeUndefined();
+    });
+  });
+
+  it('merges extraHeaders on top of the defaults', () => {
+    const init = getAuthHeaders({ 'X-Client-Type': 'mobile' });
+    const headers = init.headers as Record<string, string>;
+    expect(headers['X-Client-Type']).toBe('mobile');
+    expect(headers['Content-Type']).toBe('application/json');
   });
 });
