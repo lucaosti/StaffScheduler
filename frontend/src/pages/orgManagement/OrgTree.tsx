@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { OrgUnit, OrgUnitNode } from '../../services/orgService';
 import EmptyState from '../../components/EmptyState';
 
@@ -23,7 +24,8 @@ interface Props {
 const renderTree = (
   nodes: OrgUnitNode[],
   depth: number,
-  props: Pick<Props, 'canAdmin' | 'busy' | 'onDeleteUnit' | 'onViewMembers'>
+  props: Pick<Props, 'canAdmin' | 'busy' | 'onDeleteUnit' | 'onViewMembers'>,
+  t: (key: string) => string
 ): JSX.Element[] => {
   const out: JSX.Element[] = [];
   for (const n of nodes) {
@@ -38,7 +40,7 @@ const renderTree = (
         <td>{n.managerUserId ?? '-'}</td>
         <td>
           <span className={`badge ${n.isActive ? 'bg-success' : 'bg-secondary'}`}>
-            {n.isActive ? 'active' : 'inactive'}
+            {n.isActive ? t('orgTree.active') : t('orgTree.inactive')}
           </span>
         </td>
         <td className="text-end">
@@ -46,7 +48,7 @@ const renderTree = (
             className="btn btn-sm btn-outline-primary me-1"
             onClick={() => props.onViewMembers(n.id)}
           >
-            Members
+            {t('orgTree.members')}
           </button>
           {props.canAdmin && (
             <button
@@ -54,14 +56,14 @@ const renderTree = (
               onClick={() => props.onDeleteUnit(n.id)}
               disabled={props.busy}
             >
-              Delete
+              {t('common.delete')}
             </button>
           )}
         </td>
       </tr>
     );
     if (n.children?.length) {
-      out.push(...renderTree(n.children, depth + 1, props));
+      out.push(...renderTree(n.children, depth + 1, props, t));
     }
   }
   return out;
@@ -77,7 +79,9 @@ const OrgTree: React.FC<Props> = ({
   onCreateUnit,
   onDeleteUnit,
   onViewMembers,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  return (
   <div className="card">
     <div className="card-body">
       {canAdmin && (
@@ -85,7 +89,7 @@ const OrgTree: React.FC<Props> = ({
           <div className="col-md-4">
             <input
               className="form-control"
-              placeholder="Unit name"
+              placeholder={t('orgTree.unitNamePlaceholder')}
               value={newUnit.name}
               onChange={(e) => onNewUnitChange({ ...newUnit, name: e.target.value })}
               required
@@ -97,7 +101,7 @@ const OrgTree: React.FC<Props> = ({
               value={newUnit.parentId}
               onChange={(e) => onNewUnitChange({ ...newUnit, parentId: e.target.value })}
             >
-              <option value="">No parent (root)</option>
+              <option value="">{t('orgTree.noParent')}</option>
               {units.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
@@ -109,14 +113,14 @@ const OrgTree: React.FC<Props> = ({
             <input
               type="number"
               className="form-control"
-              placeholder="Manager user id"
+              placeholder={t('orgTree.managerUserIdPlaceholder')}
               value={newUnit.managerUserId}
               onChange={(e) => onNewUnitChange({ ...newUnit, managerUserId: e.target.value })}
             />
           </div>
           <div className="col-md-2">
             <button className="btn btn-primary w-100" disabled={busy}>
-              Create
+              {t('orgTree.create')}
             </button>
           </div>
         </form>
@@ -125,26 +129,27 @@ const OrgTree: React.FC<Props> = ({
       {tree.length === 0 ? (
         <EmptyState
           icon="bi-diagram-3"
-          title="No org units yet"
-          message="Create the first unit using the form above."
+          title={t('orgTree.emptyTitle')}
+          message={t('orgTree.emptyMessage')}
         />
       ) : (
         <table className="table table-hover">
           <thead>
             <tr>
-              <th scope="col">Unit</th>
-              <th scope="col">Manager</th>
-              <th scope="col">Status</th>
-              <th scope="col" className="text-end">Actions</th>
+              <th scope="col">{t('orgTree.columns.unit')}</th>
+              <th scope="col">{t('orgTree.columns.manager')}</th>
+              <th scope="col">{t('orgTree.columns.status')}</th>
+              <th scope="col" className="text-end">{t('orgTree.columns.actions')}</th>
             </tr>
           </thead>
           <tbody>
-            {renderTree(tree, 0, { canAdmin, busy, onDeleteUnit, onViewMembers })}
+            {renderTree(tree, 0, { canAdmin, busy, onDeleteUnit, onViewMembers }, t)}
           </tbody>
         </table>
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default OrgTree;

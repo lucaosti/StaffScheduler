@@ -7,6 +7,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { todayIso } from '../../utils/format';
 import ExportCsvLink from '../../components/ExportCsvLink';
@@ -30,6 +31,7 @@ const formatDateTime = (value?: string | Date | null): string => {
 
 
 const Attendance: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canApprove = (user?.permissions ?? []).includes('attendance.approve');
   const canReadCost = (user?.permissions ?? []).includes('attendance.read');
@@ -56,7 +58,7 @@ const Attendance: React.FC = () => {
   const acting = clockInMutation.isPending || clockOutMutation.isPending || decisionMutation.isPending;
   const error =
     actionError ??
-    (recordsQuery.isError ? (recordsQuery.error as Error).message ?? 'Failed to load attendance records.' : null);
+    (recordsQuery.isError ? (recordsQuery.error as Error).message ?? t('attendance.loadFailed') : null);
 
   const openRecord = myRecords.find((r) => !r.clockOut) ?? null;
 
@@ -86,7 +88,7 @@ const Attendance: React.FC = () => {
       const location = await getLocation();
       await clockInMutation.mutateAsync(location);
     } catch (e) {
-      setActionError((e as Error).message ?? 'Clock-in failed.');
+      setActionError((e as Error).message ?? t('attendance.clockInFailed'));
     }
   };
 
@@ -96,7 +98,7 @@ const Attendance: React.FC = () => {
     try {
       await clockOutMutation.mutateAsync(openRecord.id);
     } catch (e) {
-      setActionError((e as Error).message ?? 'Clock-out failed.');
+      setActionError((e as Error).message ?? t('attendance.clockOutFailed'));
     }
   };
 
@@ -105,7 +107,7 @@ const Attendance: React.FC = () => {
     try {
       await decisionMutation.mutateAsync({ id, decision });
     } catch (e) {
-      setActionError((e as Error).message ?? 'Action failed.');
+      setActionError((e as Error).message ?? t('attendance.actionFailed'));
     }
   };
 
@@ -114,8 +116,8 @@ const Attendance: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex justify-content-between align-items-start">
           <div>
-            <h1 className="h3 mb-0">Attendance</h1>
-            <p className="text-muted mb-0 small">Clock in and out; punches are reviewed before they count.</p>
+            <h1 className="h3 mb-0">{t('attendance.title')}</h1>
+            <p className="text-muted mb-0 small">{t('attendance.subtitle')}</p>
           </div>
           {/* An approver exports what their filters select; everyone else gets
               their own records, which the endpoint enforces rather than trusts. */}
@@ -132,9 +134,9 @@ const Attendance: React.FC = () => {
       <div className="card mb-4">
         <div className="card-body d-flex align-items-center justify-content-between">
           <div>
-            <div className="fw-semibold">Your status</div>
+            <div className="fw-semibold">{t('attendance.yourStatus')}</div>
             <div className="text-muted small">
-              {openRecord ? `Clocked in at ${formatDateTime(openRecord.clockIn)}` : 'Not clocked in'}
+              {openRecord ? t('attendance.clockedInAt', { time: formatDateTime(openRecord.clockIn) }) : t('attendance.notClockedIn')}
             </div>
           </div>
           <button
@@ -147,28 +149,28 @@ const Attendance: React.FC = () => {
             ) : (
               <i className={`bi ${openRecord ? 'bi-box-arrow-right' : 'bi-box-arrow-in-right'} me-1`} aria-hidden="true"></i>
             )}
-            {openRecord ? 'Clock out' : 'Clock in'}
+            {openRecord ? t('attendance.clockOut') : t('attendance.clockIn')}
           </button>
         </div>
       </div>
 
       <div className="card mb-4">
-        <div className="card-header">Your recent punches</div>
+        <div className="card-header">{t('attendance.recentPunches')}</div>
         <div className="card-body p-0">
           {loading ? (
             <div className="d-flex align-items-center justify-content-center py-4">
-              <span className="spinner-border me-2" role="status" aria-label="Loading"></span>Loading…
+              <span className="spinner-border me-2" role="status" aria-label={t('common.loading')}></span>{t('common.loading')}
             </div>
           ) : myRecords.length === 0 ? (
-            <div className="text-center text-muted py-4">No attendance records yet.</div>
+            <div className="text-center text-muted py-4">{t('attendance.noRecords')}</div>
           ) : (
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
                   <tr>
-                    <th scope="col">Clock in</th>
-                    <th scope="col">Clock out</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('attendance.columns.clockIn')}</th>
+                    <th scope="col">{t('attendance.columns.clockOut')}</th>
+                    <th scope="col">{t('attendance.columns.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -176,7 +178,7 @@ const Attendance: React.FC = () => {
                     <tr key={r.id}>
                       <td className="small">{formatDateTime(r.clockIn)}</td>
                       <td className="small">{formatDateTime(r.clockOut)}</td>
-                      <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}</span></td>
+                      <td><span className={`badge ${STATUS_BADGE[r.status]}`}>{t(`attendance.status.${r.status}`, r.status)}</span></td>
                     </tr>
                   ))}
                 </tbody>
@@ -188,21 +190,21 @@ const Attendance: React.FC = () => {
 
       {canApprove && (
         <div className="card mb-4">
-          <div className="card-header">Pending approval</div>
+          <div className="card-header">{t('attendance.pendingApproval')}</div>
           <div className="card-body p-0">
             {pending.length === 0 ? (
               <div className="text-center text-muted py-4">
-                <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>Nothing waiting for review.
+                <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>{t('attendance.nothingWaiting')}
               </div>
             ) : (
               <div className="table-responsive">
                 <table className="table table-hover mb-0">
                   <thead className="table-light">
                     <tr>
-                      <th scope="col">User ID</th>
-                      <th scope="col">Clock in</th>
-                      <th scope="col">Clock out</th>
-                      <th scope="col" className="text-end">Actions</th>
+                      <th scope="col">{t('attendance.columns.userId')}</th>
+                      <th scope="col">{t('attendance.columns.clockIn')}</th>
+                      <th scope="col">{t('attendance.columns.clockOut')}</th>
+                      <th scope="col" className="text-end">{t('attendance.columns.actions')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -216,7 +218,7 @@ const Attendance: React.FC = () => {
                             className="btn btn-sm btn-success me-1"
                             disabled={acting}
                             onClick={() => handleDecision(r.id, 'approve')}
-                            aria-label={`Approve record ${r.id}`}
+                            aria-label={t('attendance.approveRecord', { id: r.id })}
                           >
                             <i className="bi bi-check" aria-hidden="true"></i>
                           </button>
@@ -224,7 +226,7 @@ const Attendance: React.FC = () => {
                             className="btn btn-sm btn-danger"
                             disabled={acting}
                             onClick={() => handleDecision(r.id, 'reject')}
-                            aria-label={`Reject record ${r.id}`}
+                            aria-label={t('attendance.rejectRecord', { id: r.id })}
                           >
                             <i className="bi bi-x" aria-hidden="true"></i>
                           </button>
@@ -241,18 +243,18 @@ const Attendance: React.FC = () => {
 
       {canReadCost && cost && !costError && (
         <div className="card">
-          <div className="card-header">Labor cost — last 30 days</div>
+          <div className="card-header">{t('attendance.laborCostTitle')}</div>
           <div className="card-body">
             <div className="row text-center">
               <div className="col">
-                <div className="text-muted small">Planned</div>
-                <div className="fs-4">€{cost.plannedCost.toFixed(2)}</div>
-                <div className="text-muted small">{cost.plannedHours.toFixed(1)} h</div>
+                <div className="text-muted small">{t('attendance.planned')}</div>
+                <div className="fs-4">{t('attendance.currencyAmount', { amount: cost.plannedCost.toFixed(2) })}</div>
+                <div className="text-muted small">{t('attendance.hoursValue', { hours: cost.plannedHours.toFixed(1) })}</div>
               </div>
               <div className="col">
-                <div className="text-muted small">Actual (approved)</div>
-                <div className="fs-4">€{cost.actualCost.toFixed(2)}</div>
-                <div className="text-muted small">{cost.actualHours.toFixed(1)} h</div>
+                <div className="text-muted small">{t('attendance.actualApproved')}</div>
+                <div className="fs-4">{t('attendance.currencyAmount', { amount: cost.actualCost.toFixed(2) })}</div>
+                <div className="text-muted small">{t('attendance.hoursValue', { hours: cost.actualHours.toFixed(1) })}</div>
               </div>
             </div>
           </div>
