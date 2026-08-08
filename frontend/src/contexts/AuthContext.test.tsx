@@ -11,10 +11,17 @@ import React from 'react';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuth } from './AuthContext';
 import * as authService from '../services/authService';
+import * as translationOverrideService from '../services/translationOverrideService';
+import * as organizationOverrides from '../i18n/organizationOverrides';
+import i18n from '../i18n';
 
 jest.mock('../services/authService');
+jest.mock('../services/translationOverrideService');
+jest.mock('../i18n/organizationOverrides');
 
 const mockedAuthService = authService as jest.Mocked<typeof authService>;
+const mockedOverrideService = translationOverrideService as jest.Mocked<typeof translationOverrideService>;
+const mockedApplyOverrides = organizationOverrides.applyOrganizationOverrides as jest.Mock;
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
   <AuthProvider>{children}</AuthProvider>
@@ -22,6 +29,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockedOverrideService.getMyOverrides.mockResolvedValue({ success: true, data: {} });
 });
 
 describe('useAuth', () => {
@@ -161,5 +169,85 @@ describe('AuthProvider actions', () => {
     expect(result.current.login).toBe(first.login);
     expect(result.current.logout).toBe(first.logout);
     expect(result.current.refreshToken).toBe(first.refreshToken);
+  });
+});
+
+describe('organization translation overrides', () => {
+  it('does not fetch overrides before authentication', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(mockedOverrideService.getMyOverrides).not.toHaveBeenCalled();
+  });
+
+  it('fetches and applies overrides for the active locale once the user is known', async () => {
+    mockedOverrideService.getMyOverrides.mockResolvedValue({
+      success: true,
+      data: { 'auth.signIn': 'Enter' },
+    });
+    mockedAuthService.verifyToken.mockResolvedValue({
+      success: true,
+      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin', organizationName: 'Acme' } as never,
+    });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    await waitFor(() => expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledWith(i18n.language));
+    await waitFor(() =>
+      expect(mockedApplyOverrides).toHaveBeenCalledWith(i18n.language, { 'auth.signIn': 'Enter' })
+    );
+  });
+
+  it('re-fetches and re-applies overrides when the locale changes', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({
+      success: true,
+      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin', organizationName: 'Acme' } as never,
+    });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    await waitFor(() => expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      i18n.emit('languageChanged', 'it');
+    });
+
+    await waitFor(() => expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledWith('it'));
+  });
+
+  it('does not re-fetch on the synthetic languageChanged re-emit applyOrganizationOverrides fires for the same locale', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({
+      success: true,
+      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin', organizationName: 'Acme' } as never,
+    });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    await waitFor(() => expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      // The same locale as already applied — this is what
+      // applyOrganizationOverrides' own re-emit looks like.
+      i18n.emit('languageChanged', i18n.language);
+    });
+
+    expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops listening for locale changes on logout', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({
+      success: true,
+      data: { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin', organizationName: 'Acme' } as never,
+    });
+    mockedAuthService.logout.mockResolvedValue();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    await waitFor(() => expect(mockedOverrideService.getMyOverrides).toHaveBeenCalledTimes(1));
+
+    act(() => result.current.logout());
+
+    mockedOverrideService.getMyOverrides.mockClear();
+    act(() => {
+      i18n.emit('languageChanged', 'ar');
+    });
+    expect(mockedOverrideService.getMyOverrides).not.toHaveBeenCalled();
   });
 });

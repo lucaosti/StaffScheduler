@@ -114,6 +114,7 @@ const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = 
   { file: 'reports.ts', variable: 'router', prefix: '/reports' },
   { file: 'integrations.ts', variable: 'router', prefix: '/integrations' },
   { file: 'sso.ts', variable: 'router', prefix: '/sso' },
+  { file: 'i18nOverrides.ts', variable: 'router', prefix: '/i18n' },
   { file: 'notifications.ts', variable: 'router', prefix: '/notifications' },
   { file: 'webhooks.ts', variable: 'router', prefix: '/webhooks' },
   { file: 'bulkImport.ts', variable: 'router', prefix: '/import' },

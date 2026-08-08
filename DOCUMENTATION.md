@@ -864,13 +864,28 @@ today.
 exports `applyOrganizationOverrides(locale, overrides)`, which layers a caller-supplied
 `Record<string, string>` over the shipped base catalog for one locale via
 `i18next.addResourceBundle(locale, 'translation', overrides, true, true)`, so an
-organization can rename or correct a string without a code deploy. **This is
-client-side-only and unconnected today** — no backend endpoint yet serves per-organization
-translation strings, and adding one is out of scope for the PR that introduced this layer
-(a follow-up issue tracks wiring it once that endpoint exists). Nothing calls
-`applyOrganizationOverrides` yet; it exists so the integration point is real rather than
-simulated, consistent with the "no fake async" rule above — no handler pretends to fetch
-overrides that don't exist.
+organization can rename or correct a string without a code deploy.
+
+The backend half is `translation_overrides` (`organization_name` nullable — NULL is the
+platform-wide default, a named row overrides it for that organization only — `locale`,
+and `overrides`, the whole map for that organization+locale in one JSON column; unique on
+`(organization_name, locale)`, mirroring `sso_providers`' nullable-organization-scoping
+shape). `TranslationOverrideService.resolveForOrganization` resolves the org-specific row
+over the platform-wide fallback, the same visibility order `SsoProviderService.listPublic`
+uses. `GET /api/i18n/overrides?locale=xx` (`routes/i18nOverrides.ts`) exposes that
+resolution to any authenticated caller, scoped to their own organization read from
+`req.user` — it needs no special permission, since it is what every signed-in user's own
+frontend calls to render itself, not an admin surface. The admin CRUD alongside it
+(`/api/i18n/overrides/admin*`) reuses the existing `settings.manage` permission, the same
+class of system-configuration act SSO provider CRUD already sits in.
+
+`AuthContext` calls `GET /api/i18n/overrides` and `applyOrganizationOverrides` once the
+authenticated user (and therefore their organization) is known — on login and on mount —
+and again on every `i18next` `'languageChanged'` event, so switching locale re-fetches
+that organization's overrides for the new locale. It deliberately does not run before
+login: an unauthenticated visitor has no organization yet, so the Login page stays on the
+shipped base catalog only. The Settings → Translations tab (`settings.manage`-gated)
+manages the override rows.
 
 **RTL**: `frontend/src/i18n/DirectionSync.tsx`, mounted once in `App.tsx`, reactively sets
 `dir` and `lang` on `<html>` from the active i18next locale (`dir="rtl"` for Arabic). It

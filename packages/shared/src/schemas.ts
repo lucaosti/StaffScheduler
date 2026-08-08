@@ -1408,3 +1408,33 @@ export const costPlanIdParam = z.object({ id: positiveInt });
 export const costPlanListQuery = z.object({
   departmentId: positiveInt.optional(),
 });
+
+// ── Organization translation overrides ──────────────────────────────────────
+
+/**
+ * A translation-override row's own fields. `overrides` is the whole
+ * `Record<string, string>` map for one organization+locale in a single JSON
+ * column — matching the frontend's `applyOrganizationOverrides(locale,
+ * overrides)` signature exactly, rather than one row per key.
+ */
+const translationOverrideFields = {
+  organizationName: z.string().max(255).nullable().optional(),
+  locale: z.string().min(2).max(10),
+  overrides: z.record(z.string().min(1).max(200), z.string().max(2000)),
+};
+
+export const createTranslationOverrideBody = z.object(translationOverrideFields);
+
+export const updateTranslationOverrideBody = z.object({
+  overrides: z.record(z.string().min(1).max(200), z.string().max(2000)),
+});
+
+/**
+ * The caller's own org+locale lookup — `GET /api/i18n/overrides`. No
+ * `organizationName`: the caller's own is read from `req.user`, never
+ * accepted from the client, so nobody can ask for another organization's
+ * strings by naming it.
+ */
+export const translationOverrideQuery = z.object({
+  locale: z.string().min(2).max(10),
+});
