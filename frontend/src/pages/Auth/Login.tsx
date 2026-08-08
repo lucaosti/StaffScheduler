@@ -24,6 +24,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { ApiError } from '../../services/apiUtils';
 import { internalPathOr } from '../../utils/internalPath';
@@ -40,11 +41,11 @@ interface LocationState {
   };
 }
 
-const METHOD_LABELS: Record<TwoFactorMethodType, string> = {
-  totp: 'Authenticator app',
-  webauthn: 'Passkey',
-  email: 'Email code',
-  sms: 'SMS',
+const METHOD_LABEL_KEYS: Record<TwoFactorMethodType, string> = {
+  totp: 'auth.methods.totp',
+  webauthn: 'auth.methods.webauthn',
+  email: 'auth.methods.email',
+  sms: 'auth.methods.sms',
 };
 
 /** Methods whose code must be requested from the server before it can be entered/produced. TOTP computes its own. */
@@ -69,6 +70,7 @@ const Login: React.FC = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { t } = useTranslation();
 
   // The path the visitor originally asked for, which reached router state
   // from the URL — so it is input, not code. Validated before it is navigated
@@ -95,7 +97,7 @@ const Login: React.FC = () => {
         setAvailableMethods(methods);
         setSelectedMethod(methods.includes('totp') ? 'totp' : methods[0]);
       } else {
-        setError(err instanceof Error ? err.message : 'Login failed');
+        setError(err instanceof Error ? err.message : t('auth.loginFailed'));
       }
     } finally {
       setIsLoading(false);
@@ -129,7 +131,7 @@ const Login: React.FC = () => {
       // Email: the server just sent the code. Reveal the input.
       setChallengeRequested(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not request a two-factor challenge');
+      setError(err instanceof Error ? err.message : t('auth.challengeFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -159,8 +161,8 @@ const Login: React.FC = () => {
               <div className="card-body p-4">
                 <div className="text-center mb-4">
                   <i className="bi bi-calendar-check-fill text-primary" style={{ fontSize: '3rem' }}></i>
-                  <h3 className="mt-2">Staff Scheduler</h3>
-                  <p className="text-muted">Sign in to your account</p>
+                  <h3 className="mt-2">{t('app.title')}</h3>
+                  <p className="text-muted">{t('auth.subtitle')}</p>
                 </div>
 
                 {error && (
@@ -172,7 +174,7 @@ const Login: React.FC = () => {
                 <form onSubmit={handleSubmit}>
                   <div className="mb-3">
                     <label htmlFor="email" className="form-label">
-                      Email
+                      {t('auth.email')}
                     </label>
                     <input
                       type="email"
@@ -189,7 +191,7 @@ const Login: React.FC = () => {
 
                   <div className="mb-4">
                     <label htmlFor="password" className="form-label">
-                      Password
+                      {t('auth.password')}
                     </label>
                     <input
                       type="password"
@@ -205,7 +207,7 @@ const Login: React.FC = () => {
 
                   {availableMethods && availableMethods.length > 1 && (
                     <div className="mb-3">
-                      <label className="form-label">Two-factor method</label>
+                      <label className="form-label">{t('auth.twoFactorMethod')}</label>
                       <div className="btn-group w-100" role="group">
                         {availableMethods.map((m) => (
                           <button
@@ -214,7 +216,7 @@ const Login: React.FC = () => {
                             className={`btn btn-sm ${selectedMethod === m ? 'btn-primary' : 'btn-outline-primary'}`}
                             onClick={() => handleSelectMethod(m)}
                           >
-                            {METHOD_LABELS[m]}
+                            {t(METHOD_LABEL_KEYS[m])}
                           </button>
                         ))}
                       </div>
@@ -224,7 +226,7 @@ const Login: React.FC = () => {
                   {availableMethods && selectedMethod && !NEEDS_CHALLENGE[selectedMethod] && (
                     <div className="mb-4">
                       <label htmlFor="code" className="form-label">
-                        Two-factor code
+                        {t('auth.twoFactorCode')}
                       </label>
                       <input
                         type="text"
@@ -239,7 +241,7 @@ const Login: React.FC = () => {
                         autoFocus
                       />
                       <div className="form-text">
-                        Enter the code from your authenticator app, or a recovery code.
+                        {t('auth.twoFactorCodeHelp')}
                       </div>
                     </div>
                   )}
@@ -252,7 +254,7 @@ const Login: React.FC = () => {
                         onClick={() => void requestChallenge('email')}
                         disabled={isLoading}
                       >
-                        Send code to my email
+                        {t('auth.sendEmailCode')}
                       </button>
                     </div>
                   )}
@@ -260,7 +262,7 @@ const Login: React.FC = () => {
                   {availableMethods && selectedMethod === 'email' && challengeRequested && (
                     <div className="mb-4">
                       <label htmlFor="code" className="form-label">
-                        Code from your email
+                        {t('auth.emailCode')}
                       </label>
                       <input
                         type="text"
@@ -285,7 +287,7 @@ const Login: React.FC = () => {
                         onClick={() => void requestChallenge('webauthn')}
                         disabled={isLoading}
                       >
-                        Continue with passkey
+                        {t('auth.continueWithPasskey')}
                       </button>
                     </div>
                   )}
@@ -301,10 +303,10 @@ const Login: React.FC = () => {
                       {isLoading ? (
                         <>
                           <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                          Signing in...
+                          {t('auth.signingIn')}
                         </>
                       ) : (
-                        'Sign In'
+                        t('auth.signIn')
                       )}
                     </button>
                   )}
