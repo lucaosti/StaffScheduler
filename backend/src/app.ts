@@ -54,6 +54,7 @@ import { createSkillGapRouter } from './routes/skillGap';
 import { createReportsRouter } from './routes/reports';
 import { createIntegrationsRouter } from './routes/integrations';
 import { createSsoRouter } from './routes/sso';
+import { createI18nOverridesRouter } from './routes/i18nOverrides';
 import { createNotificationsRouter } from './routes/notifications';
 import { createWebhooksRouter } from './routes/webhooks';
 import { createBulkImportRouter } from './routes/bulkImport';
@@ -235,6 +236,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/reports`, createReportsRouter(pool, readPool));
     app.use(`${prefix}/integrations`, createIntegrationsRouter(pool));
     app.use(`${prefix}/sso`, createSsoRouter(pool));
+    app.use(`${prefix}/i18n`, createI18nOverridesRouter(pool));
     app.use(`${prefix}/notifications`, createNotificationsRouter(pool));
     app.use(`${prefix}/webhooks`, createWebhooksRouter(pool));
     app.use(`${prefix}/import`, createBulkImportRouter(pool));

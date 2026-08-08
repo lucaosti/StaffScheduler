@@ -11,6 +11,9 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
+import i18n, { isSupportedLocale } from '../i18n';
+import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
+import { getMyOverrides } from '../services/translationOverrideService';
 
 interface AuthState {
   user: User | null;
@@ -175,6 +178,41 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       logout();
     }
   }, [logout]);
+
+  // Organization translation overrides: fetched once the authenticated user
+  // (and therefore their organization) is known, and re-fetched whenever the
+  // locale changes. Not run before login — an unauthenticated visitor has no
+  // organization yet, so the Login page stays on the shipped base catalog.
+  //
+  // `lastLocale` is scoped to this effect run (reset on every login/logout
+  // transition) rather than held in a ref, because it exists to break a
+  // feedback loop: `applyOrganizationOverrides` re-emits i18next's own
+  // 'languageChanged' event to make already-mounted `useTranslation()` calls
+  // pick up the merged strings, and that synthetic re-emit carries the SAME
+  // locale — without this guard it would re-trigger this handler and
+  // re-fetch forever.
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+    let lastLocale: string | null = null;
+
+    const fetchAndApply = (locale: string): void => {
+      if (locale === lastLocale || !isSupportedLocale(locale)) return;
+      lastLocale = locale;
+      getMyOverrides(locale)
+        .then((response) => {
+          if (response.success) applyOrganizationOverrides(locale, response.data ?? {});
+        })
+        .catch(() => {
+          // Non-fatal: the shipped base catalog stands on its own.
+        });
+    };
+
+    fetchAndApply(i18n.language);
+    i18n.on('languageChanged', fetchAndApply);
+    return () => {
+      i18n.off('languageChanged', fetchAndApply);
+    };
+  }, [state.isAuthenticated]);
 
   // Proactive refresh: rotate the session before the ~15m access token expires,
   // so an active user is never interrupted by an expired token mid-session.
