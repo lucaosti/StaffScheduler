@@ -141,6 +141,29 @@ export interface Employee {
    * both engines' load variables are integral.
    */
   carried_load?: { weekend?: number; night?: number };
+  /**
+   * How many of the most recent consecutive PUBLISHED predecessor schedule
+   * periods had this employee working at least one day of the category — a
+   * COUNT OF PERIODS, not days, which is why it is a separate field rather
+   * than a reuse of `carried_load`.
+   *
+   * WHY THIS IS NOT DERIVABLE FROM `carried_load`. That field is a
+   * cumulative deviation from the candidates' average over a fixed lookback
+   * window; it can be perfectly balanced in total while one person still
+   * held nights for three straight periods and another had the inverse
+   * pattern. This asks a different question — is the SAME person
+   * concentrated on the category RIGHT NOW — which needs the period-by-period
+   * sequence, not a running total. See `shiftRotationViolations` in
+   * constraintValidator.ts for why that makes it a separate soft goal
+   * entirely, not a restatement of equity.
+   *
+   * WHY THE WALK STOPS AT THE FIRST NON-QUALIFYING PERIOD. The count means
+   * "how long has this streak run uninterrupted", so a period where the
+   * employee did none of the category ends the streak; periods further back
+   * than that are not part of the current concentration and must not be
+   * counted.
+   */
+  consecutive_category_periods?: { weekend?: number; night?: number };
 }
 
 export interface Shift {
@@ -235,6 +258,15 @@ export interface OptimizationProblem {
      * fatigue a night shift leaves behind.
      */
     min_hours_after_night_shift?: number;
+    /**
+     * How many consecutive qualifying periods an employee may hold a
+     * category (weekend/night) before rotating it away is a soft goal
+     * rather than optional. Configurable because what counts as "too long"
+     * is an organizational judgment, not a fact this file can assert —
+     * some rosters rotate every period, others accept two in a row as
+     * normal.
+     */
+    max_consecutive_category_periods?: number;
   };
   weights?: Record<string, number>;
 }

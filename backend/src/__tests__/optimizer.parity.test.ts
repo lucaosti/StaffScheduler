@@ -38,6 +38,8 @@ import {
   weekendSpread,
   nightLoads,
   nightSpread,
+  shiftRotationViolations,
+  DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS,
   qualifiedStaffShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
@@ -526,6 +528,112 @@ describe('illegalTurnarounds', () => {
     };
     const worked = [{ employeeId: 'e1', shiftId: 's1' }];
     expect(illegalTurnarounds(problem, worked)).toEqual([]);
+  });
+});
+
+describe('shiftRotationViolations', () => {
+  const shift = (id: string, date: string, startTime: string, endTime: string) => ({
+    id,
+    date,
+    start_time: startTime,
+    end_time: endTime,
+    min_staff: 1,
+    max_staff: 1,
+  });
+
+  const employee = (id: string, streak?: { weekend?: number; night?: number }) => ({
+    id,
+    max_hours_per_week: 60,
+    skills: [],
+    unavailable_dates: [],
+    ...(streak ? { consecutive_category_periods: streak } : {}),
+  });
+
+  it('flags an employee assigned to a category already at the default threshold', () => {
+    // 2026-06-06 is a Saturday.
+    const problem = {
+      shifts: [shift('s1', '2026-06-06', '09:00', '17:00')],
+      employees: [employee('e1', { weekend: 2 })],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([
+      { employeeId: 'e1', category: 'weekend', consecutivePeriods: 2, threshold: 2 },
+    ]);
+  });
+
+  it('stays silent while the streak is below the threshold', () => {
+    const problem = {
+      shifts: [shift('s1', '2026-06-06', '09:00', '17:00')],
+      employees: [employee('e1', { weekend: 1 })],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([]);
+  });
+
+  it('stays silent for an employee with no recorded history at all', () => {
+    const problem = {
+      shifts: [shift('s1', '2026-06-06', '09:00', '17:00')],
+      employees: [employee('e1')],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([]);
+  });
+
+  it('says nothing about an employee whose streak is high but who is not assigned to the category this period', () => {
+    // A Wednesday — not a weekend under either definition.
+    const problem = {
+      shifts: [shift('s1', '2026-06-03', '09:00', '17:00')],
+      employees: [employee('e1', { weekend: 5 })],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([]);
+  });
+
+  it('honours a configured threshold', () => {
+    const problem = {
+      shifts: [shift('s1', '2026-06-06', '09:00', '17:00')],
+      employees: [employee('e1', { weekend: 2 })],
+      constraints: { max_consecutive_category_periods: 3 }, // 2 no longer trips it
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([]);
+  });
+
+  it('tracks weekend and night streaks independently', () => {
+    // A night shift on a weekday: only the night streak applies.
+    const problem = {
+      shifts: [shift('s1', '2026-06-03', '22:00', '06:00')],
+      employees: [employee('e1', { weekend: 5, night: 2 })],
+      constraints: {},
+    };
+    const worked = [{ employeeId: 'e1', shiftId: 's1' }];
+    expect(shiftRotationViolations(problem, worked)).toEqual([
+      { employeeId: 'e1', category: 'night', consecutivePeriods: 2, threshold: 2 },
+    ]);
+  });
+
+  it('counts work held on other schedules as this period\'s category assignment', () => {
+    const problem = {
+      shifts: [],
+      employees: [
+        {
+          ...employee('e1', { night: 2 }),
+          existing_assignments: [{ date: '2026-06-03', start_time: '22:00', end_time: '06:00' }],
+        },
+      ],
+      constraints: {},
+    };
+    expect(shiftRotationViolations(problem, [])).toEqual([
+      { employeeId: 'e1', category: 'night', consecutivePeriods: 2, threshold: 2 },
+    ]);
+  });
+
+  it('defaults the threshold to DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS when unconfigured', () => {
+    expect(DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS).toBe(2);
   });
 });
 
@@ -1599,6 +1707,74 @@ describeOrtools('CP-SAT engine shares night work', () => {
     };
     const loads = nightLoads(evening, [{ employeeId: 'e1', shiftId: 'evening' }]);
     expect(loads.find((l) => l.employeeId === 'e1')?.days).toBe(1);
+  });
+});
+
+/**
+ * Shift rotation: consecutive-period concentration, not just total spread.
+ *
+ * Night equity above balances the TOTAL night days across employees within
+ * one solve — it says nothing about whether the SAME person held nights the
+ * last two periods running. `e1` carries a night streak already at the
+ * default threshold; `e2` has none.
+ *
+ * THE DISCRIMINATING FIXTURE: EXACTLY TWO EMPLOYEES AND ONE NIGHT SHIFT.
+ * With more employees or more night shifts, category balance (which of the
+ * next equity terms this is layered on top of) can itself have a stake in
+ * who takes a given night shift, and the two terms can pull against each
+ * other hard enough that avoiding the rotation charge costs more equity than
+ * it saves — a genuine, expected trade-off at the same SOFT level, not a bug.
+ * With exactly two employees and one night shift the category-balance spread
+ * is `|1 − 0| = 1` NO MATTER WHICH of the two takes it, so equity is
+ * indifferent between them; the two day shifts keep total hours level
+ * whichever way the night shift falls. Only the rotation term can still
+ * express a preference, so it is the only thing that can be responsible for
+ * the night shift landing on `e2`.
+ */
+describeOrtools('CP-SAT engine rotates category work across periods', () => {
+  const problem = {
+    shifts: [
+      { id: 'day1', date: '2033-10-03', start_time: '09:00', end_time: '17:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+      { id: 'day2', date: '2033-10-04', start_time: '09:00', end_time: '17:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+      { id: 'night1', date: '2033-10-05', start_time: '22:00', end_time: '06:00',
+        min_staff: 1, max_staff: 1, department_id: 1 },
+    ],
+    employees: [
+      {
+        id: 'e1',
+        max_hours_per_week: 200,
+        max_consecutive_days: 30,
+        min_hours_between_shifts: 1,
+        skills: [],
+        unavailable_dates: [],
+        consecutive_category_periods: { night: 2 },
+      },
+      {
+        id: 'e2',
+        max_hours_per_week: 200,
+        max_consecutive_days: 30,
+        min_hours_between_shifts: 1,
+        skills: [],
+        unavailable_dates: [],
+      },
+    ],
+    skills: {},
+    preferences: {},
+    constraints: {},
+  };
+
+  it('keeps the already-rotated employee off the category this period', () => {
+    const assignments = runPython(problem);
+    expect(assignments.find((a) => a.shiftId === 'night1')?.employeeId).toBe('e2');
+    expect(shiftRotationViolations(problem, assignments)).toEqual([]);
+  });
+
+  it('does not trade coverage for the rotation goal', () => {
+    const assignments = runPython(problem);
+    expect(assignments).toHaveLength(problem.shifts.length);
+    expect(coverageShortfalls(problem, assignments)).toEqual([]);
   });
 });
 

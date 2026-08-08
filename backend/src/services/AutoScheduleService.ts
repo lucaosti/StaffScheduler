@@ -140,6 +140,20 @@ interface AutoScheduleResult {
 const EQUITY_HORIZON_DAYS = 90;
 
 /**
+ * How many predecessor periods the rotation streak walk looks back through.
+ *
+ * A CHOSEN bound, not a derived one — the walk follows
+ * `resolvePredecessorId` one period at a time and would otherwise run the
+ * full length of a department's published history on every generate() call.
+ * Six periods is enough to answer "is this person concentrated on this
+ * category right now" (the threshold that actually flags a violation is
+ * `max_consecutive_category_periods`, default 2 — well inside this cap) while
+ * keeping the walk's cost bounded regardless of how far back a department's
+ * schedule chain goes.
+ */
+const ROTATION_LOOKBACK_CAP = 6;
+
+/**
  * Category days worked before this period, as a normalised deviation from the
  * average of the people being scheduled.
  *
@@ -231,6 +245,106 @@ export class AutoScheduleService {
       [schedule.department_id, scheduleId, schedule.start_date]
     );
     return rows.length > 0 ? (rows[0].id as number) : null;
+  }
+
+  /**
+   * How many of the most recent consecutive PUBLISHED predecessor periods
+   * each employee already held a category (weekend/night), for every
+   * employee in `employeeIds`.
+   *
+   * WALKS THE SAME PREDECESSOR CHAIN `resolvePredecessorId` USES, one period
+   * at a time, up to `ROTATION_LOOKBACK_CAP` periods back. A period counts
+   * toward an employee's streak the moment they worked at least one day of
+   * the category in it; the walk for that employee/category STOPS at the
+   * first period that didn't, or at the cap, or at the first non-published
+   * predecessor (an explicit `previous_schedule_id` need not be published,
+   * and only what actually happened should extend a streak) — whichever
+   * comes first. This is a count of PERIODS, not days, which is why it is a
+   * separate mechanism from `carriedLoads`' cumulative deviation above.
+   */
+  private async consecutiveCategoryPeriods(
+    scheduleId: number,
+    schedule: RowDataPacket,
+    employeeIds: number[]
+  ): Promise<Map<number, { weekend: number; night: number }>> {
+    const counts = new Map<number, { weekend: number; night: number }>(
+      employeeIds.map((id) => [id, { weekend: 0, night: 0 }])
+    );
+    if (employeeIds.length === 0) return counts;
+
+    // Per employee, per category: still on an unbroken streak walking
+    // backwards. Once a period fails to qualify for a category, that
+    // employee/category pair stops accumulating for the rest of the walk —
+    // only the CONSECUTIVE run counts.
+    const stillCounting = new Map<number, { weekend: boolean; night: boolean }>(
+      employeeIds.map((id) => [id, { weekend: true, night: true }])
+    );
+
+    let currentId = scheduleId;
+    let current = schedule;
+
+    for (let period = 0; period < ROTATION_LOOKBACK_CAP; period++) {
+      const predecessorId = await this.resolvePredecessorId(currentId, current);
+      if (!predecessorId) break;
+
+      const [predRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT id, department_id, start_date, end_date, status, previous_schedule_id
+           FROM schedules AS sc WHERE sc.id = ? LIMIT 1`,
+        [predecessorId]
+      );
+      if (predRows.length === 0) break;
+      const predecessor = predRows[0];
+      // Only what actually happened extends a streak — the same reasoning
+      // `carriedLoads`' history read applies to the equity horizon.
+      if (predecessor.status !== 'published') break;
+
+      const [workedRows] = await this.pool.execute<RowDataPacket[]>(
+        `SELECT sa.user_id, s.date, s.start_time, s.end_time
+           -- rotation streak: shifts worked in this predecessor period
+           FROM shift_assignments sa
+           JOIN shifts s ON s.id = sa.shift_id
+          WHERE s.schedule_id = ?
+            AND sa.status IN ('pending', 'confirmed')
+            AND sa.user_id IN (${inClause(employeeIds)})`,
+        [predecessorId]
+      );
+
+      const workedWeekend = new Set<number>();
+      const workedNight = new Set<number>();
+      for (const row of workedRows) {
+        const userId = row.user_id as number;
+        const date = DateUtils.toDateString(row.date as string | Date);
+        if (isWeekendDay(date)) workedWeekend.add(userId);
+        if (isNightWork({ date, start_time: row.start_time as string, end_time: row.end_time as string })) {
+          workedNight.add(userId);
+        }
+      }
+
+      let anyoneStillCounting = false;
+      for (const id of employeeIds) {
+        const flags = stillCounting.get(id)!;
+        const total = counts.get(id)!;
+        if (flags.weekend) {
+          if (workedWeekend.has(id)) total.weekend += 1;
+          else flags.weekend = false;
+        }
+        if (flags.night) {
+          if (workedNight.has(id)) total.night += 1;
+          else flags.night = false;
+        }
+        if (flags.weekend || flags.night) anyoneStillCounting = true;
+      }
+
+      // Nobody left with a live streak — further periods cannot change the
+      // result, so stop walking rather than paying for periods that can only
+      // ever be discarded.
+      if (!anyoneStillCounting) break;
+
+      currentId = predecessorId;
+      current = predecessor;
+    }
+
+    return counts;
   }
 
   async generate(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
@@ -411,6 +525,12 @@ export class AutoScheduleService {
       employeeIds
     );
 
+    // Rotation streak: how many consecutive PUBLISHED predecessor periods
+    // each employee already held a category, walked separately from the
+    // equity horizon above — a count of periods rather than a deviation over
+    // a fixed date window, so it needs its own predecessor-chain walk.
+    const rotationHistory = await this.consecutiveCategoryPeriods(scheduleId, schedule, employeeIds);
+
     const contracts = new EmploymentContractService(this.pool);
     const contractLimits = await contracts.resolveLimitsForPeriod(
       empRows.map((e) => e.id as number),
@@ -531,6 +651,7 @@ export class AutoScheduleService {
         unavailable_dates: unavailableByUser.get(e.id as number) ?? [],
         existing_assignments: externalAssignmentsByUser.get(e.id as number) ?? [],
         carried_load: carried.get(e.id as number),
+        consecutive_category_periods: rotationHistory.get(e.id as number),
         };
       }),
       pinned_assignments: pinned,
