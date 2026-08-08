@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Staff Scheduler</string>
+    <string name="title_activity_main">Staff Scheduler</string>
+    <string name="package_name">com.staffscheduler.app</string>
+    <string name="custom_url_scheme">com.staffscheduler.app</string>
+</resources>
