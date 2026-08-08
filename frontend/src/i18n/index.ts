@@ -35,9 +35,9 @@ export const SUPPORTED_LOCALES = ['en', 'it', 'ar'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Locales that render right-to-left. Arabic is the only one shipped today. */
-export const RTL_LOCALES: readonly Locale[] = ['ar'];
+const RTL_LOCALES: readonly Locale[] = ['ar'];
 
-export const LOCALE_STORAGE_KEY = 'locale';
+const LOCALE_STORAGE_KEY = 'locale';
 
 export const isRtl = (locale: string): boolean =>
   (RTL_LOCALES as readonly string[]).includes(locale);
