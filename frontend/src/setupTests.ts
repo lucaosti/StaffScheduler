@@ -17,6 +17,11 @@
 import '@testing-library/jest-dom';
 import { TextDecoder, TextEncoder } from 'util';
 
+// Initializes i18next (English, source language) so any test that renders a
+// component using useTranslation() works without importing the setup module
+// itself — the same reason App.tsx imports it for its side effect.
+import './i18n';
+
 // The app's runtime default API base is the relative '/api/v1' (proxied by
 // Vite in dev and nginx in production). Node's fetch rejects relative URLs,
 // so unit tests pin an absolute base that the MSW handlers register against.

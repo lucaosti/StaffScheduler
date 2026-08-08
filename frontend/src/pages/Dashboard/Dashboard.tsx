@@ -24,6 +24,7 @@
 
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
 import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
@@ -33,6 +34,7 @@ import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
  * @returns JSX element containing dashboard statistics and navigation
  */
 const Dashboard: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
   const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
@@ -43,9 +45,7 @@ const Dashboard: React.FC = () => {
   const stats = dashboardQuery.data?.stats ?? null;
   const recentActivity = dashboardQuery.data?.recentActivity ?? [];
   const loading = dashboardQuery.isLoading;
-  const error = dashboardQuery.isError
-    ? 'Failed to load dashboard data. Please ensure the backend is running and database is populated.'
-    : null;
+  const error = dashboardQuery.isError ? t('dashboard.errorBody') : null;
 
   // Kept off the main loading/error gate above: a slow or failed attention-items
   // fetch should not block the stat cards, which is what one combined query would do.
@@ -59,9 +59,9 @@ const Dashboard: React.FC = () => {
       <div className="container-fluid py-4">
         <div className="text-center">
           <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">Loading...</span>
+            <span className="visually-hidden">{t('common.loading')}</span>
           </div>
-          <p className="mt-2">Loading dashboard...</p>
+          <p className="mt-2">{t('dashboard.loading')}</p>
         </div>
       </div>
     );
@@ -71,10 +71,10 @@ const Dashboard: React.FC = () => {
     return (
       <div className="container-fluid py-4">
         <div className="alert alert-danger" role="alert">
-          <h4 className="alert-heading">Error</h4>
+          <h4 className="alert-heading">{t('dashboard.errorTitle')}</h4>
           <p>{error}</p>
           <button className="btn btn-outline-danger" onClick={() => dashboardQuery.refetch()}>
-            Try Again
+            {t('common.tryAgain')}
           </button>
         </div>
       </div>
@@ -87,12 +87,12 @@ const Dashboard: React.FC = () => {
       {permissionDenied && (
         <div className="alert alert-warning alert-dismissible fade show mb-4" role="alert">
           <i className="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
-          <strong>Access denied.</strong> You do not have permission to view that page.
+          <strong>{t('dashboard.accessDeniedTitle')}</strong> {t('dashboard.accessDeniedBody')}
           <button
             type="button"
             className="btn-close"
             data-bs-dismiss="alert"
-            aria-label="Close"
+            aria-label={t('common.close')}
           ></button>
         </div>
       )}
@@ -102,14 +102,14 @@ const Dashboard: React.FC = () => {
         <div className="col">
           <div className="d-flex justify-content-between align-items-center">
             <div>
-              <h1 className="h3 mb-0">Dashboard</h1>
+              <h1 className="h3 mb-0">{t('dashboard.title')}</h1>
               <p className="text-muted mb-0">
-                Welcome back, {user?.email}! Here's what's happening today.
+                {t('dashboard.welcome', { email: user?.email })}
               </p>
             </div>
             <div className="text-end">
               <small className="text-muted">
-                Last updated: {new Date().toLocaleTimeString()}
+                {t('dashboard.lastUpdated', { time: new Date().toLocaleTimeString() })}
               </small>
             </div>
           </div>
@@ -129,7 +129,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
-                    <h6 className="card-title text-muted mb-1">Total Employees</h6>
+                    <h6 className="card-title text-muted mb-1">{t('dashboard.stats.totalEmployees')}</h6>
                     <h3 className="mb-0">{stats.totalEmployees.toLocaleString()}</h3>
                   </div>
                 </div>
@@ -147,7 +147,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
-                    <h6 className="card-title text-muted mb-1">Active Schedules</h6>
+                    <h6 className="card-title text-muted mb-1">{t('dashboard.stats.activeSchedules')}</h6>
                     <h3 className="mb-0">{stats.activeSchedules}</h3>
                   </div>
                 </div>
@@ -165,7 +165,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
-                    <h6 className="card-title text-muted mb-1">Today's Shifts</h6>
+                    <h6 className="card-title text-muted mb-1">{t('dashboard.stats.todayShifts')}</h6>
                     <h3 className="mb-0">{stats.todayShifts}</h3>
                   </div>
                 </div>
@@ -183,7 +183,7 @@ const Dashboard: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex-grow-1 ms-3">
-                    <h6 className="card-title text-muted mb-1">Pending Approvals</h6>
+                    <h6 className="card-title text-muted mb-1">{t('dashboard.stats.pendingApprovals')}</h6>
                     <h3 className="mb-0">{stats.pendingApprovals}</h3>
                   </div>
                 </div>
@@ -199,9 +199,9 @@ const Dashboard: React.FC = () => {
           <div className="col-xl-3 col-md-6">
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body text-center">
-                <h6 className="card-title text-muted mb-3">Monthly Hours</h6>
+                <h6 className="card-title text-muted mb-3">{t('dashboard.stats.monthlyHours')}</h6>
                 <h2 className="text-primary mb-0">{stats.monthlyHours.toLocaleString()}</h2>
-                <small className="text-muted">hours scheduled</small>
+                <small className="text-muted">{t('dashboard.stats.monthlyHoursUnit')}</small>
               </div>
             </div>
           </div>
@@ -211,9 +211,9 @@ const Dashboard: React.FC = () => {
             <div className="col-xl-3 col-md-6">
               <div className="card border-0 shadow-sm h-100">
                 <div className="card-body text-center">
-                  <h6 className="card-title text-muted mb-3">Monthly Cost</h6>
+                  <h6 className="card-title text-muted mb-3">{t('dashboard.stats.monthlyCost')}</h6>
                   <h2 className="text-success mb-0">{formatCurrency(stats.monthlyCost)}</h2>
-                  <small className="text-muted">labor costs</small>
+                  <small className="text-muted">{t('dashboard.stats.monthlyCostUnit')}</small>
                 </div>
               </div>
             </div>
@@ -222,9 +222,9 @@ const Dashboard: React.FC = () => {
           <div className="col-xl-3 col-md-6">
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body text-center">
-                <h6 className="card-title text-muted mb-3">Coverage Rate</h6>
+                <h6 className="card-title text-muted mb-3">{t('dashboard.stats.coverageRate')}</h6>
                 <h2 className="text-info mb-0">{formatPct(stats.coverageRate)}</h2>
-                <small className="text-muted">shifts covered</small>
+                <small className="text-muted">{t('dashboard.stats.coverageRateUnit')}</small>
               </div>
             </div>
           </div>
@@ -232,9 +232,9 @@ const Dashboard: React.FC = () => {
           <div className="col-xl-3 col-md-6">
             <div className="card border-0 shadow-sm h-100">
               <div className="card-body text-center">
-                <h6 className="card-title text-muted mb-3">Employee Satisfaction</h6>
+                <h6 className="card-title text-muted mb-3">{t('dashboard.stats.employeeSatisfaction')}</h6>
                 <h2 className="text-warning mb-0">{formatPct(stats.employeeSatisfaction)}</h2>
-                <small className="text-muted">satisfaction rate</small>
+                <small className="text-muted">{t('dashboard.stats.employeeSatisfactionUnit')}</small>
               </div>
             </div>
           </div>
@@ -249,7 +249,7 @@ const Dashboard: React.FC = () => {
             <div className="col-md-6">
               <div className="card border-0 shadow-sm h-100">
                 <div className="card-header bg-transparent border-bottom d-flex justify-content-between align-items-center">
-                  <h5 className="card-title mb-0">Understaffed shifts</h5>
+                  <h5 className="card-title mb-0">{t('dashboard.attention.understaffedShifts')}</h5>
                   <span className="badge bg-warning text-dark">{attention.understaffedShifts.count}</span>
                 </div>
                 <div className="card-body p-0">
@@ -257,16 +257,21 @@ const Dashboard: React.FC = () => {
                     {attention.understaffedShifts.items.map((s) => (
                       <li key={s.id} className="list-group-item px-3 py-2 d-flex justify-content-between">
                         <span>
-                          {s.date} {formatTime(s.startTime)}–{formatTime(s.endTime)} — {s.departmentName}
+                          {t('dashboard.attention.shiftSummary', {
+                            date: s.date,
+                            start: formatTime(s.startTime),
+                            end: formatTime(s.endTime),
+                            department: s.departmentName,
+                          })}
                         </span>
                         <span className="text-danger text-nowrap ms-2">
-                          {s.assignedStaff}/{s.minStaff} staffed
+                          {t('dashboard.attention.staffed', { assigned: s.assignedStaff, min: s.minStaff })}
                         </span>
                       </li>
                     ))}
                   </ul>
                   {attention.understaffedShifts.truncated && (
-                    <p className="text-muted small px-3 py-2 mb-0">More than shown — see the full shift list.</p>
+                    <p className="text-muted small px-3 py-2 mb-0">{t('dashboard.attention.moreThanShown')}</p>
                   )}
                 </div>
               </div>
@@ -277,14 +282,14 @@ const Dashboard: React.FC = () => {
             <div className="col-md-6">
               <div className="card border-0 shadow-sm h-100">
                 <div className="card-header bg-transparent border-bottom d-flex justify-content-between align-items-center">
-                  <h5 className="card-title mb-0">Pending approvals — aging</h5>
+                  <h5 className="card-title mb-0">{t('dashboard.attention.pendingApprovalsAging')}</h5>
                   <span className="badge bg-warning text-dark">{attention.pendingApprovalsAging.count}</span>
                 </div>
                 <div className="card-body">
                   <div className="d-flex gap-3 mb-3 small text-muted">
-                    <span>Over 24h: <strong className="text-body">{attention.pendingApprovalsAging.overDay}</strong></span>
-                    <span>Over 48h: <strong className="text-body">{attention.pendingApprovalsAging.overTwoDays}</strong></span>
-                    <span>Over 7d: <strong className="text-body">{attention.pendingApprovalsAging.overWeek}</strong></span>
+                    <span>{t('dashboard.attention.overDay')} <strong className="text-body">{attention.pendingApprovalsAging.overDay}</strong></span>
+                    <span>{t('dashboard.attention.overTwoDays')} <strong className="text-body">{attention.pendingApprovalsAging.overTwoDays}</strong></span>
+                    <span>{t('dashboard.attention.overWeek')} <strong className="text-body">{attention.pendingApprovalsAging.overWeek}</strong></span>
                   </div>
                 </div>
                 <ul className="list-group list-group-flush">
@@ -292,7 +297,9 @@ const Dashboard: React.FC = () => {
                     <li key={p.id} className="list-group-item px-3 py-2 d-flex justify-content-between">
                       <span>{p.changeType}</span>
                       <span className="text-muted small text-nowrap ms-2">
-                        {p.ageHours < 24 ? `${p.ageHours}h waiting` : `${Math.floor(p.ageHours / 24)}d waiting`}
+                        {p.ageHours < 24
+                          ? t('dashboard.attention.waitingHours', { count: p.ageHours })
+                          : t('dashboard.attention.waitingDays', { count: Math.floor(p.ageHours / 24) })}
                       </span>
                     </li>
                   ))}
@@ -308,32 +315,32 @@ const Dashboard: React.FC = () => {
         <div className="col-md-6">
           <div className="card border-0 shadow-sm h-100">
             <div className="card-header bg-transparent border-bottom">
-              <h5 className="card-title mb-0">Quick Actions</h5>
+              <h5 className="card-title mb-0">{t('dashboard.quickActions.title')}</h5>
             </div>
             <div className="card-body">
               <div className="d-grid gap-3">
                 {user?.permissions?.includes('shift.manage') && (
                   <Link to="/shifts" className="btn btn-outline-primary text-start">
                     <i className="bi bi-plus-circle me-2" aria-hidden="true"></i>
-                    Create New Shift
+                    {t('dashboard.quickActions.createShift')}
                   </Link>
                 )}
                 {user?.permissions?.includes('employee.read') && (
                   <Link to="/employees" className="btn btn-outline-success text-start">
                     <i className="bi bi-person-plus me-2" aria-hidden="true"></i>
-                    Add Employee
+                    {t('dashboard.quickActions.addEmployee')}
                   </Link>
                 )}
                 {user?.permissions?.includes('schedule.read') && (
                   <Link to="/schedule" className="btn btn-outline-info text-start">
                     <i className="bi bi-calendar-plus me-2" aria-hidden="true"></i>
-                    Generate Schedule
+                    {t('dashboard.quickActions.generateSchedule')}
                   </Link>
                 )}
                 {user?.permissions?.includes('report.read') && (
                   <Link to="/reports" className="btn btn-outline-warning text-start">
                     <i className="bi bi-graph-up me-2" aria-hidden="true"></i>
-                    View Reports
+                    {t('dashboard.quickActions.viewReports')}
                   </Link>
                 )}
               </div>
@@ -344,14 +351,14 @@ const Dashboard: React.FC = () => {
         <div className="col-md-6">
           <div className="card border-0 shadow-sm h-100">
             <div className="card-header bg-transparent border-bottom">
-              <h5 className="card-title mb-0">Recent Activity</h5>
+              <h5 className="card-title mb-0">{t('dashboard.recentActivity.title')}</h5>
             </div>
             <div className="card-body p-0">
               {recentActivity.length === 0 ? (
                 <div className="d-flex align-items-center justify-content-center text-center py-5 text-muted">
                   <div>
                     <i className="bi bi-clock-history fs-3 mb-2 d-block" aria-hidden="true"></i>
-                    <p className="mb-0">No recent activity.</p>
+                    <p className="mb-0">{t('dashboard.recentActivity.empty')}</p>
                   </div>
                 </div>
               ) : (

@@ -49,7 +49,12 @@ import Login from './pages/Auth/Login';
 // Contexts
 import { AuthProvider } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
-import { I18nProvider } from './i18n/I18nContext';
+
+// i18next must be initialized before any component calls useTranslation();
+// importing for its side effect (the `i18n.init(...)` call) is the idiomatic
+// react-i18next pattern — no provider component is required.
+import './i18n';
+import DirectionSync from './i18n/DirectionSync';
 
 // Chrome
 import DemoBanner from './components/DemoBanner';
@@ -109,7 +114,7 @@ const App: React.FC = () => {
   return (
     <QueryClientProvider client={queryClient}>
     <ThemeProvider>
-      <I18nProvider>
+      <DirectionSync />
       <AuthProvider>
         <DemoBanner />
         <ErrorBoundary>
@@ -246,7 +251,6 @@ const App: React.FC = () => {
         </Suspense>
         </ErrorBoundary>
       </AuthProvider>
-      </I18nProvider>
     </ThemeProvider>
     </QueryClientProvider>
   );
