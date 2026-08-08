@@ -32,6 +32,7 @@
  */
 
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
@@ -41,6 +42,7 @@ import { vcardUrl } from '../../services/directoryService';
 import type { DirectoryProfile, VcardImportPreviewRow } from '../../services/directoryService';
 
 const Directory: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const permissions = user?.permissions ?? [];
@@ -106,10 +108,9 @@ const Directory: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-1">Directory</h1>
+      <h1 className="h4 mb-1">{t('directory.title')}</h1>
       <p className="text-muted">
-        Who someone is and how to reach them. Separate from the account, which decides whether they
-        can sign in.
+        {t('directory.subtitle')}
       </p>
 
       {message && (
@@ -120,14 +121,14 @@ const Directory: React.FC = () => {
 
       {canReadOthers && (
         <div className="mb-3">
-          <label className="form-label" htmlFor="directory-person">Person</label>
+          <label className="form-label" htmlFor="directory-person">{t('directory.personLabel')}</label>
           <select
             id="directory-person"
             className="form-select"
             value={selectedId}
             onChange={(e) => setSelectedId(e.target.value)}
           >
-            <option value="">My profile</option>
+            <option value="">{t('directory.myProfile')}</option>
             {(others.data ?? []).map((e) => (
               <option key={String(e.id)} value={String(e.id)}>
                 {[e.firstName, e.lastName].filter(Boolean).join(' ') || e.email}
@@ -143,40 +144,40 @@ const Directory: React.FC = () => {
         error={showing.error}
         onRetry={showing.refetch}
         isEmpty={!shown}
-        loadingMessage="Loading profile…"
-        empty={<p className="text-muted">No profile to show.</p>}
+        loadingMessage={t('directory.loadingProfile')}
+        empty={<p className="text-muted">{t('directory.noProfile')}</p>}
       >
         {shown && (
           <>
             <dl className="row">
-              <dt className="col-sm-3">Name</dt>
+              <dt className="col-sm-3">{t('directory.fields.name')}</dt>
               <dd className="col-sm-9">
                 {shown.firstName} {shown.lastName}
               </dd>
-              <dt className="col-sm-3">Email</dt>
+              <dt className="col-sm-3">{t('directory.fields.email')}</dt>
               <dd className="col-sm-9">{shown.email}</dd>
-              <dt className="col-sm-3">Phone</dt>
-              <dd className="col-sm-9">{shown.phone ?? '—'}</dd>
-              <dt className="col-sm-3">Position</dt>
-              <dd className="col-sm-9">{shown.position ?? '—'}</dd>
-              <dt className="col-sm-3">Roles</dt>
-              <dd className="col-sm-9">{shown.roles.join(', ') || '—'}</dd>
+              <dt className="col-sm-3">{t('directory.fields.phone')}</dt>
+              <dd className="col-sm-9">{shown.phone ?? t('common.emptyValue')}</dd>
+              <dt className="col-sm-3">{t('directory.fields.position')}</dt>
+              <dd className="col-sm-9">{shown.position ?? t('common.emptyValue')}</dd>
+              <dt className="col-sm-3">{t('directory.fields.roles')}</dt>
+              <dd className="col-sm-9">{shown.roles.join(', ') || t('common.emptyValue')}</dd>
             </dl>
 
             <a className="btn btn-sm btn-outline-secondary mb-4" href={vcardUrl(shown.id)}>
-              Download vCard
+              {t('directory.downloadVcard')}
             </a>
 
-            <h2 className="h6">Additional fields</h2>
+            <h2 className="h6">{t('directory.additionalFields')}</h2>
             {shown.fields.length === 0 ? (
-              <p className="text-muted">No additional fields.</p>
+              <p className="text-muted">{t('directory.noAdditionalFields')}</p>
             ) : (
               <table className="table table-sm align-middle">
                 <thead>
                   <tr>
-                    <th>Field</th>
-                    <th>Value</th>
-                    <th>Visibility</th>
+                    <th>{t('directory.columns.field')}</th>
+                    <th>{t('directory.columns.value')}</th>
+                    <th>{t('directory.columns.visibility')}</th>
                     {canManage && <th />}
                   </tr>
                 </thead>
@@ -190,7 +191,7 @@ const Directory: React.FC = () => {
                             knowing who reads it is how a private note becomes
                             a published one. */}
                         <span className={`badge ${f.isPublic ? 'bg-info text-dark' : 'bg-secondary'}`}>
-                          {f.isPublic ? 'Visible to colleagues' : 'Private'}
+                          {f.isPublic ? t('directory.visibility.public') : t('directory.visibility.private')}
                         </span>
                       </td>
                       {canManage && (
@@ -201,7 +202,7 @@ const Directory: React.FC = () => {
                             onClick={() => act(removeField.mutateAsync({ id: shown.id, key: f.key }))}
                             disabled={removeField.isPending}
                           >
-                            Remove
+                            {t('memberList.remove')}
                           </button>
                         </td>
                       )}
@@ -214,7 +215,7 @@ const Directory: React.FC = () => {
             {canManage && (
               <form className="row g-2 align-items-end" onSubmit={addField}>
                 <div className="col-md-3">
-                  <label className="form-label" htmlFor="field-key">Field</label>
+                  <label className="form-label" htmlFor="field-key">{t('directory.columns.field')}</label>
                   <input
                     id="field-key"
                     className="form-control"
@@ -224,7 +225,7 @@ const Directory: React.FC = () => {
                   />
                 </div>
                 <div className="col-md-4">
-                  <label className="form-label" htmlFor="field-value">Value</label>
+                  <label className="form-label" htmlFor="field-value">{t('directory.columns.value')}</label>
                   <input
                     id="field-value"
                     className="form-control"
@@ -234,7 +235,7 @@ const Directory: React.FC = () => {
                 </div>
                 <div className="col-auto">
                   <button type="submit" className="btn btn-primary" disabled={saveFields.isPending}>
-                    Save field
+                    {t('directory.form.saveField')}
                   </button>
                 </div>
               </form>
@@ -245,33 +246,38 @@ const Directory: React.FC = () => {
 
       {canManage && (
         <div className="mt-5 pt-4 border-top">
-          <h2 className="h6">Bulk import from vCard</h2>
+          <h2 className="h6">{t('directory.bulkImport.title')}</h2>
           <p className="text-muted small">
-            Creates a sign-in account for each card — not just a directory profile. A card whose
-            email already exists is skipped, never updated.
+            {t('directory.bulkImport.description')}
           </p>
 
           {runImport.data?.data ? (
             <>
               <div className="alert alert-success">
-                Created {runImport.data.data.inserted} account
-                {runImport.data.data.inserted === 1 ? '' : 's'}.
+                {t('directory.bulkImport.createdMessage', {
+                  count: runImport.data.data.inserted,
+                  plural: runImport.data.data.inserted === 1 ? '' : 's',
+                })}
                 {runImport.data.data.skipped.length > 0 && (
                   <>
                     {' '}
-                    Skipped {runImport.data.data.skipped.length}:{' '}
-                    {runImport.data.data.skipped.map((s) => `${s.email || '(unknown)'} (${s.reason})`).join(', ')}
+                    {t('directory.bulkImport.skippedMessage', {
+                      count: runImport.data.data.skipped.length,
+                      items: runImport.data.data.skipped
+                        .map((s) => `${s.email || t('directory.bulkImport.unknownEmail')} (${s.reason})`)
+                        .join(', '),
+                    })}
                   </>
                 )}
               </div>
               <button type="button" className="btn btn-sm btn-outline-secondary" onClick={resetImport}>
-                Import another file
+                {t('directory.bulkImport.importAnother')}
               </button>
             </>
           ) : (
             <>
               <div className="mb-2">
-                <label className="form-label" htmlFor="vcf-file">.vcf file</label>
+                <label className="form-label" htmlFor="vcf-file">{t('directory.bulkImport.vcfFileLabel')}</label>
                 <input
                   id="vcf-file"
                   ref={fileInputRef}
@@ -289,31 +295,33 @@ const Directory: React.FC = () => {
                   onClick={doPreview}
                   disabled={previewImport.isPending}
                 >
-                  Preview {vcfFileName}
+                  {t('directory.bulkImport.preview', { fileName: vcfFileName })}
                 </button>
               )}
 
               {preview && (
                 <>
                   {preview.length === 0 ? (
-                    <p className="text-muted">No cards found in this file.</p>
+                    <p className="text-muted">{t('directory.bulkImport.noCards')}</p>
                   ) : (
                     <table className="table table-sm align-middle">
                       <thead>
                         <tr>
-                          <th>Name</th>
-                          <th>Email</th>
-                          <th>What will happen</th>
+                          <th>{t('directory.bulkImport.columns.name')}</th>
+                          <th>{t('directory.bulkImport.columns.email')}</th>
+                          <th>{t('directory.bulkImport.columns.outcome')}</th>
                         </tr>
                       </thead>
                       <tbody>
                         {preview.map((row, i) => (
                           <tr key={`${row.email}-${i}`}>
                             <td>{row.name}</td>
-                            <td>{row.email || '—'}</td>
+                            <td>{row.email || t('common.emptyValue')}</td>
                             <td>
                               <span className={`badge ${row.outcome === 'create' ? 'bg-success' : 'bg-secondary'}`}>
-                                {row.outcome === 'create' ? 'Will create an account' : `Will skip — ${row.reason}`}
+                                {row.outcome === 'create'
+                                  ? t('directory.bulkImport.willCreate')
+                                  : t('directory.bulkImport.willSkip', { reason: row.reason })}
                               </span>
                             </td>
                           </tr>
@@ -326,7 +334,7 @@ const Directory: React.FC = () => {
                     <div className="row g-2 align-items-end">
                       <div className="col-md-4">
                         <label className="form-label" htmlFor="vcf-password">
-                          Initial password for created accounts
+                          {t('directory.bulkImport.initialPasswordLabel')}
                         </label>
                         <input
                           id="vcf-password"
@@ -345,7 +353,10 @@ const Directory: React.FC = () => {
                           onClick={doImport}
                           disabled={runImport.isPending || importPassword.length < 8}
                         >
-                          Confirm import ({willCreate} account{willCreate === 1 ? '' : 's'})
+                          {t('directory.bulkImport.confirmImport', {
+                            count: willCreate,
+                            plural: willCreate === 1 ? '' : 's',
+                          })}
                         </button>
                       </div>
                     </div>

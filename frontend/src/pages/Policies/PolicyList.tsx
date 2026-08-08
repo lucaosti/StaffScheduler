@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Policy, PolicyScope } from '../../services/policyService';
 import EmptyState from '../../components/EmptyState';
 
@@ -15,6 +16,17 @@ interface PolicyFormState {
   policyValue: string;
   description: string;
 }
+
+// Kept as identifiers (not JSX literals) so the option `value`s stay the raw
+// enum the backend expects while the visible label goes through `t()`.
+const POLICY_SCOPES: PolicyScope[] = ['global', 'org_unit', 'schedule', 'shift_template'];
+
+const POLICY_SCOPE_LABEL_KEYS: Record<PolicyScope, string> = {
+  global: 'policies.list.scopes.global',
+  org_unit: 'policies.list.scopes.orgUnit',
+  schedule: 'policies.list.scopes.schedule',
+  shift_template: 'policies.list.scopes.shiftTemplate',
+};
 
 interface Props {
   policies: Policy[];
@@ -40,7 +52,9 @@ const PolicyList: React.FC<Props> = ({
   onCreatePolicy,
   onToggleActive,
   onDeletePolicy,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  return (
   <div className="card">
     <div className="card-body">
       {canManage && (
@@ -53,17 +67,18 @@ const PolicyList: React.FC<Props> = ({
                 onFormChange({ ...policyForm, scopeType: e.target.value as PolicyScope })
               }
             >
-              <option value="global">global</option>
-              <option value="org_unit">org_unit</option>
-              <option value="schedule">schedule</option>
-              <option value="shift_template">shift_template</option>
+              {POLICY_SCOPES.map((scope) => (
+                <option key={scope} value={scope}>
+                  {t(POLICY_SCOPE_LABEL_KEYS[scope])}
+                </option>
+              ))}
             </select>
           </div>
           <div className="col-md-1">
             <input
               type="number"
               className="form-control"
-              placeholder="Scope id"
+              placeholder={t('policies.list.form.scopeIdPlaceholder')}
               value={policyForm.scopeId}
               onChange={(e) => onFormChange({ ...policyForm, scopeId: e.target.value })}
             />
@@ -71,7 +86,7 @@ const PolicyList: React.FC<Props> = ({
           <div className="col-md-3">
             <input
               className="form-control"
-              placeholder="policy key (e.g. min_rest_hours)"
+              placeholder={t('policies.list.form.policyKeyPlaceholder')}
               value={policyForm.policyKey}
               onChange={(e) => onFormChange({ ...policyForm, policyKey: e.target.value })}
               required
@@ -80,7 +95,7 @@ const PolicyList: React.FC<Props> = ({
           <div className="col-md-3">
             <input
               className="form-control font-monospace"
-              placeholder='value JSON, e.g. {"hours":11}'
+              placeholder={t('policies.list.form.valueJsonPlaceholder')}
               value={policyForm.policyValue}
               onChange={(e) => onFormChange({ ...policyForm, policyValue: e.target.value })}
             />
@@ -88,31 +103,35 @@ const PolicyList: React.FC<Props> = ({
           <div className="col-md-2">
             <input
               className="form-control"
-              placeholder="Description"
+              placeholder={t('policies.list.form.descriptionPlaceholder')}
               value={policyForm.description}
               onChange={(e) => onFormChange({ ...policyForm, description: e.target.value })}
             />
           </div>
           <div className="col-md-1">
             <button className="btn btn-primary w-100" disabled={busy}>
-              Add
+              {t('policies.list.form.add')}
             </button>
           </div>
         </form>
       )}
 
       {policies.length === 0 ? (
-        <EmptyState icon="bi-shield" title="No policies" message="No policies configured yet." />
+        <EmptyState
+          icon="bi-shield"
+          title={t('policies.list.empty.title')}
+          message={t('policies.list.empty.message')}
+        />
       ) : (
         <table className="table">
           <thead>
             <tr>
-              <th scope="col">Scope</th>
-              <th scope="col">Key</th>
-              <th scope="col">Value</th>
-              <th scope="col">Owner</th>
-              <th scope="col">Status</th>
-              <th scope="col" className="text-end">Actions</th>
+              <th scope="col">{t('policies.list.columns.scope')}</th>
+              <th scope="col">{t('policies.list.columns.key')}</th>
+              <th scope="col">{t('policies.list.columns.value')}</th>
+              <th scope="col">{t('policies.list.columns.owner')}</th>
+              <th scope="col">{t('policies.list.columns.status')}</th>
+              <th scope="col" className="text-end">{t('policies.list.columns.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -127,7 +146,7 @@ const PolicyList: React.FC<Props> = ({
                 <td>{p.imposedByUserId}</td>
                 <td>
                   <span className={`badge ${p.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                    {p.isActive ? 'active' : 'inactive'}
+                    {p.isActive ? t('policies.list.status.active') : t('policies.list.status.inactive')}
                   </span>
                 </td>
                 <td className="text-end">
@@ -138,14 +157,14 @@ const PolicyList: React.FC<Props> = ({
                         onClick={() => onToggleActive(p)}
                         disabled={busy}
                       >
-                        {p.isActive ? 'Deactivate' : 'Activate'}
+                        {p.isActive ? t('policies.list.deactivate') : t('policies.list.activate')}
                       </button>
                       <button
                         className="btn btn-sm btn-outline-danger"
                         onClick={() => onDeletePolicy(p.id)}
                         disabled={busy}
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </>
                   )}
@@ -157,6 +176,7 @@ const PolicyList: React.FC<Props> = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default PolicyList;

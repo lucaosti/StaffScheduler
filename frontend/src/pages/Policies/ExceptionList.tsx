@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Policy, PolicyExceptionRequest } from '../../services/policyService';
 import EmptyState from '../../components/EmptyState';
 
@@ -41,7 +42,15 @@ const ExceptionList: React.FC<Props> = ({
   onApprove,
   onReject,
   onCancel,
-}) => (
+}) => {
+  const { t } = useTranslation();
+  const statusKeys: Record<string, string> = {
+    approved: t('policies.exceptions.status.approved'),
+    pending: t('policies.exceptions.status.pending'),
+    rejected: t('policies.exceptions.status.rejected'),
+    cancelled: t('policies.exceptions.status.cancelled'),
+  };
+  return (
   <div className="card">
     <div className="card-body">
       <form className="row g-2 mb-3" onSubmit={onCreateException}>
@@ -52,10 +61,10 @@ const ExceptionList: React.FC<Props> = ({
             onChange={(e) => onFormChange({ ...exceptionForm, policyId: e.target.value })}
             required
           >
-            <option value="">Pick a policy…</option>
+            <option value="">{t('policies.exceptions.form.pickPolicy')}</option>
             {policies.map((p) => (
               <option key={p.id} value={p.id}>
-                [{p.scopeType}] {p.policyKey} (owner {p.imposedByUserId})
+                [{p.scopeType}] {p.policyKey} ({t('policies.exceptions.form.owner', { id: p.imposedByUserId })})
               </option>
             ))}
           </select>
@@ -63,7 +72,7 @@ const ExceptionList: React.FC<Props> = ({
         <div className="col-md-3">
           <input
             className="form-control"
-            placeholder="Target type (e.g. shift_assignment)"
+            placeholder={t('policies.exceptions.form.targetTypePlaceholder')}
             value={exceptionForm.targetType}
             onChange={(e) => onFormChange({ ...exceptionForm, targetType: e.target.value })}
             required
@@ -73,7 +82,7 @@ const ExceptionList: React.FC<Props> = ({
           <input
             type="number"
             className="form-control"
-            placeholder="Target id"
+            placeholder={t('policies.exceptions.form.targetIdPlaceholder')}
             value={exceptionForm.targetId}
             onChange={(e) => onFormChange({ ...exceptionForm, targetId: e.target.value })}
             required
@@ -82,14 +91,14 @@ const ExceptionList: React.FC<Props> = ({
         <div className="col-md-3">
           <input
             className="form-control"
-            placeholder="Reason"
+            placeholder={t('policies.exceptions.form.reasonPlaceholder')}
             value={exceptionForm.reason}
             onChange={(e) => onFormChange({ ...exceptionForm, reason: e.target.value })}
           />
         </div>
         <div className="col-md-1">
           <button className="btn btn-primary w-100" disabled={busy}>
-            Request
+            {t('policies.exceptions.form.request')}
           </button>
         </div>
       </form>
@@ -97,18 +106,18 @@ const ExceptionList: React.FC<Props> = ({
       {exceptions.length === 0 ? (
         <EmptyState
           icon="bi-file-earmark-break"
-          title="No exceptions"
-          message="No exception requests yet."
+          title={t('policies.exceptions.empty.title')}
+          message={t('policies.exceptions.empty.message')}
         />
       ) : (
         <table className="table">
           <thead>
             <tr>
-              <th scope="col">Policy</th>
-              <th scope="col">Target</th>
-              <th scope="col">Requested by</th>
-              <th scope="col">Status</th>
-              <th scope="col" className="text-end">Actions</th>
+              <th scope="col">{t('policies.exceptions.columns.policy')}</th>
+              <th scope="col">{t('policies.exceptions.columns.target')}</th>
+              <th scope="col">{t('policies.exceptions.columns.requestedBy')}</th>
+              <th scope="col">{t('policies.exceptions.columns.status')}</th>
+              <th scope="col" className="text-end">{t('policies.exceptions.columns.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -129,7 +138,7 @@ const ExceptionList: React.FC<Props> = ({
                           : 'bg-secondary'
                     }`}
                   >
-                    {e.status}
+                    {statusKeys[e.status] ?? e.status}
                   </span>
                 </td>
                 <td className="text-end">
@@ -140,14 +149,14 @@ const ExceptionList: React.FC<Props> = ({
                         onClick={() => onApprove(e.id)}
                         disabled={busy}
                       >
-                        Approve
+                        {t('policies.exceptions.approve')}
                       </button>
                       <button
                         className="btn btn-sm btn-outline-danger me-1"
                         onClick={() => onReject(e.id)}
                         disabled={busy}
                       >
-                        Reject
+                        {t('policies.exceptions.reject')}
                       </button>
                     </>
                   )}
@@ -157,7 +166,7 @@ const ExceptionList: React.FC<Props> = ({
                       onClick={() => onCancel(e.id)}
                       disabled={busy}
                     >
-                      Cancel
+                      {t('policies.exceptions.cancel')}
                     </button>
                   )}
                 </td>
@@ -168,6 +177,7 @@ const ExceptionList: React.FC<Props> = ({
       )}
     </div>
   </div>
-);
+  );
+};
 
 export default ExceptionList;
