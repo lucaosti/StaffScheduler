@@ -86,7 +86,7 @@ const Timeline: React.FC = () => {
   }, [windowStart, windowEnd]);
 
   return (
-    <div className="container-fluid py-3">
+    <div className="container-fluid py-3 timeline-page">
       <h1 className="h4 mb-3">{t('timeline.title')}</h1>
 
       <div className="row g-2 align-items-end mb-3">
@@ -136,10 +136,10 @@ const Timeline: React.FC = () => {
         empty={<p className="text-muted">{t('timeline.empty')}</p>}
       >
         <div className="table-responsive">
-          <table className="table table-sm align-middle">
+          <table className="table table-sm align-middle" style={{ minWidth: 480 }}>
             <thead>
               <tr>
-                <th style={{ width: '18%' }}>{t('timeline.person')}</th>
+                <th style={{ width: '18%', minWidth: 90 }}>{t('timeline.person')}</th>
                 <th>
                   <div className="d-flex justify-content-between small text-muted">
                     {days.map((day) => (

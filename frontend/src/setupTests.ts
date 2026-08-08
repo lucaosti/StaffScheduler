@@ -67,3 +67,22 @@ if (typeof (globalThis as { BroadcastChannel?: unknown }).BroadcastChannel === '
   (globalThis as unknown as { BroadcastChannel: typeof BroadcastChannelStub }).BroadcastChannel =
     BroadcastChannelStub;
 }
+
+// jsdom does not implement `window.matchMedia`. Pages use it (via
+// `useIsNarrowViewport`) to swap a desktop grid for a compact mobile layout;
+// without a stub, calling it throws "not implemented" the first time such a
+// page renders. Defaults to "not matching" (desktop) so every existing test
+// keeps exercising the desktop layout unless it opts in with its own mock.
+if (typeof window !== 'undefined' && typeof window.matchMedia === 'undefined') {
+  window.matchMedia = (query: string): MediaQueryList =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
