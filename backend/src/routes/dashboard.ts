@@ -7,7 +7,12 @@
  * Authorization model:
  * - Aggregate counters are visible to every authenticated user.
  * - Monthly labor cost is only computed for holders of `report.read`;
- *   other users receive `monthlyCost: null`.
+ *   other users receive `monthlyCost: null`. `monthlyCostPlan` — the sum of
+ *   every admin-set cost plan target whose period overlaps the current month
+ *   — carries the exact same gate and the exact same null-when-absent
+ *   behavior, since it is the other half of the same comparison. Setting a
+ *   target itself is a separate, stronger permission (`report.manage`, see
+ *   `routes/costPlans.ts`); this route only reads the sum.
  * - The recent-activities feed reads from `audit_logs` and is therefore
  *   guarded exactly like /api/audit-logs: `audit` module + `audit.read`.
  *   Its `limit` was documented in the spec but never parsed (the handler took
@@ -69,7 +74,9 @@ export const createDashboardRouter = (pool: Pool) => {
    * Get Dashboard Statistics Endpoint
    *
    * Retrieves key performance indicators and statistics for the dashboard.
-   * `monthlyCost` requires `report.read` and is null otherwise.
+   * `monthlyCost` requires `report.read` and is null otherwise. `monthlyCostPlan`
+   * — the admin-set target for the current month, summed across departments —
+   * carries the same gate and the same null-when-absent behavior.
    *
    * @route GET /api/dashboard/stats
    * @returns {Object} Dashboard statistics and KPIs
@@ -113,6 +120,18 @@ export const createDashboardRouter = (pool: Pool) => {
           AND sa.status = 'confirmed'
       `;
 
+      // The other half of the cost comparison: every admin-set target whose
+      // period overlaps the current month, summed across departments. Same
+      // overlap test a plan's own period would use to answer "does this
+      // apply to now" — LAST_DAY/DATE_FORMAT mirror MONTH_WINDOW's own
+      // sargable month bounds above rather than introducing a second style.
+      const monthlyCostPlanQuery = `
+        SELECT COALESCE(SUM(target_amount), 0) as total_target
+        FROM cost_plans
+        WHERE start_date <= LAST_DAY(CURDATE())
+          AND end_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+      `;
+
       const coverageQuery = `
         SELECT
           COUNT(DISTINCT s.id) as total_shifts,
@@ -150,6 +169,7 @@ export const createDashboardRouter = (pool: Pool) => {
         pendingApprovals,
         monthlyHoursResult,
         monthlyCostResult,
+        monthlyCostPlanResult,
         coverageResult,
         satisfactionResult,
       ] = await Promise.all([
@@ -159,12 +179,16 @@ export const createDashboardRouter = (pool: Pool) => {
         queryOne<{ count: number }>(pendingApprovalsQuery),
         queryOne<{ total_hours: number }>(monthlyHoursQuery),
         canSeeCost ? queryOne<{ total_cost: number }>(monthlyCostQuery) : Promise.resolve(null),
+        canSeeCost
+          ? queryOne<{ total_target: number }>(monthlyCostPlanQuery)
+          : Promise.resolve(null),
         queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
         queryOne<{ total_assignments: number; preferred_assignments: number }>(satisfactionQuery),
       ]);
 
       const monthlyHours = monthlyHoursResult?.total_hours || 0;
       const monthlyCost = canSeeCost ? monthlyCostResult?.total_cost || 0 : null;
+      const monthlyCostPlan = canSeeCost ? monthlyCostPlanResult?.total_target || 0 : null;
       const coverageRate = coverageResult && coverageResult.total_shifts > 0
         ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
         : 0;
@@ -180,6 +204,7 @@ export const createDashboardRouter = (pool: Pool) => {
         pendingApprovals: pendingApprovals?.count || 0,
         monthlyHours: Math.round(monthlyHours),
         monthlyCost: monthlyCost === null ? null : Math.round(monthlyCost * 100) / 100,
+        monthlyCostPlan: monthlyCostPlan === null ? null : Math.round(monthlyCostPlan * 100) / 100,
         coverageRate: Math.round(coverageRate * 10) / 10,
         employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10,
       };

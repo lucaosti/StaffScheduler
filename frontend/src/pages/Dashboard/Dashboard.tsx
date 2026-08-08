@@ -214,6 +214,27 @@ const Dashboard: React.FC = () => {
                   <h6 className="card-title text-muted mb-3">{t('dashboard.stats.monthlyCost')}</h6>
                   <h2 className="text-success mb-0">{formatCurrency(stats.monthlyCost)}</h2>
                   <small className="text-muted">{t('dashboard.stats.monthlyCostUnit')}</small>
+                  {/* The admin-set target, when one has been configured for the
+                      current period; absent (null) plans render nothing rather
+                      than a misleading "0" target. */}
+                  {stats.monthlyCostPlan !== null && stats.monthlyCostPlan > 0 && (
+                    <div className="mt-2">
+                      <small className="text-muted d-block">
+                        {t('dashboard.stats.monthlyCostPlanTarget', {
+                          amount: formatCurrency(stats.monthlyCostPlan),
+                        })}
+                      </small>
+                      <small className={stats.monthlyCost > stats.monthlyCostPlan ? 'text-danger' : 'text-success'}>
+                        {stats.monthlyCost > stats.monthlyCostPlan
+                          ? t('dashboard.stats.monthlyCostPlanOverTarget', {
+                              amount: formatCurrency(stats.monthlyCost - stats.monthlyCostPlan),
+                            })
+                          : t('dashboard.stats.monthlyCostPlanUnderTarget', {
+                              amount: formatCurrency(stats.monthlyCostPlan - stats.monthlyCost),
+                            })}
+                      </small>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

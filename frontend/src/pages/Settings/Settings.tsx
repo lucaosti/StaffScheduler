@@ -18,6 +18,7 @@ import FieldPolicySection from '../Settings/FieldPolicySection';
 import TwoFactorSection from '../Settings/TwoFactorSection';
 import GeofenceSection from '../Settings/GeofenceSection';
 import KioskDevicesSection from '../Settings/KioskDevicesSection';
+import CostPlansSection from '../Settings/CostPlansSection';
 import { updateMyPreferences } from '../../services/preferencesService';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 
@@ -47,8 +48,12 @@ interface UserSettings {
 const Settings: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('settings.manage');
+  // Separate from `isAdmin`: deciding what the organization is measured
+  // against is `report.manage`, not `settings.manage` — the same read/write
+  // separation the backend draws for cost plans.
+  const canManageCostPlans = user?.permissions?.includes('report.manage');
 
-  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks'>('personal');
+  const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks' | 'costPlans'>('personal');
 
   const [settings, setSettings] = useState<UserSettings>({
     personalSettings: {
@@ -225,6 +230,16 @@ const Settings: React.FC = () => {
                 </button>
               </li>
             )}
+            {canManageCostPlans && (
+              <li className="nav-item">
+                <button
+                  className={`nav-link ${activeTab === 'costPlans' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('costPlans')}
+                >
+                  <i className="bi bi-cash-coin me-2"></i>Cost Plans
+                </button>
+              </li>
+            )}
           </ul>
         </div>
       </div>
@@ -264,6 +279,8 @@ const Settings: React.FC = () => {
       {activeTab === 'geofences' && isAdmin && <GeofenceSection />}
 
       {activeTab === 'kiosks' && isAdmin && <KioskDevicesSection />}
+
+      {activeTab === 'costPlans' && canManageCostPlans && <CostPlansSection />}
     </div>
   );
 };

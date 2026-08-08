@@ -335,10 +335,13 @@ or request a page.
 | `/api/events` | Server-sent events stream | authenticated |
 | `/api/directory` | User directory + vCard export/import | `user.read` |
 | `/api/dashboard` | Dashboard statistics | authenticated |
+| `/api/cost-plans` | Cost plan CRUD (admin-set labor-cost targets) | `report.read` (read) / `report.manage` (write) |
 | `/api/settings` | System settings | `settings.manage` |
 | `/api/health` | Health check (unauthenticated) | — |
 
 **`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives.
+
+**Cost plans (decision-support: cost vs. plan).** A cost plan is a fixed labor-cost target an administrator sets for one department over one period (`start_date`/`end_date`, the same period shape `schedules` already uses) — a manager-entered budget figure, not derived from headcount or contracted hours. `POST /api/cost-plans` creates one; `PUT /api/cost-plans/{id}` edits its target amount; `GET /api/cost-plans` / `GET /api/cost-plans/{id}` list or read one; `DELETE /api/cost-plans/{id}` removes one. A duplicate department+period is a `409`. Reading requires `report.read`; writing requires `report.manage`, a separate, stronger permission — deciding what the organization is measured against is a different act from viewing the measurement, the same read/write split `payroll.manage` draws against its own read-side gates. `GET /api/dashboard/stats` folds the other half of the comparison into its existing response: `monthlyCostPlan` is the sum of every cost plan whose period overlaps the current month, across departments, computed in the same route alongside `monthlyCost` and gated behind the identical `report.read` check — null under the exact same condition `monthlyCost` is null.
 
 **Batch endpoints (#316)**: `POST /api/employees/batch` and `POST /api/assignments/batch` accept up to 200 rows per request and report one outcome per row instead of aborting the whole batch on the first failure — the shape a high-volume integration needs to retry only what actually failed. Both return HTTP 207 with the shared envelope from `packages/shared/src/batch.ts`:
 
@@ -494,7 +497,8 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `timeoff.approve` | Approve time-off |
 | `shiftswap.approve` | Approve shift swaps |
 | `preferences.manage` | Manage preferences |
-| `report.read` | Reports (also gates the dashboard's monthly labor cost, and lifts `GET /dashboard/attention-items`'s understaffed-shift list from the caller's own org units to unrestricted) |
+| `report.read` | Reports (also gates the dashboard's monthly labor cost and cost-plan comparison, and lifts `GET /dashboard/attention-items`'s understaffed-shift list from the caller's own org units to unrestricted) |
+| `report.manage` | Create, edit and delete cost plan targets (Administrator only by default; see §10b) |
 | `audit.read` | Audit logs (including the dashboard recent-activity feed) |
 | `user.read` / `user.manage` | User accounts |
 | `user.read_all` | List the complete, unscoped user directory (Administrator only by default; managers without it get a department-scoped list) |

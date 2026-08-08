@@ -64,6 +64,7 @@ describe('GET /api/dashboard/stats', () => {
       .mockResolvedValueOnce([[{ count: 2 }], null]) // pending
       .mockResolvedValueOnce([[{ total_hours: 320 }], null])
       .mockResolvedValueOnce([[{ total_cost: 7200.55 }], null])
+      .mockResolvedValueOnce([[{ total_target: 8000 }], null])
       .mockResolvedValueOnce([[{ total_shifts: 10, covered_shifts: 9 }], null]);
 
     const res = await request(mountApp()).get('/api/dashboard/stats');
@@ -72,9 +73,10 @@ describe('GET /api/dashboard/stats', () => {
     expect(res.body.data.activeSchedules).toBe(3);
     expect(res.body.data.coverageRate).toBe(90);
     expect(res.body.data.monthlyCost).toBe(7200.55);
+    expect(res.body.data.monthlyCostPlan).toBe(8000);
   });
 
-  it('omits the labor cost for users without report.read', async () => {
+  it('omits the labor cost and cost plan for users without report.read', async () => {
     currentPermissions = ['schedule.read']; // no report.read
     execute
       .mockResolvedValueOnce([[{ count: 50 }], null])
@@ -82,14 +84,16 @@ describe('GET /api/dashboard/stats', () => {
       .mockResolvedValueOnce([[{ count: 8 }], null])
       .mockResolvedValueOnce([[{ count: 2 }], null])
       .mockResolvedValueOnce([[{ total_hours: 320 }], null])
-      // no cost query issued for this user; next mocks feed coverage/satisfaction
+      // no cost or cost-plan query issued for this user; next mock feeds coverage/satisfaction
       .mockResolvedValueOnce([[{ total_shifts: 10, covered_shifts: 9 }], null]);
 
     const res = await request(mountApp()).get('/api/dashboard/stats');
     expect(res.status).toBe(200);
     expect(res.body.data.monthlyCost).toBeNull();
+    expect(res.body.data.monthlyCostPlan).toBeNull();
     const issuedSql = execute.mock.calls.map((c) => String(c[0]));
     expect(issuedSql.some((sql) => sql.includes('hourly_rate'))).toBe(false);
+    expect(issuedSql.some((sql) => sql.includes('cost_plans'))).toBe(false);
   });
 
   it('uses sargable date-range predicates (no MONTH()/DATE() on columns)', async () => {
