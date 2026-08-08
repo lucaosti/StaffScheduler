@@ -329,6 +329,7 @@ describe('domain components match the shared schemas', () => {
     Geofence: sharedSchemas.geofenceSchema,
     KioskDevice: sharedSchemas.kioskDeviceSchema,
     WebhookSubscription: sharedSchemas.webhookSubscriptionSchema,
+    CostPlan: sharedSchemas.costPlanSchema,
   } as const;
 
   const componentProps = (name: string): string[] =>
