@@ -16,7 +16,7 @@
 import { useEffect, useState } from 'react';
 
 /** Phone viewports (375px–428px) and the small tablet band just above them. */
-export const MOBILE_BREAKPOINT_PX = 576;
+const MOBILE_BREAKPOINT_PX = 576;
 
 export function useIsNarrowViewport(breakpointPx: number = MOBILE_BREAKPOINT_PX): boolean {
   const query = `(max-width: ${breakpointPx}px)`;
