@@ -835,6 +835,79 @@ All routes require `settings.manage` and are scoped to the caller's own `organiz
 
 ---
 
+## 7f. Frontend internationalization (i18n) and RTL
+
+The frontend uses `react-i18next` (over `i18next`). It replaced an earlier homegrown
+`I18nContext`/`messages.ts` pair that was wired into `App.tsx` but never actually called
+from any page — this is the layer that made it real.
+
+**Setup**: `frontend/src/i18n/index.ts` initializes `i18next` with `initReactI18next` and
+`i18next-browser-languagedetector`. English (`en`) is the fallback/source language —
+every key is guaranteed to exist there. `App.tsx` imports `./i18n` once for its side
+effect (no provider component needed; `useTranslation()` reads the initialized singleton
+directly), and `frontend/src/setupTests.ts` does the same so any test that renders a
+component using `useTranslation()` works without importing the module itself.
+
+**Catalogs**: `frontend/src/i18n/locales/{en,it,ar}/translation.json`. Keys are **flat
+dotted strings** (`"auth.signIn"`), not nested JSON objects — `keySeparator: false` in
+the `i18next.init()` config is what makes the dot part of the literal key instead of a
+path into a nested tree. This mirrors the old `messages.ts` convention on purpose, so a
+key lookup reads the same way it always did. Arabic (`ar`) is the one RTL locale shipped
+today.
+
+**Organization translation overrides**: `frontend/src/i18n/organizationOverrides.ts`
+exports `applyOrganizationOverrides(locale, overrides)`, which layers a caller-supplied
+`Record<string, string>` over the shipped base catalog for one locale via
+`i18next.addResourceBundle(locale, 'translation', overrides, true, true)`, so an
+organization can rename or correct a string without a code deploy. **This is
+client-side-only and unconnected today** — no backend endpoint yet serves per-organization
+translation strings, and adding one is out of scope for the PR that introduced this layer
+(a follow-up issue tracks wiring it once that endpoint exists). Nothing calls
+`applyOrganizationOverrides` yet; it exists so the integration point is real rather than
+simulated, consistent with the "no fake async" rule above — no handler pretends to fetch
+overrides that don't exist.
+
+**RTL**: `frontend/src/i18n/DirectionSync.tsx`, mounted once in `App.tsx`, reactively sets
+`dir` and `lang` on `<html>` from the active i18next locale (`dir="rtl"` for Arabic). It
+targets `<html>` rather than a nested wrapper so anything rendered outside the React tree
+(Bootstrap modals, portals) still inherits the correct writing direction. Bootstrap 5's
+utility classes (`ms-*`, `me-*`, `text-start`, `text-end`, ...) are logical properties
+already, so most of the app mirrors correctly with zero extra CSS. `frontend/src/index.css`
+carries a documented `[dir='rtl']` override block for the handful of physical (non-logical)
+properties the app's own CSS still uses (`.sidebar`'s `left`/`border-right`,
+`.main-content`'s `margin-left`) — new custom CSS should prefer logical properties
+(`margin-inline-start`, ...) over adding to that list. **RTL is verified end-to-end on one
+page today: Login** (`pages/Auth/Login.tsx`), chosen because it is small, always mounted,
+and its form/label/button layout visibly breaks if RTL CSS is wrong. Every other page is
+untested under `dir="rtl"` (tracked in the same follow-up issue as the remaining
+`useTranslation()` conversions).
+
+**Locale switcher**: `frontend/src/components/LocaleSwitcher.tsx`, mounted in
+`components/Layout/Header.tsx` next to `ThemeToggle`, so it is visible on every
+authenticated page. Selecting a locale calls `i18n.changeLanguage()`, which
+`i18next-browser-languagedetector` persists to `localStorage` (key `locale`, same
+convention the old context used) and re-renders every mounted `useTranslation()`
+consumer, including `DirectionSync`.
+
+**Converted pages**: `pages/Auth/Login.tsx` and `pages/Dashboard/Dashboard.tsx` are fully
+converted — every user-facing string routes through `t()`. The rest of `pages/` is not yet
+converted (tracked in a follow-up issue); code, comments, and documentation stay English
+regardless of UI locale, by convention — only user-facing strings go through the
+translation layer.
+
+**Lint enforcement**: `frontend/eslint.config.js` enables `eslint-plugin-i18next`'s
+`i18next/no-literal-string` rule (`mode: 'jsx-only'`, so it checks both JSX text and
+JSX attribute values, e.g. `title`/`aria-label`/`placeholder`) — but only for an explicit
+`I18N_ENFORCED_FILES` **include list**, not the whole `src/pages` tree. With most pages not
+yet converted, a codebase-wide rule would need an exclude list nearly as long as the page
+tree and would need updating on every unrelated page change; an include list only grows
+when a page is actually migrated to `useTranslation()`, in the same PR that converts it.
+The rule config also documents (in the file itself) why its `words`/`jsx-attributes`
+options repeat the plugin's own defaults — passing a partial options object replaces
+those defaults outright rather than merging with them.
+
+---
+
 ## 8. Delegation framework
 
 User A can grant User B a time-bounded subset of their own permissions.
