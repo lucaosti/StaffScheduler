@@ -1093,6 +1093,73 @@ class ScheduleOptimizerORTools:
 
         return [-spread * scale], cap * scale
 
+    def _rotation_terms(self, scale: int) -> Tuple[List, int]:
+        """
+        SOFT: charge for keeping an employee on the same shift category for
+        too many periods running.
+
+        WHY THIS IS A DIFFERENT PROPERTY FROM `_category_balance_terms`. That
+        term minimises the TOTAL spread of category days across employees; it
+        can be perfectly balanced while one person still works nights for
+        three straight periods and another has the inverse pattern, because a
+        spread has no notion of adjacency between periods. This charges
+        CONSECUTIVE-PERIOD CONCENTRATION on the same person, independent of
+        the running total — see `shiftRotationViolations` in
+        constraintValidator.ts, the checker this term mirrors.
+
+        WHY IT ONLY EVER CHARGES, NEVER FORBIDS. Made hard, an organization
+        with too few night- or weekend-qualified staff to always rotate
+        becomes unsolvable — the same reasoning that keeps every other term in
+        this objective soft.
+
+        WHY A BOOLEAN "WORKED THIS PERIOD" AND NOT A DAY COUNT.
+        `consecutive_category_periods` is itself a period-level streak count
+        (see the field's own comment in types.ts): whether THIS period
+        extends it is a yes/no question, so the charge is per employee per
+        category, not per day.
+
+        Only employees whose streak already meets or exceeds the threshold
+        are considered — for everyone else this period cannot yet be a
+        violation, and building a variable for them would be pure overhead.
+        """
+        # 2, matching constraintValidator.ts's DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS —
+        # this file has no module-level constants for the other configurable
+        # thresholds either (weekend_days, night_window), so the default lives
+        # inline here the same way.
+        threshold = self.constraints_config.get('max_consecutive_category_periods', 2)
+        categories = (
+            ('weekend', lambda sh: self._is_weekend(sh['date'])),
+            ('night', self._is_night),
+        )
+
+        terms, bound = [], 0
+        for emp_id in self.employees:
+            streaks = self.employees[emp_id].get('consecutive_category_periods', {}) or {}
+            for key, matches in categories:
+                if streaks.get(key, 0) < threshold:
+                    continue
+
+                # Already worked on another schedule this period — a fixed
+                # fact, not a decision, so the charge applies unconditionally.
+                if any(matches(ext) for ext in self.external_by_employee.get(emp_id, [])):
+                    terms.append(-scale)
+                    bound += scale
+                    continue
+
+                day_vars = [
+                    v for shift_id, shift in self.shifts.items()
+                    if matches(shift) and (v := self._var(emp_id, shift_id)) is not None
+                ]
+                if not day_vars:
+                    continue  # cannot work the category this period — nothing to charge
+
+                worked = self.model.NewBoolVar(f'rotation_e{emp_id}_{key}')
+                self.model.AddMaxEquality(worked, day_vars)
+                terms.append(-worked * scale)
+                bound += scale
+
+        return terms, bound
+
     def _labour_cost_terms(self) -> Tuple[List, int]:
         """
         LOWEST: total labour cost, in cents.
@@ -1154,7 +1221,7 @@ class ScheduleOptimizerORTools:
         MEDIUM      coverage shortfall below min_staff.
         DISRUPTION  keeping published assignments.
         SOFT        preferences, workload fairness, surplus-staffing charge,
-                    rest blocks, weekend/night equity.
+                    rest blocks, weekend/night equity, category rotation.
         COST        total labour cost — chosen only between solutions already
                     tied on everything above. See `_labour_cost_terms` for why
                     this is a separate, lowest level rather than a SOFT weight:
@@ -1212,6 +1279,10 @@ class ScheduleOptimizerORTools:
             self._category_balance_terms(
                 'night', self._is_night, fairness_scale, 'night'
             ),
+            # Same weight again: a rotation streak is a third equity-adjacent
+            # goal, distinct from the two above — see _rotation_terms for why
+            # it is not a restatement of the spread they minimise.
+            self._rotation_terms(fairness_scale),
         ):
             soft_terms.extend(terms)
             soft_bound += bound

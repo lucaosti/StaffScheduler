@@ -1007,6 +1007,83 @@ export const nightSpread = (
   assignments: ValidatedAssignment[]
 ): number => spreadOf(nightLoads(problem, assignments));
 
+/** An employee kept on the same shift category for too many periods running. */
+export interface ShiftRotationViolation {
+  employeeId: string;
+  category: 'weekend' | 'night';
+  /** Consecutive PUBLISHED predecessor periods this employee already held the category, before this one. */
+  consecutivePeriods: number;
+  /** `max_consecutive_category_periods` in effect when this was flagged. */
+  threshold: number;
+}
+
+/** How many consecutive periods on a category trip the rotation goal, applied when the problem does not say otherwise. */
+export const DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS = 2;
+
+/**
+ * An employee assigned to a category (weekend/night) this period whose
+ * `consecutive_category_periods[category]` already meets or exceeds the
+ * configured threshold — the same person holding the category again,
+ * without a break, one period too many.
+ *
+ * WHY THIS IS A DIFFERENT PROPERTY FROM `weekendSpread`/`nightSpread`.
+ * Those minimise the TOTAL spread of category days across employees over
+ * the history horizon — they can be perfectly balanced in total while one
+ * person still works nights for three straight periods and another has the
+ * inverse pattern, because a spread measure has no notion of adjacency
+ * between periods. This checks CONSECUTIVE-PERIOD CONCENTRATION on the same
+ * person, independent of the running total: equity asks "is it even
+ * overall", this asks "is the same person on it again, right now".
+ *
+ * WHY SOFT. Made hard, an organization with too few night- or weekend-
+ * qualified staff to always rotate becomes unsolvable — the same reasoning
+ * that keeps coverage, rest blocks and the rest of this family soft. The
+ * existing equity constraint already provides real pressure toward
+ * fairness; this adds temporal-adjacency pressure on top of it without
+ * making an otherwise-legal schedule illegal.
+ *
+ * WHY "AT LEAST ONE DAY THIS PERIOD" AND NOT A COUNT. `consecutive_category_periods`
+ * is itself a period-level count (see its doc comment in types.ts) — whether
+ * a period "counts" toward the streak is a yes/no question per period, not a
+ * days-worked question, so continuing the streak this period only needs one
+ * qualifying day, the same test `AutoScheduleService`'s history walk applies
+ * to each predecessor period.
+ */
+export function shiftRotationViolations(
+  problem: OptimizationProblem,
+  assignments: ValidatedAssignment[]
+): ShiftRotationViolation[] {
+  const threshold =
+    typeof problem.constraints?.max_consecutive_category_periods === 'number'
+      ? problem.constraints.max_consecutive_category_periods
+      : DEFAULT_MAX_CONSECUTIVE_CATEGORY_PERIODS;
+
+  const findings: ShiftRotationViolation[] = [];
+  const categories: Array<{
+    category: 'weekend' | 'night';
+    matches: (shift: ShiftTimes) => boolean;
+  }> = [
+    { category: 'weekend', matches: (s) => isWeekendDate(problem, s.date) },
+    { category: 'night', matches: (s) => isNightShift(problem, s) },
+  ];
+
+  for (const { category, matches } of categories) {
+    // Current period only — carried history already lives in
+    // `consecutive_category_periods`, not in this count.
+    const loads = categoryLoads(problem, assignments, matches);
+    for (const load of loads) {
+      if (load.days === 0) continue;
+      const emp = problem.employees.find((e) => e.id === load.employeeId);
+      const consecutivePeriods = emp?.consecutive_category_periods?.[category] ?? 0;
+      if (consecutivePeriods >= threshold) {
+        findings.push({ employeeId: load.employeeId, category, consecutivePeriods, threshold });
+      }
+    }
+  }
+
+  return findings;
+}
+
 /** A shift short of the qualified people some skill requires. */
 export interface QualifiedStaffShortfall {
   shiftId: string;
