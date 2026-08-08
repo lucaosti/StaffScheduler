@@ -17,7 +17,9 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import ThemeToggle from '../ThemeToggle';
+import LocaleSwitcher from '../LocaleSwitcher';
 import * as notificationService from '../../services/notificationService';
 import type { AppNotification } from '../../services/notificationService';
 import { isInternalPath } from '../../utils/internalPath';
@@ -42,6 +44,7 @@ const RECENT_LIMIT = 5;
  * @returns JSX element containing the header navigation
  */
 const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
   const [recent, setRecent] = useState<AppNotification[]>([]);
@@ -112,9 +115,10 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
         <i className="bi bi-list"></i>
       </button>
 
-      <h5 className="mb-0 text-body">Staff Scheduler</h5>
+      <h5 className="mb-0 text-body">{t('app.title')}</h5>
 
       <div className="ms-auto d-flex align-items-center gap-2">
+        <LocaleSwitcher />
         <ThemeToggle />
         <div className="dropdown">
           <button
