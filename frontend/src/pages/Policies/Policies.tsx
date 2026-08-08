@@ -13,6 +13,7 @@
 
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import * as policyService from '../../services/policyService';
 import type { Policy, ApprovalMatrixRow, PolicyScope } from '../../services/policyService';
@@ -24,6 +25,24 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 
 type Tab = 'policies' | 'exceptions' | 'matrix';
 
+// Kept as identifiers (not JSX literals) so the option `value`s stay the raw
+// enum the backend expects while the visible label goes through `t()`.
+const MATRIX_SCOPES: ApprovalMatrixRow['approverScope'][] = [
+  'policy_owner',
+  'unit_manager',
+  'unit_manager_chain',
+  'company_role',
+  'company_user',
+];
+
+const MATRIX_SCOPE_LABEL_KEYS: Record<ApprovalMatrixRow['approverScope'], string> = {
+  policy_owner: 'policies.matrix.scopes.policyOwner',
+  unit_manager: 'policies.matrix.scopes.unitManager',
+  unit_manager_chain: 'policies.matrix.scopes.unitManagerChain',
+  company_role: 'policies.matrix.scopes.companyRole',
+  company_user: 'policies.matrix.scopes.companyUser',
+};
+
 interface ConfirmState {
   show: boolean;
   title: string;
@@ -32,6 +51,7 @@ interface ConfirmState {
 }
 
 const Policies: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const isAdmin = user?.permissions?.includes('policy.manage');
   const isManager =
@@ -82,13 +102,16 @@ const Policies: React.FC = () => {
   const handleApplyPreset = () => {
     if (!selectedPreset) return;
     const preset = presets.find((p) => p.key === selectedPreset);
+    const ruleCount = preset?.rules.length;
     setConfirm({
       show: true,
-      title: 'Load compliance preset',
-      message:
-        `Load "${preset?.name ?? selectedPreset}"? This creates or updates ` +
-        `${preset?.rules.length ?? 'its'} global polic${preset?.rules.length === 1 ? 'y' : 'ies'} — ` +
-        'each one stays fully editable afterward, like any other policy.',
+      title: t('policies.preset.title'),
+      message: t('policies.preset.confirmMessage', {
+        name: preset?.name ?? selectedPreset,
+        count: ruleCount !== undefined ? String(ruleCount) : t('policies.preset.countFallback'),
+        policyWord:
+          ruleCount === 1 ? t('policies.preset.policySingular') : t('policies.preset.policyPlural'),
+      }),
       onConfirm: async () => {
         setConfirm((prev) => ({ ...prev, show: false }));
         setBusy(true);
@@ -156,8 +179,8 @@ const Policies: React.FC = () => {
   const handleDeletePolicy = (id: number) => {
     setConfirm({
       show: true,
-      title: 'Delete policy',
-      message: 'Are you sure you want to delete this policy?',
+      title: t('policies.deletePolicy.title'),
+      message: t('policies.deletePolicy.message'),
       onConfirm: async () => {
         setConfirm((prev) => ({ ...prev, show: false }));
         setBusy(true);
@@ -264,14 +287,14 @@ const Policies: React.FC = () => {
   if (loading) {
     return (
       <div className="container-fluid py-3">
-        <LoadingSpinner message="Loading policies..." />
+        <LoadingSpinner message={t('policies.loading')} />
       </div>
     );
   }
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h3 mb-3">Policies & exceptions</h1>
+      <h1 className="h3 mb-3">{t('policies.title')}</h1>
 
       {error && (
         <div className="alert alert-danger alert-dismissible" role="alert">
@@ -279,7 +302,7 @@ const Policies: React.FC = () => {
           <button
             type="button"
             className="btn-close"
-            aria-label="Close"
+            aria-label={t('common.close')}
             onClick={() => setError(null)}
           />
         </div>
@@ -291,7 +314,7 @@ const Policies: React.FC = () => {
             className={`nav-link ${activeTab === 'policies' ? 'active' : ''}`}
             onClick={() => setActiveTab('policies')}
           >
-            Policies
+            {t('policies.tabs.policies')}
           </button>
         </li>
         <li className="nav-item">
@@ -299,7 +322,7 @@ const Policies: React.FC = () => {
             className={`nav-link ${activeTab === 'exceptions' ? 'active' : ''}`}
             onClick={() => setActiveTab('exceptions')}
           >
-            Exceptions
+            {t('policies.tabs.exceptions')}
           </button>
         </li>
         {isAdmin && (
@@ -308,7 +331,7 @@ const Policies: React.FC = () => {
               className={`nav-link ${activeTab === 'matrix' ? 'active' : ''}`}
               onClick={() => setActiveTab('matrix')}
             >
-              Approval matrix
+              {t('policies.tabs.matrix')}
             </button>
           </li>
         )}
@@ -318,7 +341,7 @@ const Policies: React.FC = () => {
         <div className="card mb-3">
           <div className="card-body d-flex align-items-center gap-2">
             <label className="form-label mb-0 me-2" htmlFor="compliance-preset-select">
-              Load compliance preset
+              {t('policies.preset.title')}
             </label>
             <select
               id="compliance-preset-select"
@@ -327,7 +350,7 @@ const Policies: React.FC = () => {
               onChange={(e) => setSelectedPreset(e.target.value)}
               disabled={busy}
             >
-              <option value="">Choose a preset…</option>
+              <option value="">{t('policies.preset.choose')}</option>
               {presets.map((p) => (
                 <option key={p.key} value={p.key}>{p.name}</option>
               ))}
@@ -338,7 +361,7 @@ const Policies: React.FC = () => {
               disabled={busy || !selectedPreset}
               onClick={handleApplyPreset}
             >
-              Load
+              {t('policies.preset.load')}
             </button>
             {selectedPreset && (
               <span className="text-muted small">
@@ -384,17 +407,16 @@ const Policies: React.FC = () => {
         <div className="card">
           <div className="card-body">
             <p className="text-muted">
-              Each row defines who must approve a given change type. Auto-approve fires when the
-              actor is the resolved approver and the flag is on.
+              {t('policies.matrix.description')}
             </p>
             <table className="table">
               <thead>
                 <tr>
-                  <th scope="col">Change type</th>
-                  <th scope="col">Approver scope</th>
-                  <th scope="col">Role</th>
-                  <th scope="col">User</th>
-                  <th scope="col">Auto approve</th>
+                  <th scope="col">{t('policies.matrix.columns.changeType')}</th>
+                  <th scope="col">{t('policies.matrix.columns.approverScope')}</th>
+                  <th scope="col">{t('policies.matrix.columns.role')}</th>
+                  <th scope="col">{t('policies.matrix.columns.user')}</th>
+                  <th scope="col">{t('policies.matrix.columns.autoApprove')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -412,11 +434,11 @@ const Policies: React.FC = () => {
                         }
                         disabled={busy}
                       >
-                        <option value="policy_owner">policy_owner</option>
-                        <option value="unit_manager">unit_manager</option>
-                        <option value="unit_manager_chain">unit_manager_chain</option>
-                        <option value="company_role">company_role</option>
-                        <option value="company_user">company_user</option>
+                        {MATRIX_SCOPES.map((scope) => (
+                          <option key={scope} value={scope}>
+                            {t(MATRIX_SCOPE_LABEL_KEYS[scope])}
+                          </option>
+                        ))}
                       </select>
                     </td>
                     <td>
@@ -430,7 +452,7 @@ const Policies: React.FC = () => {
                         }
                         disabled={busy}
                       >
-                        <option value="">-</option>
+                        <option value="">{t('common.emptyValue')}</option>
                         {roles.map((r) => (
                           <option key={r.id} value={r.id}>{r.name}</option>
                         ))}
