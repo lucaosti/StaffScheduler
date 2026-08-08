@@ -56,6 +56,10 @@ interface Fixtures {
   predecessor?: Rows;
   external?: Rows;
   proposal?: Rows;
+  /** Answers the rotation walk's re-fetch of each predecessor schedule row. */
+  rotationPredecessorRow?: Rows;
+  /** Answers the rotation walk's per-predecessor-period worked-shifts read. */
+  rotationWorked?: Rows;
 }
 
 /**
@@ -80,6 +84,8 @@ const MATCHERS: Array<[keyof Fixtures, string]> = [
   ['history', 'INTERVAL 90 DAY'],
   ['external', "sc.status = 'published' OR sc.id = ?"],
   ['proposal', 'schedule_replan_proposals'],
+  ['rotationPredecessorRow', 'FROM schedules AS sc WHERE sc.id = ?'],
+  ['rotationWorked', 'rotation streak: shifts worked in this predecessor period'],
 ];
 
 const SCHEDULE_ROW = {
@@ -524,6 +530,134 @@ describe('AutoScheduleService.generate', () => {
       // The id list is interpolated, so an empty one would produce `IN ()` —
       // a syntax error rather than an empty result.
       expect(wasQueried(execute, 'history')).toBe(false);
+    });
+  });
+
+  /**
+   * Consecutive-period streak: a different property from carried equity
+   * history above. Equity carries a cumulative deviation over a fixed date
+   * window; this walks the predecessor CHAIN one period at a time and counts
+   * how many ran consecutively, stopping at the first period that didn't
+   * qualify, at an unpublished predecessor, or at the lookback cap.
+   */
+  describe('rotation history', () => {
+    const twoEmployees = { employees: [EMPLOYEE_ROW, { ...EMPLOYEE_ROW, id: 2 }] };
+
+    it('does not walk the chain at all when there is no predecessor', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, twoEmployees);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(wasQueried(execute, 'rotationPredecessorRow')).toBe(false);
+      const problem = lastProblemGiven();
+      expect(problem.employees[0].consecutive_category_periods).toEqual({ weekend: 0, night: 0 });
+    });
+
+    it('does not query the walk at all when there are no candidates', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { employees: [] });
+      conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // Same reasoning as the equity horizon: an empty id list would produce
+      // `IN ()`, a syntax error rather than an empty result.
+      expect(wasQueried(execute, 'rotationPredecessorRow')).toBe(false);
+    });
+
+    it('stops the streak the first period the employee did not qualify', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        predecessor: [{ id: 77 }],
+        rotationPredecessorRow: [
+          { id: 77, department_id: 3, status: 'published', previous_schedule_id: null },
+        ],
+        rotationWorked: [], // nobody worked either category in the predecessor period
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      expect(problem.employees[0].consecutive_category_periods).toEqual({ weekend: 0, night: 0 });
+      // The streak broke on the very first period walked, so the walk stops
+      // there rather than paying for periods that can only be discarded.
+      expect(
+        execute.mock.calls.filter((c) =>
+          String(c[0]).includes('rotation streak: shifts worked in this predecessor period')
+        ).length
+      ).toBe(1);
+    });
+
+    it('does not extend a streak past an unpublished predecessor', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        predecessor: [{ id: 77 }],
+        rotationPredecessorRow: [
+          { id: 77, department_id: 3, status: 'draft', previous_schedule_id: null },
+        ],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // A draft is not what happened; only published periods extend a streak.
+      expect(wasQueried(execute, 'rotationWorked')).toBe(false);
+      expect(lastProblemGiven().employees[0].consecutive_category_periods).toEqual({
+        weekend: 0,
+        night: 0,
+      });
+    });
+
+    it('counts weekend and night streaks independently', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        predecessor: [{ id: 77 }],
+        rotationPredecessorRow: [
+          { id: 77, department_id: 3, status: 'published', previous_schedule_id: null },
+        ],
+        // A Wednesday night shift: night qualifies, weekend does not.
+        rotationWorked: [{ user_id: 1, date: '2026-04-08', start_time: '22:00', end_time: '06:00' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      // Employee 1's weekend streak breaks immediately (0); the night streak
+      // keeps qualifying every period the mock repeats it for, so it climbs to
+      // the lookback cap rather than running unbounded.
+      expect(problem.employees[0].consecutive_category_periods.weekend).toBe(0);
+      expect(problem.employees[0].consecutive_category_periods.night).toBe(6);
+      expect(problem.employees[1].consecutive_category_periods).toEqual({ weekend: 0, night: 0 });
+    });
+
+    it('stops walking at the lookback cap rather than the department\'s full history', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        ...twoEmployees,
+        predecessor: [{ id: 77 }],
+        rotationPredecessorRow: [
+          { id: 77, department_id: 3, status: 'published', previous_schedule_id: null },
+        ],
+        // A qualifying weekend day, repeated identically for every period the
+        // (mocked) chain resolves to.
+        rotationWorked: [{ user_id: 1, date: '2026-04-04', start_time: '08:00', end_time: '16:00' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(lastProblemGiven().employees[0].consecutive_category_periods.weekend).toBe(6);
+      // Exactly the cap's worth of predecessor reads, not one more.
+      expect(
+        execute.mock.calls.filter((c) => String(c[0]).includes('FROM schedules AS sc WHERE sc.id = ?')).length
+      ).toBe(6);
     });
   });
 
