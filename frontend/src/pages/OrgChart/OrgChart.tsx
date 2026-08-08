@@ -9,6 +9,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { OrgUnitNode } from '../../services/orgService';
 import {
@@ -103,14 +104,19 @@ interface OrgNodeProps {
 }
 
 const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlighted, onSelect, onToggle }) => {
+  const { t } = useTranslation();
   const { node, x, y } = item;
   const midX = x + NODE_W / 2;
   const midY = y + NODE_H / 2;
+  const nodeAriaLabel =
+    node.name +
+    (highlighted ? t('orgChart.node.inYourChain') : '') +
+    (hasChildren ? (collapsed ? t('orgChart.node.collapsedSuffix') : t('orgChart.node.expandedSuffix')) : '');
 
   return (
     <g
       role="button"
-      aria-label={`${node.name}${highlighted ? ', part of your reporting chain' : ''}${hasChildren ? (collapsed ? ', collapsed' : ', expanded') : ''}`}
+      aria-label={nodeAriaLabel}
       tabIndex={0}
       style={{ cursor: 'pointer' }}
       onClick={onSelect}
@@ -137,7 +143,7 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlig
         dominantBaseline="middle"
         style={{ fontSize: 13, fontWeight: 600, fill: 'var(--bs-body-color, #212529)' }}
       >
-        {node.name.length > 20 ? node.name.slice(0, 18) + '…' : node.name}
+        {node.name.length > 20 ? node.name.slice(0, 18) + t('common.ellipsis') : node.name}
       </text>
       {node.description && (
         <text
@@ -147,13 +153,13 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlig
           dominantBaseline="middle"
           style={{ fontSize: 10, fill: 'var(--bs-secondary-color, #6c757d)' }}
         >
-          {node.description.length > 26 ? node.description.slice(0, 24) + '…' : node.description}
+          {node.description.length > 26 ? node.description.slice(0, 24) + t('common.ellipsis') : node.description}
         </text>
       )}
       {hasChildren && (
         <g
           role="button"
-          aria-label={collapsed ? `Expand ${node.name}` : `Collapse ${node.name}`}
+          aria-label={collapsed ? t('orgChart.expandNode', { name: node.name }) : t('orgChart.collapseNode', { name: node.name })}
           tabIndex={0}
           onClick={(e) => { e.stopPropagation(); onToggle(); }}
           onKeyDown={(e) => {
@@ -169,7 +175,7 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlig
             dominantBaseline="middle"
             style={{ fontSize: 14, fill: 'var(--bs-primary, #0d6efd)', fontFamily: 'monospace' }}
           >
-            {collapsed ? '+' : '−'}
+            {collapsed ? t('orgChart.expandSymbol') : t('orgChart.collapseSymbol')}
           </text>
         </g>
       )}
@@ -178,6 +184,7 @@ const OrgNode: React.FC<OrgNodeProps> = ({ item, collapsed, hasChildren, highlig
 };
 
 const OrgChart: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
   const [selectedNode, setSelectedNode] = useState<OrgUnitNode | null>(null);
@@ -191,12 +198,12 @@ const OrgChart: React.FC = () => {
 
   const roots = treeQuery.data ?? [];
   const loading = treeQuery.isLoading;
-  const error = treeQuery.isError ? (treeQuery.error as Error).message ?? 'Failed to load org chart.' : null;
+  const error = treeQuery.isError ? (treeQuery.error as Error).message ?? t('orgChart.loadFailed') : null;
   const myChain = useMemo(() => chainQuery.data ?? [], [chainQuery.data]);
   const members = membersQuery.data ?? [];
   const membersLoading = selectedNode !== null && membersQuery.isLoading;
   const membersError = membersQuery.isError
-    ? (membersQuery.error as Error).message ?? 'Failed to load members.'
+    ? (membersQuery.error as Error).message ?? t('orgChart.membersLoadFailed')
     : null;
 
   // Units the current user belongs to or reports up through — used to
@@ -234,17 +241,17 @@ const OrgChart: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Organisation Chart</h1>
-            <p className="text-muted mb-0 small">Browse every office top-down; click one to see who's in it</p>
+            <h1 className="h3 mb-0">{t('orgChart.title')}</h1>
+            <p className="text-muted mb-0 small">{t('orgChart.subtitle')}</p>
           </div>
           <div className="d-flex gap-2">
-            <button className="btn btn-sm btn-outline-secondary" onClick={expandAll} aria-label="Expand all nodes">
-              <i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>Expand all
+            <button className="btn btn-sm btn-outline-secondary" onClick={expandAll} aria-label={t('orgChart.expandAllAriaLabel')}>
+              <i className="bi bi-arrows-expand me-1" aria-hidden="true"></i>{t('orgChart.expandAll')}
             </button>
-            <button className="btn btn-sm btn-outline-secondary" onClick={collapseAll} aria-label="Collapse all nodes">
-              <i className="bi bi-arrows-collapse me-1" aria-hidden="true"></i>Collapse all
+            <button className="btn btn-sm btn-outline-secondary" onClick={collapseAll} aria-label={t('orgChart.collapseAllAriaLabel')}>
+              <i className="bi bi-arrows-collapse me-1" aria-hidden="true"></i>{t('orgChart.collapseAll')}
             </button>
-            <button className="btn btn-sm btn-outline-primary" onClick={() => treeQuery.refetch()} aria-label="Refresh org chart">
+            <button className="btn btn-sm btn-outline-primary" onClick={() => treeQuery.refetch()} aria-label={t('orgChart.refreshAriaLabel')}>
               <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
             </button>
           </div>
@@ -261,16 +268,21 @@ const OrgChart: React.FC = () => {
         <div className="card mb-3">
           <div className="card-body py-2">
             <div className="d-flex align-items-center flex-wrap gap-2">
-              <span className="text-muted small fw-semibold text-uppercase">Your reporting chain</span>
+              <span className="text-muted small fw-semibold text-uppercase">{t('orgChart.yourReportingChain')}</span>
               {myChain.map((link, i) => (
                 <React.Fragment key={link.unitId}>
                   {i > 0 && <i className="bi bi-chevron-right text-muted small" aria-hidden="true"></i>}
                   <span className="small">
                     <span className="fw-semibold">{link.unitName}</span>
                     {link.manager ? (
-                      <span className="text-muted"> — {link.manager.firstName} {link.manager.lastName}</span>
+                      <span className="text-muted">
+                        {t('orgChart.managerName', {
+                          firstName: link.manager.firstName,
+                          lastName: link.manager.lastName,
+                        })}
+                      </span>
                     ) : (
-                      <span className="text-muted fst-italic"> — no manager assigned</span>
+                      <span className="text-muted fst-italic">{t('orgChart.noManagerAssignedWithDash')}</span>
                     )}
                   </span>
                 </React.Fragment>
@@ -284,19 +296,19 @@ const OrgChart: React.FC = () => {
         <div className="card-body p-2">
           {loading ? (
             <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label="Loading org chart"></span>
-              <span>Loading…</span>
+              <span className="spinner-border me-2" role="status" aria-label={t('orgChart.loadingAriaLabel')}></span>
+              <span>{t('common.loading')}</span>
             </div>
           ) : roots.length === 0 ? (
             <div className="text-center text-muted py-5">
               <i className="bi bi-diagram-3 fs-3 d-block mb-2" aria-hidden="true"></i>
-              No org units found.
+              {t('orgChart.noOrgUnits')}
             </div>
           ) : (
             <div style={{ overflowX: 'auto', overflowY: 'auto' }}>
               <svg
                 role="img"
-                aria-label="Organisation chart"
+                aria-label={t('orgChart.title')}
                 width={svgW}
                 height={svgH}
                 viewBox={`0 0 ${svgW} ${svgH}`}
@@ -333,17 +345,17 @@ const OrgChart: React.FC = () => {
       </div>
 
       {selectedNode && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={`${selectedNode.name} details`}>
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('orgChart.detailsAriaLabel', { name: selectedNode.name })}>
           <div className="modal-dialog modal-dialog-scrollable">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">
                   {selectedNode.name}
                   {myUnitIds.has(selectedNode.id) && (
-                    <span className="badge bg-primary ms-2">You report here</span>
+                    <span className="badge bg-primary ms-2">{t('orgChart.youReportHere')}</span>
                   )}
                 </h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setSelectedNode(null)}></button>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setSelectedNode(null)}></button>
               </div>
               <div className="modal-body">
                 {selectedNode.description && (
@@ -354,10 +366,10 @@ const OrgChart: React.FC = () => {
                 )}
                 {membersLoading ? (
                   <div className="d-flex align-items-center justify-content-center py-4">
-                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading members"></span>Loading…
+                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-label={t('orgChart.loadingMembersAriaLabel')}></span>{t('common.loading')}
                   </div>
                 ) : members.length === 0 ? (
-                  <p className="text-muted small mb-0">No members in this office.</p>
+                  <p className="text-muted small mb-0">{t('orgChart.noMembers')}</p>
                 ) : (
                   <ul className="list-group list-group-flush">
                     {members.map((m) => (
@@ -366,12 +378,12 @@ const OrgChart: React.FC = () => {
                           <div className="fw-semibold">
                             {m.firstName} {m.lastName}
                             {user && Number(user.id) === m.userId && (
-                              <span className="badge bg-secondary ms-2">You</span>
+                              <span className="badge bg-secondary ms-2">{t('orgChart.you')}</span>
                             )}
                           </div>
                           <div className="text-muted small">{m.email}{m.position ? ` · ${m.position}` : ''}</div>
                         </div>
-                        {m.isPrimary && <span className="badge bg-success">Primary</span>}
+                        {m.isPrimary && <span className="badge bg-success">{t('orgChart.primary')}</span>}
                       </li>
                     ))}
                   </ul>
