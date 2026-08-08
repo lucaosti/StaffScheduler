@@ -18,6 +18,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useTimeOffQuery, useTimeOffMutations } from '../../hooks/useTimeOff';
@@ -37,6 +38,7 @@ const TYPES = ['vacation', 'sick', 'personal', 'other'] as const;
 
 
 const TimeOff: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const canApprove = (user?.permissions ?? []).includes('timeoff.approve');
@@ -63,12 +65,12 @@ const TimeOff: React.FC = () => {
   };
 
   const period = (r: TimeOffRequest): string =>
-    r.startDate === r.endDate ? r.startDate : `${r.startDate} → ${r.endDate}`;
+    r.startDate === r.endDate ? r.startDate : t('timeOff.periodRange', { start: r.startDate, end: r.endDate });
 
   return (
     <div className="container-fluid py-3">
       <div className="d-flex justify-content-between align-items-center mb-3">
-        <h1 className="h4 mb-0">Time off</h1>
+        <h1 className="h4 mb-0">{t('timeOff.title')}</h1>
         <ExportCsvLink path="/time-off/export" disabled={(mine.data?.length ?? 0) === 0} />
       </div>
 
@@ -80,7 +82,7 @@ const TimeOff: React.FC = () => {
 
       <form className="row g-2 align-items-end mb-4" onSubmit={submit}>
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeoff-from">From</label>
+          <label className="form-label" htmlFor="timeoff-from">{t('timeOff.from')}</label>
           <input
             id="timeoff-from"
             type="date"
@@ -91,7 +93,7 @@ const TimeOff: React.FC = () => {
           />
         </div>
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeoff-to">To</label>
+          <label className="form-label" htmlFor="timeoff-to">{t('timeOff.to')}</label>
           <input
             id="timeoff-to"
             type="date"
@@ -102,20 +104,20 @@ const TimeOff: React.FC = () => {
           />
         </div>
         <div className="col-auto">
-          <label className="form-label" htmlFor="timeoff-type">Type</label>
+          <label className="form-label" htmlFor="timeoff-type">{t('timeOff.type')}</label>
           <select
             id="timeoff-type"
             className="form-select"
             value={type}
             onChange={(e) => setType(e.target.value)}
           >
-            {TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {TYPES.map((ty) => (
+              <option key={ty} value={ty}>{t(`timeOff.types.${ty}`)}</option>
             ))}
           </select>
         </div>
         <div className="col-md-4">
-          <label className="form-label" htmlFor="timeoff-reason">Reason (optional)</label>
+          <label className="form-label" htmlFor="timeoff-reason">{t('timeOff.reasonOptional')}</label>
           <input
             id="timeoff-reason"
             className="form-control"
@@ -125,28 +127,28 @@ const TimeOff: React.FC = () => {
         </div>
         <div className="col-auto">
           <button type="submit" className="btn btn-primary" disabled={request.isPending}>
-            Request
+            {t('timeOff.request')}
           </button>
         </div>
       </form>
 
-      <h2 className="h6">My requests</h2>
+      <h2 className="h6">{t('timeOff.myRequests')}</h2>
       <QueryState
         isLoading={mine.isLoading}
         isError={mine.isError}
         error={mine.error}
         onRetry={mine.refetch}
         isEmpty={(mine.data?.length ?? 0) === 0}
-        loadingMessage="Loading your requests…"
-        empty={<p className="text-muted">You have no time-off requests.</p>}
+        loadingMessage={t('timeOff.loadingMine')}
+        empty={<p className="text-muted">{t('timeOff.emptyMine')}</p>}
       >
         <table className="table table-sm align-middle mb-4">
           <thead>
             <tr>
-              <th>Period</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>In the schedule</th>
+              <th>{t('timeOff.columns.period')}</th>
+              <th>{t('timeOff.columns.type')}</th>
+              <th>{t('timeOff.columns.status')}</th>
+              <th>{t('timeOff.columns.inSchedule')}</th>
               <th />
             </tr>
           </thead>
@@ -154,10 +156,10 @@ const TimeOff: React.FC = () => {
             {(mine.data ?? []).map((r) => (
               <tr key={r.id}>
                 <td>{period(r)}</td>
-                <td>{r.type}</td>
+                <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
                 <td>
                   <span className={`badge ${STATUS_BADGE[r.status] ?? 'bg-secondary'}`}>
-                    {r.status}
+                    {t(`timeOff.status.${r.status}`, r.status)}
                   </span>
                 </td>
                 <td>
@@ -165,11 +167,11 @@ const TimeOff: React.FC = () => {
                       unavailability row; until it exists, the optimizer has
                       never been told. */}
                   {r.status !== 'approved' ? (
-                    <span className="text-muted">—</span>
+                    <span className="text-muted">{t('common.emptyValue')}</span>
                   ) : r.unavailabilityId ? (
-                    <span className="text-success">Recorded</span>
+                    <span className="text-success">{t('timeOff.recorded')}</span>
                   ) : (
-                    <span className="text-warning">Not yet recorded</span>
+                    <span className="text-warning">{t('timeOff.notYetRecorded')}</span>
                   )}
                 </td>
                 <td className="text-end">
@@ -180,7 +182,7 @@ const TimeOff: React.FC = () => {
                       onClick={() => act(cancel.mutateAsync(r.id))}
                       disabled={cancel.isPending}
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   )}
                 </td>
@@ -192,23 +194,23 @@ const TimeOff: React.FC = () => {
 
       {canApprove && (
         <>
-          <h2 className="h6">Awaiting a decision</h2>
+          <h2 className="h6">{t('timeOff.awaitingDecision')}</h2>
           <QueryState
             isLoading={queue.isLoading}
             isError={queue.isError}
             error={queue.error}
             onRetry={queue.refetch}
             isEmpty={(queue.data?.length ?? 0) === 0}
-            loadingMessage="Loading the queue…"
-            empty={<p className="text-muted">Nothing is waiting for a decision.</p>}
+            loadingMessage={t('timeOff.loadingQueue')}
+            empty={<p className="text-muted">{t('timeOff.emptyQueue')}</p>}
           >
             <table className="table table-sm align-middle">
               <thead>
                 <tr>
-                  <th>Person</th>
-                  <th>Period</th>
-                  <th>Type</th>
-                  <th>Reason</th>
+                  <th>{t('timeOff.columns.person')}</th>
+                  <th>{t('timeOff.columns.period')}</th>
+                  <th>{t('timeOff.columns.type')}</th>
+                  <th>{t('timeOff.columns.reason')}</th>
                   <th />
                 </tr>
               </thead>
@@ -217,8 +219,8 @@ const TimeOff: React.FC = () => {
                   <tr key={r.id}>
                     <td>{r.userId}</td>
                     <td>{period(r)}</td>
-                    <td>{r.type}</td>
-                    <td className="text-muted">{r.reason ?? '—'}</td>
+                    <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
+                    <td className="text-muted">{r.reason ?? t('common.emptyValue')}</td>
                     <td className="text-end">
                       <button
                         type="button"
@@ -226,7 +228,7 @@ const TimeOff: React.FC = () => {
                         onClick={() => act(approve.mutateAsync({ id: r.id }))}
                         disabled={approve.isPending}
                       >
-                        Approve
+                        {t('timeOff.approve')}
                       </button>
                       <button
                         type="button"
@@ -234,7 +236,7 @@ const TimeOff: React.FC = () => {
                         onClick={() => act(reject.mutateAsync({ id: r.id }))}
                         disabled={reject.isPending}
                       >
-                        Reject
+                        {t('timeOff.reject')}
                       </button>
                     </td>
                   </tr>

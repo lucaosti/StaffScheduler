@@ -20,6 +20,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useMyAssignmentsQuery, useAssignmentMutations } from '../../hooks/useAssignments';
@@ -48,6 +49,7 @@ const formatDate = (value?: string | Date | null): string => {
 
 
 const MyAssignments: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
 
@@ -60,7 +62,7 @@ const MyAssignments: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">My shifts</h1>
+      <h1 className="h4 mb-3">{t('myAssignments.title')}</h1>
 
       {message && (
         <div className="alert alert-warning" role="alert">
@@ -74,16 +76,16 @@ const MyAssignments: React.FC = () => {
         error={assignments.error}
         onRetry={assignments.refetch}
         isEmpty={(assignments.data?.length ?? 0) === 0}
-        loadingMessage="Loading your shifts…"
-        empty={<p className="text-muted">You have no shifts assigned.</p>}
+        loadingMessage={t('myAssignments.loading')}
+        empty={<p className="text-muted">{t('myAssignments.empty')}</p>}
       >
         <table className="table table-sm align-middle">
           <thead>
             <tr>
-              <th>Date</th>
-              <th>Time</th>
-              <th>Department</th>
-              <th>Status</th>
+              <th>{t('myAssignments.columns.date')}</th>
+              <th>{t('myAssignments.columns.time')}</th>
+              <th>{t('myAssignments.columns.department')}</th>
+              <th>{t('myAssignments.columns.status')}</th>
               <th />
             </tr>
           </thead>
@@ -92,12 +94,12 @@ const MyAssignments: React.FC = () => {
               <tr key={String(assignment.id)}>
                 <td>{formatDate(assignment.shiftDate)}</td>
                 <td>
-                  {shiftTime(assignment.startTime)}–{shiftTime(assignment.endTime)}
+                  {t('common.timeRange', { start: shiftTime(assignment.startTime), end: shiftTime(assignment.endTime) })}
                 </td>
-                <td>{assignment.departmentName ?? '—'}</td>
+                <td>{assignment.departmentName ?? t('common.emptyValue')}</td>
                 <td>
                   <span className={`badge ${STATUS_BADGE[assignment.status] ?? 'bg-secondary'}`}>
-                    {assignment.status}
+                    {t(`assignments.status.${assignment.status}`, assignment.status)}
                   </span>
                 </td>
                 <td className="text-end">
@@ -112,7 +114,7 @@ const MyAssignments: React.FC = () => {
                         onClick={() => act(confirm.mutateAsync(Number(assignment.id)))}
                         disabled={confirm.isPending}
                       >
-                        Confirm
+                        {t('myAssignments.confirm')}
                       </button>
                       <button
                         type="button"
@@ -120,7 +122,7 @@ const MyAssignments: React.FC = () => {
                         onClick={() => act(decline.mutateAsync(Number(assignment.id)))}
                         disabled={decline.isPending}
                       >
-                        Decline
+                        {t('myAssignments.decline')}
                       </button>
                     </>
                   )}
