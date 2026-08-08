@@ -65,6 +65,16 @@ type ID = number | string;
 
 export interface LoginResponse {
   user: User;
+  /**
+   * Present only when the request carried the mobile-client signal
+   * (`X-Client-Type: mobile`) — the Capacitor app's WebView cannot rely on
+   * the httpOnly session cookies the way the web SPA does, so it also
+   * receives the raw token values here to hand to native secure storage.
+   * Absent for every ordinary web request; the cookies remain the sole
+   * mechanism there.
+   */
+  accessToken?: string;
+  refreshToken?: string;
 }
 
 /**

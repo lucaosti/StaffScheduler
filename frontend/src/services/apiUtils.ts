@@ -12,6 +12,7 @@
  */
 
 import { ApiResponse } from '../types';
+import { getCachedAccessToken, isNativePlatform } from './mobileAuthStorage';
 
 // Default to the same-origin relative path, on the canonical /api/v1 prefix
 // (#319 — the legacy unversioned /api now 308-redirects here rather than
@@ -98,9 +99,32 @@ const AUTH_HEADERS: Record<string, string> = {
 
 /**
  * Returns a RequestInit object for authenticated fetch calls.
- * Uses credentials: 'include' so the httpOnly auth cookie is sent automatically.
+ *
+ * `credentials: 'include'` still sends the httpOnly auth cookie whenever the
+ * browser has one — harmless on every platform, and the ONLY mechanism for
+ * the ordinary web SPA, unchanged from before mobile support existed.
+ *
+ * Inside the Capacitor app (`isNativePlatform()`), the cookie jar cannot be
+ * relied on (see `mobileAuthStorage.ts`), so when a token has been loaded
+ * into the in-memory cache — after login/refresh, or at startup once
+ * `loadCachedTokens` resolves — it is also attached as `Authorization:
+ * Bearer`, which `authenticate` middleware already accepts as an alternative
+ * to the cookie. A web request never has a cached token (the cache is only
+ * ever populated on the native platform), so this branch is a no-op there.
+ *
+ * `extraHeaders` merges in call-specific headers on top of the defaults —
+ * currently only used to send `X-Client-Type: mobile` from the auth service
+ * when running inside the Capacitor app, so that opt-in stays a per-call
+ * decision rather than something every request carries.
  */
-export const getAuthHeaders = (): RequestInit => ({
-  credentials: 'include',
-  headers: { ...AUTH_HEADERS },
-});
+export const getAuthHeaders = (extraHeaders?: Record<string, string>): RequestInit => {
+  const bearer = isNativePlatform() ? getCachedAccessToken() : null;
+  return {
+    credentials: 'include',
+    headers: {
+      ...AUTH_HEADERS,
+      ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}),
+      ...extraHeaders,
+    },
+  };
+};

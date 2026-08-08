@@ -2,8 +2,13 @@
  * Authentication Context Provider
  *
  * Manages application-wide authentication state using React Context API.
- * JWT tokens are stored exclusively in httpOnly cookies set by the server;
- * no token is persisted in localStorage or sessionStorage.
+ * On the web platform, JWTs are stored exclusively in httpOnly cookies set by
+ * the server; no token is persisted in localStorage or sessionStorage. Inside
+ * the Capacitor mobile app the cookie jar cannot be relied on, so tokens are
+ * additionally cached from native secure storage at startup — see
+ * `services/mobileAuthStorage.ts` for why and `services/authService.ts` for
+ * where they are read from and written to. Neither exists, and neither runs,
+ * on the web platform.
  *
  * @author Luca Ostinelli
  */
@@ -11,6 +16,7 @@
 import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, ReactNode } from 'react';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
+import { isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -99,6 +105,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     // falls back to a silent refresh (which rotates the refresh cookie and
     // mints a new access token) before giving up.
     const initializeAuth = async () => {
+      // Native only: populate the in-memory token cache from secure storage
+      // before the first API call, so `getAuthHeaders` has an access token to
+      // attach. A no-op on the web platform (isNativePlatform() is false).
+      if (isNativePlatform()) await loadCachedTokens();
       try {
         const response = await authService.verifyToken();
         if (response.success && response.data) {
