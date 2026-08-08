@@ -61,7 +61,7 @@ const MyAssignments: React.FC = () => {
 
 
   return (
-    <div className="container-fluid py-3">
+    <div className="container-fluid py-3 myassignments-page">
       <h1 className="h4 mb-3">{t('myAssignments.title')}</h1>
 
       {message && (
@@ -79,58 +79,60 @@ const MyAssignments: React.FC = () => {
         loadingMessage={t('myAssignments.loading')}
         empty={<p className="text-muted">{t('myAssignments.empty')}</p>}
       >
-        <table className="table table-sm align-middle">
-          <thead>
-            <tr>
-              <th>{t('myAssignments.columns.date')}</th>
-              <th>{t('myAssignments.columns.time')}</th>
-              <th>{t('myAssignments.columns.department')}</th>
-              <th>{t('myAssignments.columns.status')}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {(assignments.data ?? []).map((assignment: ShiftAssignment) => (
-              <tr key={String(assignment.id)}>
-                <td>{formatDate(assignment.shiftDate)}</td>
-                <td>
-                  {t('common.timeRange', { start: shiftTime(assignment.startTime), end: shiftTime(assignment.endTime) })}
-                </td>
-                <td>{assignment.departmentName ?? t('common.emptyValue')}</td>
-                <td>
-                  <span className={`badge ${STATUS_BADGE[assignment.status] ?? 'bg-secondary'}`}>
-                    {t(`assignments.status.${assignment.status}`, assignment.status)}
-                  </span>
-                </td>
-                <td className="text-end">
-                  {/* Only a pending shift is still a question. Offering the
-                      buttons on a settled one would invite a click the server
-                      refuses. */}
-                  {assignment.status === 'pending' && (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-success me-2"
-                        onClick={() => act(confirm.mutateAsync(Number(assignment.id)))}
-                        disabled={confirm.isPending}
-                      >
-                        {t('myAssignments.confirm')}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => act(decline.mutateAsync(Number(assignment.id)))}
-                        disabled={decline.isPending}
-                      >
-                        {t('myAssignments.decline')}
-                      </button>
-                    </>
-                  )}
-                </td>
+        <div className="table-responsive">
+          <table className="table table-sm align-middle">
+            <thead>
+              <tr>
+                <th>{t('myAssignments.columns.date')}</th>
+                <th>{t('myAssignments.columns.time')}</th>
+                <th>{t('myAssignments.columns.department')}</th>
+                <th>{t('myAssignments.columns.status')}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(assignments.data ?? []).map((assignment: ShiftAssignment) => (
+                <tr key={String(assignment.id)}>
+                  <td>{formatDate(assignment.shiftDate)}</td>
+                  <td>
+                    {t('common.timeRange', { start: shiftTime(assignment.startTime), end: shiftTime(assignment.endTime) })}
+                  </td>
+                  <td>{assignment.departmentName ?? t('common.emptyValue')}</td>
+                  <td>
+                    <span className={`badge ${STATUS_BADGE[assignment.status] ?? 'bg-secondary'}`}>
+                      {t(`assignments.status.${assignment.status}`, assignment.status)}
+                    </span>
+                  </td>
+                  <td className="text-end">
+                    {/* Only a pending shift is still a question. Offering the
+                        buttons on a settled one would invite a click the server
+                        refuses. */}
+                    {assignment.status === 'pending' && (
+                      <div className="d-flex flex-wrap justify-content-end gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-success"
+                          onClick={() => act(confirm.mutateAsync(Number(assignment.id)))}
+                          disabled={confirm.isPending}
+                        >
+                          {t('myAssignments.confirm')}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => act(decline.mutateAsync(Number(assignment.id)))}
+                          disabled={decline.isPending}
+                        >
+                          {t('myAssignments.decline')}
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </QueryState>
     </div>
   );

@@ -23,6 +23,7 @@ import CreateScheduleModal, { type CreateScheduleValues } from '../Schedule/Crea
 import StatsBadge from '../Schedule/StatsBadge';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { toLocalDateString } from '../../utils/format';
+import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 
 /**
  * The engine-provenance subset of an optimization result the UI cares about.
@@ -38,6 +39,11 @@ const Schedule: React.FC = () => {
   // Server state (the four page lists + first-schedule assignments) is owned by
   // one TanStack Query hook; `reload` invalidates it after a mutation. Only
   // genuinely local UI state lives in this component.
+  // A week/month grid with a column per day genuinely cannot be reflowed into
+  // something usable at phone width by CSS alone — the columns themselves
+  // have to go. Below the breakpoint, both views render the same underlying
+  // data as a day-by-day agenda list instead.
+  const isNarrow = useIsNarrowViewport();
   const { query: pageQuery, reload: loadData } = useSchedulePageData();
   const pageData = pageQuery.data;
   // Memoized so the derived arrays keep a stable reference between renders while
@@ -349,17 +355,17 @@ const Schedule: React.FC = () => {
   }
 
   return (
-    <div className="container-fluid py-4">
+    <div className="container-fluid py-4 schedule-page">
       <div className="row mb-4">
         <div className="col">
-          <div className="d-flex justify-content-between align-items-center">
+          <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
             <div>
               <h1 className="h3 mb-0">Schedule Management</h1>
               <p className="text-muted mb-0">
                 Create and manage work schedules and run optimization on demand.
               </p>
             </div>
-            <div className="d-flex gap-2">
+            <div className="d-flex flex-wrap gap-2">
               <button
                 className="btn btn-primary"
                 type="button"
@@ -410,7 +416,7 @@ const Schedule: React.FC = () => {
 
       <div className="row mb-4">
         <div className="col-md-6">
-          <div className="d-flex align-items-center gap-3">
+          <div className="d-flex flex-wrap align-items-center gap-3">
             <button
               className="btn btn-outline-secondary"
               type="button"
@@ -467,7 +473,65 @@ const Schedule: React.FC = () => {
         </div>
       )}
 
-      {viewMode === 'week' && (
+      {viewMode === 'week' && isNarrow && (
+        <div className="d-flex flex-column gap-3">
+          {filteredShifts.length === 0 ? (
+            <div className="card">
+              <div className="card-body text-center text-muted py-4">
+                No shifts to display. Create shifts and a schedule to get started.
+              </div>
+            </div>
+          ) : (
+            weekDates.map((date) => (
+              <div className="card" key={date.toISOString()}>
+                <div className="card-header fw-semibold">{formatDate(date)}</div>
+                <ul className="list-group list-group-flush">
+                  {filteredShifts.map((shift) => {
+                    const deptName =
+                      shift.departmentName ||
+                      (shift.departmentId
+                        ? departmentNameById.get(Number(shift.departmentId))
+                        : '') ||
+                      '';
+                    const dayAssignments = getAssignmentsForDateAndShift(date, shift.id!);
+                    const shortBy = (shift.minStaff ?? 0) - dayAssignments.length;
+                    return (
+                      <li className="list-group-item" key={shift.id}>
+                        <div className="d-flex justify-content-between align-items-start gap-2">
+                          <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
+                          {deptName && <span className="badge bg-primary">{deptName}</span>}
+                        </div>
+                        {dayAssignments.length > 0 ? (
+                          <div className="d-flex flex-wrap gap-1 mt-2">
+                            {dayAssignments.map((assignment) => {
+                              const employee = getEmployeeById(assignment.userId);
+                              return (
+                                <span key={assignment.id} className="badge bg-success">
+                                  {employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="text-muted mt-2">
+                            <i className="bi bi-plus-circle" aria-hidden="true"></i>{' '}
+                            <small>Assign Staff</small>
+                          </div>
+                        )}
+                        {shortBy > 0 && (
+                          <div className="small text-danger mt-1">Need {shortBy} more</div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {viewMode === 'week' && !isNarrow && (
         <div className="card">
           <div className="card-body p-0">
             <div className="table-responsive">
@@ -571,7 +635,63 @@ const Schedule: React.FC = () => {
         </div>
       )}
 
-      {viewMode === 'month' && (
+      {viewMode === 'month' && isNarrow && (
+        <div className="card">
+          <div className="card-body">
+            {monthLoading && (
+              <div className="d-flex align-items-center justify-content-center py-2 mb-2 border-bottom small text-muted">
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading month"></span>
+                Loading…
+              </div>
+            )}
+            <div className="d-flex flex-column gap-2">
+              {monthGridDates
+                .filter((date) => date.getMonth() === selectedWeek.getMonth())
+                .map((date) => {
+                  const dateKey = toLocalDateString(date);
+                  const dayShifts = shiftsByDate.get(dateKey) ?? [];
+                  const isToday = dateKey === todayKey;
+                  return (
+                    <div className={`card ${isToday ? 'border-primary' : ''}`} key={dateKey}>
+                      <div className="card-body py-2">
+                        <div className="d-flex justify-content-between align-items-center mb-1">
+                          <span className="fw-semibold">
+                            {date.toLocaleDateString(undefined, {
+                              weekday: 'short',
+                              day: 'numeric',
+                              month: 'short',
+                            })}
+                          </span>
+                          {dayShifts.length > 0 && (
+                            <span className="badge bg-secondary" aria-label={`${dayShifts.length} shifts`}>
+                              {dayShifts.length}
+                            </span>
+                          )}
+                        </div>
+                        {dayShifts.length === 0 ? (
+                          <div className="text-muted small">No shifts</div>
+                        ) : (
+                          <div className="d-flex flex-column gap-1">
+                            {dayShifts.map((shift) => (
+                              <div key={shift.id} className="small">
+                                <span className="badge bg-primary-subtle text-primary-emphasis">
+                                  {shift.startTime}–{shift.endTime}
+                                </span>{' '}
+                                {shift.departmentName ?? ''}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewMode === 'month' && !isNarrow && (
         <div className="card">
           <div className="card-body p-0">
             {monthLoading && (
