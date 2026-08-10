@@ -252,7 +252,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
       });
     }
 
-    await departmentService.removeUserFromDepartment(targetUserId, departmentId);
+    await departmentService.removeUserFromDepartment(departmentId, targetUserId);
 
     res.json({ success: true, data: { message: 'User removed from department successfully' } });
   });

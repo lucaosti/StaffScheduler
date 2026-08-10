@@ -168,31 +168,3 @@ describe('ShiftService.getShiftStatistics', () => {
     expect(stats.fullyStaffed).toBe(6);
   });
 });
-
-describe('ShiftService.getAllShiftTemplates', () => {
-  it('returns active templates', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([
-      [
-        {
-          id: 1,
-          name: 'Morning',
-          description: '',
-          department_id: 3,
-          start_time: '08:00',
-          end_time: '16:00',
-          min_staff: 2,
-          max_staff: 5,
-          is_active: 1,
-          created_at: '2026-04-26',
-          updated_at: '2026-04-26',
-        },
-      ],
-      null,
-    ]);
-    const service = new ShiftService(pool);
-    const templates = await service.getAllShiftTemplates();
-    expect(templates).toHaveLength(1);
-    expect(templates[0].isActive).toBe(true);
-  });
-});

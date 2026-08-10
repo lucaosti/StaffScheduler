@@ -414,14 +414,17 @@ describe('departments router DELETE /:id/users/:userId', () => {
   });
 
   it('returns 200 when admin removes user from department', async () => {
-    (DepartmentService.prototype.removeUserFromDepartment as jest.Mock) = jest
-      .fn()
-      .mockResolvedValue(undefined);
+    const removeUserFromDepartment = jest.fn().mockResolvedValue(undefined);
+    (DepartmentService.prototype.removeUserFromDepartment as jest.Mock) = removeUserFromDepartment;
 
     const res = await request(mountApp()).delete('/api/departments/3/users/7');
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
+    // Regression: the call site once passed (userId, departmentId), the
+    // reverse of the service's own (departmentId, userId) signature — the
+    // DELETE it built matched no row, so removal silently no-opped.
+    expect(removeUserFromDepartment).toHaveBeenCalledWith(3, 7);
   });
 
   it('returns 500 on service error', async () => {

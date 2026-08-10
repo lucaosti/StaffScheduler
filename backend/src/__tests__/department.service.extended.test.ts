@@ -10,7 +10,7 @@
  *   - assignEmployeesToDepartment (missing dept, skipped invalid user, dedupe)
  *   - getDepartmentsByManager mapping
  *   - getDepartmentStatistics with zero active depts
- *   - getDepartmentStatsByDepartment + getDepartmentStats
+ *   - getDepartmentStatsByDepartment
  *
  * @author Luca Ostinelli
  */
@@ -269,17 +269,6 @@ describe('DepartmentService convenience helpers', () => {
     execute.mockRejectedValueOnce(new Error('boom'));
     const svc = new DepartmentService(pool);
     await expect(svc.getDepartmentsForUser(1)).rejects.toThrow(/boom/);
-  });
-
-  it('getDepartmentStats forwards to getDepartmentStatistics', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ count: 4 }], null] as Tuple)
-      .mockResolvedValueOnce([[{ count: 3 }], null] as Tuple)
-      .mockResolvedValueOnce([[{ count: 30 }], null] as Tuple);
-    const svc = new DepartmentService(pool);
-    const s = await svc.getDepartmentStats();
-    expect(s.total).toBe(4);
   });
 
   it('getDepartmentStatsByDepartment returns counts + bubbles errors', async () => {

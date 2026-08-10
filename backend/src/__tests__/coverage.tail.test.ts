@@ -15,7 +15,7 @@ import { DepartmentService } from '../services/DepartmentService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { ResponsibilityRuleService } from '../services/ResponsibilityRuleService';
 import { ScheduleService } from '../services/ScheduleService';
-import { ShiftService } from '../services/ShiftService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { UserService } from '../services/UserService';
 import { ValidationUtils } from '../utils';
@@ -238,14 +238,14 @@ describe('ScheduleService — residual arms', () => {
   });
 });
 
-describe('ShiftService / TwoFactorService / UserService — residual arms', () => {
+describe('ShiftTemplateService / TwoFactorService / UserService — residual arms', () => {
   it('shift template creation throws when the created row cannot be re-read', async () => {
     const { pool, execute, conn } = makePool();
     conn.execute.mockResolvedValueOnce([{ insertId: 5 }, null]); // INSERT template
     execute.mockResolvedValueOnce([[], null]); // re-read gone
 
     await expect(
-      new ShiftService(pool).createShiftTemplate({ name: 'T', startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 2 } as never)
+      new ShiftTemplateService(pool).createShiftTemplate({ name: 'T', startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 2 } as never)
     ).rejects.toThrow('Failed to retrieve created shift template');
   });
 

@@ -1,5 +1,5 @@
 /**
- * ShiftSwapService — open shift board unit tests.
+ * ShiftSwapOfferService — open shift board unit tests.
  *
  * Covers posting an assignment as an open offer, listing/scoping the board,
  * cancelling an offer, and claiming one (which produces a real shift-swap
@@ -7,6 +7,7 @@
  */
 
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { ShiftSwapOfferService } from '../services/ShiftSwapOfferService';
 
 type Tuple = [unknown, unknown];
 
@@ -68,25 +69,28 @@ const makePool = () => {
   return { pool: { execute, getConnection } as never, execute, conn };
 };
 
-describe('ShiftSwapService.createOpenOffer', () => {
+/** Builds a `ShiftSwapOfferService` wired to a real `ShiftSwapService` over the same pool. */
+const makeOfferService = (pool: unknown) => new ShiftSwapOfferService(pool as never, new ShiftSwapService(pool as never));
+
+describe('ShiftSwapOfferService.createOpenOffer', () => {
   it('throws when the assignment does not exist', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow('Assignment not found');
   });
 
   it('refuses an assignment the caller does not own', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[assignmentRow({ user_id: 99 })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow('You can only offer your own assignment');
   });
 
   it('refuses an assignment that is not pending or confirmed', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[assignmentRow({ status: 'cancelled' })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow(/Cannot offer an assignment in status/);
   });
 
@@ -95,7 +99,7 @@ describe('ShiftSwapService.createOpenOffer', () => {
     execute
       .mockResolvedValueOnce([[assignmentRow({ date: '2020-01-01' })], null] as Tuple)
       .mockResolvedValueOnce([[{ today: '2099-06-01' }], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow('Cannot offer a shift that has already passed');
   });
 
@@ -105,7 +109,7 @@ describe('ShiftSwapService.createOpenOffer', () => {
       .mockResolvedValueOnce([[assignmentRow()], null] as Tuple)
       .mockResolvedValueOnce([[{ today: '2020-01-01' }], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 5 }], null] as Tuple); // an open offer already exists
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow('already posted as an open offer');
   });
 
@@ -117,7 +121,7 @@ describe('ShiftSwapService.createOpenOffer', () => {
       .mockResolvedValueOnce([[], null] as Tuple) // no existing open offer
       .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[offerRow({ id: 9 })], null] as Tuple); // getOpenOfferById
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const created = await svc.createOpenOffer(7, 100, 'flexible on timing');
     expect(created.id).toBe(9);
     expect(created.status).toBe('open');
@@ -131,15 +135,15 @@ describe('ShiftSwapService.createOpenOffer', () => {
       .mockResolvedValueOnce([[], null] as Tuple)
       .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple); // getOpenOfferById -> null
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.createOpenOffer(7, 100)).rejects.toThrow('Failed to retrieve created open offer');
   });
 });
 
-describe('ShiftSwapService.listOpenOffers', () => {
+describe('ShiftSwapOfferService.listOpenOffers', () => {
   it('returns an empty list without querying when the caller has no visible org units', async () => {
     const { pool, execute } = makePool();
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const offers = await svc.listOpenOffers(7, []);
     expect(offers).toEqual([]);
     expect(execute).not.toHaveBeenCalled();
@@ -159,7 +163,7 @@ describe('ShiftSwapService.listOpenOffers', () => {
       }],
       null,
     ] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const offers = await svc.listOpenOffers(7, [1, 2]);
     expect(offers).toHaveLength(1);
     expect(offers[0].userName).toBe('Jane Doe');
@@ -172,7 +176,7 @@ describe('ShiftSwapService.listOpenOffers', () => {
   it('restricts to the caller own offers when mine is true', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await svc.listOpenOffers(7, [], true);
     const [sql] = execute.mock.calls[0];
     expect(sql).toMatch(/o\.user_id = \?/);
@@ -181,7 +185,7 @@ describe('ShiftSwapService.listOpenOffers', () => {
   it('does not scope by org unit when unrestricted', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await svc.listOpenOffers(7, null);
     const [sql] = execute.mock.calls[0];
     expect(sql).toMatch(/o\.user_id != \?/);
@@ -189,13 +193,13 @@ describe('ShiftSwapService.listOpenOffers', () => {
   });
 });
 
-describe('ShiftSwapService.cancelOpenOffer', () => {
+describe('ShiftSwapOfferService.cancelOpenOffer', () => {
   it('cancels successfully', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
       .mockResolvedValueOnce([[offerRow({ status: 'cancelled' })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const cancelled = await svc.cancelOpenOffer(1, 7);
     expect(cancelled.status).toBe('cancelled');
   });
@@ -205,7 +209,7 @@ describe('ShiftSwapService.cancelOpenOffer', () => {
     execute
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.cancelOpenOffer(1, 7)).rejects.toThrow('Open shift offer not found');
   });
 
@@ -214,7 +218,7 @@ describe('ShiftSwapService.cancelOpenOffer', () => {
     execute
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[offerRow({ user_id: 99 })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.cancelOpenOffer(1, 7)).rejects.toThrow('Forbidden');
   });
 
@@ -223,13 +227,13 @@ describe('ShiftSwapService.cancelOpenOffer', () => {
     execute
       .mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple)
       .mockResolvedValueOnce([[offerRow({ status: 'claimed' })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.cancelOpenOffer(1, 7)).rejects.toThrow(/Cannot cancel offer in status/);
   });
 });
 
-describe('ShiftSwapService.claimOpenOffer', () => {
-  const internalsOf = (service: ShiftSwapService) =>
+describe('ShiftSwapOfferService.claimOpenOffer', () => {
+  const internalsOf = (service: ShiftSwapOfferService) =>
     service as unknown as {
       workflows: { getWorkflowByChangeType: (t: string) => unknown };
       resolution: {
@@ -241,7 +245,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
       };
     };
 
-  const spyWorkflowResolution = (service: ShiftSwapService, canCreate = true) => {
+  const spyWorkflowResolution = (service: ShiftSwapOfferService, canCreate = true) => {
     const internals = internalsOf(service);
     jest.spyOn(internals.workflows, 'getWorkflowByChangeType').mockResolvedValue(workflow as never);
     jest.spyOn(internals.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
@@ -252,21 +256,21 @@ describe('ShiftSwapService.claimOpenOffer', () => {
   it('throws when the offer does not exist', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow('Open shift offer not found');
   });
 
   it('throws when the offer is not open', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[offerRow({ status: 'claimed' })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow(/Cannot claim offer in status/);
   });
 
   it('refuses a caller claiming their own offer', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[offerRow({ user_id: 9 })], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow('cannot claim your own open offer');
   });
 
@@ -275,7 +279,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
     execute
       .mockResolvedValueOnce([[offerRow()], null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow('Claimer assignment not found');
   });
 
@@ -284,7 +288,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
     execute
       .mockResolvedValueOnce([[offerRow()], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 200, user_id: 999 }], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow('Claimer does not own the offered assignment');
   });
 
@@ -293,7 +297,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
     execute
       .mockResolvedValueOnce([[offerRow()], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 200, user_id: 9 }], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     spyWorkflowResolution(svc, false);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow(/No approver could be resolved/);
   });
@@ -304,7 +308,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
       .mockResolvedValueOnce([[offerRow()], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 200, user_id: 9 }], null] as Tuple);
     conn.execute.mockResolvedValueOnce([[{ status: 'claimed' }], null]); // locked re-check
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     spyWorkflowResolution(svc);
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow(/Cannot claim offer in status/);
     expect(conn.rollback).toHaveBeenCalled();
@@ -320,7 +324,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
       .mockResolvedValueOnce([{ insertId: 501 }, null]) // INSERT shift_swap_requests
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE offer -> claimed
     execute.mockResolvedValue([[swapRow()], null] as Tuple); // getById + cleanup UPDATEs fall through
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const internals = spyWorkflowResolution(svc);
     jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
@@ -342,7 +346,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
       .mockResolvedValueOnce([{ insertId: 501 }, null])
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
     execute.mockResolvedValue([[swapRow()], null] as Tuple);
-    const svc = new ShiftSwapService(pool);
+    const svc = makeOfferService(pool);
     const internals = spyWorkflowResolution(svc);
     jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue({ id: 900 } as never);
 
