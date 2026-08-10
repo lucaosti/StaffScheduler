@@ -259,6 +259,8 @@ Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev prox
 | `EMAIL_HOST` + `EMAIL_USER` + `EMAIL_PASSWORD` | Enables real email delivery via the outbox. Without them no email intent is recorded at all. |
 | `DB_REPLICA_HOST` | Routes `ReportsService`/`CalendarService`/`AuditLogService` SELECTs to a MySQL read replica. Unset leaves `createReadPool` returning the primary pool unchanged — see DOCUMENTATION.md §10a. |
 | `GUSTO_API_KEY` + `GUSTO_COMPANY_ID` | Enables payroll export to Gusto. Without them `GustoProvider` refuses to run rather than sending anywhere — see DOCUMENTATION.md §7e. |
+| `FCM_SERVER_KEY` | Enables native push delivery to Android via FCM's legacy HTTP API. Without it, an android device token's send fails loudly rather than silently — see DOCUMENTATION.md §7c. |
+| `APNS_KEY_ID` + `APNS_TEAM_ID` + `APNS_PRIVATE_KEY` + `APNS_BUNDLE_ID` | Enables native push delivery to iOS via APNs (all four required together). Without them, an ios device token's send fails loudly rather than silently — see DOCUMENTATION.md §7c. |
 
 ## Observability and operations
 

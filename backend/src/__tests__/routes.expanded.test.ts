@@ -61,6 +61,7 @@ jest.mock('../services/UserDirectoryService');
 jest.mock('../services/BulkImportService');
 jest.mock('../services/NotificationService');
 jest.mock('../services/PushService');
+jest.mock('../services/NativePushService');
 jest.mock('../services/RbacService');
 
 import { AssignmentService } from '../services/AssignmentService';
@@ -81,6 +82,7 @@ import { UserDirectoryService } from '../services/UserDirectoryService';
 import { BulkImportService } from '../services/BulkImportService';
 import { NotificationService } from '../services/NotificationService';
 import { PushService, isPushConfigured } from '../services/PushService';
+import { NativePushService } from '../services/NativePushService';
 
 import { createAssignmentsRouter } from '../routes/assignments';
 import { createSchedulesRouter } from '../routes/schedules';
@@ -1872,6 +1874,40 @@ describe('notifications router (extended)', () => {
       .send({ endpoint: 'https://push.example/x' });
     expect(res.status).toBe(200);
     expect(PushService.prototype.unsubscribe).toHaveBeenCalledWith(1, 'https://push.example/x');
+  });
+
+  it('POST /push/device-token 201 registers the device token', async () => {
+    (NativePushService.prototype.registerToken as jest.Mock) = jest.fn().mockResolvedValue({
+      id: 1,
+      userId: 1,
+      platform: 'ios',
+      token: 'device-token',
+      isActive: true,
+      createdAt: 'x',
+      lastUsedAt: null,
+    });
+    const res = await request(app())
+      .post('/api/notifications/push/device-token')
+      .send({ platform: 'ios', token: 'device-token' });
+    expect(res.status).toBe(201);
+    expect(res.body.data.token).toBe('device-token');
+    expect(NativePushService.prototype.registerToken).toHaveBeenCalledWith(1, 'ios', 'device-token');
+  });
+
+  it('POST /push/device-token 400 on a malformed body', async () => {
+    const res = await request(app())
+      .post('/api/notifications/push/device-token')
+      .send({ platform: 'windows-phone', token: 'x' });
+    expect(res.status).toBe(400);
+  });
+
+  it('DELETE /push/device-token 200 deactivates the device token', async () => {
+    (NativePushService.prototype.deactivateToken as jest.Mock) = jest.fn().mockResolvedValue(undefined);
+    const res = await request(app())
+      .delete('/api/notifications/push/device-token')
+      .send({ token: 'device-token' });
+    expect(res.status).toBe(200);
+    expect(NativePushService.prototype.deactivateToken).toHaveBeenCalledWith(1, 'device-token');
   });
 });
 

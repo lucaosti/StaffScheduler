@@ -16368,6 +16368,90 @@
         }
       }
     },
+    "/notifications/push/device-token": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Register or reactivate a mobile client's native push device token",
+        "description": "A separate transport from Web Push above: the APNs (iOS) / FCM (Android) device token a mobile client's `@capacitor/push-notifications` `registration` listener returns, not a browser `PushSubscription`. Re-registering the same token (app reinstall, OS-issued rotation) updates the row in place rather than creating a duplicate. Module `notifications` must be enabled (404 otherwise).",
+        "responses": {
+          "201": {
+            "description": "The stored device token."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "enum": [
+                      "ios",
+                      "android"
+                    ]
+                  },
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "platform",
+                  "token"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Notifications"
+        ],
+        "summary": "Deactivate a mobile client's native push device token",
+        "description": "Deactivates rather than deletes — same audit-trail reasoning as the email outbox and the Web Push subscription. Module `notifications` must be enabled (404 otherwise).",
+        "responses": {
+          "200": {
+            "description": "Deactivated."
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "token": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "token"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhooks": {
       "get": {
         "tags": [

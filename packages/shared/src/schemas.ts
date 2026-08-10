@@ -668,6 +668,21 @@ export const pushUnsubscribeBody = z.object({
   endpoint: z.string().url(),
 });
 
+/**
+ * The device token a mobile client's `@capacitor/push-notifications`
+ * `registration` listener hands back — an APNs (iOS) or FCM (Android)
+ * token, not a `PushSubscription` (the Web Push shape above), since a
+ * Capacitor WebView has no browser Push API.
+ */
+export const registerDeviceTokenBody = z.object({
+  platform: z.enum(['ios', 'android']),
+  token: z.string().min(1),
+});
+
+export const deactivateDeviceTokenBody = z.object({
+  token: z.string().min(1),
+});
+
 // ── Outbound webhooks (#315) ─────────────────────────────────────────────────
 
 const webhookEventType = z.enum(['schedule.published', 'assignment.confirmed', 'approval.decided']);
