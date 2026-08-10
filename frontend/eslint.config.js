@@ -57,6 +57,13 @@ const I18N_ENFORCED_FILES = [
   'src/pages/Governance/RaciMatrix.tsx',
   'src/pages/Org/Authority.tsx',
   'src/pages/Org/OrgManagement.tsx',
+  'src/pages/Admin/Skills.tsx',
+  'src/pages/Admin/UserAccounts.tsx',
+  'src/pages/Admin/EmploymentContracts.tsx',
+  'src/pages/Admin/RoleTimeline.tsx',
+  'src/pages/Admin/AuditLogs.tsx',
+  'src/pages/Admin/ApprovalWorkflows.tsx',
+  'src/pages/Admin/RbacManagement.tsx',
 ];
 
 module.exports = [
