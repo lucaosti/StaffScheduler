@@ -24,6 +24,10 @@
  * refuses their value. Left empty they get the generated wording — "does not
  * match the required format" — which tells them nothing they can act on.
  *
+ * The table and the per-field editor live in FieldPolicyTable and
+ * FieldPolicyForm; the draft shape and its conversions to/from the wire
+ * `FieldPolicy` live in fieldPolicyDraft.
+ *
  * @author Luca Ostinelli
  */
 
@@ -34,82 +38,14 @@ import {
   useFieldPoliciesQuery,
   useSaveFieldPolicy,
 } from '../../hooks/useFieldPolicies';
-import type { FieldPolicy } from '../../services/fieldPolicyService';
+import FieldPolicyTable from './FieldPolicyTable';
+import FieldPolicyForm from './FieldPolicyForm';
+import { type Draft, toDraft, fromDraft } from './fieldPolicyDraft';
 
 interface Props {
   /** The signed-in administrator's organization, or null if they have none. */
   organizationName: string | null;
 }
-
-/** Fields the server keeps required whatever a policy says. */
-const ALWAYS_REQUIRED = new Set(['email', 'firstName', 'lastName']);
-
-/**
- * The form's own state, as raw strings.
- *
- * WHY NOT `FieldPolicy` DIRECTLY. An earlier version bound each input straight
- * to the `string | null` / `number | null` shape and normalised on every
- * keystroke (trimming, splitting `allowedValues` on commas). That fights the
- * person typing: trimming a trailing space on every change strips the space the
- * moment it's typed, so "We need a number" collapses to "Weneedanumber" as
- * words run together; splitting `allowedValues` on every change drops a
- * trailing comma the instant it's typed, since it produces one more empty
- * segment `filter(Boolean)` removes. A controlled input's `value` must be
- * exactly what the last `onChange` reported, or the DOM and React disagree
- * about the cursor and characters vanish.
- *
- * So the draft holds untouched strings, and parsing — trim, split, `Number()`
- * — happens exactly once, when the form is submitted.
- */
-interface Draft {
-  fieldKey: string;
-  isRequired: boolean;
-  visiblePermission: string;
-  editPermission: string;
-  minLength: string;
-  maxLength: string;
-  minValue: string;
-  maxValue: string;
-  pattern: string;
-  allowedValues: string;
-  helpText: string;
-}
-
-const toDraft = (fieldKey: string, policy: FieldPolicy | undefined): Draft => ({
-  fieldKey,
-  isRequired: policy?.isRequired ?? false,
-  visiblePermission: policy?.visiblePermission ?? '',
-  editPermission: policy?.editPermission ?? '',
-  minLength: policy?.minLength?.toString() ?? '',
-  maxLength: policy?.maxLength?.toString() ?? '',
-  minValue: policy?.minValue?.toString() ?? '',
-  maxValue: policy?.maxValue?.toString() ?? '',
-  pattern: policy?.pattern ?? '',
-  allowedValues: policy?.allowedValues?.join(', ') ?? '',
-  helpText: policy?.helpText ?? '',
-});
-
-/** An empty input means "no rule", which is null rather than 0 or "". */
-const orNull = (value: string): string | null => (value.trim() === '' ? null : value.trim());
-const numberOrNull = (value: string): number | null =>
-  value.trim() === '' ? null : Number(value);
-
-const fromDraft = (draft: Draft): FieldPolicy => ({
-  fieldKey: draft.fieldKey,
-  isRequired: draft.isRequired,
-  visiblePermission: orNull(draft.visiblePermission),
-  editPermission: orNull(draft.editPermission),
-  minLength: numberOrNull(draft.minLength),
-  maxLength: numberOrNull(draft.maxLength),
-  minValue: numberOrNull(draft.minValue),
-  maxValue: numberOrNull(draft.maxValue),
-  pattern: orNull(draft.pattern),
-  allowedValues:
-    draft.allowedValues.trim() === ''
-      ? null
-      : draft.allowedValues.split(',').map((v) => v.trim()).filter(Boolean),
-  helpText: orNull(draft.helpText),
-});
 
 const FieldPolicySection: React.FC<Props> = ({ organizationName }) => {
   // null = the global fallback row; the administrator's own organization is the
@@ -223,249 +159,17 @@ const FieldPolicySection: React.FC<Props> = ({ organizationName }) => {
           onRetry={query.refetch}
           loadingMessage="Loading the field rules…"
         >
-          <div className="table-responsive">
-            <table className="table table-sm align-middle">
-              <thead>
-                <tr>
-                  <th scope="col">Field</th>
-                  <th scope="col">Required</th>
-                  <th scope="col">Rule</th>
-                  <th scope="col">Message shown</th>
-                  <th scope="col"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((field) => {
-                  const policy = byKey.get(field);
-                  const alwaysRequired = ALWAYS_REQUIRED.has(field);
-                  return (
-                    <tr key={field}>
-                      <td className="fw-semibold">{field}</td>
-                      <td>
-                        {alwaysRequired ? (
-                          <span
-                            className="badge bg-secondary"
-                            title="Required by the database and by sign-in; a rule cannot make it optional"
-                          >
-                            always
-                          </span>
-                        ) : policy?.isRequired ? (
-                          <span className="badge bg-primary">yes</span>
-                        ) : (
-                          <span className="text-muted">no</span>
-                        )}
-                      </td>
-                      <td className="small text-muted">
-                        {policy
-                          ? [
-                              policy.minLength !== null && `min ${policy.minLength} chars`,
-                              policy.maxLength !== null && `max ${policy.maxLength} chars`,
-                              policy.minValue !== null && `min ${policy.minValue}`,
-                              policy.maxValue !== null && `max ${policy.maxValue}`,
-                              policy.pattern && `pattern ${policy.pattern}`,
-                              policy.allowedValues && `one of ${policy.allowedValues.join(', ')}`,
-                              policy.editPermission && `edit needs ${policy.editPermission}`,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ') || 'no rule'
-                          : 'no rule'}
-                      </td>
-                      <td className="small">
-                        {policy?.helpText ?? <span className="text-muted">generated wording</span>}
-                      </td>
-                      <td className="text-end">
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-outline-secondary me-2"
-                          onClick={() => startEditing(field)}
-                        >
-                          {policy ? 'Edit' : 'Add rule'}
-                        </button>
-                        {policy && (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => handleDelete(field)}
-                          >
-                            Remove
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <FieldPolicyTable fields={fields} byKey={byKey} onEdit={startEditing} onDelete={handleDelete} />
         </QueryState>
 
         {editing && (
-          <form className="border rounded p-3 mt-3" onSubmit={handleSave}>
-            <h6 className="mb-3">
-              Rule for <code>{editing.fieldKey}</code>
-            </h6>
-
-            <div className="row g-3">
-              <div className="col-md-4">
-                <div className="form-check">
-                  <input
-                    id="policy-required"
-                    className="form-check-input"
-                    type="checkbox"
-                    checked={ALWAYS_REQUIRED.has(editing.fieldKey) || editing.isRequired}
-                    disabled={ALWAYS_REQUIRED.has(editing.fieldKey)}
-                    onChange={(e) => setEditing({ ...editing, isRequired: e.target.checked })}
-                  />
-                  <label className="form-check-label" htmlFor="policy-required">
-                    Required
-                  </label>
-                </div>
-                {ALWAYS_REQUIRED.has(editing.fieldKey) && (
-                  <div className="form-text">
-                    Always required — the database and sign-in depend on it, so this cannot be
-                    turned off.
-                  </div>
-                )}
-              </div>
-
-              <div className="col-md-4">
-                <label className="form-label" htmlFor="policy-edit-permission">
-                  Changing it needs
-                </label>
-                <input
-                  id="policy-edit-permission"
-                  className="form-control"
-                  placeholder="e.g. payroll.manage"
-                  value={editing.editPermission}
-                  onChange={(e) => setEditing({ ...editing, editPermission: e.target.value })}
-                />
-                <div className="form-text">A permission code. Leave empty for no restriction.</div>
-              </div>
-
-              <div className="col-md-4">
-                <label className="form-label" htmlFor="policy-visible-permission">
-                  Seeing it needs
-                </label>
-                <input
-                  id="policy-visible-permission"
-                  className="form-control"
-                  placeholder="e.g. payroll.read"
-                  value={editing.visiblePermission}
-                  onChange={(e) => setEditing({ ...editing, visiblePermission: e.target.value })}
-                />
-              </div>
-
-              <div className="col-md-3">
-                <label className="form-label" htmlFor="policy-min-length">
-                  Min length
-                </label>
-                <input
-                  id="policy-min-length"
-                  type="number"
-                  min={0}
-                  className="form-control"
-                  value={editing.minLength}
-                  onChange={(e) => setEditing({ ...editing, minLength: e.target.value })}
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label" htmlFor="policy-max-length">
-                  Max length
-                </label>
-                <input
-                  id="policy-max-length"
-                  type="number"
-                  min={1}
-                  className="form-control"
-                  value={editing.maxLength}
-                  onChange={(e) => setEditing({ ...editing, maxLength: e.target.value })}
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label" htmlFor="policy-min-value">
-                  Min value
-                </label>
-                <input
-                  id="policy-min-value"
-                  type="number"
-                  className="form-control"
-                  value={editing.minValue}
-                  onChange={(e) => setEditing({ ...editing, minValue: e.target.value })}
-                />
-              </div>
-              <div className="col-md-3">
-                <label className="form-label" htmlFor="policy-max-value">
-                  Max value
-                </label>
-                <input
-                  id="policy-max-value"
-                  type="number"
-                  className="form-control"
-                  value={editing.maxValue}
-                  onChange={(e) => setEditing({ ...editing, maxValue: e.target.value })}
-                />
-              </div>
-
-              <div className="col-md-6">
-                <label className="form-label" htmlFor="policy-pattern">
-                  Pattern
-                </label>
-                <input
-                  id="policy-pattern"
-                  className="form-control font-monospace"
-                  maxLength={200}
-                  placeholder="^[A-Z]{2}\d{4}$"
-                  value={editing.pattern}
-                  onChange={(e) => setEditing({ ...editing, pattern: e.target.value })}
-                />
-                <div className="form-text">
-                  A regular expression, at most 200 characters. Rejected on save if it does not
-                  compile.
-                </div>
-              </div>
-
-              <div className="col-md-6">
-                <label className="form-label" htmlFor="policy-allowed">
-                  Permitted values
-                </label>
-                <input
-                  id="policy-allowed"
-                  className="form-control"
-                  placeholder="Nurse, Doctor, Porter"
-                  value={editing.allowedValues}
-                  onChange={(e) => setEditing({ ...editing, allowedValues: e.target.value })}
-                />
-                <div className="form-text">Comma-separated. Leave empty to allow anything.</div>
-              </div>
-
-              <div className="col-12">
-                <label className="form-label" htmlFor="policy-help">
-                  Message shown when the rule refuses a value
-                </label>
-                <input
-                  id="policy-help"
-                  className="form-control"
-                  maxLength={255}
-                  placeholder="Include the area code, e.g. +39 02 …"
-                  value={editing.helpText}
-                  onChange={(e) => setEditing({ ...editing, helpText: e.target.value })}
-                />
-                <div className="form-text">
-                  This is what the person filling the form reads. Left empty they get the generated
-                  wording, which tells them the rule but not what to do about it.
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-3 d-flex gap-2">
-              <button type="submit" className="btn btn-primary" disabled={save.isPending}>
-                {save.isPending ? 'Saving…' : 'Save rule'}
-              </button>
-              <button type="button" className="btn btn-link" onClick={() => setEditing(null)}>
-                Cancel
-              </button>
-            </div>
-          </form>
+          <FieldPolicyForm
+            editing={editing}
+            saving={save.isPending}
+            onChange={setEditing}
+            onSubmit={handleSave}
+            onCancel={() => setEditing(null)}
+          />
         )}
       </div>
     </div>
