@@ -164,6 +164,22 @@ export const config = {
     companyId: process.env.GUSTO_COMPANY_ID,
     apiBaseUrl: process.env.GUSTO_API_BASE_URL || 'https://api.gusto.com',
   },
+  nativePush: {
+    // Native (Capacitor) push, gated by `isNativePushConfigured()` (see
+    // NativePushService.ts) — same posture as `gusto` above: no production
+    // credentials ship with this repository, and either transport can be
+    // configured independently since a deployment may ship only one platform
+    // at first. Android delivers through FCM's legacy HTTP API (a single
+    // server-key bearer token); iOS delivers through APNs, which needs a
+    // full key identity (key id + team id + the .p8 private key content) to
+    // mint the ES256 JWT APNs requires per request, plus the app's bundle id
+    // as the push `topic`.
+    fcmServerKey: process.env.FCM_SERVER_KEY,
+    apnsKeyId: process.env.APNS_KEY_ID,
+    apnsTeamId: process.env.APNS_TEAM_ID,
+    apnsPrivateKey: process.env.APNS_PRIVATE_KEY,
+    apnsBundleId: process.env.APNS_BUNDLE_ID,
+  },
   reports: {
     storagePath: process.env.REPORT_STORAGE_PATH || './reports',
     cleanupDays: parseInt(process.env.REPORT_CLEANUP_DAYS || '30'),

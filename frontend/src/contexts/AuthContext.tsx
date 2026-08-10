@@ -17,6 +17,7 @@ import React, { createContext, useContext, useReducer, useEffect, useCallback, u
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
 import { isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
+import { registerForNativePush } from '../services/nativePushService';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -145,6 +146,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           type: 'LOGIN_SUCCESS',
           payload: { user },
         });
+        // Native only: obtain a device token and register it with the
+        // backend. A no-op on the web platform. Fire-and-forget — a push
+        // registration failure (permission declined, no push services on
+        // the device) must never block login.
+        void registerForNativePush();
       } else {
         throw new Error(response.error?.message || 'Login failed');
       }

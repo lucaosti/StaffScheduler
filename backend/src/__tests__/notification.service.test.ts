@@ -8,6 +8,11 @@ jest.mock('../services/MailerService', () => ({ isEmailConfigured: () => isEmail
 const isPushConfigured = jest.fn().mockReturnValue(false);
 jest.mock('../services/PushService', () => ({ isPushConfigured: () => isPushConfigured() }));
 
+const isNativePushConfigured = jest.fn().mockReturnValue(false);
+jest.mock('../services/NativePushService', () => ({
+  isNativePushConfigured: () => isNativePushConfigured(),
+}));
+
 import { NotificationService } from '../services/NotificationService';
 
 const buildRow = (overrides: Record<string, unknown> = {}) => ({
@@ -132,6 +137,61 @@ describe('NotificationService.notify', () => {
     await new NotificationService(pool).notify({ userId: 7, type: 't', title: 'Subj' });
 
     expect(conn.execute.mock.calls.filter((c) => /INSERT INTO push_outbox/.test(c[0]))).toHaveLength(0);
+  });
+
+  it('enqueues one native_push_outbox row per active device token when native push is configured', async () => {
+    isNativePushConfigured.mockReturnValueOnce(true);
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 9 }, null]) // INSERT notifications
+        .mockResolvedValueOnce([[{ id: 201 }, { id: 202 }], null]) // SELECT active device tokens
+        .mockResolvedValueOnce([{ insertId: 1 }, null]) // INSERT native_push_outbox (201)
+        .mockResolvedValueOnce([{ insertId: 2 }, null]), // INSERT native_push_outbox (202)
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const execute = jest.fn().mockResolvedValueOnce([[buildRow({ id: 9 })], null]); // getById
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute } as never;
+
+    await new NotificationService(pool).notify({
+      userId: 7,
+      type: 't',
+      title: 'Subj',
+      body: 'Msg',
+      link: '/x',
+    });
+
+    const outboxCalls = conn.execute.mock.calls.filter((c) => /INSERT INTO native_push_outbox/.test(c[0]));
+    expect(outboxCalls).toHaveLength(2);
+    expect(outboxCalls[0][1][0]).toBe(9); // notification_id
+    expect(outboxCalls[0][1][1]).toBe(201); // device_token_id
+    expect(JSON.parse(outboxCalls[0][1][2])).toEqual({ title: 'Subj', body: 'Msg', link: '/x' });
+    expect(outboxCalls[1][1][1]).toBe(202);
+  });
+
+  it('does not enqueue native_push_outbox rows when the user has no active device tokens', async () => {
+    isNativePushConfigured.mockReturnValueOnce(true);
+    const conn = {
+      beginTransaction: jest.fn().mockResolvedValue(undefined),
+      execute: jest
+        .fn()
+        .mockResolvedValueOnce([{ insertId: 9 }, null]) // INSERT notifications
+        .mockResolvedValueOnce([[], null]), // SELECT active device tokens: none
+      commit: jest.fn().mockResolvedValue(undefined),
+      rollback: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn(),
+    };
+    const execute = jest.fn().mockResolvedValueOnce([[buildRow({ id: 9 })], null]);
+    const pool = { getConnection: jest.fn().mockResolvedValue(conn), execute } as never;
+
+    await new NotificationService(pool).notify({ userId: 7, type: 't', title: 'Subj' });
+
+    expect(
+      conn.execute.mock.calls.filter((c) => /INSERT INTO native_push_outbox/.test(c[0]))
+    ).toHaveLength(0);
   });
 
   it('rolls back and rethrows when the insert fails', async () => {

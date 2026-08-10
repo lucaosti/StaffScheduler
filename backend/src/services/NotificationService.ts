@@ -14,6 +14,7 @@ import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/pro
 import { logger } from '../config/logger';
 import { isEmailConfigured } from './MailerService';
 import { isPushConfigured } from './PushService';
+import { isNativePushConfigured } from './NativePushService';
 
 interface Notification {
   id: number;
@@ -106,6 +107,30 @@ export class NotificationService {
             `INSERT INTO push_outbox (notification_id, subscription_id, payload)
              VALUES (?, ?, ?)`,
             [res.insertId, sub.id, payload]
+          );
+        }
+      }
+    }
+
+    // A third delivery leg, same reasoning and same transaction, for native
+    // (Capacitor) mobile push: one outbox row per ACTIVE device token the
+    // recipient has registered, so a person with the app on two devices gets
+    // it on both, and one with none registered (or an unconfigured
+    // deployment) accumulates nothing. Separate from the Web Push leg above
+    // — a device token is not a `PushSubscription`, and the two are
+    // delivered through entirely different transports.
+    if (isNativePushConfigured()) {
+      const [deviceTokens] = await conn.execute<RowDataPacket[]>(
+        `SELECT id FROM device_push_tokens WHERE user_id = ? AND is_active = TRUE`,
+        [input.userId]
+      );
+      if (deviceTokens.length > 0) {
+        const payload = JSON.stringify({ title: input.title, body: input.body, link: input.link });
+        for (const deviceToken of deviceTokens) {
+          await conn.execute(
+            `INSERT INTO native_push_outbox (notification_id, device_token_id, payload)
+             VALUES (?, ?, ?)`,
+            [res.insertId, deviceToken.id, payload]
           );
         }
       }
