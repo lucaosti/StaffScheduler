@@ -48,6 +48,30 @@ interface UpdatePolicyInput {
   isActive?: boolean;
 }
 
+/**
+ * Known policy keys that `PolicyValidator` cannot give real effect to.
+ *
+ * `staffing_min` is the one case: it has no per-assignment meaning (adding
+ * one person to a shift only ever moves it toward a minimum, never away
+ * from it), and the actual minimum-staffing check already exists, per-shift,
+ * as `shifts.min_staff` / `shift_templates.min_staff` — enforced by both
+ * scheduling engines via `coverageShortfalls`. A scope-level `policies` row
+ * for it would sit in the table looking configured while doing nothing,
+ * exactly the silent-no-op this rejection exists to prevent. Rejected here,
+ * not left to the free-text `policyKey` catalog, precisely because it LOOKS
+ * like a real, well-known key — an organization typing `staffing_min` is
+ * trying to configure the thing shift/template `min_staff` already does.
+ */
+const UNENFORCEABLE_POLICY_KEYS = new Set(['staffing_min']);
+
+const rejectIfUnenforceable = (policyKey: string): void => {
+  if (UNENFORCEABLE_POLICY_KEYS.has(policyKey)) {
+    throw new ConflictError(
+      `Policy key '${policyKey}' is not enforced by the policy engine — set 'minStaff' directly on the shift or shift template instead, which the scheduling engine already honors.`
+    );
+  }
+};
+
 const parseValue = (raw: unknown): unknown => {
   if (raw === null || raw === undefined) return null;
   if (typeof raw === 'string') {
@@ -122,6 +146,7 @@ export class PolicyService {
 
   async create(input: CreatePolicyInput): Promise<Policy> {
     if (!input.policyKey?.trim()) throw new ConflictError('policyKey is required');
+    rejectIfUnenforceable(input.policyKey.trim());
     const [res] = await this.pool.execute<ResultSetHeader>(
       `INSERT INTO policies
          (scope_type, scope_id, policy_key, policy_value, description, imposed_by_user_id)
@@ -153,6 +178,7 @@ export class PolicyService {
       description: patch.description !== undefined ? patch.description : existing.description,
       isActive: patch.isActive ?? existing.isActive,
     };
+    rejectIfUnenforceable(merged.policyKey);
     await this.pool.execute(
       `UPDATE policies
           SET scope_type = ?, scope_id = ?, policy_key = ?, policy_value = ?, description = ?, is_active = ?
