@@ -24,7 +24,7 @@ import { authenticate } from '../middleware/auth';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { idParam, pendingApprovalDelegateBody as delegateBody, pendingApprovalDecisionBody as decisionBody, pendingApprovalListQuery } from '../schemas';
 import { PendingApprovalService } from '../services/PendingApprovalService';
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApprovalDecisionService } from '../services/ApprovalDecisionService';
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
 
 
@@ -50,7 +50,7 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   // (services/PendingApprovalDispatch.ts) inspects which entity FK is set and
   // calls the matching service. Authorization is per-instance (assignee, or
   // any structure member once opened — enforced inside each service's call
-  // into ApprovalEngineService.decidePendingApproval), not a blanket
+  // into ApprovalDecisionService.decidePendingApproval), not a blanket
   // permission code, so there's no requirePermission gate here.
   const dispatchDecision = (
     id: number,
@@ -81,25 +81,25 @@ export function createPendingApprovalsRouter(pool: Pool): express.Router {
   // shift swap) that was assigned to a structure (`assigned_to_org_unit_id`).
 
   router.post('/:id/keep', authenticate, validateParams(idParam), async (req, res) => {
-    const engine = new ApprovalEngineService(pool);
+    const engine = new ApprovalDecisionService(pool);
     const result = await engine.keepForSelf(Number(req.params.id), req.user!.id);
     res.json({ success: true, data: result });
   });
 
   router.post('/:id/delegate', authenticate, validateParams(idParam), validateBody(delegateBody), async (req, res) => {
-    const engine = new ApprovalEngineService(pool);
+    const engine = new ApprovalDecisionService(pool);
     const result = await engine.delegateToPerson(Number(req.params.id), req.user!.id, res.locals.body.targetUserId);
     res.json({ success: true, data: result });
   });
 
   router.post('/:id/open-to-structure', authenticate, validateParams(idParam), async (req, res) => {
-    const engine = new ApprovalEngineService(pool);
+    const engine = new ApprovalDecisionService(pool);
     const result = await engine.openToStructure(Number(req.params.id), req.user!.id);
     res.json({ success: true, data: result });
   });
 
   router.get('/:id/chain', authenticate, validateParams(idParam), async (req, res) => {
-    const engine = new ApprovalEngineService(pool);
+    const engine = new ApprovalDecisionService(pool);
     const chain = await engine.getDecisionChain(Number(req.params.id), req.user!.id);
     res.json({ success: true, data: chain });
   });

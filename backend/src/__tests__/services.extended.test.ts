@@ -265,15 +265,17 @@ describe('PolicyService extended', () => {
 /* ---------------- PolicyExceptionService extended ---------------- */
 
 // Same instance-boundary spying as EmployeeLoanService's "workflow
-// attachment" and "decision arms" suites: ApprovalEngineService has its own
-// suite, so these tests pin only PolicyExceptionService's own orchestration
-// decisions rather than the engine's internal SQL shape.
+// attachment" and "decision arms" suites: ApproverResolutionService and
+// ApprovalDecisionService have their own suites, so these tests pin only
+// PolicyExceptionService's own orchestration decisions rather than their
+// internal SQL shape.
 const policyExceptionInternalsOf = (service: PolicyExceptionService) =>
   service as unknown as {
-    engine: {
-      getWorkflowByChangeType: (t: string) => unknown;
+    resolution: {
       resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
       canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+    };
+    decisions: {
       createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       decidePendingApproval: (...a: unknown[]) => unknown;
     };
@@ -290,9 +292,9 @@ const policyExceptionWorkflow = {
 const spyPolicyExceptionCreation = (service: PolicyExceptionService) => {
   const internals = policyExceptionInternalsOf(service);
   jest
-    .spyOn(internals.engine, 'resolveFirstStepAutoApprove')
+    .spyOn(internals.resolution, 'resolveFirstStepAutoApprove')
     .mockResolvedValue({ workflow: policyExceptionWorkflow, autoApprove: false, approverUserId: 8 } as never);
-  jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+  jest.spyOn(internals.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
   return internals;
 };
 
@@ -337,7 +339,7 @@ describe('PolicyExceptionService extended', () => {
       .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[], null] as Tuple); // getById → null
     const svc = new PolicyExceptionService(pool);
-    jest.spyOn(policyExceptionInternalsOf(svc).engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+    jest.spyOn(policyExceptionInternalsOf(svc).resolution, 'resolveFirstStepAutoApprove').mockResolvedValue({
       workflow: policyExceptionWorkflow,
       approverUserId: 1,
       autoApprove: true,
@@ -360,7 +362,7 @@ describe('PolicyExceptionService extended', () => {
       .mockResolvedValue([[], null] as Tuple); // createPendingApprovalForStep's own SQL
     const svc = new PolicyExceptionService(pool);
     const internals = spyPolicyExceptionCreation(svc);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
 
     const result = await svc.create({
       policyId: 1, targetType: 't', targetId: 1, requestedByUserId: 7,
@@ -373,7 +375,7 @@ describe('PolicyExceptionService extended', () => {
     execute.mockResolvedValueOnce([[policyRow({ imposed_by_user_id: 8 })], null] as Tuple); // policy
     const svc = new PolicyExceptionService(pool);
     const internals = spyPolicyExceptionCreation(svc);
-    (internals.engine.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);
+    (internals.resolution.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);
 
     await expect(
       svc.create({ policyId: 1, targetType: 'shift_assignment', targetId: 100, requestedByUserId: 7 })
@@ -392,7 +394,7 @@ describe('PolicyExceptionService extended', () => {
     const svc = new PolicyExceptionService(pool);
     const internals = spyPolicyExceptionCreation(svc);
     const createPa = jest
-      .spyOn(internals.engine, 'createPendingApprovalForStep')
+      .spyOn(internals.decisions, 'createPendingApprovalForStep')
       .mockResolvedValue({ id: 501 } as never);
 
     const created = await svc.create({
@@ -419,7 +421,7 @@ describe('PolicyExceptionService extended', () => {
       .mockResolvedValue([[], null] as Tuple); // also serves the cleanup DELETE
     const svc = new PolicyExceptionService(pool);
     const internals = spyPolicyExceptionCreation(svc);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
     await expect(
       svc.create({ policyId: 1, targetType: 'shift_assignment', targetId: 100, requestedByUserId: 7 })
@@ -431,7 +433,7 @@ describe('PolicyExceptionService extended', () => {
 
   const spyDecide = (service: PolicyExceptionService, result: unknown) =>
     jest
-      .spyOn(policyExceptionInternalsOf(service).engine, 'decidePendingApproval')
+      .spyOn(policyExceptionInternalsOf(service).decisions, 'decidePendingApproval')
       .mockImplementation(async (...args: unknown[]) => {
         const ctx = await (args[4] as () => Promise<{ policyOwnerId: number }>)();
         expect(ctx.policyOwnerId).toBe(8); // decisions are scoped to the policy's owner

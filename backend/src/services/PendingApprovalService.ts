@@ -5,7 +5,7 @@
  * types a decision can be about (change request, time-off, loan, shift
  * swap, policy exception) — exactly one of the corresponding *_id columns is
  * set per row. Write-side mutations (approve / reject / advance / delegate)
- * live in ApprovalEngineService and the per-entity services so the full
+ * live in ApprovalDecisionService and the per-entity services so the full
  * entity lifecycle stays with its owner.
  *
  * @author Luca Ostinelli

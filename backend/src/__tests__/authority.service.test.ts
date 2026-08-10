@@ -23,12 +23,13 @@ jest.mock('../services/OrgUnitService', () => ({
 }));
 
 const listWorkflows = jest.fn();
+jest.mock('../services/ApprovalWorkflowService', () => ({
+  ApprovalWorkflowService: jest.fn().mockImplementation(() => ({ listWorkflows })),
+}));
+
 const resolveAllApproversForStep = jest.fn();
-jest.mock('../services/ApprovalEngineService', () => ({
-  ApprovalEngineService: jest.fn().mockImplementation(() => ({
-    listWorkflows,
-    resolveAllApproversForStep,
-  })),
+jest.mock('../services/ApproverResolutionService', () => ({
+  ApproverResolutionService: jest.fn().mockImplementation(() => ({ resolveAllApproversForStep })),
 }));
 
 const resolveResponsibleUsers = jest.fn();

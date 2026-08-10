@@ -14,7 +14,7 @@
 
 import { Pool } from 'mysql2/promise';
 import { ConflictError, NotFoundError } from '../errors';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { ChangeRequestService } from './ChangeRequestService';
 import { TimeOffService } from './TimeOffService';
 import { EmployeeLoanService } from './EmployeeLoanService';
@@ -29,7 +29,7 @@ export async function dispatchPendingApprovalDecision(
   note: string | null,
   organizationName: string | null = null
 ): Promise<unknown> {
-  const engine = new ApprovalEngineService(pool);
+  const engine = new ApprovalDecisionService(pool);
   const pa = await engine.getPendingApprovalById(id);
   if (!pa) throw new NotFoundError('Pending approval not found');
 
