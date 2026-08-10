@@ -20,7 +20,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { PendingApprovalService } from '../../src/services/PendingApprovalService';
-import { ApprovalEngineService } from '../../src/services/ApprovalEngineService';
+import { ApprovalDecisionService } from '../../src/services/ApprovalDecisionService';
 import { dispatchPendingApprovalDecision } from '../../src/services/PendingApprovalDispatch';
 import { PendingApprovalWithContext } from '../../src/types';
 import { Rng } from './prng';
@@ -65,7 +65,7 @@ export async function runManagerActor(
   delegateProbability = 0.35
 ): Promise<Decision[]> {
   const svc = new PendingApprovalService(pool);
-  const engine = new ApprovalEngineService(pool);
+  const engine = new ApprovalDecisionService(pool);
   const rng = new Rng(runSeed).child(`manager:${headUserId}`);
   const decisions: Decision[] = [];
 
