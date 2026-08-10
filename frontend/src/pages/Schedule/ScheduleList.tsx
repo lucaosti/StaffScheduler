@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Schedule } from '../../types';
 import EmptyState from '../../components/EmptyState';
 
@@ -16,6 +17,10 @@ interface Props {
   onCreateNew: () => void;
 }
 
+// The badge shows the raw status word (draft/published/archived), which the
+// existing test suite asserts on verbatim (`getByText('draft')`, etc.) — kept
+// untranslated on purpose rather than routed through `t()`, unlike the
+// prose labels elsewhere on this page.
 const ScheduleList: React.FC<Props> = ({
   schedules,
   onGenerate,
@@ -23,13 +28,15 @@ const ScheduleList: React.FC<Props> = ({
   onArchive,
   onCreateNew,
 }) => {
+  const { t } = useTranslation();
+
   if (schedules.length === 0) {
     return (
       <EmptyState
         icon="bi-calendar3"
-        title="No schedules yet"
-        message="Click New Schedule to create one."
-        action={{ label: 'New Schedule', onClick: onCreateNew }}
+        title={t('schedule.list.emptyTitle')}
+        message={t('schedule.list.emptyMessage')}
+        action={{ label: t('schedule.newSchedule'), onClick: onCreateNew }}
       />
     );
   }
@@ -56,7 +63,10 @@ const ScheduleList: React.FC<Props> = ({
               </div>
               <p className="card-text mb-2">
                 <small className="text-muted">
-                  {`${String(schedule.startDate).slice(0, 10)} → ${String(schedule.endDate).slice(0, 10)}`}
+                  {t('schedule.list.dateRange', {
+                    start: String(schedule.startDate).slice(0, 10),
+                    end: String(schedule.endDate).slice(0, 10),
+                  })}
                 </small>
                 {schedule.departmentName && (
                   <>
@@ -71,7 +81,7 @@ const ScheduleList: React.FC<Props> = ({
                   type="button"
                   onClick={() => onGenerate(schedule)}
                 >
-                  <i className="bi bi-magic me-1"></i>Generate
+                  <i className="bi bi-magic me-1"></i>{t('schedule.generate')}
                 </button>
                 {schedule.status === 'draft' && (
                   <button
@@ -79,7 +89,7 @@ const ScheduleList: React.FC<Props> = ({
                     type="button"
                     onClick={() => onPublish(schedule.id)}
                   >
-                    <i className="bi bi-cloud-upload me-1"></i>Publish
+                    <i className="bi bi-cloud-upload me-1"></i>{t('schedule.list.publish')}
                   </button>
                 )}
                 {schedule.status !== 'archived' && (
@@ -88,7 +98,7 @@ const ScheduleList: React.FC<Props> = ({
                     type="button"
                     onClick={() => onArchive(schedule.id)}
                   >
-                    <i className="bi bi-archive me-1"></i>Archive
+                    <i className="bi bi-archive me-1"></i>{t('schedule.list.archive')}
                   </button>
                 )}
               </div>
