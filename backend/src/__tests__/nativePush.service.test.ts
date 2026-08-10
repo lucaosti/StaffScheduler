@@ -139,6 +139,40 @@ describe('sendNativePush', () => {
         sendNativePush({ platform: 'android', token: 't' }, { title: 'Hi' })
       ).rejects.not.toBeInstanceOf(NativePushGoneError);
     });
+
+    it('treats an unparseable FCM response body as an empty result rather than throwing on the body itself', async () => {
+      configureFcm();
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => {
+          throw new Error('not json');
+        },
+      } as unknown as Response);
+
+      await expect(
+        sendNativePush({ platform: 'android', token: 't' }, { title: 'Hi' })
+      ).rejects.toThrow(/FCM send failed/);
+    });
+
+    it('aborts the FCM request once the timeout elapses', async () => {
+      configureFcm();
+      jest.useFakeTimers();
+      try {
+        fetchMock.mockImplementationOnce(
+          (_url: string, init: { signal: AbortSignal }) =>
+            new Promise((_resolve, reject) => {
+              init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')));
+            })
+        );
+        const resultPromise = sendNativePush({ platform: 'android', token: 't' }, { title: 'Hi' });
+        const assertion = expect(resultPromise).rejects.toThrow(/aborted/);
+        await jest.advanceTimersByTimeAsync(20_000);
+        await assertion;
+      } finally {
+        jest.useRealTimers();
+      }
+    });
   });
 
   describe('ios (APNs)', () => {
@@ -189,6 +223,49 @@ describe('sendNativePush', () => {
       await expect(
         sendNativePush({ platform: 'ios', token: 't' }, { title: 'Hi' })
       ).rejects.not.toBeInstanceOf(NativePushGoneError);
+    });
+
+    it('falls back to the HTTP status when a 400/410 body carries no reason field', async () => {
+      configureApns();
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, 400));
+
+      await expect(
+        sendNativePush({ platform: 'ios', token: 't' }, { title: 'Hi' })
+      ).rejects.toThrow(/APNs send failed: 400/);
+    });
+
+    it('treats an unparseable APNs response body as an empty result rather than throwing on the body itself', async () => {
+      configureApns();
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 410,
+        json: async () => {
+          throw new Error('not json');
+        },
+      } as unknown as Response);
+
+      await expect(
+        sendNativePush({ platform: 'ios', token: 't' }, { title: 'Hi' })
+      ).rejects.toThrow(/APNs send failed: 410/);
+    });
+
+    it('aborts the APNs request once the timeout elapses', async () => {
+      configureApns();
+      jest.useFakeTimers();
+      try {
+        fetchMock.mockImplementationOnce(
+          (_url: string, init: { signal: AbortSignal }) =>
+            new Promise((_resolve, reject) => {
+              init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')));
+            })
+        );
+        const resultPromise = sendNativePush({ platform: 'ios', token: 't' }, { title: 'Hi' });
+        const assertion = expect(resultPromise).rejects.toThrow(/aborted/);
+        await jest.advanceTimersByTimeAsync(20_000);
+        await assertion;
+      } finally {
+        jest.useRealTimers();
+      }
     });
   });
 });
