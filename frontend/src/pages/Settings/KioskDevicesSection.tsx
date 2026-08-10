@@ -16,6 +16,7 @@ import { useDepartmentsQuery } from '../../hooks/useDepartments';
 import { useKioskDevicesQuery, useKioskDeviceMutations } from '../../hooks/useKioskDevices';
 import ConfirmModal from '../../components/ConfirmModal';
 import QueryState from '../../components/QueryState';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 import type { KioskDevice } from '../../types';
 
 const KioskDevicesSection: React.FC = () => {
@@ -25,7 +26,10 @@ const KioskDevicesSection: React.FC = () => {
   const { create, remove } = useKioskDeviceMutations(departmentId);
 
   const [newName, setNewName] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  // No success banner here — the one-time token reveal (issuedToken) and the
+  // list re-rendering are the confirmation; `run`'s success path is unused,
+  // only its error handling is.
+  const { error, setError, run } = useSettingsSectionSave();
   const [confirmRevokeId, setConfirmRevokeId] = useState<number | null>(null);
   const [issuedToken, setIssuedToken] = useState<{ name: string; token: string } | null>(null);
 
@@ -33,31 +37,26 @@ const KioskDevicesSection: React.FC = () => {
   const devices = devicesQuery.data ?? [];
 
   const handleCreate = async () => {
-    setError(null);
     if (!newName.trim()) {
       setError('Name is required.');
       return;
     }
-    try {
-      const created = await create.mutateAsync({ name: newName.trim() });
-      if (created) {
-        setIssuedToken({ name: created.name, token: created.token });
-      }
+    let created: Awaited<ReturnType<typeof create.mutateAsync>> | undefined;
+    const ok = await run(
+      async () => { created = await create.mutateAsync({ name: newName.trim() }); },
+      '',
+      'Failed to create kiosk device.'
+    );
+    if (ok) {
+      if (created) setIssuedToken({ name: created.name, token: created.token });
       setNewName('');
-    } catch (err) {
-      setError((err as Error).message || 'Failed to create kiosk device.');
     }
   };
 
   const handleRevoke = async () => {
     if (confirmRevokeId === null) return;
-    try {
-      await remove.mutateAsync(confirmRevokeId);
-    } catch (err) {
-      setError((err as Error).message || 'Failed to revoke kiosk device.');
-    } finally {
-      setConfirmRevokeId(null);
-    }
+    await run(() => remove.mutateAsync(confirmRevokeId), '', 'Failed to revoke kiosk device.');
+    setConfirmRevokeId(null);
   };
 
   return (

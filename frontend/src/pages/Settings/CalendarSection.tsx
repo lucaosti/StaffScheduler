@@ -25,6 +25,7 @@ import { useDepartmentsQuery } from '../../hooks/useDepartments';
 import { useRolesAndPermissionsQuery } from '../../hooks/useRbac';
 import { useCalendarTokensQuery, useCalendarTokenMutations } from '../../hooks/useCalendarTokens';
 import { CalendarToken, buildFeedUrl } from '../../services/calendarService';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 const CLIENT_INSTRUCTIONS = [
   {
@@ -77,7 +78,10 @@ const CalendarSection: React.FC = () => {
   /** The one token whose raw URL can be shown: the one just created. */
   const [freshUrl, setFreshUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [actionError, setError] = useState<string | null>(null);
+  // No success banner here — the fresh-URL reveal and the list re-rendering
+  // are the confirmation; `run`'s success path is unused, only its error
+  // handling is.
+  const { error: actionError, setError, run } = useSettingsSectionSave();
 
   // The filter options for the aggregate builder. Both are ordinary cached
   // queries; a failure leaves the selects empty rather than breaking the page,
@@ -107,13 +111,15 @@ const CalendarSection: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    try {
-      const created = await create.mutateAsync(label);
+    let created: Awaited<ReturnType<typeof create.mutateAsync>> | undefined;
+    const ok = await run(
+      async () => { created = await create.mutateAsync(label); },
+      '',
+      'Failed to create token.'
+    );
+    if (ok && created) {
       setFreshUrl(buildFeedUrl(created.token));
       setLabel('');
-    } catch (err) {
-      setError((err as Error).message || 'Failed to create token.');
     }
   };
 
@@ -124,12 +130,7 @@ const CalendarSection: React.FC = () => {
       )
     )
       return;
-    setError(null);
-    try {
-      await revoke.mutateAsync(token.id);
-    } catch (err) {
-      setError((err as Error).message || 'Failed to revoke token.');
-    }
+    await run(() => revoke.mutateAsync(token.id), '', 'Failed to revoke token.');
   };
 
   return (

@@ -13,6 +13,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { listModulesForOrg } from '../../services/moduleService';
 import { useModulesQuery, useModuleMutations } from '../../hooks/useModules';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 import { ModuleWithOrgOverride } from '../../types';
 
 interface PendingToggle {
@@ -28,11 +29,10 @@ const ModulesSection: React.FC = () => {
   const modulesQuery = useModulesQuery();
   const modules = modulesQuery.data ?? [];
   const loading = modulesQuery.isLoading;
-  const [actionError, setError] = useState<string | null>(null);
+  const { success, error: actionError, run, setSuccess } = useSettingsSectionSave();
   const error = modulesQuery.isError
     ? (modulesQuery.error as Error).message ?? 'Failed to load modules.'
     : actionError;
-  const [success, setSuccess] = useState<string | null>(null);
 
   // Org-override panel state
   const [orgName, setOrgName] = useState<string>(user?.organizationName ?? '');
@@ -68,36 +68,35 @@ const ModulesSection: React.FC = () => {
 
   const confirmToggle = async () => {
     if (!pendingToggle) return;
-    setSuccess(null);
-    setError(null);
-    try {
-      const { code, targetEnabled, scope, org } = pendingToggle;
-      if (scope === 'global') {
-        await setGlobal.mutateAsync({ code, isEnabled: targetEnabled, justification: justification || undefined });
-        if (orgModules.length > 0 && orgName) await loadOrgModules();
-        setSuccess(`Module '${code}' ${targetEnabled ? 'enabled' : 'disabled'} globally.`);
-      } else if (scope === 'org' && org) {
-        await setOrgOverride.mutateAsync({ code, org, isEnabled: targetEnabled, justification: justification || undefined });
-        await loadOrgModules();
-        setSuccess(`Module '${code}' override set for org '${org}'.`);
-      }
-      setPendingToggle(null);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to update module.');
-    }
+    const { code, targetEnabled, scope, org } = pendingToggle;
+    const ok = await run(
+      async () => {
+        if (scope === 'global') {
+          await setGlobal.mutateAsync({ code, isEnabled: targetEnabled, justification: justification || undefined });
+          if (orgModules.length > 0 && orgName) await loadOrgModules();
+        } else if (scope === 'org' && org) {
+          await setOrgOverride.mutateAsync({ code, org, isEnabled: targetEnabled, justification: justification || undefined });
+          await loadOrgModules();
+        }
+      },
+      scope === 'global'
+        ? `Module '${code}' ${targetEnabled ? 'enabled' : 'disabled'} globally.`
+        : `Module '${code}' override set for org '${org}'.`,
+      'Failed to update module.'
+    );
+    if (ok) setPendingToggle(null);
   };
 
   const handleRemoveOverride = async (code: string) => {
     if (!orgName.trim()) return;
-    setSuccess(null);
-    setError(null);
-    try {
-      await removeOrgOverride.mutateAsync({ code, org: orgName.trim() });
-      await loadOrgModules();
-      setSuccess(`Override for module '${code}' removed; global default now applies.`);
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to remove override.');
-    }
+    await run(
+      async () => {
+        await removeOrgOverride.mutateAsync({ code, org: orgName.trim() });
+        await loadOrgModules();
+      },
+      `Override for module '${code}' removed; global default now applies.`,
+      'Failed to remove override.'
+    );
   };
 
   return (

@@ -27,6 +27,7 @@ import {
   useUpdateTranslationOverride,
 } from '../../hooks/useTranslationOverrides';
 import type { TranslationOverride } from '../../services/translationOverrideService';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 interface Props {
   /** The signed-in administrator's organization, or null if they have none. */
@@ -67,8 +68,7 @@ const pairsToOverrides = (pairs: Pair[]): Record<string, string> => {
 const TranslationOverridesSection: React.FC<Props> = ({ organizationName }) => {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { success: message, error, run, setSuccess: setMessage, setError } = useSettingsSectionSave();
 
   const overridesQuery = useTranslationOverridesQuery();
   const create = useCreateTranslationOverride();
@@ -117,24 +117,20 @@ const TranslationOverridesSection: React.FC<Props> = ({ organizationName }) => {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!draft) return;
-    setError(null);
     const overrides = pairsToOverrides(draft.pairs);
-    try {
-      if (editingId !== null) {
-        await update.mutateAsync({ id: editingId, overrides });
-        setMessage('Translation override updated.');
-      } else {
-        await create.mutateAsync({
-          organizationName: draft.organizationName === '' ? null : draft.organizationName,
-          locale: draft.locale,
-          overrides,
-        });
-        setMessage('Translation override saved.');
-      }
-      resetForm();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to save the translation override');
-    }
+    const ok = await run(
+      () =>
+        editingId !== null
+          ? update.mutateAsync({ id: editingId, overrides })
+          : create.mutateAsync({
+              organizationName: draft.organizationName === '' ? null : draft.organizationName,
+              locale: draft.locale,
+              overrides,
+            }),
+      editingId !== null ? 'Translation override updated.' : 'Translation override saved.',
+      'Failed to save the translation override'
+    );
+    if (ok) resetForm();
   };
 
   const handleDelete = async (row: TranslationOverride) => {
@@ -147,13 +143,7 @@ const TranslationOverridesSection: React.FC<Props> = ({ organizationName }) => {
     ) {
       return;
     }
-    setError(null);
-    try {
-      await remove.mutateAsync(row.id);
-      setMessage('Translation override removed.');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to remove the translation override');
-    }
+    await run(() => remove.mutateAsync(row.id), 'Translation override removed.', 'Failed to remove the translation override');
   };
 
   return (
