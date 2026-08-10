@@ -88,6 +88,7 @@ const SPEC_PATH = path.join(BACKEND, 'openapi', 'openapi.json');
  */
 const ROUTE_MOUNTS: Array<{ file: string; variable: string; prefix: string }> = [
   { file: 'auth.ts', variable: 'router', prefix: '/auth' },
+  { file: 'authSso.ts', variable: 'router', prefix: '/auth' },
   { file: 'twoFactor.ts', variable: 'router', prefix: '/auth/2fa' },
   { file: 'users.ts', variable: 'router', prefix: '/users' },
   { file: 'dashboard.ts', variable: 'router', prefix: '/dashboard' },
