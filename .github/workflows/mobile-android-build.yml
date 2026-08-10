@@ -1,0 +1,53 @@
+name: Mobile Android build (unsigned)
+
+# Manually triggered only — no signing secrets exist in CI, so this can only
+# ever produce an unsigned debug APK for local sideloading/smoke-testing,
+# never a store-ready artifact. Its value today is narrow but real: it
+# proves the Android Gradle project (mobile/android) still configures and
+# builds after any change to the mobile scaffold, something that cannot be
+# verified in the environment this scaffold and release tooling were
+# authored in (no JDK installed there — see DOCUMENTATION.md's mobile
+# section). Not wired to push/pull_request: the mobile workspace has no
+# application logic yet to justify running this on every commit.
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  android-debug-build:
+    name: Build unsigned Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies (workspace root)
+        run: npm ci --prefer-offline --no-audit --no-fund
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Build frontend and sync Capacitor
+        run: npm run build --workspace=mobile
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: staff-scheduler-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

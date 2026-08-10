@@ -7,7 +7,8 @@
     "build": "npm --prefix ../frontend run build && node scripts/copy-web-assets.mjs && npx cap sync",
     "sync": "npx cap sync",
     "open:ios": "npx cap open ios",
-    "open:android": "npx cap open android"
+    "open:android": "npx cap open android",
+    "version:bump": "node scripts/version-bump.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.0",
