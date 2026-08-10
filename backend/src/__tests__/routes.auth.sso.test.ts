@@ -1,5 +1,5 @@
 /**
- * SSO route tests (`routes/auth.ts`'s `/sso/*` endpoints) — the login
+ * SSO route tests (`routes/authSso.ts`'s `/sso/*` endpoints) — the login
  * redirect, the callback's state/nonce handling and cookie behavior, and
  * that a disabled/unknown provider is refused before anything else runs.
  *
@@ -11,7 +11,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
-import { createAuthRouter } from '../routes/auth';
+import { createSsoAuthRouter } from '../routes/authSso';
 import { config } from '../config';
 
 jest.mock('../services/UserService');
@@ -35,7 +35,7 @@ const buildApp = (prefix = '/api/v1/auth') => {
   const app = express();
   app.use(express.json());
   app.use(cookieParser());
-  app.use(prefix, createAuthRouter({} as never));
+  app.use(prefix, createSsoAuthRouter({} as never));
   return app;
 };
 
