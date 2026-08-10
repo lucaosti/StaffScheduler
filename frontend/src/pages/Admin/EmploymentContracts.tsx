@@ -23,6 +23,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useContractsQuery, useUserContractsQuery, useContractMutations } from '../../hooks/useEmploymentContracts';
@@ -31,21 +32,24 @@ import type { EmploymentContract } from '../../services/employmentContractServic
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 import { todayIso } from '../../utils/format';
 
-const LIMITS: Array<{ key: keyof EmploymentContract; label: string }> = [
-  { key: 'maxHoursPerWeek', label: 'Max hours / week' },
-  { key: 'minHoursPerWeek', label: 'Min hours / week' },
-  { key: 'maxHoursPerDay', label: 'Max hours / day' },
-  { key: 'maxConsecutiveDays', label: 'Max consecutive days' },
-  { key: 'minHoursBetweenShifts', label: 'Min rest between shifts' },
-  { key: 'minConsecutiveDaysOff', label: 'Min consecutive days off' },
-  { key: 'minDaysOffPerPeriod', label: 'Min days off per 7-day period' },
+const LIMIT_KEYS: Array<{ key: keyof EmploymentContract; labelKey: string }> = [
+  { key: 'maxHoursPerWeek', labelKey: 'admin.employmentContracts.limits.maxHoursPerWeek' },
+  { key: 'minHoursPerWeek', labelKey: 'admin.employmentContracts.limits.minHoursPerWeek' },
+  { key: 'maxHoursPerDay', labelKey: 'admin.employmentContracts.limits.maxHoursPerDay' },
+  { key: 'maxConsecutiveDays', labelKey: 'admin.employmentContracts.limits.maxConsecutiveDays' },
+  { key: 'minHoursBetweenShifts', labelKey: 'admin.employmentContracts.limits.minHoursBetweenShifts' },
+  { key: 'minConsecutiveDaysOff', labelKey: 'admin.employmentContracts.limits.minConsecutiveDaysOff' },
+  { key: 'minDaysOffPerPeriod', labelKey: 'admin.employmentContracts.limits.minDaysOffPerPeriod' },
 ];
 
 
 const EmploymentContracts: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const canManage = (user?.permissions ?? []).includes('preferences.manage');
+
+  const LIMITS = LIMIT_KEYS.map(({ key, labelKey }) => ({ key, label: t(labelKey) }));
 
   const [name, setName] = useState('');
   const [limits, setLimits] = useState<Record<string, string>>({});
@@ -93,10 +97,9 @@ const EmploymentContracts: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-1">Employment contracts</h1>
+      <h1 className="h4 mb-1">{t('admin.employmentContracts.title')}</h1>
       <p className="text-muted">
-        Working-time limits the scheduler enforces. Set by managers, never by the person they
-        apply to.
+        {t('admin.employmentContracts.subtitle')}
       </p>
 
       {message && (
@@ -108,7 +111,7 @@ const EmploymentContracts: React.FC = () => {
       {canManage && (
         <form className="row g-2 align-items-end mb-4" onSubmit={submitContract}>
           <div className="col-md-3">
-            <label className="form-label" htmlFor="contract-name">Name</label>
+            <label className="form-label" htmlFor="contract-name">{t('admin.employmentContracts.form.name')}</label>
             <input
               id="contract-name"
               className="form-control"
@@ -125,7 +128,7 @@ const EmploymentContracts: React.FC = () => {
                 type="number"
                 min={0}
                 className="form-control"
-                placeholder="—"
+                placeholder={t('common.emptyValue')}
                 value={limits[key as string] ?? ''}
                 onChange={(e) => setLimits({ ...limits, [key as string]: e.target.value })}
               />
@@ -133,7 +136,7 @@ const EmploymentContracts: React.FC = () => {
           ))}
           <div className="col-auto">
             <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-              Add contract
+              {t('admin.employmentContracts.form.addContract')}
             </button>
           </div>
         </form>
@@ -145,17 +148,17 @@ const EmploymentContracts: React.FC = () => {
         error={contracts.error}
         onRetry={contracts.refetch}
         isEmpty={(contracts.data?.length ?? 0) === 0}
-        loadingMessage="Loading contracts…"
-        empty={<p className="text-muted">No contracts defined yet.</p>}
+        loadingMessage={t('admin.employmentContracts.loadingContracts')}
+        empty={<p className="text-muted">{t('admin.employmentContracts.emptyContracts')}</p>}
       >
         <table className="table table-sm align-middle mb-4">
           <thead>
             <tr>
-              <th>Name</th>
+              <th>{t('admin.employmentContracts.form.name')}</th>
               {LIMITS.map(({ key, label }) => (
                 <th key={String(key)}>{label}</th>
               ))}
-              <th>Status</th>
+              <th>{t('admin.employmentContracts.table.status')}</th>
             </tr>
           </thead>
           <tbody>
@@ -167,7 +170,7 @@ const EmploymentContracts: React.FC = () => {
                     {c[key] === null || c[key] === undefined ? (
                       // Not "0" and not "—": the contract does not bound this,
                       // and the caller falls back to their default.
-                      <span className="text-muted">not constrained</span>
+                      <span className="text-muted">{t('admin.employmentContracts.notConstrained')}</span>
                     ) : (
                       String(c[key])
                     )}
@@ -175,7 +178,7 @@ const EmploymentContracts: React.FC = () => {
                 ))}
                 <td>
                   <span className={`badge ${c.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                    {c.isActive ? 'Active' : 'Inactive'}
+                    {c.isActive ? t('admin.employmentContracts.status.active') : t('admin.employmentContracts.status.inactive')}
                   </span>
                 </td>
               </tr>
@@ -186,10 +189,10 @@ const EmploymentContracts: React.FC = () => {
 
       {canManage && (
         <>
-          <h2 className="h6">Who is on which contract</h2>
+          <h2 className="h6">{t('admin.employmentContracts.assignment.title')}</h2>
           <form className="row g-2 align-items-end mb-3" onSubmit={submitAssignment}>
             <div className="col-md-3">
-              <label className="form-label" htmlFor="contract-person">Person</label>
+              <label className="form-label" htmlFor="contract-person">{t('admin.employmentContracts.assignment.person')}</label>
               <select
                 id="contract-person"
                 className="form-select"
@@ -197,7 +200,7 @@ const EmploymentContracts: React.FC = () => {
                 onChange={(e) => setPersonId(e.target.value)}
                 required
               >
-                <option value="">Choose someone…</option>
+                <option value="">{t('admin.employmentContracts.assignment.choosePerson')}</option>
                 {(employees.data ?? []).map((e) => (
                   <option key={String(e.id)} value={String(e.id)}>
                     {[e.firstName, e.lastName].filter(Boolean).join(' ') || e.email}
@@ -206,7 +209,7 @@ const EmploymentContracts: React.FC = () => {
               </select>
             </div>
             <div className="col-md-3">
-              <label className="form-label" htmlFor="contract-choice">Contract</label>
+              <label className="form-label" htmlFor="contract-choice">{t('admin.employmentContracts.assignment.contract')}</label>
               <select
                 id="contract-choice"
                 className="form-select"
@@ -214,14 +217,14 @@ const EmploymentContracts: React.FC = () => {
                 onChange={(e) => setContractId(e.target.value)}
                 required
               >
-                <option value="">Choose a contract…</option>
+                <option value="">{t('admin.employmentContracts.assignment.chooseContract')}</option>
                 {(contracts.data ?? []).map((c) => (
                   <option key={c.id} value={String(c.id)}>{c.name}</option>
                 ))}
               </select>
             </div>
             <div className="col-auto">
-              <label className="form-label" htmlFor="contract-from">In force from</label>
+              <label className="form-label" htmlFor="contract-from">{t('admin.employmentContracts.assignment.inForceFrom')}</label>
               <input
                 id="contract-from"
                 type="date"
@@ -232,7 +235,7 @@ const EmploymentContracts: React.FC = () => {
               />
             </div>
             <div className="col-auto">
-              <label className="form-label" htmlFor="contract-to">Until (optional)</label>
+              <label className="form-label" htmlFor="contract-to">{t('admin.employmentContracts.assignment.until')}</label>
               <input
                 id="contract-to"
                 type="date"
@@ -243,7 +246,7 @@ const EmploymentContracts: React.FC = () => {
             </div>
             <div className="col-auto">
               <button type="submit" className="btn btn-primary" disabled={assign.isPending}>
-                Assign
+                {t('admin.employmentContracts.assignment.assign')}
               </button>
             </div>
           </form>
@@ -255,15 +258,15 @@ const EmploymentContracts: React.FC = () => {
               error={history.error}
               onRetry={history.refetch}
               isEmpty={(history.data?.length ?? 0) === 0}
-              loadingMessage="Loading contract history…"
-              empty={<p className="text-muted">This person has no contract on record.</p>}
+              loadingMessage={t('admin.employmentContracts.history.loading')}
+              empty={<p className="text-muted">{t('admin.employmentContracts.history.empty')}</p>}
             >
               <table className="table table-sm align-middle">
                 <thead>
                   <tr>
-                    <th>Contract</th>
-                    <th>From</th>
-                    <th>Until</th>
+                    <th>{t('admin.employmentContracts.history.columns.contract')}</th>
+                    <th>{t('admin.employmentContracts.history.columns.from')}</th>
+                    <th>{t('admin.employmentContracts.history.columns.until')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -273,7 +276,7 @@ const EmploymentContracts: React.FC = () => {
                       <td>{a.effectiveFrom}</td>
                       {/* Open-ended is not "no end date is known": it is in
                           force until something replaces it. */}
-                      <td>{a.effectiveTo ?? <span className="text-muted">still in force</span>}</td>
+                      <td>{a.effectiveTo ?? <span className="text-muted">{t('admin.employmentContracts.history.stillInForce')}</span>}</td>
                     </tr>
                   ))}
                 </tbody>

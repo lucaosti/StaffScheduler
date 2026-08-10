@@ -11,6 +11,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { Permission, Role, UserRoleAssignment, Employee } from '../../types';
 import { createRole, updateRole, deleteRole, assignRole, removeRole } from '../../services/rbacService';
@@ -43,6 +44,7 @@ const EMPTY_FORM: RoleFormState = { name: '', description: '', permissionCodes: 
 // ---------------------------------------------------------------------------
 
 const RbacManagement: React.FC = () => {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<Tab>('roles');
   // The history tab reuses the user already picked in the grants tab rather
   // than offering a second search: having two selections for "who" on one page
@@ -59,7 +61,7 @@ const RbacManagement: React.FC = () => {
   const rolesLoading = rolesQuery.isLoading;
   const [rolesActionError, setRolesError] = useState<string | null>(null);
   const rolesError = rolesQuery.isError
-    ? (rolesQuery.error as Error).message ?? 'Failed to load roles.'
+    ? (rolesQuery.error as Error).message ?? t('admin.rbac.roles.loadFailed')
     : rolesActionError;
   const [rolesSuccess, setRolesSuccess] = useState<string | null>(null);
   const loadRoles = () => queryClient.invalidateQueries({ queryKey: rbacKeys.rolesAndPerms });
@@ -91,7 +93,7 @@ const RbacManagement: React.FC = () => {
   const userRoles = userRolesQuery.data ?? [];
   const userRolesLoading = selectedUser !== null && userRolesQuery.isLoading;
   const userRolesError = userRolesQuery.isError
-    ? (userRolesQuery.error as Error).message ?? 'Failed to load user roles.'
+    ? (userRolesQuery.error as Error).message ?? t('admin.rbac.userRoles.loadFailed')
     : userRolesActionError;
   const loadUserRoles = () =>
     queryClient.invalidateQueries({ queryKey: ['rbac', 'user-roles'] });
@@ -161,15 +163,15 @@ const RbacManagement: React.FC = () => {
       };
       if (roleModal.editing) {
         await updateRole(roleModal.editing.id, body);
-        setRolesSuccess(`Role "${roleForm.name}" updated.`);
+        setRolesSuccess(t('admin.rbac.roles.updatedMessage', { name: roleForm.name }));
       } else {
         await createRole(body);
-        setRolesSuccess(`Role "${roleForm.name}" created.`);
+        setRolesSuccess(t('admin.rbac.roles.createdMessage', { name: roleForm.name }));
       }
       setRoleModal({ open: false, editing: null });
       await loadRoles();
     } catch (e) {
-      setRolesError((e as Error).message ?? 'Failed to save role.');
+      setRolesError((e as Error).message ?? t('admin.rbac.roles.saveFailed'));
     } finally {
       setRoleSaving(false);
     }
@@ -182,11 +184,11 @@ const RbacManagement: React.FC = () => {
     setRolesSuccess(null);
     try {
       await deleteRole(deleteConfirm.id);
-      setRolesSuccess(`Role "${deleteConfirm.name}" deleted.`);
+      setRolesSuccess(t('admin.rbac.roles.deletedMessage', { name: deleteConfirm.name }));
       setDeleteConfirm(null);
       await loadRoles();
     } catch (e) {
-      setRolesError((e as Error).message ?? 'Failed to delete role.');
+      setRolesError((e as Error).message ?? t('admin.rbac.roles.deleteFailed'));
       setDeleteConfirm(null);
     } finally {
       setDeleting(false);
@@ -211,10 +213,10 @@ const RbacManagement: React.FC = () => {
         justification: grantForm.justification || undefined,
       });
       setGrantForm({ roleId: '', scopeOrgUnitId: '', expiresAt: '', justification: '' });
-      setUserRolesSuccess('Role granted successfully.');
+      setUserRolesSuccess(t('admin.rbac.userRoles.grantedMessage'));
       await loadUserRoles();
     } catch (e) {
-      setUserRolesError((e as Error).message ?? 'Failed to grant role.');
+      setUserRolesError((e as Error).message ?? t('admin.rbac.userRoles.grantFailed'));
     } finally {
       setGranting(false);
     }
@@ -232,12 +234,12 @@ const RbacManagement: React.FC = () => {
         revokeTarget.scopeOrgUnitId,
         revokeJustification || undefined
       );
-      setUserRolesSuccess(`Role "${revokeTarget.roleName}" revoked.`);
+      setUserRolesSuccess(t('admin.rbac.userRoles.revokedMessage', { name: revokeTarget.roleName }));
       setRevokeTarget(null);
       setRevokeJustification('');
       await loadUserRoles();
     } catch (e) {
-      setUserRolesError((e as Error).message ?? 'Failed to revoke role.');
+      setUserRolesError((e as Error).message ?? t('admin.rbac.userRoles.revokeFailed'));
     } finally {
       setRevoking(false);
     }
@@ -250,6 +252,15 @@ const RbacManagement: React.FC = () => {
     return acc;
   }, {});
 
+  // Computed outside the JSX tree rather than inline in the `subject` prop:
+  // the linter's i18next rule flags any string literal appearing inside a
+  // JSX attribute expression, including the `kind` discriminant here, which
+  // is a type tag rather than user-facing copy.
+  const historySubject: { kind: 'user' | 'role'; id: number } | null =
+    historyKind === 'role'
+      ? (historyRoleId !== null ? { kind: 'role', id: historyRoleId } : null)
+      : (selectedUser?.id ? { kind: 'user', id: Number(selectedUser.id) } : null);
+
   // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
@@ -258,8 +269,8 @@ const RbacManagement: React.FC = () => {
     <div className="container-fluid py-4">
       <div className="row mb-4">
         <div className="col">
-          <h1 className="h3 mb-0">Roles &amp; Permissions</h1>
-          <p className="text-muted mb-0">Manage roles, permission sets, and user role grants</p>
+          <h1 className="h3 mb-0">{t('admin.rbac.title')}</h1>
+          <p className="text-muted mb-0">{t('admin.rbac.subtitle')}</p>
         </div>
       </div>
 
@@ -269,7 +280,7 @@ const RbacManagement: React.FC = () => {
             className={`nav-link ${activeTab === 'roles' ? 'active' : ''}`}
             onClick={() => setActiveTab('roles')}
           >
-            <i className="bi bi-shield-check me-2" aria-hidden="true"></i>Roles
+            <i className="bi bi-shield-check me-2" aria-hidden="true"></i>{t('admin.rbac.tabs.roles')}
           </button>
         </li>
         <li className="nav-item">
@@ -277,7 +288,7 @@ const RbacManagement: React.FC = () => {
             className={`nav-link ${activeTab === 'user-roles' ? 'active' : ''}`}
             onClick={() => setActiveTab('user-roles')}
           >
-            <i className="bi bi-person-badge me-2" aria-hidden="true"></i>User Role Grants
+            <i className="bi bi-person-badge me-2" aria-hidden="true"></i>{t('admin.rbac.tabs.userRoles')}
           </button>
         </li>
         <li className="nav-item">
@@ -285,7 +296,7 @@ const RbacManagement: React.FC = () => {
             className={`nav-link ${activeTab === 'history' ? 'active' : ''}`}
             onClick={() => setActiveTab('history')}
           >
-            <i className="bi bi-clock-history me-2" aria-hidden="true"></i>History
+            <i className="bi bi-clock-history me-2" aria-hidden="true"></i>{t('admin.rbac.tabs.history')}
           </button>
         </li>
       </ul>
@@ -294,31 +305,31 @@ const RbacManagement: React.FC = () => {
       {activeTab === 'history' && (
         <div className="card">
           <div className="card-header d-flex align-items-center gap-3 flex-wrap">
-            <span className="fw-semibold">Role assignment history</span>
-            <div className="btn-group btn-group-sm" role="group" aria-label="History subject">
+            <span className="fw-semibold">{t('admin.rbac.history.heading')}</span>
+            <div className="btn-group btn-group-sm" role="group" aria-label={t('admin.rbac.history.subjectAriaLabel')}>
               <button
                 type="button"
                 className={`btn btn-outline-secondary ${historyKind === 'user' ? 'active' : ''}`}
                 onClick={() => setHistoryKind('user')}
               >
-                By person
+                {t('admin.rbac.history.byPerson')}
               </button>
               <button
                 type="button"
                 className={`btn btn-outline-secondary ${historyKind === 'role' ? 'active' : ''}`}
                 onClick={() => setHistoryKind('role')}
               >
-                By role
+                {t('admin.rbac.history.byRole')}
               </button>
             </div>
             {historyKind === 'role' ? (
               <select
                 className="form-select form-select-sm w-auto"
-                aria-label="Select a role"
+                aria-label={t('admin.rbac.history.selectRoleAriaLabel')}
                 value={historyRoleId ?? ''}
                 onChange={(e) => setHistoryRoleId(e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">— select a role —</option>
+                <option value="">{t('admin.rbac.history.selectRolePlaceholder')}</option>
                 {roles.map((role) => (
                   <option key={role.id} value={role.id}>{role.name}</option>
                 ))}
@@ -326,19 +337,13 @@ const RbacManagement: React.FC = () => {
             ) : (
               <span className="text-muted small">
                 {selectedUser
-                  ? `Showing ${selectedUser.firstName} ${selectedUser.lastName}`
-                  : 'Pick someone in the User Role Grants tab first.'}
+                  ? t('admin.rbac.history.showingPerson', { name: `${selectedUser.firstName} ${selectedUser.lastName}` })
+                  : t('admin.rbac.history.pickSomeone')}
               </span>
             )}
           </div>
           <div className="card-body">
-            <RoleTimeline
-              subject={
-                historyKind === 'role'
-                  ? (historyRoleId !== null ? { kind: 'role', id: historyRoleId } : null)
-                  : (selectedUser?.id ? { kind: 'user', id: Number(selectedUser.id) } : null)
-              }
-            />
+            <RoleTimeline subject={historySubject} />
           </div>
         </div>
       )}
@@ -349,7 +354,7 @@ const RbacManagement: React.FC = () => {
           {rolesSuccess && (
             <div className="alert alert-success alert-dismissible" role="status">
               <i className="bi bi-check-circle me-2" aria-hidden="true"></i>{rolesSuccess}
-              <button type="button" className="btn-close" onClick={() => setRolesSuccess(null)} aria-label="Close"></button>
+              <button type="button" className="btn-close" onClick={() => setRolesSuccess(null)} aria-label={t('common.close')}></button>
             </div>
           )}
           {rolesError && (
@@ -359,38 +364,38 @@ const RbacManagement: React.FC = () => {
           )}
 
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <h5 className="mb-0">All Roles</h5>
+            <h5 className="mb-0">{t('admin.rbac.roles.allRoles')}</h5>
             <button className="btn btn-primary btn-sm" onClick={openCreate}>
-              <i className="bi bi-plus me-1" aria-hidden="true"></i>New Role
+              <i className="bi bi-plus me-1" aria-hidden="true"></i>{t('admin.rbac.roles.newRole')}
             </button>
           </div>
 
           {rolesLoading ? (
             <div className="text-center py-4">
               <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              <span className="ms-2">Loading…</span>
+              <span className="ms-2">{t('common.loading')}</span>
             </div>
           ) : (
             <div className="table-responsive">
               <table className="table table-hover">
                 <thead className="table-light">
                   <tr>
-                    <th scope="col">Name</th>
-                    <th scope="col">Description</th>
-                    <th scope="col">Permissions</th>
-                    <th scope="col" className="text-center">System</th>
-                    <th scope="col" className="text-center">Actions</th>
+                    <th scope="col">{t('admin.rbac.roles.columns.name')}</th>
+                    <th scope="col">{t('admin.rbac.roles.columns.description')}</th>
+                    <th scope="col">{t('admin.rbac.roles.columns.permissions')}</th>
+                    <th scope="col" className="text-center">{t('admin.rbac.roles.columns.system')}</th>
+                    <th scope="col" className="text-center">{t('admin.rbac.roles.columns.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {roles.map((role) => (
                     <tr key={role.id}>
                       <td className="fw-semibold">{role.name}</td>
-                      <td className="text-muted small">{role.description ?? '—'}</td>
+                      <td className="text-muted small">{role.description ?? t('common.emptyValue')}</td>
                       <td>
                         <div className="d-flex flex-wrap gap-1">
                           {(role.permissions ?? []).length === 0 ? (
-                            <span className="text-muted small">None</span>
+                            <span className="text-muted small">{t('admin.rbac.roles.noPermissions')}</span>
                           ) : (
                             (role.permissions ?? []).slice(0, 5).map((code) => (
                               <span key={code} className="badge bg-light text-dark border font-monospace small">
@@ -399,15 +404,15 @@ const RbacManagement: React.FC = () => {
                             ))
                           )}
                           {(role.permissions ?? []).length > 5 && (
-                            <span className="badge bg-secondary">+{(role.permissions ?? []).length - 5} more</span>
+                            <span className="badge bg-secondary">{t('admin.rbac.roles.morePermissions', { count: (role.permissions ?? []).length - 5 })}</span>
                           )}
                         </div>
                       </td>
                       <td className="text-center">
                         {role.isSystem ? (
-                          <span className="badge bg-warning text-dark">System</span>
+                          <span className="badge bg-warning text-dark">{t('admin.rbac.roles.systemBadge')}</span>
                         ) : (
-                          <span className="text-muted">—</span>
+                          <span className="text-muted">{t('common.emptyValue')}</span>
                         )}
                       </td>
                       <td className="text-center">
@@ -415,7 +420,7 @@ const RbacManagement: React.FC = () => {
                           <button
                             className="btn btn-outline-primary"
                             onClick={() => openEdit(role)}
-                            aria-label={`Edit role ${role.name}`}
+                            aria-label={t('admin.rbac.roles.editAriaLabel', { name: role.name })}
                           >
                             <i className="bi bi-pencil" aria-hidden="true"></i>
                           </button>
@@ -423,8 +428,8 @@ const RbacManagement: React.FC = () => {
                             className="btn btn-outline-danger"
                             onClick={() => setDeleteConfirm(role)}
                             disabled={role.isSystem}
-                            aria-label={`Delete role ${role.name}`}
-                            title={role.isSystem ? 'System roles cannot be deleted' : undefined}
+                            aria-label={t('admin.rbac.roles.deleteAriaLabel', { name: role.name })}
+                            title={role.isSystem ? t('admin.rbac.roles.systemCannotDelete') : undefined}
                           >
                             <i className="bi bi-trash" aria-hidden="true"></i>
                           </button>
@@ -446,7 +451,7 @@ const RbacManagement: React.FC = () => {
             {userRolesSuccess && (
               <div className="alert alert-success alert-dismissible" role="status">
                 <i className="bi bi-check-circle me-2" aria-hidden="true"></i>{userRolesSuccess}
-                <button type="button" className="btn-close" onClick={() => setUserRolesSuccess(null)} aria-label="Close"></button>
+                <button type="button" className="btn-close" onClick={() => setUserRolesSuccess(null)} aria-label={t('common.close')}></button>
               </div>
             )}
             {userRolesError && (
@@ -457,15 +462,15 @@ const RbacManagement: React.FC = () => {
 
             {/* User search */}
             <div className="card mb-4">
-              <div className="card-header"><h5 className="mb-0">Select Employee</h5></div>
+              <div className="card-header"><h5 className="mb-0">{t('admin.rbac.userRoles.selectEmployee')}</h5></div>
               <div className="card-body">
                 <div className="position-relative">
-                  <label htmlFor="employeeSearchInput" className="form-label">Search by name or email</label>
+                  <label htmlFor="employeeSearchInput" className="form-label">{t('admin.rbac.userRoles.searchLabel')}</label>
                   <input
                     id="employeeSearchInput"
                     type="text"
                     className="form-control"
-                    placeholder="Type to search…"
+                    placeholder={t('admin.rbac.userRoles.searchPlaceholder')}
                     value={employeeSearch}
                     onChange={(e) => setEmployeeSearch(e.target.value)}
                     autoComplete="off"
@@ -507,7 +512,7 @@ const RbacManagement: React.FC = () => {
                       className="btn btn-sm btn-outline-secondary ms-auto"
                       onClick={() => { setSelectedUser(null); }}
                     >
-                      Change
+                      {t('admin.rbac.userRoles.change')}
                     </button>
                   </div>
                 )}
@@ -519,24 +524,24 @@ const RbacManagement: React.FC = () => {
                 {/* Current grants */}
                 <div className="card mb-4">
                   <div className="card-header">
-                    <h5 className="mb-0">Current Role Grants</h5>
+                    <h5 className="mb-0">{t('admin.rbac.userRoles.currentGrants')}</h5>
                   </div>
                   <div className="card-body p-0">
                     {userRolesLoading ? (
                       <div className="text-center py-3">
                         <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        <span className="ms-2">Loading…</span>
+                        <span className="ms-2">{t('common.loading')}</span>
                       </div>
                     ) : userRoles.length === 0 ? (
-                      <p className="text-muted text-center py-3 mb-0">No roles assigned.</p>
+                      <p className="text-muted text-center py-3 mb-0">{t('admin.rbac.userRoles.noneAssigned')}</p>
                     ) : (
                       <table className="table table-sm table-hover mb-0">
                         <thead className="table-light">
                           <tr>
-                            <th scope="col">Role</th>
-                            <th scope="col">Scope (Org Unit)</th>
-                            <th scope="col">Expires</th>
-                            <th scope="col" className="text-center">Revoke</th>
+                            <th scope="col">{t('admin.rbac.userRoles.columns.role')}</th>
+                            <th scope="col">{t('admin.rbac.userRoles.columns.scope')}</th>
+                            <th scope="col">{t('admin.rbac.userRoles.columns.expires')}</th>
+                            <th scope="col" className="text-center">{t('admin.rbac.userRoles.columns.revoke')}</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -545,21 +550,21 @@ const RbacManagement: React.FC = () => {
                               <td className="fw-semibold">{ur.roleName}</td>
                               <td>
                                 {ur.scopeOrgUnitId
-                                  ? (orgUnits.find((u) => u.id === ur.scopeOrgUnitId)?.name ?? `Unit #${ur.scopeOrgUnitId}`)
-                                  : <span className="text-muted">Global</span>}
+                                  ? (orgUnits.find((u) => u.id === ur.scopeOrgUnitId)?.name ?? t('admin.rbac.userRoles.unitFallback', { id: ur.scopeOrgUnitId }))
+                                  : <span className="text-muted">{t('admin.rbac.userRoles.global')}</span>}
                               </td>
                               <td>
                                 {ur.expiresAt
                                   ? new Date(ur.expiresAt).toLocaleDateString()
-                                  : <span className="text-muted">Never</span>}
+                                  : <span className="text-muted">{t('admin.rbac.userRoles.never')}</span>}
                               </td>
                               <td className="text-center">
                                 <button
                                   className="btn btn-sm btn-outline-danger"
                                   onClick={() => { setRevokeTarget(ur); setRevokeJustification(''); }}
-                                  aria-label={`Revoke role ${ur.roleName}`}
+                                  aria-label={t('admin.rbac.userRoles.revokeAriaLabel', { name: ur.roleName })}
                                 >
-                                  Revoke
+                                  {t('admin.rbac.userRoles.revokeButton')}
                                 </button>
                               </td>
                             </tr>
@@ -572,12 +577,12 @@ const RbacManagement: React.FC = () => {
 
                 {/* Grant new role */}
                 <div className="card">
-                  <div className="card-header"><h5 className="mb-0">Grant Role</h5></div>
+                  <div className="card-header"><h5 className="mb-0">{t('admin.rbac.userRoles.grantRole')}</h5></div>
                   <div className="card-body">
                     <form onSubmit={(e) => void handleGrant(e)}>
                       <div className="row g-3">
                         <div className="col-md-4">
-                          <label htmlFor="grantRoleSelect" className="form-label">Role <span className="text-danger">*</span></label>
+                          <label htmlFor="grantRoleSelect" className="form-label">{t('admin.rbac.userRoles.roleLabel')} <span className="text-danger">*</span></label>
                           <select
                             id="grantRoleSelect"
                             className="form-select"
@@ -585,28 +590,28 @@ const RbacManagement: React.FC = () => {
                             onChange={(e) => setGrantForm((f) => ({ ...f, roleId: e.target.value ? Number(e.target.value) : '' }))}
                             required
                           >
-                            <option value="">Select role…</option>
+                            <option value="">{t('admin.rbac.userRoles.selectRolePlaceholder')}</option>
                             {roles.map((r) => (
                               <option key={r.id} value={r.id}>{r.name}</option>
                             ))}
                           </select>
                         </div>
                         <div className="col-md-4">
-                          <label htmlFor="grantScopeSelect" className="form-label">Scope (Org Unit)</label>
+                          <label htmlFor="grantScopeSelect" className="form-label">{t('admin.rbac.userRoles.scopeLabel')}</label>
                           <select
                             id="grantScopeSelect"
                             className="form-select"
                             value={grantForm.scopeOrgUnitId}
                             onChange={(e) => setGrantForm((f) => ({ ...f, scopeOrgUnitId: e.target.value ? Number(e.target.value) : '' }))}
                           >
-                            <option value="">Global (no scope)</option>
+                            <option value="">{t('admin.rbac.userRoles.globalNoScope')}</option>
                             {orgUnits.map((u) => (
                               <option key={u.id} value={u.id}>{u.name}</option>
                             ))}
                           </select>
                         </div>
                         <div className="col-md-4">
-                          <label htmlFor="grantExpiresAt" className="form-label">Expires at</label>
+                          <label htmlFor="grantExpiresAt" className="form-label">{t('admin.rbac.userRoles.expiresAtLabel')}</label>
                           <input
                             id="grantExpiresAt"
                             type="datetime-local"
@@ -616,12 +621,12 @@ const RbacManagement: React.FC = () => {
                           />
                         </div>
                         <div className="col-12">
-                          <label htmlFor="grantJustification" className="form-label">Justification <span className="text-muted">(optional)</span></label>
+                          <label htmlFor="grantJustification" className="form-label">{t('admin.rbac.userRoles.justificationLabel')} <span className="text-muted">{t('admin.rbac.userRoles.optional')}</span></label>
                           <input
                             id="grantJustification"
                             type="text"
                             className="form-control"
-                            placeholder="Reason for this grant…"
+                            placeholder={t('admin.rbac.userRoles.justificationPlaceholder')}
                             value={grantForm.justification}
                             onChange={(e) => setGrantForm((f) => ({ ...f, justification: e.target.value }))}
                             maxLength={1000}
@@ -630,9 +635,9 @@ const RbacManagement: React.FC = () => {
                         <div className="col-12">
                           <button type="submit" className="btn btn-primary" disabled={granting || grantForm.roleId === ''}>
                             {granting ? (
-                              <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Granting…</>
+                              <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.userRoles.granting')}</>
                             ) : (
-                              <><i className="bi bi-plus me-1" aria-hidden="true"></i>Grant Role</>
+                              <><i className="bi bi-plus me-1" aria-hidden="true"></i>{t('admin.rbac.userRoles.grantButton')}</>
                             )}
                           </button>
                         </div>
@@ -653,18 +658,18 @@ const RbacManagement: React.FC = () => {
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title" id="roleModalLabel">
-                  {roleModal.editing ? `Edit role "${roleModal.editing.name}"` : 'Create Role'}
+                  {roleModal.editing ? t('admin.rbac.roleModal.editTitle', { name: roleModal.editing.name }) : t('admin.rbac.roleModal.createTitle')}
                 </h5>
                 <button
                   type="button"
                   className="btn-close"
                   onClick={() => setRoleModal({ open: false, editing: null })}
-                  aria-label="Close dialog"
+                  aria-label={t('admin.rbac.closeDialogAriaLabel')}
                 ></button>
               </div>
               <div className="modal-body">
                 <div className="mb-3">
-                  <label htmlFor="roleNameInput" className="form-label">Name <span className="text-danger">*</span></label>
+                  <label htmlFor="roleNameInput" className="form-label">{t('admin.rbac.roleModal.nameLabel')} <span className="text-danger">*</span></label>
                   <input
                     id="roleNameInput"
                     type="text"
@@ -677,7 +682,7 @@ const RbacManagement: React.FC = () => {
                   />
                 </div>
                 <div className="mb-3">
-                  <label htmlFor="roleDescInput" className="form-label">Description</label>
+                  <label htmlFor="roleDescInput" className="form-label">{t('admin.rbac.roleModal.descriptionLabel')}</label>
                   <input
                     id="roleDescInput"
                     type="text"
@@ -688,7 +693,7 @@ const RbacManagement: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="form-label">Permissions</label>
+                  <label className="form-label">{t('admin.rbac.roleModal.permissionsLabel')}</label>
                   {Object.entries(permsByResource).map(([resource, perms]) => (
                     <div key={resource} className="mb-3">
                       <h6 className="text-uppercase text-muted small mb-2">{resource}</h6>
@@ -718,7 +723,7 @@ const RbacManagement: React.FC = () => {
                   className="btn btn-secondary"
                   onClick={() => setRoleModal({ open: false, editing: null })}
                 >
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -727,9 +732,9 @@ const RbacManagement: React.FC = () => {
                   disabled={roleSaving || !roleForm.name.trim()}
                 >
                   {roleSaving ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.roleModal.saving')}</>
                   ) : (
-                    roleModal.editing ? 'Save Changes' : 'Create Role'
+                    roleModal.editing ? t('admin.rbac.roleModal.saveChanges') : t('admin.rbac.roleModal.createRole')
                   )}
                 </button>
               </div>
@@ -744,26 +749,26 @@ const RbacManagement: React.FC = () => {
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title" id="deleteRoleModalLabel">Delete Role</h5>
+                <h5 className="modal-title" id="deleteRoleModalLabel">{t('admin.rbac.deleteRoleModal.title')}</h5>
                 <button
                   type="button"
                   className="btn-close"
                   onClick={() => setDeleteConfirm(null)}
-                  aria-label="Close dialog"
+                  aria-label={t('admin.rbac.closeDialogAriaLabel')}
                 ></button>
               </div>
               <div className="modal-body">
-                <p>Delete role <strong>{deleteConfirm.name}</strong>? This will remove all user grants for this role. This action cannot be undone.</p>
+                <p>{t('admin.rbac.deleteRoleModal.prefix')} <strong>{deleteConfirm.name}</strong>? {t('admin.rbac.deleteRoleModal.suffix')}</p>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setDeleteConfirm(null)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-danger"
                   onClick={() => void confirmDelete()}
                   disabled={deleting}
                 >
-                  {deleting ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Deleting…</> : 'Delete'}
+                  {deleting ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.deleteRoleModal.deleting')}</> : t('common.delete')}
                 </button>
               </div>
             </div>
@@ -777,17 +782,19 @@ const RbacManagement: React.FC = () => {
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title" id="revokeModalLabel">Revoke Role Grant</h5>
+                <h5 className="modal-title" id="revokeModalLabel">{t('admin.rbac.revokeModal.title')}</h5>
                 <button
                   type="button"
                   className="btn-close"
                   onClick={() => setRevokeTarget(null)}
-                  aria-label="Close dialog"
+                  aria-label={t('admin.rbac.closeDialogAriaLabel')}
                 ></button>
               </div>
               <div className="modal-body">
-                <p>Revoke role <strong>{revokeTarget.roleName}</strong> from <strong>{selectedUser?.firstName} {selectedUser?.lastName}</strong>?</p>
-                <label htmlFor="revokeJustificationInput" className="form-label">Justification <span className="text-muted">(optional)</span></label>
+                <p>
+                  {t('admin.rbac.revokeModal.prefix')} <strong>{revokeTarget.roleName}</strong> {t('admin.rbac.revokeModal.from')} <strong>{selectedUser?.firstName} {selectedUser?.lastName}</strong>?
+                </p>
+                <label htmlFor="revokeJustificationInput" className="form-label">{t('admin.rbac.userRoles.justificationLabel')} <span className="text-muted">{t('admin.rbac.userRoles.optional')}</span></label>
                 <textarea
                   id="revokeJustificationInput"
                   className="form-control"
@@ -798,14 +805,14 @@ const RbacManagement: React.FC = () => {
                 />
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setRevokeTarget(null)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setRevokeTarget(null)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-danger"
                   onClick={() => void confirmRevoke()}
                   disabled={revoking}
                 >
-                  {revoking ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Revoking…</> : 'Revoke'}
+                  {revoking ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.revokeModal.revoking')}</> : t('admin.rbac.userRoles.revokeButton')}
                 </button>
               </div>
             </div>

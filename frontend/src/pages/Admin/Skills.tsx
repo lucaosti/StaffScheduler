@@ -15,12 +15,14 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useSkillsQuery, useSkillMutations } from '../../hooks/useSkills';
 import type { Skill } from '../../services/skillService';
 
 const Skills: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   // The route is gated on `employee.read` so a picker can list the catalogue,
   // but editing it takes `employee.manage`. Without this, everyone saw Add,
@@ -36,7 +38,7 @@ const Skills: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null);
 
   const failureOf = (error: unknown): string =>
-    error instanceof Error ? error.message : 'The request failed';
+    error instanceof Error ? error.message : t('admin.skills.requestFailed');
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,7 +74,7 @@ const Skills: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">Skills</h1>
+      <h1 className="h4 mb-3">{t('admin.skills.title')}</h1>
 
       {message && (
         <div className="alert alert-warning" role="alert">
@@ -83,7 +85,7 @@ const Skills: React.FC = () => {
       {canManage && (
       <form className="row g-2 align-items-end mb-4" onSubmit={submit}>
         <div className="col-md-3">
-          <label className="form-label" htmlFor="skill-name">Name</label>
+          <label className="form-label" htmlFor="skill-name">{t('admin.skills.form.name')}</label>
           <input
             id="skill-name"
             className="form-control"
@@ -93,7 +95,7 @@ const Skills: React.FC = () => {
           />
         </div>
         <div className="col-md-5">
-          <label className="form-label" htmlFor="skill-description">Description</label>
+          <label className="form-label" htmlFor="skill-description">{t('admin.skills.form.description')}</label>
           <input
             id="skill-description"
             className="form-control"
@@ -103,7 +105,7 @@ const Skills: React.FC = () => {
         </div>
         <div className="col-auto">
           <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-            Add skill
+            {t('admin.skills.form.addSkill')}
           </button>
         </div>
       </form>
@@ -115,17 +117,17 @@ const Skills: React.FC = () => {
         error={skills.error}
         onRetry={skills.refetch}
         isEmpty={(skills.data?.length ?? 0) === 0}
-        loadingMessage="Loading skills…"
-        empty={<p className="text-muted">No skills defined yet.</p>}
+        loadingMessage={t('admin.skills.loading')}
+        empty={<p className="text-muted">{t('admin.skills.empty')}</p>}
       >
         <table className="table table-sm align-middle">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Description</th>
-              <th className="text-end">Employees</th>
-              <th className="text-end">Shift requirements</th>
-              <th>Status</th>
+              <th>{t('admin.skills.form.name')}</th>
+              <th>{t('admin.skills.form.description')}</th>
+              <th className="text-end">{t('admin.skills.table.employees')}</th>
+              <th className="text-end">{t('admin.skills.table.shiftRequirements')}</th>
+              <th>{t('admin.skills.table.status')}</th>
               {canManage && <th />}
             </tr>
           </thead>
@@ -133,12 +135,12 @@ const Skills: React.FC = () => {
             {(skills.data ?? []).map((skill) => (
               <tr key={skill.id}>
                 <td>{skill.name}</td>
-                <td className="text-muted">{skill.description ?? '—'}</td>
+                <td className="text-muted">{skill.description ?? t('common.emptyValue')}</td>
                 <td className="text-end">{skill.employeeCount}</td>
                 <td className="text-end">{skill.shiftRequirementCount}</td>
                 <td>
                   <span className={`badge ${skill.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                    {skill.isActive ? 'Active' : 'Retired'}
+                    {skill.isActive ? t('admin.skills.status.active') : t('admin.skills.status.retired')}
                   </span>
                 </td>
                 <td className="text-end">
@@ -150,7 +152,7 @@ const Skills: React.FC = () => {
                         onClick={() => retire(skill)}
                         disabled={update.isPending}
                       >
-                        {skill.isActive ? 'Retire' : 'Reactivate'}
+                        {skill.isActive ? t('admin.skills.retire') : t('admin.skills.reactivate')}
                       </button>
                       <button
                         type="button"
@@ -158,7 +160,7 @@ const Skills: React.FC = () => {
                         onClick={() => destroy(skill)}
                         disabled={remove.isPending}
                       >
-                        Delete
+                        {t('common.delete')}
                       </button>
                     </>
                   )}
