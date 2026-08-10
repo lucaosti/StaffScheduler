@@ -26,7 +26,7 @@ import {
 import OrgTree from '../orgManagement/OrgTree';
 import MemberList from '../orgManagement/MemberList';
 import ConfirmModal from '../../components/ConfirmModal';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import QueryState from '../../components/QueryState';
 import EmptyState from '../../components/EmptyState';
 
 type Tab = 'tree' | 'members' | 'loans';
@@ -97,7 +97,6 @@ const OrgManagement: React.FC = () => {
   const tree = unitsQuery.data?.tree ?? [];
   const loans = loansQuery.data ?? [];
   const members = membersQuery.data ?? [];
-  const loading = unitsQuery.isLoading || loansQuery.isLoading;
 
   // Invalidates both cache entries for the unit hierarchy: this page's own
   // orgKeys.units (units + tree, fetched together) and orgKeys.tree, the
@@ -277,14 +276,6 @@ const OrgManagement: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container-fluid py-3">
-        <LoadingSpinner message={t('orgManagement.loading')} />
-      </div>
-    );
-  }
-
   return (
     <div className="container-fluid py-3">
       <h1 className="h3 mb-3">{t('orgManagement.title')}</h1>
@@ -301,6 +292,13 @@ const OrgManagement: React.FC = () => {
         </div>
       )}
 
+      <QueryState
+        isLoading={unitsQuery.isLoading || loansQuery.isLoading}
+        isError={unitsQuery.isError || loansQuery.isError}
+        error={unitsQuery.error ?? loansQuery.error}
+        onRetry={() => { unitsQuery.refetch(); loansQuery.refetch(); }}
+        loadingMessage={t('orgManagement.loading')}
+      >
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item">
           <button
@@ -521,6 +519,7 @@ const OrgManagement: React.FC = () => {
           </div>
         </div>
       )}
+      </QueryState>
 
       <ConfirmModal
         show={confirm.show}

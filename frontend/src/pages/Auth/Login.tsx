@@ -30,6 +30,7 @@ import { ApiError } from '../../services/apiUtils';
 import { internalPathOr } from '../../utils/internalPath';
 import { TwoFactorMethodType, requestLoginChallenge } from '../../services/twoFactorService';
 import { runWebAuthnAuthentication } from '../../services/webAuthnClient';
+import ErrorAlert from '../../components/ErrorAlert';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
 
 /**
@@ -165,11 +166,7 @@ const Login: React.FC = () => {
                   <p className="text-muted">{t('auth.subtitle')}</p>
                 </div>
 
-                {error && (
-                  <div className="alert alert-danger" role="alert">
-                    {error}
-                  </div>
-                )}
+                {error && <ErrorAlert message={error} />}
 
                 <form onSubmit={handleSubmit}>
                   <div className="mb-3">
