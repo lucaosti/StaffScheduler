@@ -36,7 +36,9 @@ export const createEventsRouter = (): Router => {
         res.write(': heartbeat\n\n');
       } catch {
         /* istanbul ignore next */
-        // Will be cleaned up by the close handler.
+        // Synchronous write failures land here. Writing to an already-
+        // destroyed stream instead emits 'error' asynchronously — outside
+        // this try/catch — which is what the 'error' listener below is for.
       }
     }, HEARTBEAT_MS);
     if (typeof heartbeat.unref === 'function') heartbeat.unref();
@@ -50,6 +52,15 @@ export const createEventsRouter = (): Router => {
     };
     req.on('close', cleanup);
     req.on('end', cleanup);
+    // Without a listener, an 'error' emitted by either stream (e.g. the
+    // client aborting mid-write, or the heartbeat firing on an already-
+    // destroyed response) is an unhandled EventEmitter error — which Node
+    // treats as an uncaught exception and can take down the whole process,
+    // surfacing as an unrelated failure in whatever test happens to be
+    // running at that moment (#556). Cleanup already tolerates being called
+    // more than once, so wiring it here too is just closing this last gap.
+    req.on('error', cleanup);
+    res.on('error', cleanup);
   });
 
   return router;
