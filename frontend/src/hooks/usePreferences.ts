@@ -19,7 +19,9 @@ import {
   type UserPreferences,
 } from '../services/preferencesService';
 
-export const myPreferencesKey = ['my-preferences'] as const;
+// Module-private: nothing outside this file invalidates a preferences
+// query directly.
+const myPreferencesKey = ['my-preferences'] as const;
 
 /** The current user's saved preferences (null when none/failed). */
 export function useMyPreferencesQuery() {

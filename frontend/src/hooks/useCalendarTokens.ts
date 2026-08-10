@@ -17,7 +17,9 @@ import {
   type CreatedCalendarToken,
 } from '../services/calendarService';
 
-export const calendarTokensKey = ['calendar-tokens'] as const;
+// Module-private: nothing outside this file invalidates a calendar-token
+// query directly.
+const calendarTokensKey = ['calendar-tokens'] as const;
 
 /** The caller's own calendar-feed tokens. */
 export function useCalendarTokensQuery() {

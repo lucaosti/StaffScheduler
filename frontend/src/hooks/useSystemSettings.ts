@@ -19,7 +19,9 @@ import {
   type TimePeriod,
 } from '../services/settingsService';
 
-export const systemSettingsKey = ['system-settings'] as const;
+// Module-private: nothing outside this file invalidates a system-settings
+// query directly.
+const systemSettingsKey = ['system-settings'] as const;
 
 /** All system settings rows, as-stored (a free-text key/value table). */
 export function useSystemSettingsQuery() {
