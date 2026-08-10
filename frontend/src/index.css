@@ -323,6 +323,48 @@ code {
   margin-right: 0;
 }
 
+/*
+ * Mobile touch targets for the schedule/calendar-adjacent pages (issue: the
+ * Capacitor WebView shell has no mouse — every actionable control needs a
+ * real touch target, not just enough visual padding to read as a button on a
+ * desktop pointer). Scoped to these pages' wrapper classes rather than to
+ * `.btn`/`.btn-sm` globally: those utility classes are used across pages this
+ * pass did not audit, and widening them everywhere would be an unreviewed
+ * change to screens outside this scope.
+ */
+@media (max-width: 576px) {
+  .schedule-page .btn,
+  .schedule-page .btn-close,
+  .timeline-page .btn,
+  .myassignments-page .btn,
+  .timeoff-page .btn,
+  .oncall-page .btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .schedule-page .btn-sm,
+  .timeline-page .btn-sm,
+  .myassignments-page .btn-sm,
+  .timeoff-page .btn-sm,
+  .oncall-page .btn-sm {
+    min-height: 44px;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+
+  .schedule-page .form-select,
+  .schedule-page .form-control,
+  .timeline-page .form-select,
+  .timeline-page .form-control,
+  .timeoff-page .form-select,
+  .timeoff-page .form-control,
+  .oncall-page .form-select,
+  .oncall-page .form-control {
+    min-height: 44px;
+  }
+}
+
 /* Print */
 @media print {
   .sidebar,
