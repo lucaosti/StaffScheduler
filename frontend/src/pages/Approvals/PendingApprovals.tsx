@@ -10,7 +10,10 @@
  * it to one team member, or open it to the whole team — and every row
  * exposes a "Chain of command" panel (visible to everyone who can see the
  * item) showing what happened: which structure it went to, what the head
- * decided, and who ultimately acted on it.
+ * decided, and who ultimately acted on it. Both the panel and the
+ * delegation controls live in ApprovalRow, which fetches its own chain and
+ * unit-members data when expanded. The approve/reject form lives in
+ * DecisionModal.
  *
  * Accessible to all authenticated users; the backend only returns items
  * assigned to the current user (directly, or via an opened structure).
@@ -21,37 +24,14 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
-import {
-  getDecisionChain,
-  PendingApprovalItem,
-  DecisionChain,
-} from '../../services/pendingApprovalService';
-import { listMembersDetailed, OrgUnitMemberDetail } from '../../services/orgService';
+import { PendingApprovalItem } from '../../services/pendingApprovalService';
 import { usePendingApprovalsQuery, usePendingApprovalMutations } from '../../hooks/usePendingApprovals';
+import ApprovalRow from './ApprovalRow';
+import DecisionModal from './DecisionModal';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 
 type DecisionMode = 'approve' | 'reject';
-
-const STATUS_BADGE: Record<string, string> = {
-  pending: 'bg-warning text-dark',
-  approved: 'bg-success',
-  rejected: 'bg-danger',
-  escalated: 'bg-secondary',
-};
-
-const STATUS_LABEL_KEYS: Record<string, string> = {
-  pending: 'approvals.status.pending',
-  approved: 'approvals.status.approved',
-  rejected: 'approvals.status.rejected',
-  escalated: 'approvals.status.escalated',
-};
-
-const REASSIGNMENT_LABEL_KEYS: Record<string, string> = {
-  kept: 'approvals.reassignment.kept',
-  delegated_to_person: 'approvals.reassignment.delegatedToPerson',
-  opened_to_structure: 'approvals.reassignment.openedToStructure',
-};
 
 const PendingApprovals: React.FC = () => {
   const { t } = useTranslation();
@@ -59,131 +39,32 @@ const PendingApprovals: React.FC = () => {
   const currentUserId = user?.id ? Number(user.id) : null;
 
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
-  const [actionError, setError] = useState<string | null>(null);
 
-  // Decision modal state
   const [decisionTarget, setDecisionTarget] = useState<PendingApprovalItem | null>(null);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>('approve');
-  const [note, setNote] = useState('');
-  const [decisionError, setDecisionError] = useState<string | null>(null);
 
-  // Expanded row: chain-of-command panel + (for structure heads) delegation controls
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [chains, setChains] = useState<Record<number, DecisionChain>>({});
-  const [chainLoading, setChainLoading] = useState(false);
-  const [members, setMembers] = useState<OrgUnitMemberDetail[]>([]);
-  const [delegateTargetId, setDelegateTargetId] = useState<string>('');
-  const [delegateError, setDelegateError] = useState<string | null>(null);
 
-  // Main queue via TanStack Query (keyed by filter). Load errors come from
-  // the query; action/chain errors are set locally.
+  // Main queue via TanStack Query (keyed by filter).
   const queueQuery = usePendingApprovalsQuery(filter);
   const items = queueQuery.data ?? [];
-  const loading = queueQuery.isLoading;
-  const error = queueQuery.isError
-    ? (queueQuery.error as Error).message ?? t('approvals.loadFailed')
-    : actionError;
   const { approve, reject, keep, delegate, openToStructure } = usePendingApprovalMutations();
   const deciding = approve.isPending || reject.isPending;
-  const delegating = keep.isPending || delegate.isPending || openToStructure.isPending;
-  const load = () => queueQuery.refetch();
-
-  const toggleExpand = async (item: PendingApprovalItem) => {
-    if (expandedId === item.id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(item.id);
-    setDelegateTargetId('');
-    setDelegateError(null);
-    setChainLoading(true);
-    try {
-      const res = await getDecisionChain(item.id);
-      if (res.data) setChains((prev) => ({ ...prev, [item.id]: res.data as DecisionChain }));
-      if (item.assignedToOrgUnitId) {
-        const membersRes = await listMembersDetailed(item.assignedToOrgUnitId);
-        setMembers(membersRes.data ?? []);
-      } else {
-        setMembers([]);
-      }
-    } catch (e) {
-      setError((e as Error).message ?? t('approvals.chainLoadFailed'));
-    } finally {
-      setChainLoading(false);
-    }
-  };
-
-  const refreshChain = async (id: number) => {
-    const res = await getDecisionChain(id);
-    if (res.data) setChains((prev) => ({ ...prev, [id]: res.data as DecisionChain }));
-  };
 
   const openDecision = (item: PendingApprovalItem, mode: DecisionMode) => {
     setDecisionTarget(item);
     setDecisionMode(mode);
-    setNote('');
-    setDecisionError(null);
   };
 
-  const handleDecisionConfirm = async () => {
+  const handleDecisionConfirm = async (note: string) => {
     if (!decisionTarget) return;
-    setDecisionError(null);
-    try {
-      if (decisionMode === 'approve') {
-        await approve.mutateAsync({ id: decisionTarget.id, note: note || undefined });
-      } else {
-        await reject.mutateAsync({ id: decisionTarget.id, note: note || undefined });
-      }
-      setDecisionTarget(null);
-    } catch (e) {
-      setDecisionError((e as Error).message ?? t('approvals.actionFailed'));
+    if (decisionMode === 'approve') {
+      await approve.mutateAsync({ id: decisionTarget.id, note: note || undefined });
+    } else {
+      await reject.mutateAsync({ id: decisionTarget.id, note: note || undefined });
     }
+    setDecisionTarget(null);
   };
-
-  const handleKeep = async (item: PendingApprovalItem) => {
-    setDelegateError(null);
-    try {
-      await keep.mutateAsync(item.id);
-      await refreshChain(item.id);
-    } catch (e) {
-      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    }
-  };
-
-  const handleDelegate = async (item: PendingApprovalItem) => {
-    const targetUserId = Number(delegateTargetId);
-    if (!targetUserId) return;
-    setDelegateError(null);
-    try {
-      await delegate.mutateAsync({ id: item.id, targetUserId });
-      await refreshChain(item.id);
-    } catch (e) {
-      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    }
-  };
-
-  const handleOpenToStructure = async (item: PendingApprovalItem) => {
-    setDelegateError(null);
-    try {
-      await openToStructure.mutateAsync(item.id);
-      await refreshChain(item.id);
-    } catch (e) {
-      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    }
-  };
-
-  const formatDate = (iso: string) => {
-    try { return new Date(iso).toLocaleString(); } catch { return iso; }
-  };
-
-  // A structure-assigned decision still sitting with its default assignee
-  // (the head, nobody has delegated/opened it yet) shows the delegation
-  // controls to that same head.
-  const canManageStructureDecision = (item: PendingApprovalItem): boolean =>
-    item.status === 'pending' &&
-    item.assignedToOrgUnitId !== null &&
-    item.assignedToUserId !== null &&
-    item.assignedToUserId === currentUserId;
 
   return (
     <div className="container-fluid py-4">
@@ -210,19 +91,24 @@ const PendingApprovals: React.FC = () => {
                 {t('approvals.all')}
               </button>
             </div>
-            <button className="btn btn-sm btn-outline-secondary" onClick={load} aria-label={t('approvals.refresh')}>
+            <button className="btn btn-sm btn-outline-secondary" onClick={() => queueQuery.refetch()} aria-label={t('approvals.refresh')}>
               <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
             </button>
           </div>
         </div>
       </div>
 
-      {error && <ErrorAlert message={error} onRetry={() => queueQuery.refetch()} />}
+      {queueQuery.isError && (
+        <ErrorAlert
+          message={(queueQuery.error as Error).message ?? t('approvals.loadFailed')}
+          onRetry={() => queueQuery.refetch()}
+        />
+      )}
 
       <div className="card">
         <div className="card-body p-0">
           <QueryState
-            isLoading={loading}
+            isLoading={queueQuery.isLoading}
             loadingMessage={t('common.loading')}
             isEmpty={items.length === 0}
             empty={
@@ -248,166 +134,17 @@ const PendingApprovals: React.FC = () => {
                 </thead>
                 <tbody>
                   {items.map((item) => (
-                    <React.Fragment key={item.id}>
-                      <tr>
-                        <td className="text-muted small">{item.id}</td>
-                        <td>
-                          <button
-                            className="btn btn-link btn-sm p-0 text-decoration-none fw-semibold text-start"
-                            onClick={() => void toggleExpand(item)}
-                            aria-label={expandedId === item.id
-                              ? t('approvals.collapseAriaLabel', { id: item.id })
-                              : t('approvals.expandAriaLabel', { id: item.id })}
-                          >
-                            {item.changeType}
-                            {item.assignedToOrgUnitId !== null && (
-                              <span className="badge bg-info-subtle text-info-emphasis ms-2">{t('approvals.structureBadge')}</span>
-                            )}
-                            <i className={`bi ms-1 ${expandedId === item.id ? 'bi-chevron-up' : 'bi-chevron-down'}`} aria-hidden="true"></i>
-                          </button>
-                        </td>
-                        <td className="small text-muted">
-                          {item.targetEntityType}
-                          {item.targetEntityId != null && ` #${item.targetEntityId}`}
-                        </td>
-                        <td className="small text-muted">{item.proposerUserId}</td>
-                        <td className="small">{item.stepOrder}</td>
-                        <td>
-                          <span className={`badge ${STATUS_BADGE[item.status] ?? 'bg-secondary'}`}>
-                            {STATUS_LABEL_KEYS[item.status] ? t(STATUS_LABEL_KEYS[item.status]) : item.status}
-                          </span>
-                        </td>
-                        <td className="small text-muted text-nowrap">{formatDate(item.createdAt)}</td>
-                        <td className="text-end">
-                          {item.status === 'pending' && (
-                            <>
-                              <button
-                                className="btn btn-sm btn-success me-1"
-                                onClick={() => openDecision(item, 'approve')}
-                                aria-label={t('approvals.approveAriaLabel', { id: item.id })}
-                              >
-                                <i className="bi bi-check" aria-hidden="true"></i>
-                              </button>
-                              <button
-                                className="btn btn-sm btn-danger"
-                                onClick={() => openDecision(item, 'reject')}
-                                aria-label={t('approvals.rejectAriaLabel', { id: item.id })}
-                              >
-                                <i className="bi bi-x" aria-hidden="true"></i>
-                              </button>
-                            </>
-                          )}
-                        </td>
-                      </tr>
-                      {expandedId === item.id && (
-                        <tr>
-                          <td colSpan={8} className="bg-light border-top-0">
-                            <div className="p-3">
-                              {item.justification && (
-                                <div className="mb-2">
-                                  <span className="fw-semibold small text-muted text-uppercase me-2">{t('approvals.justification')}</span>
-                                  <span className="small">{item.justification}</span>
-                                </div>
-                              )}
-                              <div className="mb-3">
-                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('approvals.proposedPayload')}</span>
-                                <pre className="bg-white border rounded p-2 small mb-0" style={{ maxHeight: 200, overflow: 'auto', fontSize: '0.75rem' }}>
-                                  {JSON.stringify(item.proposedPayload, null, 2)}
-                                </pre>
-                              </div>
-
-                              <div className="border-top pt-3">
-                                <span className="fw-semibold small text-muted text-uppercase d-block mb-2">{t('approvals.chainOfCommand')}</span>
-                                {chainLoading && !chains[item.id] ? (
-                                  <span className="small text-muted">{t('common.loading')}</span>
-                                ) : chains[item.id] ? (
-                                  <div className="small d-flex flex-wrap align-items-center gap-2">
-                                    {chains[item.id].assignedToOrgUnit ? (
-                                      <>
-                                        <span className="badge bg-secondary">{chains[item.id].assignedToOrgUnit!.name}</span>
-                                        <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
-                                        <span>
-                                          {t('approvals.head')} <strong>{chains[item.id].assignedToOrgUnit!.headName ?? t('approvals.unassigned')}</strong>
-                                        </span>
-                                        {chains[item.id].reassignments.map((r) => (
-                                          <React.Fragment key={r.id}>
-                                            <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
-                                            <span>
-                                              {r.actorName} {REASSIGNMENT_LABEL_KEYS[r.action] ? t(REASSIGNMENT_LABEL_KEYS[r.action]) : r.action}
-                                              {r.targetName ? ` ${r.targetName}` : ''}
-                                            </span>
-                                          </React.Fragment>
-                                        ))}
-                                        <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
-                                        <span>
-                                          {chains[item.id].decidedByName
-                                            ? <>{t('approvals.decidedBy')} <strong>{chains[item.id].decidedByName}</strong></>
-                                            : chains[item.id].openToStructure
-                                              ? t('approvals.openToTeamAwaiting')
-                                              : t('approvals.awaitingDecision')}
-                                        </span>
-                                      </>
-                                    ) : (
-                                      <span className="text-muted">{t('approvals.assignedDirectly')}</span>
-                                    )}
-                                  </div>
-                                ) : null}
-                              </div>
-
-                              {canManageStructureDecision(item) && (
-                                <div className="border-top pt-3 mt-3">
-                                  <span className="fw-semibold small text-muted text-uppercase d-block mb-2">
-                                    {t('approvals.youHeadThisStructure')}
-                                  </span>
-                                  {delegateError && (
-                                    <div className="alert alert-danger py-2 small" role="alert">{delegateError}</div>
-                                  )}
-                                  <div className="d-flex flex-wrap align-items-center gap-2">
-                                    <button
-                                      className="btn btn-sm btn-outline-primary"
-                                      disabled={delegating}
-                                      onClick={() => void handleKeep(item)}
-                                    >
-                                      {t('approvals.keepForMyself')}
-                                    </button>
-                                    <select
-                                      className="form-select form-select-sm"
-                                      style={{ width: 'auto' }}
-                                      value={delegateTargetId}
-                                      onChange={(e) => setDelegateTargetId(e.target.value)}
-                                      aria-label={t('approvals.delegateToTeamMemberAriaLabel')}
-                                    >
-                                      <option value="">{t('approvals.delegateToPlaceholder')}</option>
-                                      {members
-                                        .filter((m) => m.userId !== currentUserId)
-                                        .map((m) => (
-                                          <option key={m.userId} value={m.userId}>
-                                            {m.firstName} {m.lastName}
-                                          </option>
-                                        ))}
-                                    </select>
-                                    <button
-                                      className="btn btn-sm btn-outline-primary"
-                                      disabled={delegating || !delegateTargetId}
-                                      onClick={() => void handleDelegate(item)}
-                                    >
-                                      {t('approvals.delegate')}
-                                    </button>
-                                    <button
-                                      className="btn btn-sm btn-outline-secondary"
-                                      disabled={delegating}
-                                      onClick={() => void handleOpenToStructure(item)}
-                                    >
-                                      {t('approvals.openToMyTeam')}
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
+                    <ApprovalRow
+                      key={item.id}
+                      item={item}
+                      currentUserId={currentUserId}
+                      isExpanded={expandedId === item.id}
+                      onToggleExpand={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                      onOpenDecision={openDecision}
+                      keepMutation={keep}
+                      delegateMutation={delegate}
+                      openToStructureMutation={openToStructure}
+                    />
                   ))}
                 </tbody>
               </table>
@@ -416,64 +153,13 @@ const PendingApprovals: React.FC = () => {
         </div>
       </div>
 
-      {/* Decision Modal */}
-      {decisionTarget && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true"
-          aria-label={decisionMode === 'approve'
-            ? t('approvals.approveAriaLabel', { id: decisionTarget.id })
-            : t('approvals.rejectAriaLabel', { id: decisionTarget.id })}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  {t('approvals.reviewModalTitle', {
-                    action: decisionMode === 'approve' ? t('approvals.approve') : t('approvals.reject'),
-                    changeType: decisionTarget.changeType,
-                  })}
-                </h5>
-                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setDecisionTarget(null)}></button>
-              </div>
-              <div className="modal-body">
-                {decisionError && (
-                  <div className="alert alert-danger py-2 small" role="alert">{decisionError}</div>
-                )}
-                <div className="mb-3">
-                  <label htmlFor="decisionNote" className="form-label">
-                    {t('approvals.note')} <span className="text-muted small">{t('approvals.optional')}</span>
-                  </label>
-                  <textarea
-                    id="decisionNote"
-                    className="form-control"
-                    rows={3}
-                    placeholder={t('approvals.notePlaceholder')}
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setDecisionTarget(null)}>
-                  {t('common.cancel')}
-                </button>
-                <button
-                  type="button"
-                  className={`btn ${decisionMode === 'approve' ? 'btn-success' : 'btn-danger'}`}
-                  onClick={handleDecisionConfirm}
-                  disabled={deciding}
-                  aria-label={decisionMode === 'approve' ? t('approvals.confirmApproveAriaLabel') : t('approvals.confirmRejectAriaLabel')}
-                >
-                  {deciding ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('approvals.saving')}</>
-                  ) : (
-                    decisionMode === 'approve' ? t('approvals.approve') : t('approvals.reject')
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="modal-backdrop fade show"></div>
-        </div>
-      )}
+      <DecisionModal
+        target={decisionTarget}
+        mode={decisionMode}
+        deciding={deciding}
+        onClose={() => setDecisionTarget(null)}
+        onConfirm={handleDecisionConfirm}
+      />
     </div>
   );
 };
