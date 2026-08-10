@@ -110,7 +110,7 @@ services:
       # Enables the shared Redis-backed caches. Drop this line (and the redis
       # service) to run single-instance with in-process state.
       REDIS_URL: redis://:${REDIS_PASSWORD:-}@redis:6379
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
       DB_QUEUE_LIMIT: ${DB_QUEUE_LIMIT:-100}
