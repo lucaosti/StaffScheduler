@@ -16,8 +16,8 @@
  */
 
 import { ApiResponse, DashboardStats, AttentionItems, AuditLogEntry } from '../types';
-import { getAuthHeaders, API_BASE_URL } from './apiUtils';
 import { apiClient } from '../api/client';
+import { listAuditLogs } from './auditLogService';
 
 export const getDashboardStats = (): Promise<ApiResponse<DashboardStats>> =>
   apiClient.get<DashboardStats, '/dashboard/stats'>('/dashboard/stats');
@@ -25,16 +25,20 @@ export const getDashboardStats = (): Promise<ApiResponse<DashboardStats>> =>
 export const getAttentionItems = (): Promise<ApiResponse<AttentionItems>> =>
   apiClient.get<AttentionItems, '/dashboard/attention-items'>('/dashboard/attention-items');
 
+/**
+ * Routed through `listAuditLogs` (the generated client) rather than a raw
+ * `fetch`, per the service-layer convention — this used to hand-parse the
+ * response body itself, duplicating what `handleResponse` already does.
+ *
+ * Still swallows its own failure into an empty list rather than throwing:
+ * the recent-activity feed is a secondary widget on the dashboard, and a
+ * failure here should not take down the stat cards `useDashboardData`
+ * loads alongside it.
+ */
 export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
   try {
-    const response = await fetch(`${API_BASE_URL}/audit-logs?limit=${limit}`, {
-      method: 'GET',
-      ...getAuthHeaders(),
-    });
-    if (!response.ok) return [];
-    const body = await response.json();
-    const items = body?.data?.items ?? body?.data ?? [];
-    return Array.isArray(items) ? items : [];
+    const res = await listAuditLogs({ limit });
+    return res.success && Array.isArray(res.data) ? res.data : [];
   } catch {
     return [];
   }
