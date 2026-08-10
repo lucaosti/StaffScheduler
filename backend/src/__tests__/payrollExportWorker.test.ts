@@ -136,6 +136,36 @@ describe('processPayrollExportOutboxOnce', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('coerces a non-string range_start/range_end (a real driver returns Date columns) before building the batch', async () => {
+    const conn = makeConn([
+      row({ range_start: new Date('2026-05-01T00:00:00Z'), range_end: new Date('2026-05-31T00:00:00Z') }),
+    ]);
+    const pool = poolWith(conn, [batchLine()]);
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ id: 'run_1' }) });
+
+    await processPayrollExportOutboxOnce(pool);
+
+    expect(conn.commit).toHaveBeenCalled();
+    // buildBatch received strings, not Date objects, as its range params.
+    const batchQueryParams = (pool as { execute: jest.Mock }).execute.mock.calls[0][1] as unknown[];
+    expect(typeof batchQueryParams[0]).toBe('string');
+    expect(typeof batchQueryParams[1]).toBe('string');
+  });
+
+  it('stringifies a non-Error throw from the provider as the recorded failure message', async () => {
+    const conn = makeConn([row({ id: 5 })]);
+    const pool = poolWith(conn, [batchLine()]);
+    // A provider throwing a plain string rather than an Error.
+    (global.fetch as jest.Mock).mockImplementationOnce(() => {
+      throw 'network unreachable';
+    });
+
+    await processPayrollExportOutboxOnce(pool);
+
+    const params = conn.execute.mock.calls[0][1];
+    expect(params[2]).toBe('network unreachable');
+  });
+
   it('fails the job when Gusto is not configured, without making a request', async () => {
     config.gusto.apiKey = undefined;
     const conn = makeConn([row()]);
@@ -162,6 +192,14 @@ describe('processPayrollExportOutboxOnce', () => {
     expect(count).toBe(0);
     expect(conn.rollback).toHaveBeenCalled();
   });
+
+  it('rolls back and returns 0 when the poll query throws a non-Error value', async () => {
+    const conn = makeConn([]);
+    conn.query.mockRejectedValueOnce('connection pool exhausted');
+    const count = await processPayrollExportOutboxOnce(poolWith(conn));
+    expect(count).toBe(0);
+    expect(conn.rollback).toHaveBeenCalled();
+  });
 });
 
 describe('startPayrollExportWorker', () => {
@@ -176,6 +214,14 @@ describe('startPayrollExportWorker', () => {
     startPayrollExportWorker(pool, 10);
     jest.advanceTimersByTime(25);
     expect((pool as { getConnection: jest.Mock }).getConnection).toHaveBeenCalled();
+  });
+
+  it('defaults to the standard poll interval when none is given', () => {
+    const pool = poolWith(makeConn([]));
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    startPayrollExportWorker(pool);
+    expect(setIntervalSpy.mock.calls[0][1]).toBe(60_000);
+    setIntervalSpy.mockRestore();
   });
 
   it('does not schedule a second interval on a second call while one is already running', () => {

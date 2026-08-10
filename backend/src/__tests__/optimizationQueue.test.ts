@@ -129,6 +129,20 @@ describe('getOptimizationStatus', () => {
     expect(status).toMatchObject({ jobId: 'schedule:5', state: 'completed', progress: 100 });
     expect(status!.result?.assignmentsCreated).toBe(3);
   });
+
+  it('defaults progress to 0 and state to unknown when the job reports neither', async () => {
+    const q = load();
+    queueGetJob.mockResolvedValue({
+      id: 'schedule:5',
+      getState: jest.fn().mockResolvedValue(undefined),
+      progress: undefined,
+      returnvalue: undefined,
+      failedReason: undefined,
+    });
+
+    const status = await q.getOptimizationStatus(5);
+    expect(status).toMatchObject({ jobId: 'schedule:5', state: 'unknown', progress: 0 });
+  });
 });
 
 describe('cancelOptimization', () => {
@@ -202,5 +216,37 @@ describe('closeOptimizationQueue', () => {
 
     expect(workerClose).toHaveBeenCalled();
     expect(queueClose).toHaveBeenCalled();
+  });
+});
+
+describe('parseRedisUrl', () => {
+  it('parses host, port, password, and db from a full redis:// URL', () => {
+    const { parseRedisUrl } = load();
+    expect(parseRedisUrl('redis://:secret@cache.internal:6380/2')).toEqual({
+      host: 'cache.internal',
+      port: 6380,
+      password: 'secret',
+      db: 2,
+    });
+  });
+
+  it('defaults port/password/db when the URL omits them', () => {
+    const { parseRedisUrl } = load();
+    expect(parseRedisUrl('redis://cache.internal')).toEqual({
+      host: 'cache.internal',
+      port: 6379,
+      password: undefined,
+      db: undefined,
+    });
+  });
+
+  it('falls back to localhost:6379 when the URL cannot be parsed', () => {
+    const { parseRedisUrl } = load();
+    expect(parseRedisUrl('not-a-url')).toEqual({ host: '127.0.0.1', port: 6379 });
+  });
+
+  it('defaults host to 127.0.0.1 when the URL has no authority', () => {
+    const { parseRedisUrl } = load();
+    expect(parseRedisUrl('redis:///2').host).toBe('127.0.0.1');
   });
 });

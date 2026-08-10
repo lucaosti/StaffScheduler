@@ -41,6 +41,16 @@ describe('PayrollExportService.buildBatch', () => {
     const batch = await new PayrollExportService(pool).buildBatch('2026-05-01', '2026-05-31');
     expect(batch.lines).toEqual([]);
   });
+
+  it('falls back to zero hours/pay when the aggregates are not numbers', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ user_id: 1, full_name: 'Anna Demo', email: 'anna@example.com', hours: null, gross_pay: null }],
+      null,
+    ] as Tuple);
+    const batch = await new PayrollExportService(pool).buildBatch('2026-05-01', '2026-05-31');
+    expect(batch.lines[0]).toMatchObject({ hours: 0, grossPay: 0 });
+  });
 });
 
 describe('PayrollExportService job CRUD', () => {
@@ -69,6 +79,17 @@ describe('PayrollExportService job CRUD', () => {
 
     const job = await new PayrollExportService(pool).createJob('gusto', '2026-05-01', '2026-05-31', 1);
     expect(job).toMatchObject({ id: 9, provider: 'gusto', status: 'pending' });
+  });
+
+  it('throws when the newly inserted job cannot be re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 9 }, null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+
+    await expect(
+      new PayrollExportService(pool).createJob('gusto', '2026-05-01', '2026-05-31', 1)
+    ).rejects.toThrow('Failed to create payroll export job');
   });
 
   it('getById returns null for an unknown job', async () => {

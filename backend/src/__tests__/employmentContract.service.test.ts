@@ -132,6 +132,61 @@ describe('resolveLimitsForPeriod', () => {
     expect(limits.get(7)).toMatchObject({ maxHoursPerWeek: 24, maxHoursPerDay: 6 });
   });
 
+  it('maps every unstated limit to null, not just the ones other tests happen to null', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        {
+          user_id: 7,
+          ...contractRow({
+            min_hours_per_week: null,
+            max_consecutive_days: null,
+            min_hours_between_shifts: null,
+            min_consecutive_days_off: null,
+            min_days_off_per_period: null,
+          }),
+        },
+      ],
+      [],
+    ]);
+
+    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+      [7],
+      '2033-04-01',
+      '2033-04-30'
+    );
+
+    expect(limits.get(7)).toMatchObject({
+      minHoursPerWeek: null,
+      maxConsecutiveDays: null,
+      minHoursBetweenShifts: null,
+      minConsecutiveDaysOff: null,
+      minDaysOffPerPeriod: null,
+    });
+  });
+
+  it('lets an earlier stated limit win over a later unstated one', async () => {
+    // The reverse of "lets a stated limit win over an unstated one": here the
+    // FIRST contract in force states the limit and the SECOND is silent on it,
+    // exercising the other side of `tighter`/`tighterLowerBound`'s null checks.
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [
+        { user_id: 7, ...contractRow({ id: 1, max_hours_per_week: 40, min_hours_between_shifts: 11 }) },
+        { user_id: 7, ...contractRow({ id: 2, max_hours_per_week: null, min_hours_between_shifts: null }) },
+      ],
+      [],
+    ]);
+
+    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+      [7],
+      '2033-04-01',
+      '2033-04-30'
+    );
+
+    expect(limits.get(7)).toMatchObject({ maxHoursPerWeek: 40, minHoursBetweenShifts: 11 });
+  });
+
   it('omits users with no contract rather than inventing limits', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], []]);
@@ -173,6 +228,17 @@ describe('resolveLimitsForPeriod', () => {
     const [sql, params] = execute.mock.calls[0];
     expect(sql).toContain('IN (7,9)');
     expect(params).toEqual(['2033-04-30', '2033-04-01']);
+  });
+
+  it('does not query when every id is non-integer', async () => {
+    const { pool, execute } = makePool();
+    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+      [NaN, 1.5] as number[],
+      '2033-04-01',
+      '2033-04-30'
+    );
+    expect(limits.size).toBe(0);
+    expect(execute).not.toHaveBeenCalled();
   });
 });
 
@@ -270,6 +336,25 @@ describe('contract CRUD', () => {
     expect(params).toEqual(['Full time', null, true, 24, 0, 8, 5, 11, 2, 3, 1]);
   });
 
+  it('applies an override for every other limit field the patch supplies', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[row], []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[contractRow()], []]);
+
+    await new EmploymentContractService(pool).update(1, {
+      minHoursPerWeek: 10,
+      maxConsecutiveDays: 6,
+      minHoursBetweenShifts: 12,
+      minConsecutiveDaysOff: 3,
+      minDaysOffPerPeriod: 4,
+    });
+
+    const [, params] = execute.mock.calls[1];
+    expect(params).toEqual(['Full time', null, true, 40, 10, 8, 6, 12, 3, 4, 1]);
+  });
+
   it('distinguishes clearing a limit from omitting it', async () => {
     const { pool, execute } = makePool();
     execute
@@ -338,5 +423,22 @@ describe('contract CRUD', () => {
       effectiveTo: '2033-06-30',
     });
     expect(created).toMatchObject({ id: 4, contractId: 2 });
+  });
+
+  it('throws when the newly created assignment cannot be found in the re-read history', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], []]) // no overlap
+      .mockResolvedValueOnce([{ insertId: 4 }, []])
+      .mockResolvedValueOnce([[], []]); // re-read comes back empty — no id 4
+
+    await expect(
+      new EmploymentContractService(pool).assign({
+        userId: 7,
+        contractId: 2,
+        effectiveFrom: '2033-04-01',
+        effectiveTo: '2033-06-30',
+      })
+    ).rejects.toThrow('Failed to retrieve contract assignment after insert');
   });
 });

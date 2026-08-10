@@ -195,6 +195,22 @@ describe('SsoAuthService.verifyIdToken', () => {
     });
   });
 
+  it('omits email/givenName/familyName when the IdP claims lack them, and reads fullName when present', async () => {
+    const token = jwt.sign(
+      { sub: 'idp-subject-2', nonce: 'expected-nonce', name: 'Anna Demo' },
+      privateKey,
+      { algorithm: 'RS256', issuer: provider.issuer, audience: provider.clientId, expiresIn: '5m', keyid: 'key-1' }
+    );
+    const profile = await new SsoAuthService({} as never).verifyIdToken(provider, token, 'expected-nonce');
+    expect(profile).toEqual({
+      sub: 'idp-subject-2',
+      email: undefined,
+      givenName: undefined,
+      familyName: undefined,
+      fullName: 'Anna Demo',
+    });
+  });
+
   it('rejects a token signed with a DIFFERENT key than the one JWKS serves', async () => {
     const token = signIdToken({}, otherKeyPair.privateKey);
     await expect(
@@ -385,6 +401,25 @@ describe('SsoAuthService.findOrCreateUser', () => {
 
     expect(createUser).toHaveBeenCalledWith(
       expect.objectContaining({ firstName: 'Bruno', lastName: 'Da Silva' })
+    );
+  });
+
+  it('defaults to "SSO User" when the IdP gives no name information at all', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]).mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]);
+    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce(null);
+    const createUser = jest
+      .spyOn(UserService.prototype, 'createUser')
+      .mockResolvedValueOnce({ id: 101, isActive: true } as never);
+
+    const jitProvider = { ...provider, jitProvisioningEnabled: true };
+    await new SsoAuthService(pool).findOrCreateUser(jitProvider, {
+      sub: 'idp-subject-3',
+      email: 'noname@example.com',
+    });
+
+    expect(createUser).toHaveBeenCalledWith(
+      expect.objectContaining({ firstName: 'SSO', lastName: 'User' })
     );
   });
 });
