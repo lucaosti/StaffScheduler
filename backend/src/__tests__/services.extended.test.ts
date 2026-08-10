@@ -2,7 +2,7 @@
  * Extended service-layer tests targeting uncovered branches in:
  *   - PolicyService (CRUD, listApplicable for all scopes)
  *   - PolicyExceptionService (approve/reject/cancel and forbidden flows)
- *   - PolicyValidator (manual_assignment_locked, no shift, applicable filtering)
+ *   - PolicyValidator (manual_assignment_locked, skill_required, no shift, applicable filtering)
  *   - ApprovalMatrixService (all approver scopes, update flow)
  *   - EmployeeLoanService (approve/reject/cancel, list filters)
  *   - OrgUnitService (CRUD, memberships)
@@ -212,6 +212,27 @@ describe('PolicyService extended', () => {
       imposedByUserId: 1,
     });
     expect(created.id).toBe(1);
+  });
+
+  it('create rejects staffing_min — it has no per-assignment enforcement path', async () => {
+    const { pool, execute } = makePool();
+    const svc = new PolicyService(pool);
+    await expect(
+      svc.create({
+        scopeType: 'global',
+        policyKey: 'staffing_min',
+        policyValue: { staff: 3 },
+        imposedByUserId: 1,
+      })
+    ).rejects.toThrow(/not enforced/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('update rejects renaming a policy to staffing_min', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[policyRow({ id: 5, policy_key: 'min_rest_hours' })], null] as Tuple);
+    const svc = new PolicyService(pool);
+    await expect(svc.update(5, { policyKey: 'staffing_min' })).rejects.toThrow(/not enforced/);
   });
 
   it('create throws when refresh returns no row', async () => {
@@ -789,6 +810,94 @@ describe('PolicyValidator', () => {
     const r = await v.validateAssignment({ userId: 1, shiftId: 9 });
     expect(r.ok).toBe(true);
     expect(r.violations[0].hasApprovedException).toBe(true);
+  });
+
+  it('skill_required blocks when the candidate is missing a required skill', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 9,
+            schedule_id: null,
+            template_id: null,
+            department_id: 1,
+            date: '2026-04-25',
+            start_time: '08:00',
+            end_time: '16:00',
+          },
+        ],
+        null,
+      ] as Tuple) // shift lookup
+      .mockResolvedValueOnce([[{ org_unit_id: 1 }], null] as Tuple) // user_org_units
+      .mockResolvedValueOnce([
+        [policyRow({ id: 3, policy_key: 'skill_required', policy_value: { skillIds: [10, 11] } })],
+        null,
+      ] as Tuple) // listApplicable
+      .mockResolvedValueOnce([[{ skill_id: 10 }], null] as Tuple) // user_skills — only 10, missing 11
+      .mockResolvedValueOnce([[{ c: 0 }], null] as Tuple); // hasApproved
+    const v = new PolicyValidator(pool);
+    const r = await v.validateAssignment({ userId: 1, shiftId: 9 });
+    expect(r.ok).toBe(false);
+    expect(r.violations[0].policyKey).toBe('skill_required');
+    expect(r.violations[0].message).toMatch(/11/);
+  });
+
+  it('skill_required passes when the candidate holds every required skill', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 9,
+            schedule_id: null,
+            template_id: null,
+            department_id: 1,
+            date: '2026-04-25',
+            start_time: '08:00',
+            end_time: '16:00',
+          },
+        ],
+        null,
+      ] as Tuple)
+      .mockResolvedValueOnce([[{ org_unit_id: 1 }], null] as Tuple)
+      .mockResolvedValueOnce([
+        [policyRow({ id: 3, policy_key: 'skill_required', policy_value: { skillIds: [10] } })],
+        null,
+      ] as Tuple)
+      .mockResolvedValueOnce([[{ skill_id: 10 }], null] as Tuple);
+    const v = new PolicyValidator(pool);
+    const r = await v.validateAssignment({ userId: 1, shiftId: 9 });
+    expect(r.ok).toBe(true);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('skill_required with a malformed policyValue is treated as unset, not enforced', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([
+        [
+          {
+            id: 9,
+            schedule_id: null,
+            template_id: null,
+            department_id: 1,
+            date: '2026-04-25',
+            start_time: '08:00',
+            end_time: '16:00',
+          },
+        ],
+        null,
+      ] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([
+        [policyRow({ id: 3, policy_key: 'skill_required', policy_value: {} })],
+        null,
+      ] as Tuple);
+    const v = new PolicyValidator(pool);
+    const r = await v.validateAssignment({ userId: 1, shiftId: 9 });
+    expect(r.ok).toBe(true);
+    expect(r.violations).toHaveLength(0);
   });
 
   it('non-blocking keys (e.g. min_rest_hours) emit no violation', async () => {
