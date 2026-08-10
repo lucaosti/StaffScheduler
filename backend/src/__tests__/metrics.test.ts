@@ -46,6 +46,32 @@ describe('httpMetricsMiddleware', () => {
     expect(body).toContain('status_code="200"');
   });
 
+  it('uses the route path alone when there is no mount-point baseUrl', async () => {
+    const finish: Array<() => void> = [];
+    const req = { method: 'GET', baseUrl: '', route: { path: '/health' } } as unknown as Request;
+    const res = {
+      statusCode: 200,
+      on: (e: string, cb: () => void) => e === 'finish' && finish.push(cb),
+    } as unknown as Response;
+    httpMetricsMiddleware(req, res, jest.fn());
+    finish.forEach((h) => h());
+    const body = await registry.metrics();
+    expect(body).toContain('route="/health"');
+  });
+
+  it('falls back to (unknown) when the matched route pattern is empty', async () => {
+    const finish: Array<() => void> = [];
+    const req = { method: 'GET', baseUrl: '', route: { path: '' } } as unknown as Request;
+    const res = {
+      statusCode: 200,
+      on: (e: string, cb: () => void) => e === 'finish' && finish.push(cb),
+    } as unknown as Response;
+    httpMetricsMiddleware(req, res, jest.fn());
+    finish.forEach((h) => h());
+    const body = await registry.metrics();
+    expect(body).toContain('route="(unknown)"');
+  });
+
   it('labels an unmatched request as (unmatched)', async () => {
     const finish: Array<() => void> = [];
     const req = { method: 'GET', baseUrl: '', route: undefined, path: '/nope/123' } as unknown as Request;
@@ -91,5 +117,14 @@ describe('registerPoolMetrics', () => {
   it('does not throw when the pool shape is unexpected', async () => {
     registerPoolMetrics({} as never);
     await expect(registry.metrics()).resolves.toBeDefined();
+  });
+
+  it('defaults every connection count to zero when the inner pool has no arrays yet', async () => {
+    registerPoolMetrics({ pool: {} } as never);
+    const body = await registry.metrics();
+    expect(body).toContain('db_pool_connections{state="total"} 0');
+    expect(body).toContain('db_pool_connections{state="free"} 0');
+    expect(body).toContain('db_pool_connections{state="in_use"} 0');
+    expect(body).toContain('db_pool_connections{state="queued"} 0');
   });
 });

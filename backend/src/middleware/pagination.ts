@@ -38,8 +38,16 @@ export const parsePagination = (req: Request): PaginationParams | null => {
 
   if (rawPage === undefined && rawSize === undefined) return null;
 
-  const page = Math.max(1, parseInt(String(rawPage ?? '1'), 10) || 1);
-  const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(String(rawSize ?? DEFAULT_PAGE_SIZE), 10) || DEFAULT_PAGE_SIZE));
+  // parseInt('0') is 0, which `|| fallback` would treat as "not given" — that
+  // silently promoted pageSize=0 to the 25-row default instead of clamping it
+  // to 1, so NaN is checked explicitly rather than relying on truthiness.
+  const parsedPage = parseInt(String(rawPage ?? '1'), 10);
+  const page = Math.max(1, Number.isNaN(parsedPage) ? 1 : parsedPage);
+  const parsedSize = parseInt(String(rawSize ?? DEFAULT_PAGE_SIZE), 10);
+  const pageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Number.isNaN(parsedSize) ? DEFAULT_PAGE_SIZE : parsedSize)
+  );
   const offset = (page - 1) * pageSize;
 
   return { page, pageSize, offset };
