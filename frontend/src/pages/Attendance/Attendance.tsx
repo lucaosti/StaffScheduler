@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { todayIso } from '../../utils/format';
 import ExportCsvLink from '../../components/ExportCsvLink';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import {
   useMyAttendanceQuery,
   usePendingAttendanceQuery,
@@ -51,14 +53,10 @@ const Attendance: React.FC = () => {
 
   const myRecords = recordsQuery.data ?? [];
   const pending = pendingQuery.data ?? [];
-  const loading = recordsQuery.isLoading || (canApprove && pendingQuery.isLoading);
   const cost = costQuery.data ?? null;
   // 404 means the payroll module is disabled — a "panel not available" note, not a banner.
   const costError = costQuery.isError ? (costQuery.error as Error).message : null;
   const acting = clockInMutation.isPending || clockOutMutation.isPending || decisionMutation.isPending;
-  const error =
-    actionError ??
-    (recordsQuery.isError ? (recordsQuery.error as Error).message ?? t('attendance.loadFailed') : null);
 
   const openRecord = myRecords.find((r) => !r.clockOut) ?? null;
 
@@ -125,11 +123,7 @@ const Attendance: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
+      {actionError && <ErrorAlert message={actionError} />}
 
       <div className="card mb-4">
         <div className="card-body d-flex align-items-center justify-content-between">
@@ -157,13 +151,14 @@ const Attendance: React.FC = () => {
       <div className="card mb-4">
         <div className="card-header">{t('attendance.recentPunches')}</div>
         <div className="card-body p-0">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-4">
-              <span className="spinner-border me-2" role="status" aria-label={t('common.loading')}></span>{t('common.loading')}
-            </div>
-          ) : myRecords.length === 0 ? (
-            <div className="text-center text-muted py-4">{t('attendance.noRecords')}</div>
-          ) : (
+          <QueryState
+            isLoading={recordsQuery.isLoading}
+            isError={recordsQuery.isError}
+            error={recordsQuery.error}
+            onRetry={() => recordsQuery.refetch()}
+            isEmpty={myRecords.length === 0}
+            empty={<div className="text-center text-muted py-4">{t('attendance.noRecords')}</div>}
+          >
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
@@ -184,7 +179,7 @@ const Attendance: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       </div>
 
@@ -192,11 +187,18 @@ const Attendance: React.FC = () => {
         <div className="card mb-4">
           <div className="card-header">{t('attendance.pendingApproval')}</div>
           <div className="card-body p-0">
-            {pending.length === 0 ? (
-              <div className="text-center text-muted py-4">
-                <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>{t('attendance.nothingWaiting')}
-              </div>
-            ) : (
+            <QueryState
+              isLoading={pendingQuery.isLoading}
+              isError={pendingQuery.isError}
+              error={pendingQuery.error}
+              onRetry={() => pendingQuery.refetch()}
+              isEmpty={pending.length === 0}
+              empty={
+                <div className="text-center text-muted py-4">
+                  <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>{t('attendance.nothingWaiting')}
+                </div>
+              }
+            >
               <div className="table-responsive">
                 <table className="table table-hover mb-0">
                   <thead className="table-light">
@@ -236,7 +238,7 @@ const Attendance: React.FC = () => {
                   </tbody>
                 </table>
               </div>
-            )}
+            </QueryState>
           </div>
         </div>
       )}

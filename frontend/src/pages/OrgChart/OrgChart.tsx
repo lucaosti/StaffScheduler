@@ -12,6 +12,7 @@ import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { OrgUnitNode } from '../../services/orgService';
+import QueryState from '../../components/QueryState';
 import {
   useOrgTreeQuery,
   useManagerChainQuery,
@@ -197,14 +198,8 @@ const OrgChart: React.FC = () => {
   const membersQuery = useUnitMembersQuery(selectedNode?.id ?? null);
 
   const roots = treeQuery.data ?? [];
-  const loading = treeQuery.isLoading;
-  const error = treeQuery.isError ? (treeQuery.error as Error).message ?? t('orgChart.loadFailed') : null;
   const myChain = useMemo(() => chainQuery.data ?? [], [chainQuery.data]);
   const members = membersQuery.data ?? [];
-  const membersLoading = selectedNode !== null && membersQuery.isLoading;
-  const membersError = membersQuery.isError
-    ? (membersQuery.error as Error).message ?? t('orgChart.membersLoadFailed')
-    : null;
 
   // Units the current user belongs to or reports up through — used to
   // highlight "your" branch of the tree.
@@ -258,12 +253,6 @@ const OrgChart: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
-
       {myChain.length > 0 && (
         <div className="card mb-3">
           <div className="card-body py-2">
@@ -294,17 +283,19 @@ const OrgChart: React.FC = () => {
 
       <div className="card">
         <div className="card-body p-2">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label={t('orgChart.loadingAriaLabel')}></span>
-              <span>{t('common.loading')}</span>
-            </div>
-          ) : roots.length === 0 ? (
-            <div className="text-center text-muted py-5">
-              <i className="bi bi-diagram-3 fs-3 d-block mb-2" aria-hidden="true"></i>
-              {t('orgChart.noOrgUnits')}
-            </div>
-          ) : (
+          <QueryState
+            isLoading={treeQuery.isLoading}
+            isError={treeQuery.isError}
+            error={treeQuery.error}
+            onRetry={() => treeQuery.refetch()}
+            isEmpty={roots.length === 0}
+            empty={
+              <div className="text-center text-muted py-5">
+                <i className="bi bi-diagram-3 fs-3 d-block mb-2" aria-hidden="true"></i>
+                {t('orgChart.noOrgUnits')}
+              </div>
+            }
+          >
             <div style={{ overflowX: 'auto', overflowY: 'auto' }}>
               <svg
                 role="img"
@@ -340,7 +331,7 @@ const OrgChart: React.FC = () => {
                 ))}
               </svg>
             </div>
-          )}
+          </QueryState>
         </div>
       </div>
 
@@ -361,16 +352,14 @@ const OrgChart: React.FC = () => {
                 {selectedNode.description && (
                   <p className="text-muted small">{selectedNode.description}</p>
                 )}
-                {membersError && (
-                  <div className="alert alert-danger py-2 small" role="alert">{membersError}</div>
-                )}
-                {membersLoading ? (
-                  <div className="d-flex align-items-center justify-content-center py-4">
-                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-label={t('orgChart.loadingMembersAriaLabel')}></span>{t('common.loading')}
-                  </div>
-                ) : members.length === 0 ? (
-                  <p className="text-muted small mb-0">{t('orgChart.noMembers')}</p>
-                ) : (
+                <QueryState
+                  isLoading={membersQuery.isLoading}
+                  isError={membersQuery.isError}
+                  error={membersQuery.error}
+                  onRetry={() => membersQuery.refetch()}
+                  isEmpty={members.length === 0}
+                  empty={<p className="text-muted small mb-0">{t('orgChart.noMembers')}</p>}
+                >
                   <ul className="list-group list-group-flush">
                     {members.map((m) => (
                       <li key={m.userId} className="list-group-item d-flex justify-content-between align-items-center px-0">
@@ -387,7 +376,7 @@ const OrgChart: React.FC = () => {
                       </li>
                     ))}
                   </ul>
-                )}
+                </QueryState>
               </div>
             </div>
           </div>

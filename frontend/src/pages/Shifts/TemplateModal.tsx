@@ -10,6 +10,7 @@ import { Shift, Schedule } from '../../types';
 import type { Department } from '../../services/departmentService';
 import { toLocalDateString, todayIso } from '../../utils/format';
 import { useStaffingSuggestion } from '../../hooks/useStaffingSuggestion';
+import ErrorAlert from '../../components/ErrorAlert';
 
 interface Props {
   show: boolean;
@@ -81,11 +82,7 @@ const TemplateModal: React.FC<Props> = ({
           </div>
           <form onSubmit={onSubmit}>
             <div className="modal-body">
-              {formError && (
-                <div className="alert alert-danger" role="alert">
-                  {formError}
-                </div>
-              )}
+              {formError && <ErrorAlert message={formError} />}
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-schedule" className="form-label">
