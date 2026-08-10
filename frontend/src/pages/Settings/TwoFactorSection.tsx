@@ -37,14 +37,15 @@
  * @author Luca Ostinelli
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
+import { twoFactorMethodsKey, useTwoFactorMethodsQuery } from '../../hooks/useTwoFactorMethods';
 import {
   beginTwoFactorSetup,
   disableTwoFactor,
   enableTwoFactor,
-  listTwoFactorMethods,
   requestTwoFactorChallenge,
   TwoFactorMethodType,
   TwoFactorSetup,
@@ -81,8 +82,10 @@ type EnrollmentStep =
 const TwoFactorSection: React.FC = () => {
   const { refreshUser } = useAuth();
   const { message, setMessage, run: act } = useActionFeedback();
+  const queryClient = useQueryClient();
 
-  const [methods, setMethods] = useState<TwoFactorMethodType[] | null>(null);
+  const methodsQuery = useTwoFactorMethodsQuery();
+  const methods = methodsQuery.data ?? null;
   const [enrolling, setEnrolling] = useState<TwoFactorMethodType | null>(null);
   const [step, setStep] = useState<EnrollmentStep>({ phase: 'idle' });
   const [disabling, setDisabling] = useState<TwoFactorMethodType | null>(null);
@@ -91,14 +94,7 @@ const TwoFactorSection: React.FC = () => {
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const loadMethods = useCallback(async () => {
-    const res = await listTwoFactorMethods();
-    setMethods(res.data?.methods ?? []);
-  }, []);
-
-  useEffect(() => {
-    void loadMethods();
-  }, [loadMethods]);
+  const loadMethods = () => queryClient.invalidateQueries({ queryKey: twoFactorMethodsKey });
 
   const startEnrollment = async (methodType: TwoFactorMethodType) => {
     setBusy(true);

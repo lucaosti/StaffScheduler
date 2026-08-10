@@ -129,7 +129,8 @@ export function useChangeRequestMutations() {
       onSuccess: invalidate,
     }),
     approve: useMutation({
-      mutationFn: (id: number) => approveChangeRequest(id),
+      mutationFn: ({ id, justification }: { id: number; justification?: string | null }) =>
+        approveChangeRequest(id, justification),
       onSuccess: invalidate,
     }),
     reject: useMutation({

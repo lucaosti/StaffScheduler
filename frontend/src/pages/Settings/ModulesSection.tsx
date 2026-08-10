@@ -9,16 +9,11 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import {
-  listModules,
-  listModulesForOrg,
-  setModuleEnabled,
-  setModuleOrgOverride,
-  removeModuleOrgOverride,
-} from '../../services/moduleService';
-import { Module, ModuleWithOrgOverride } from '../../types';
+import { listModulesForOrg } from '../../services/moduleService';
+import { useModulesQuery, useModuleMutations } from '../../hooks/useModules';
+import { ModuleWithOrgOverride } from '../../types';
 
 interface PendingToggle {
   code: string;
@@ -30,9 +25,13 @@ interface PendingToggle {
 const ModulesSection: React.FC = () => {
   const { user } = useAuth();
 
-  const [modules, setModules] = useState<Module[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const modulesQuery = useModulesQuery();
+  const modules = modulesQuery.data ?? [];
+  const loading = modulesQuery.isLoading;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = modulesQuery.isError
+    ? (modulesQuery.error as Error).message ?? 'Failed to load modules.'
+    : actionError;
   const [success, setSuccess] = useState<string | null>(null);
 
   // Org-override panel state
@@ -44,25 +43,8 @@ const ModulesSection: React.FC = () => {
   // Justification modal state
   const [pendingToggle, setPendingToggle] = useState<PendingToggle | null>(null);
   const [justification, setJustification] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  const loadGlobal = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listModules();
-      if (res.success && res.data) setModules(res.data);
-      else setError('Failed to load modules.');
-    } catch (e) {
-      setError((e as Error).message ?? 'Failed to load modules.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadGlobal();
-  }, [loadGlobal]);
+  const { setGlobal, setOrgOverride, removeOrgOverride } = useModuleMutations();
+  const saving = setGlobal.isPending || setOrgOverride.isPending || removeOrgOverride.isPending;
 
   const loadOrgModules = async () => {
     if (!orgName.trim()) return;
@@ -86,42 +68,35 @@ const ModulesSection: React.FC = () => {
 
   const confirmToggle = async () => {
     if (!pendingToggle) return;
-    setSaving(true);
     setSuccess(null);
     setError(null);
     try {
       const { code, targetEnabled, scope, org } = pendingToggle;
       if (scope === 'global') {
-        await setModuleEnabled(code, targetEnabled, justification || undefined);
-        await loadGlobal();
+        await setGlobal.mutateAsync({ code, isEnabled: targetEnabled, justification: justification || undefined });
         if (orgModules.length > 0 && orgName) await loadOrgModules();
         setSuccess(`Module '${code}' ${targetEnabled ? 'enabled' : 'disabled'} globally.`);
       } else if (scope === 'org' && org) {
-        await setModuleOrgOverride(code, org, targetEnabled, justification || undefined);
+        await setOrgOverride.mutateAsync({ code, org, isEnabled: targetEnabled, justification: justification || undefined });
         await loadOrgModules();
         setSuccess(`Module '${code}' override set for org '${org}'.`);
       }
       setPendingToggle(null);
     } catch (e) {
       setError((e as Error).message ?? 'Failed to update module.');
-    } finally {
-      setSaving(false);
     }
   };
 
   const handleRemoveOverride = async (code: string) => {
     if (!orgName.trim()) return;
-    setSaving(true);
     setSuccess(null);
     setError(null);
     try {
-      await removeModuleOrgOverride(code, orgName.trim());
+      await removeOrgOverride.mutateAsync({ code, org: orgName.trim() });
       await loadOrgModules();
       setSuccess(`Override for module '${code}' removed; global default now applies.`);
     } catch (e) {
       setError((e as Error).message ?? 'Failed to remove override.');
-    } finally {
-      setSaving(false);
     }
   };
 

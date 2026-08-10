@@ -8,14 +8,12 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  updateCurrency,
-  updateTimePeriod,
-  getSystemSettings,
   isCurrency,
   isTimePeriod,
   type Currency,
   type TimePeriod,
 } from '../../services/settingsService';
+import { useSystemSettingsQuery, useSaveSystemSettings } from '../../hooks/useSystemSettings';
 
 /**
  * Option lists typed against the contract enums.
@@ -45,56 +43,45 @@ const SystemSection: React.FC = () => {
   // back to a PUT that rejects it.
   const [currency, setCurrency] = useState<Currency>('EUR');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('monthly');
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
+
+  const settingsQuery = useSystemSettingsQuery();
+  const loading = settingsQuery.isLoading;
+  const error = settingsQuery.isError
+    ? null // Non-critical: the form defaults are still usable, matching the prior fetch-error tolerance.
+    : actionError;
+  const save = useSaveSystemSettings();
+  const saving = save.isPending;
 
   useEffect(() => {
-    const load = async () => {
-      try {
-        const result = await getSystemSettings();
-        if (result.success && result.data) {
-          const currencySetting = result.data.find(
-            (s) => s.category === 'general' && s.key === 'currency'
-          );
-          const periodSetting = result.data.find(
-            (s) => s.category === 'schedule' && s.key === 'default_time_period'
-          );
-          // `system_settings` is a free-text key/value table, so a stored value
-          // is not guaranteed to be one the endpoint still accepts (an older
-          // release, a manual edit, a seed). Feeding it back unchecked left the
-          // select with no matching option — silently showing the wrong
-          // setting — and then submitted it, earning a 400 the user could not
-          // act on. An unrecognised value keeps the default instead.
-          if (currencySetting && isCurrency(currencySetting.value)) {
-            setCurrency(currencySetting.value);
-          }
-          if (periodSetting && isTimePeriod(periodSetting.value)) {
-            setTimePeriod(periodSetting.value);
-          }
-        }
-      } catch {
-        // Non-critical: the form defaults are still usable.
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
+    const data = settingsQuery.data;
+    if (!data) return;
+    const currencySetting = data.find((s) => s.category === 'general' && s.key === 'currency');
+    const periodSetting = data.find((s) => s.category === 'schedule' && s.key === 'default_time_period');
+    // `system_settings` is a free-text key/value table, so a stored value is
+    // not guaranteed to be one the endpoint still accepts (an older release,
+    // a manual edit, a seed). Feeding it back unchecked left the select with
+    // no matching option — silently showing the wrong setting — and then
+    // submitted it, earning a 400 the user could not act on. An unrecognised
+    // value keeps the default instead.
+    if (currencySetting && isCurrency(currencySetting.value)) {
+      setCurrency(currencySetting.value);
+    }
+    if (periodSetting && isTimePeriod(periodSetting.value)) {
+      setTimePeriod(periodSetting.value);
+    }
+  }, [settingsQuery.data]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setSuccess(null);
     setError(null);
     try {
-      await Promise.all([updateCurrency(currency), updateTimePeriod(timePeriod)]);
+      await save.mutateAsync({ currency, timePeriod });
       setSuccess('System settings saved successfully.');
     } catch (err) {
       setError((err as Error).message || 'Failed to save system settings.');
-    } finally {
-      setSaving(false);
     }
   };
 

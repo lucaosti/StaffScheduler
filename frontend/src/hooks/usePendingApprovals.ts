@@ -10,8 +10,16 @@
  * @author Luca Ostinelli
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { listPendingApprovals, type PendingApprovalItem } from '../services/pendingApprovalService';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  approvePendingItem,
+  delegatePendingItem,
+  keepPendingItem,
+  listPendingApprovals,
+  openPendingItemToStructure,
+  rejectPendingItem,
+  type PendingApprovalItem,
+} from '../services/pendingApprovalService';
 
 export const pendingApprovalsKey = ['pending-approvals'] as const;
 
@@ -25,4 +33,39 @@ export function usePendingApprovalsQuery(filter: 'pending' | 'all') {
       return res.data?.items ?? [];
     },
   });
+}
+
+/**
+ * Approve / reject / keep / delegate / open-to-structure a queue item. Each
+ * invalidates the whole `pending-approvals` family (both the pending-only
+ * and all filter variants), since a decision on one filtered view is exactly
+ * what every other filtered view needs to know about.
+ */
+export function usePendingApprovalMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: pendingApprovalsKey });
+
+  return {
+    approve: useMutation({
+      mutationFn: ({ id, note }: { id: number; note?: string }) => approvePendingItem(id, note),
+      onSuccess: invalidate,
+    }),
+    reject: useMutation({
+      mutationFn: ({ id, note }: { id: number; note?: string }) => rejectPendingItem(id, note),
+      onSuccess: invalidate,
+    }),
+    keep: useMutation({
+      mutationFn: (id: number) => keepPendingItem(id),
+      onSuccess: invalidate,
+    }),
+    delegate: useMutation({
+      mutationFn: ({ id, targetUserId }: { id: number; targetUserId: number }) =>
+        delegatePendingItem(id, targetUserId),
+      onSuccess: invalidate,
+    }),
+    openToStructure: useMutation({
+      mutationFn: (id: number) => openPendingItemToStructure(id),
+      onSuccess: invalidate,
+    }),
+  };
 }
