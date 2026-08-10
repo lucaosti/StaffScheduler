@@ -32,7 +32,7 @@ import {
   useChangeRequestMutations,
 } from '../../hooks/useGovernance';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import QueryState from '../../components/QueryState';
 
 type Tab = 'matrix' | 'changeRequests';
 
@@ -89,7 +89,6 @@ const Governance: React.FC = () => {
   // refreshes itself.
   const rulesQuery = useResponsibilityRulesQuery(canReadMatrix && activeTab === 'matrix');
   const rules = rulesQuery.data ?? [];
-  const matrixLoading = rulesQuery.isLoading;
   const { create: createRule, update: updateRule, remove: removeRule } = useResponsibilityRuleMutations();
 
   const handleCreateRule = async (e: React.FormEvent) => {
@@ -136,7 +135,6 @@ const Governance: React.FC = () => {
   const crQuery = useChangeRequestsQuery(activeTab === 'changeRequests', crFilter, crProposerId);
   const changeRequests = crQuery.data?.items ?? [];
   const crTotal = crQuery.data?.total ?? 0;
-  const crLoading = crQuery.isLoading;
   const {
     create: createCr,
     approve: approveCr,
@@ -331,9 +329,14 @@ const Governance: React.FC = () => {
             </div>
           )}
 
-          {matrixLoading ? (
-            <LoadingSpinner />
-          ) : (
+          <QueryState
+            isLoading={rulesQuery.isLoading}
+            isError={rulesQuery.isError}
+            error={rulesQuery.error}
+            onRetry={() => rulesQuery.refetch()}
+            isEmpty={rules.length === 0}
+            empty={<p className="text-muted text-center py-4 mb-0">{t('governance.matrix.noRules')}</p>}
+          >
             <div className="table-responsive">
               <table className="table table-hover">
                 <thead>
@@ -348,9 +351,6 @@ const Governance: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {rules.length === 0 && (
-                    <tr><td colSpan={canManageMatrix ? 7 : 6} className="text-center text-muted py-4">{t('governance.matrix.noRules')}</td></tr>
-                  )}
                   {rules.map(rule => (
                     <tr key={rule.id}>
                       <td><span className="badge bg-secondary">{t(SUBJECT_TYPE_LABEL_KEYS[rule.subjectType])}</span></td>
@@ -388,7 +388,7 @@ const Governance: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       )}
 
@@ -531,9 +531,14 @@ const Governance: React.FC = () => {
             </div>
           )}
 
-          {crLoading ? (
-            <LoadingSpinner />
-          ) : (
+          <QueryState
+            isLoading={crQuery.isLoading}
+            isError={crQuery.isError}
+            error={crQuery.error}
+            onRetry={() => crQuery.refetch()}
+            isEmpty={changeRequests.length === 0}
+            empty={<p className="text-muted text-center py-4 mb-0">{t('governance.changeRequests.noneFound')}</p>}
+          >
             <div className="table-responsive">
               <table className="table table-hover">
                 <thead>
@@ -549,9 +554,6 @@ const Governance: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {changeRequests.length === 0 && (
-                    <tr><td colSpan={8} className="text-center text-muted py-4">{t('governance.changeRequests.noneFound')}</td></tr>
-                  )}
                   {changeRequests.map(cr => (
                     <tr key={cr.id}>
                       <td>{cr.id}</td>
@@ -628,7 +630,7 @@ const Governance: React.FC = () => {
                 </p>
               )}
             </div>
-          )}
+          </QueryState>
         </div>
       )}
     </div>

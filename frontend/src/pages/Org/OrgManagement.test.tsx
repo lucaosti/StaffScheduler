@@ -91,7 +91,7 @@ describe('<OrgManagement />', () => {
     expect(await screen.findByRole('heading', { name: /^organization$/i })).toBeInTheDocument();
 
     // Tree: create unit
-    await userEvent.type(screen.getByPlaceholderText(/unit name/i), 'ICU');
+    await userEvent.type(await screen.findByPlaceholderText(/unit name/i), 'ICU');
     await userEvent.click(screen.getByRole('button', { name: /create/i }));
     expect(mockCreateUnit).toHaveBeenCalled();
 
@@ -176,7 +176,7 @@ describe('<OrgManagement />', () => {
     );
     expect(await screen.findByRole('heading', { name: /^organization$/i })).toBeInTheDocument();
 
-    await userEvent.type(screen.getByPlaceholderText(/unit name/i), 'ICU');
+    await userEvent.type(await screen.findByPlaceholderText(/unit name/i), 'ICU');
     await userEvent.click(screen.getByRole('button', { name: /create/i }));
 
     await waitFor(() => expect(mockCreateUnit).toHaveBeenCalled());

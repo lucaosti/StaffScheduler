@@ -22,7 +22,8 @@ import { ApiError } from '../../services/apiUtils';
 import ScheduleList from '../Schedule/ScheduleList';
 import CreateScheduleModal, { type CreateScheduleValues } from '../Schedule/CreateScheduleModal';
 import StatsBadge from '../Schedule/StatsBadge';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import { toLocalDateString } from '../../utils/format';
 import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 
@@ -69,16 +70,8 @@ const Schedule: React.FC = () => {
   const shifts = useMemo(() => pageData?.shifts ?? [], [pageData]);
   const departments = useMemo(() => pageData?.departments ?? [], [pageData]);
   const assignments = useMemo(() => pageData?.assignments ?? [], [pageData]);
-  const loading = pageQuery.isLoading;
-
-  const [localError, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  // The page error is the query's load error, or a one-off action error.
-  const error = pageQuery.isError
-    ? pageQuery.error instanceof ApiError
-      ? pageQuery.error.message
-      : (pageQuery.error as Error)?.message ?? t('schedule.loadFailed')
-    : localError;
 
 
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
@@ -370,16 +363,15 @@ const Schedule: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container-fluid py-4">
-        <LoadingSpinner message={t('schedule.loadingData')} />
-      </div>
-    );
-  }
-
   return (
     <div className="container-fluid py-4 schedule-page">
+      <QueryState
+        isLoading={pageQuery.isLoading}
+        isError={pageQuery.isError}
+        error={pageQuery.error instanceof ApiError ? pageQuery.error.message : pageQuery.error}
+        onRetry={() => loadData()}
+        loadingMessage={t('schedule.loadingData')}
+      >
       <div className="row mb-4">
         <div className="col">
           <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
@@ -479,12 +471,7 @@ const Schedule: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2"></i>
-          {error}
-        </div>
-      )}
+      {error && <ErrorAlert message={error} />}
       {info && (
         <div className="alert alert-success" role="alert">
           <i className="bi bi-check-circle me-2"></i>
@@ -851,11 +838,7 @@ const Schedule: React.FC = () => {
               </div>
               <form onSubmit={handleGenerateSchedule}>
                 <div className="modal-body">
-                  {generateError && (
-                    <div className="alert alert-danger" role="alert">
-                      {generateError}
-                    </div>
-                  )}
+                  {generateError && <ErrorAlert message={generateError} />}
                   <div className="mb-3">
                     <label htmlFor="generate-schedule-id" className="form-label">
                       {t('schedule.scheduleLabel')}
@@ -920,6 +903,7 @@ const Schedule: React.FC = () => {
           </div>
         </div>
       )}
+      </QueryState>
     </div>
   );
 };
