@@ -20,7 +20,9 @@ import {
 } from '../services/moduleService';
 import type { Module } from '../types';
 
-export const modulesKey = ['modules'] as const;
+// Module-private: nothing outside this file invalidates a modules query
+// directly.
+const modulesKey = ['modules'] as const;
 
 /** The global module list. */
 export function useModulesQuery() {
