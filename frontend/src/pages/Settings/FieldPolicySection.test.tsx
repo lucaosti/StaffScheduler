@@ -17,7 +17,7 @@
  * @author Luca Ostinelli
  */
 
-import { render, screen, waitFor, within } from '../../test-utils/renderWithClient';
+import { render, screen, waitFor, within, fireEvent } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 import FieldPolicySection from './FieldPolicySection';
 
@@ -233,5 +233,50 @@ describe('<FieldPolicySection />', () => {
     mockList.mockRejectedValue(new Error('boom'));
     render(<FieldPolicySection organizationName="Acme" />);
     expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+  });
+
+  it('saves every optional constraint the form exposes', async () => {
+    render(<FieldPolicySection organizationName="Acme" />);
+    await screen.findByText('phone');
+
+    const rows = screen.getAllByRole('row');
+    const phoneRow = rows.find((row) => row.textContent?.includes('phone'))!;
+    await userEvent.click(within(phoneRow).getByRole('button', { name: 'Add rule' }));
+
+    await userEvent.type(screen.getByLabelText(/changing it needs/i), 'payroll.manage');
+    await userEvent.type(screen.getByLabelText(/seeing it needs/i), 'payroll.read');
+    await userEvent.type(screen.getByLabelText('Max length'), '20');
+    await userEvent.type(screen.getByLabelText('Min value'), '1');
+    await userEvent.type(screen.getByLabelText('Max value'), '99');
+    fireEvent.change(screen.getByLabelText('Pattern'), { target: { value: '^[0-9]+$' } });
+    await userEvent.click(screen.getByRole('button', { name: 'Save rule' }));
+
+    await waitFor(() =>
+      expect(mockSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          editPermission: 'payroll.manage',
+          visiblePermission: 'payroll.read',
+          maxLength: 20,
+          minValue: 1,
+          maxValue: 99,
+          pattern: '^[0-9]+$',
+        })
+      )
+    );
+  });
+
+  it('cancelling the editor discards the draft without saving', async () => {
+    render(<FieldPolicySection organizationName="Acme" />);
+    await screen.findByText('phone');
+
+    const rows = screen.getAllByRole('row');
+    const phoneRow = rows.find((row) => row.textContent?.includes('phone'))!;
+    await userEvent.click(within(phoneRow).getByRole('button', { name: 'Add rule' }));
+    expect(screen.getByRole('button', { name: 'Save rule' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('button', { name: 'Save rule' })).not.toBeInTheDocument();
+    expect(mockSave).not.toHaveBeenCalled();
   });
 });
