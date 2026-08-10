@@ -64,6 +64,10 @@ const I18N_ENFORCED_FILES = [
   'src/pages/Admin/AuditLogs.tsx',
   'src/pages/Admin/ApprovalWorkflows.tsx',
   'src/pages/Admin/RbacManagement.tsx',
+  'src/pages/Schedule/Schedule.tsx',
+  'src/pages/Schedule/CreateScheduleModal.tsx',
+  'src/pages/Schedule/ScheduleList.tsx',
+  'src/pages/Schedule/StatsBadge.tsx',
 ];
 
 module.exports = [
@@ -139,6 +143,30 @@ module.exports = [
               /^\p{Emoji}+$/u,
               '--[\\w-]+',
               '[\\d.]+(px|rem|em|%|vh|vw)?',
+            ],
+          },
+          callees: {
+            // Same shallow-merge caveat again: the plugin's own default
+            // exclude list (`t`, `i18n(ext)?`, `require`, DOM/event-bus
+            // calls) must be repeated here or it's lost. Added on top:
+            // React Hook Form's `register('fieldName')` — the string
+            // argument is a form field key, not prose, so it's never a
+            // translation candidate.
+            exclude: [
+              'i18n(ext)?',
+              't',
+              'require',
+              'addEventListener',
+              'removeEventListener',
+              'postMessage',
+              'getElementById',
+              'dispatch',
+              'commit',
+              'includes',
+              'indexOf',
+              'endsWith',
+              'startsWith',
+              'register',
             ],
           },
           'jsx-attributes': {
