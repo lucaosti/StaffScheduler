@@ -11,6 +11,7 @@ import { Permission, Role } from '../../types';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 import { useRolesAndPermissionsQuery, useRoleMutations } from '../../hooks/useRbac';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 interface RoleFormState {
   name: string;
@@ -278,7 +279,7 @@ const RolesTab: React.FC = () => {
                   disabled={saving || !form.name.trim()}
                 >
                   {saving ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.roleModal.saving')}</>
+                    <><ButtonSpinner />{t('admin.rbac.roleModal.saving')}</>
                   ) : (
                     modal.editing ? t('admin.rbac.roleModal.saveChanges') : t('admin.rbac.roleModal.createRole')
                   )}
@@ -314,7 +315,7 @@ const RolesTab: React.FC = () => {
                   onClick={() => void confirmDelete()}
                   disabled={deleting}
                 >
-                  {deleting ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.deleteRoleModal.deleting')}</> : t('common.delete')}
+                  {deleting ? <><ButtonSpinner />{t('admin.rbac.deleteRoleModal.deleting')}</> : t('common.delete')}
                 </button>
               </div>
             </div>

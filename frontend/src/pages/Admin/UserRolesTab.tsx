@@ -12,6 +12,7 @@ import { Employee, UserRoleAssignment } from '../../types';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
+import ButtonSpinner from '../../components/ButtonSpinner';
 import {
   useRolesAndPermissionsQuery,
   useRbacOrgUnitsQuery,
@@ -289,7 +290,7 @@ const UserRolesTab: React.FC<Props> = ({ selectedUser, onSelectUser, onClearUser
                     <div className="col-12">
                       <button type="submit" className="btn btn-primary" disabled={granting || grantForm.roleId === ''}>
                         {granting ? (
-                          <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.userRoles.granting')}</>
+                          <><ButtonSpinner />{t('admin.rbac.userRoles.granting')}</>
                         ) : (
                           <><i className="bi bi-plus me-1" aria-hidden="true"></i>{t('admin.rbac.userRoles.grantButton')}</>
                         )}
@@ -339,7 +340,7 @@ const UserRolesTab: React.FC<Props> = ({ selectedUser, onSelectUser, onClearUser
                   onClick={() => void confirmRevoke()}
                   disabled={revoking}
                 >
-                  {revoking ? <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.rbac.revokeModal.revoking')}</> : t('admin.rbac.userRoles.revokeButton')}
+                  {revoking ? <><ButtonSpinner />{t('admin.rbac.revokeModal.revoking')}</> : t('admin.rbac.userRoles.revokeButton')}
                 </button>
               </div>
             </div>

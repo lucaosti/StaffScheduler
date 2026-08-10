@@ -13,6 +13,7 @@ import { todayIso } from '../../utils/format';
 import ExportCsvLink from '../../components/ExportCsvLink';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
+import ButtonSpinner from '../../components/ButtonSpinner';
 import {
   useMyAttendanceQuery,
   usePendingAttendanceQuery,
@@ -139,7 +140,7 @@ const Attendance: React.FC = () => {
             disabled={acting}
           >
             {acting ? (
-              <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+              <ButtonSpinner />
             ) : (
               <i className={`bi ${openRecord ? 'bi-box-arrow-right' : 'bi-box-arrow-in-right'} me-1`} aria-hidden="true"></i>
             )}
