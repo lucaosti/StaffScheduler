@@ -11,6 +11,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   createWorkflow,
@@ -23,15 +24,15 @@ import {
 } from '../../services/approvalWorkflowService';
 import { approvalWorkflowsKey, useApprovalWorkflowsQuery } from '../../hooks/useApprovalWorkflows';
 
-const SCOPE_LABELS: Record<ApproverScope, string> = {
-  policy_owner: 'Policy Owner',
-  unit_manager: 'Unit Manager',
-  unit_manager_chain: 'Manager Chain',
-  company_role: 'Company Role',
-  company_user: 'Specific User',
+const SCOPE_LABEL_KEYS: Record<ApproverScope, string> = {
+  policy_owner: 'admin.approvalWorkflows.scopes.policyOwner',
+  unit_manager: 'admin.approvalWorkflows.scopes.unitManager',
+  unit_manager_chain: 'admin.approvalWorkflows.scopes.managerChain',
+  company_role: 'admin.approvalWorkflows.scopes.companyRole',
+  company_user: 'admin.approvalWorkflows.scopes.specificUser',
 };
 
-const SCOPE_OPTIONS = Object.entries(SCOPE_LABELS) as [ApproverScope, string][];
+const SCOPE_KEYS = Object.keys(SCOPE_LABEL_KEYS) as ApproverScope[];
 
 const EMPTY_STEP: ApprovalStep = {
   stepOrder: 1,
@@ -43,6 +44,7 @@ const EMPTY_STEP: ApprovalStep = {
 };
 
 const ApprovalWorkflows: React.FC = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [actionError, setError] = useState<string | null>(null);
 
@@ -71,7 +73,7 @@ const ApprovalWorkflows: React.FC = () => {
   const workflows = workflowsQuery.data ?? [];
   const loading = workflowsQuery.isLoading;
   const error = workflowsQuery.isError
-    ? (workflowsQuery.error as Error).message ?? 'Failed to load workflows.'
+    ? (workflowsQuery.error as Error).message ?? t('admin.approvalWorkflows.errors.loadFailed')
     : actionError;
   const load = () => queryClient.invalidateQueries({ queryKey: approvalWorkflowsKey });
 
@@ -105,11 +107,11 @@ const ApprovalWorkflows: React.FC = () => {
 
   const handleSave = async () => {
     if (!formChangeType.trim()) {
-      setSaveError('Change type is required.');
+      setSaveError(t('admin.approvalWorkflows.errors.changeTypeRequired'));
       return;
     }
     if (formSteps.length === 0) {
-      setSaveError('At least one step is required.');
+      setSaveError(t('admin.approvalWorkflows.errors.atLeastOneStep'));
       return;
     }
     setSaving(true);
@@ -141,7 +143,7 @@ const ApprovalWorkflows: React.FC = () => {
       setShowModal(false);
       await load();
     } catch (e) {
-      setSaveError((e as Error).message ?? 'Failed to save workflow.');
+      setSaveError((e as Error).message ?? t('admin.approvalWorkflows.errors.saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -176,7 +178,7 @@ const ApprovalWorkflows: React.FC = () => {
       setDeleteTarget(null);
       await load();
     } catch (e) {
-      setError((e as Error).message ?? 'Failed to delete workflow.');
+      setError((e as Error).message ?? t('admin.approvalWorkflows.errors.deleteFailed'));
     } finally {
       setDeleting(false);
     }
@@ -187,11 +189,11 @@ const ApprovalWorkflows: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Approval Workflows</h1>
-            <p className="text-muted mb-0 small">Configure multi-step approval chains per change type</p>
+            <h1 className="h3 mb-0">{t('admin.approvalWorkflows.title')}</h1>
+            <p className="text-muted mb-0 small">{t('admin.approvalWorkflows.subtitle')}</p>
           </div>
           <button className="btn btn-primary btn-sm" onClick={openCreate}>
-            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>New Workflow
+            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>{t('admin.approvalWorkflows.newWorkflow')}
           </button>
         </div>
       </div>
@@ -206,23 +208,23 @@ const ApprovalWorkflows: React.FC = () => {
         <div className="card-body p-0">
           {loading ? (
             <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label="Loading workflows"></span>
-              <span>Loading…</span>
+              <span className="spinner-border me-2" role="status" aria-label={t('admin.approvalWorkflows.loadingAriaLabel')}></span>
+              <span>{t('common.loading')}</span>
             </div>
           ) : workflows.length === 0 ? (
             <div className="text-center text-muted py-5">
-              No approval workflows configured yet.
+              {t('admin.approvalWorkflows.empty')}
             </div>
           ) : (
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
                   <tr>
-                    <th scope="col">Change Type</th>
-                    <th scope="col">Steps</th>
-                    <th scope="col">Require All</th>
-                    <th scope="col">Description</th>
-                    <th scope="col" className="text-end">Actions</th>
+                    <th scope="col">{t('admin.approvalWorkflows.columns.changeType')}</th>
+                    <th scope="col">{t('admin.approvalWorkflows.columns.steps')}</th>
+                    <th scope="col">{t('admin.approvalWorkflows.columns.requireAll')}</th>
+                    <th scope="col">{t('admin.approvalWorkflows.columns.description')}</th>
+                    <th scope="col" className="text-end">{t('admin.approvalWorkflows.columns.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -234,9 +236,11 @@ const ApprovalWorkflows: React.FC = () => {
                           <button
                             className="btn btn-link btn-sm p-0 text-decoration-none"
                             onClick={() => setExpandedId(expandedId === w.id ? null : w.id)}
-                            aria-label={expandedId === w.id ? `Collapse steps for ${w.changeType}` : `Show steps for ${w.changeType}`}
+                            aria-label={expandedId === w.id
+                              ? t('admin.approvalWorkflows.collapseStepsAriaLabel', { changeType: w.changeType })
+                              : t('admin.approvalWorkflows.showStepsAriaLabel', { changeType: w.changeType })}
                           >
-                            {w.steps.length} step{w.steps.length !== 1 ? 's' : ''}
+                            {t(w.steps.length === 1 ? 'admin.approvalWorkflows.stepsCount_one' : 'admin.approvalWorkflows.stepsCount_other', { count: w.steps.length })}
                             <i
                               className={`bi ms-1 ${expandedId === w.id ? 'bi-chevron-up' : 'bi-chevron-down'}`}
                               aria-hidden="true"
@@ -245,24 +249,24 @@ const ApprovalWorkflows: React.FC = () => {
                         </td>
                         <td>
                           {w.requireAll ? (
-                            <span className="badge bg-primary">All</span>
+                            <span className="badge bg-primary">{t('admin.approvalWorkflows.requireAll.all')}</span>
                           ) : (
-                            <span className="badge bg-secondary">Any</span>
+                            <span className="badge bg-secondary">{t('admin.approvalWorkflows.requireAll.any')}</span>
                           )}
                         </td>
-                        <td className="text-muted small">{w.description ?? '—'}</td>
+                        <td className="text-muted small">{w.description ?? t('common.emptyValue')}</td>
                         <td className="text-end">
                           <button
                             className="btn btn-sm btn-outline-secondary me-1"
                             onClick={() => openEdit(w)}
-                            aria-label={`Edit workflow ${w.changeType}`}
+                            aria-label={t('admin.approvalWorkflows.editAriaLabel', { changeType: w.changeType })}
                           >
                             <i className="bi bi-pencil" aria-hidden="true"></i>
                           </button>
                           <button
                             className="btn btn-sm btn-outline-danger"
                             onClick={() => setDeleteTarget(w)}
-                            aria-label={`Delete workflow ${w.changeType}`}
+                            aria-label={t('admin.approvalWorkflows.deleteAriaLabel', { changeType: w.changeType })}
                           >
                             <i className="bi bi-trash" aria-hidden="true"></i>
                           </button>
@@ -272,19 +276,19 @@ const ApprovalWorkflows: React.FC = () => {
                         <tr>
                           <td colSpan={5} className="bg-light border-top-0">
                             <div className="p-3">
-                              <h6 className="small fw-semibold text-uppercase text-muted mb-2">Steps</h6>
+                              <h6 className="small fw-semibold text-uppercase text-muted mb-2">{t('admin.approvalWorkflows.stepsHeading')}</h6>
                               {w.steps.length === 0 ? (
-                                <span className="text-muted small">No steps defined.</span>
+                                <span className="text-muted small">{t('admin.approvalWorkflows.noStepsDefined')}</span>
                               ) : (
                                 <ol className="mb-0 small">
                                   {w.steps.map((s) => (
                                     <li key={s.id}>
-                                      <span className="badge bg-secondary me-2">{SCOPE_LABELS[s.approverScope]}</span>
-                                      {s.approverRoleId != null && <span className="me-2 text-muted">role: {s.approverRoleId}</span>}
-                                      {s.approverUserId != null && <span className="me-2 text-muted">user: {s.approverUserId}</span>}
-                                      {s.autoApproveForOwner && <span className="badge bg-success me-2">auto-approve</span>}
+                                      <span className="badge bg-secondary me-2">{t(SCOPE_LABEL_KEYS[s.approverScope])}</span>
+                                      {s.approverRoleId != null && <span className="me-2 text-muted">{t('admin.approvalWorkflows.rolePrefix', { id: s.approverRoleId })}</span>}
+                                      {s.approverUserId != null && <span className="me-2 text-muted">{t('admin.approvalWorkflows.userPrefix', { id: s.approverUserId })}</span>}
+                                      {s.autoApproveForOwner && <span className="badge bg-success me-2">{t('admin.approvalWorkflows.autoApproveBadge')}</span>}
                                       {s.escalateAfterHours != null && (
-                                        <span className="text-muted">escalate after {s.escalateAfterHours}h</span>
+                                        <span className="text-muted">{t('admin.approvalWorkflows.escalateAfter', { hours: s.escalateAfterHours })}</span>
                                       )}
                                     </li>
                                   ))}
@@ -305,39 +309,39 @@ const ApprovalWorkflows: React.FC = () => {
 
       {/* Create / Edit Modal */}
       {showModal && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={modalMode === 'create' ? 'Create workflow' : 'Edit workflow'}>
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={modalMode === 'create' ? t('admin.approvalWorkflows.modal.createDialogAriaLabel') : t('admin.approvalWorkflows.modal.editDialogAriaLabel')}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">
-                  {modalMode === 'create' ? 'New Approval Workflow' : `Edit Workflow: ${editing?.changeType}`}
+                  {modalMode === 'create' ? t('admin.approvalWorkflows.modal.createTitle') : t('admin.approvalWorkflows.modal.editTitle', { changeType: editing?.changeType })}
                 </h5>
-                <button type="button" className="btn-close" aria-label="Close dialog" onClick={() => setShowModal(false)}></button>
+                <button type="button" className="btn-close" aria-label={t('admin.approvalWorkflows.modal.closeDialogAriaLabel')} onClick={() => setShowModal(false)}></button>
               </div>
               <div className="modal-body">
                 {saveError && (
                   <div className="alert alert-danger py-2 small" role="alert">{saveError}</div>
                 )}
                 <div className="mb-3">
-                  <label htmlFor="wfChangeType" className="form-label">Change Type <span className="text-danger">*</span></label>
+                  <label htmlFor="wfChangeType" className="form-label">{t('admin.approvalWorkflows.modal.changeTypeLabel')} <span className="text-danger">*</span></label>
                   <input
                     id="wfChangeType"
                     type="text"
                     className="form-control"
-                    placeholder="e.g. TimeOff.Request"
+                    placeholder={t('admin.approvalWorkflows.modal.changeTypePlaceholder')}
                     value={formChangeType}
                     onChange={(e) => setFormChangeType(e.target.value)}
                     disabled={modalMode === 'edit'}
                   />
-                  <div className="form-text">Unique identifier for the change type this workflow governs.</div>
+                  <div className="form-text">{t('admin.approvalWorkflows.modal.changeTypeHelp')}</div>
                 </div>
                 <div className="mb-3">
-                  <label htmlFor="wfDescription" className="form-label">Description</label>
+                  <label htmlFor="wfDescription" className="form-label">{t('admin.approvalWorkflows.modal.descriptionLabel')}</label>
                   <input
                     id="wfDescription"
                     type="text"
                     className="form-control"
-                    placeholder="Optional description"
+                    placeholder={t('admin.approvalWorkflows.modal.descriptionPlaceholder')}
                     value={formDescription}
                     onChange={(e) => setFormDescription(e.target.value)}
                   />
@@ -351,50 +355,50 @@ const ApprovalWorkflows: React.FC = () => {
                     onChange={(e) => setFormRequireAll(e.target.checked)}
                   />
                   <label className="form-check-label" htmlFor="wfRequireAll">
-                    Require all approvers (parallel approval; otherwise any single approver suffices)
+                    {t('admin.approvalWorkflows.modal.requireAllLabel')}
                   </label>
                 </div>
 
                 <div className="d-flex align-items-center justify-content-between mb-2">
-                  <h6 className="mb-0">Approval Steps</h6>
+                  <h6 className="mb-0">{t('admin.approvalWorkflows.modal.approvalStepsHeading')}</h6>
                   <button type="button" className="btn btn-sm btn-outline-primary" onClick={addStep}>
-                    <i className="bi bi-plus" aria-hidden="true"></i> Add Step
+                    <i className="bi bi-plus" aria-hidden="true"></i> {t('admin.approvalWorkflows.modal.addStep')}
                   </button>
                 </div>
                 {formSteps.length === 0 && (
-                  <p className="text-muted small">No steps yet. Add at least one step.</p>
+                  <p className="text-muted small">{t('admin.approvalWorkflows.modal.noStepsYet')}</p>
                 )}
                 {formSteps.map((step, i) => (
-                  <div key={i} className="border rounded p-3 mb-2 bg-light position-relative" aria-label={`Step ${i + 1}`}>
+                  <div key={i} className="border rounded p-3 mb-2 bg-light position-relative" aria-label={t('admin.approvalWorkflows.modal.stepAriaLabel', { n: i + 1 })}>
                     <div className="d-flex align-items-center justify-content-between mb-2">
-                      <span className="fw-semibold small">Step {i + 1}</span>
+                      <span className="fw-semibold small">{t('admin.approvalWorkflows.modal.stepLabel', { n: i + 1 })}</span>
                       <button
                         type="button"
                         className="btn btn-sm btn-outline-danger py-0 px-1"
                         onClick={() => removeStep(i)}
                         disabled={formSteps.length <= 1}
-                        aria-label={`Remove step ${i + 1}`}
+                        aria-label={t('admin.approvalWorkflows.modal.removeStepAriaLabel', { n: i + 1 })}
                       >
                         <i className="bi bi-x" aria-hidden="true"></i>
                       </button>
                     </div>
                     <div className="row g-2">
                       <div className="col-md-4">
-                        <label htmlFor={`stepScope-${i}`} className="form-label small">Approver Scope</label>
+                        <label htmlFor={`stepScope-${i}`} className="form-label small">{t('admin.approvalWorkflows.modal.approverScope')}</label>
                         <select
                           id={`stepScope-${i}`}
                           className="form-select form-select-sm"
                           value={step.approverScope}
                           onChange={(e) => updateStep(i, { approverScope: e.target.value as ApproverScope })}
                         >
-                          {SCOPE_OPTIONS.map(([val, label]) => (
-                            <option key={val} value={val}>{label}</option>
+                          {SCOPE_KEYS.map((val) => (
+                            <option key={val} value={val}>{t(SCOPE_LABEL_KEYS[val])}</option>
                           ))}
                         </select>
                       </div>
                       {step.approverScope === 'company_role' && (
                         <div className="col-md-4">
-                          <label htmlFor={`stepRoleId-${i}`} className="form-label small">Role ID</label>
+                          <label htmlFor={`stepRoleId-${i}`} className="form-label small">{t('admin.approvalWorkflows.modal.roleId')}</label>
                           <input
                             id={`stepRoleId-${i}`}
                             type="number"
@@ -402,13 +406,13 @@ const ApprovalWorkflows: React.FC = () => {
                             value={step.approverRoleId ?? ''}
                             onChange={(e) => updateStep(i, { approverRoleId: e.target.value ? Number(e.target.value) : null })}
                             min={1}
-                            placeholder="Role ID"
+                            placeholder={t('admin.approvalWorkflows.modal.roleIdPlaceholder')}
                           />
                         </div>
                       )}
                       {step.approverScope === 'company_user' && (
                         <div className="col-md-4">
-                          <label htmlFor={`stepUserId-${i}`} className="form-label small">User ID</label>
+                          <label htmlFor={`stepUserId-${i}`} className="form-label small">{t('admin.approvalWorkflows.modal.userId')}</label>
                           <input
                             id={`stepUserId-${i}`}
                             type="number"
@@ -416,12 +420,12 @@ const ApprovalWorkflows: React.FC = () => {
                             value={step.approverUserId ?? ''}
                             onChange={(e) => updateStep(i, { approverUserId: e.target.value ? Number(e.target.value) : null })}
                             min={1}
-                            placeholder="User ID"
+                            placeholder={t('admin.approvalWorkflows.modal.userIdPlaceholder')}
                           />
                         </div>
                       )}
                       <div className="col-md-4">
-                        <label htmlFor={`stepEscalate-${i}`} className="form-label small">Escalate After (hours)</label>
+                        <label htmlFor={`stepEscalate-${i}`} className="form-label small">{t('admin.approvalWorkflows.modal.escalateAfterHours')}</label>
                         <input
                           id={`stepEscalate-${i}`}
                           type="number"
@@ -429,7 +433,7 @@ const ApprovalWorkflows: React.FC = () => {
                           value={step.escalateAfterHours ?? ''}
                           onChange={(e) => updateStep(i, { escalateAfterHours: e.target.value ? Number(e.target.value) : null })}
                           min={1}
-                          placeholder="Optional"
+                          placeholder={t('admin.approvalWorkflows.modal.optionalPlaceholder')}
                         />
                       </div>
                       <div className="col-12">
@@ -442,7 +446,7 @@ const ApprovalWorkflows: React.FC = () => {
                             onChange={(e) => updateStep(i, { autoApproveForOwner: e.target.checked })}
                           />
                           <label className="form-check-label small" htmlFor={`stepAutoApprove-${i}`}>
-                            Auto-approve when the actor IS the approver (owner exception)
+                            {t('admin.approvalWorkflows.modal.autoApproveLabel')}
                           </label>
                         </div>
                       </div>
@@ -452,19 +456,19 @@ const ApprovalWorkflows: React.FC = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
                   className="btn btn-primary"
                   onClick={handleSave}
                   disabled={saving}
-                  aria-label={modalMode === 'create' ? 'Create workflow' : 'Save workflow'}
+                  aria-label={modalMode === 'create' ? t('admin.approvalWorkflows.modal.createSaveAriaLabel') : t('admin.approvalWorkflows.modal.editSaveAriaLabel')}
                 >
                   {saving ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.approvalWorkflows.modal.saving')}</>
                   ) : (
-                    modalMode === 'create' ? 'Create' : 'Save'
+                    modalMode === 'create' ? t('admin.approvalWorkflows.modal.create') : t('admin.approvalWorkflows.modal.save')
                   )}
                 </button>
               </div>
@@ -480,27 +484,27 @@ const ApprovalWorkflows: React.FC = () => {
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Delete Workflow</h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setDeleteTarget(null)}></button>
+                <h5 className="modal-title">{t('admin.approvalWorkflows.deleteModal.title')}</h5>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setDeleteTarget(null)}></button>
               </div>
               <div className="modal-body">
-                Delete workflow <strong>{deleteTarget.changeType}</strong>?
+                {t('admin.approvalWorkflows.deleteModal.confirmPrefix')} <strong>{deleteTarget.changeType}</strong>?
                 <p className="mt-2 text-muted small">
-                  This will also remove all its steps and cannot be undone.
+                  {t('admin.approvalWorkflows.deleteModal.warning')}
                 </p>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-danger"
                   onClick={handleDeleteConfirm}
                   disabled={deleting}
-                  aria-label={`Confirm delete workflow ${deleteTarget.changeType}`}
+                  aria-label={t('admin.approvalWorkflows.deleteModal.confirmAriaLabel', { changeType: deleteTarget.changeType })}
                 >
                   {deleting ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Deleting…</>
-                  ) : 'Delete'}
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.approvalWorkflows.deleteModal.deleting')}</>
+                  ) : t('common.delete')}
                 </button>
               </div>
             </div>

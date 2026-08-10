@@ -23,6 +23,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import QueryState from '../../components/QueryState';
 import { useRoleTimelineQuery } from '../../hooks/useRbac';
 import { formatDate } from '../../utils/format';
@@ -47,11 +48,12 @@ const stamp = (iso: string): string => {
 };
 
 const RoleTimeline: React.FC<Props> = ({ subject }) => {
+  const { t } = useTranslation();
   const query = useRoleTimelineQuery(subject);
   const data = query.data ?? null;
 
   if (!subject) {
-    return <p className="text-muted mb-0">Select someone to see their role history.</p>;
+    return <p className="text-muted mb-0">{t('admin.roleTimeline.selectSomeone')}</p>;
   }
 
   return (
@@ -60,22 +62,22 @@ const RoleTimeline: React.FC<Props> = ({ subject }) => {
       isError={query.isError}
       error={query.error}
       onRetry={query.refetch}
-      loadingMessage="Loading the role history…"
+      loadingMessage={t('admin.roleTimeline.loading')}
     >
       {data && (
         <>
-          <h6 className="mb-2">Held now</h6>
+          <h6 className="mb-2">{t('admin.roleTimeline.heldNow')}</h6>
           {data.current.length === 0 ? (
-            <p className="text-muted">No roles currently granted.</p>
+            <p className="text-muted">{t('admin.roleTimeline.noRolesGranted')}</p>
           ) : (
             <div className="table-responsive mb-4">
               <table className="table table-sm align-middle mb-0">
                 <thead>
                   <tr>
-                    <th scope="col">{subject.kind === 'role' ? 'Person' : 'Role'}</th>
-                    <th scope="col">Scope</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col">History</th>
+                    <th scope="col">{subject.kind === 'role' ? t('admin.roleTimeline.columns.person') : t('admin.roleTimeline.columns.role')}</th>
+                    <th scope="col">{t('admin.roleTimeline.columns.scope')}</th>
+                    <th scope="col">{t('admin.roleTimeline.columns.expires')}</th>
+                    <th scope="col">{t('admin.roleTimeline.columns.history')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -83,19 +85,19 @@ const RoleTimeline: React.FC<Props> = ({ subject }) => {
                     <tr key={`${grant.userId}-${grant.roleId}-${grant.scopeOrgUnitId ?? 'all'}`}>
                       <td>
                         {subject.kind === 'role'
-                          ? (grant.userName ?? `User ${grant.userId}`)
-                          : (grant.roleName ?? `Role ${grant.roleId}`)}
+                          ? (grant.userName ?? t('admin.roleTimeline.userFallback', { id: grant.userId }))
+                          : (grant.roleName ?? t('admin.roleTimeline.roleFallback', { id: grant.roleId }))}
                       </td>
-                      <td className="text-muted">{grant.scopeOrgUnitName ?? 'All units'}</td>
-                      <td>{grant.expiresAt ? stamp(grant.expiresAt) : <span className="text-muted">—</span>}</td>
+                      <td className="text-muted">{grant.scopeOrgUnitName ?? t('admin.roleTimeline.allUnits')}</td>
+                      <td>{grant.expiresAt ? stamp(grant.expiresAt) : <span className="text-muted">{t('common.emptyValue')}</span>}</td>
                       <td>
                         {grant.hasHistory ? (
-                          <span className="text-muted small">recorded below</span>
+                          <span className="text-muted small">{t('admin.roleTimeline.recordedBelow')}</span>
                         ) : (
                           // Not an error, and not nothing: it predates the audit
                           // log or was seeded, and saying so is more honest than
                           // an empty cell that reads as "never happened".
-                          <span className="badge bg-warning text-dark">not in the log</span>
+                          <span className="badge bg-warning text-dark">{t('admin.roleTimeline.notInLog')}</span>
                         )}
                       </td>
                     </tr>
@@ -105,26 +107,26 @@ const RoleTimeline: React.FC<Props> = ({ subject }) => {
             </div>
           )}
 
-          <h6 className="mb-2">What happened</h6>
+          <h6 className="mb-2">{t('admin.roleTimeline.whatHappened')}</h6>
           {data.entries.length === 0 ? (
-            <p className="text-muted mb-0">Nothing recorded.</p>
+            <p className="text-muted mb-0">{t('admin.roleTimeline.nothingRecorded')}</p>
           ) : (
             <>
               {data.truncated && (
                 <div className="alert alert-warning py-2 small" role="note">
-                  Showing the most recent events only — there are more than this view returns.
+                  {t('admin.roleTimeline.truncatedNotice')}
                 </div>
               )}
               <div className="table-responsive">
                 <table className="table table-sm align-middle mb-0">
                   <thead>
                     <tr>
-                      <th scope="col">When</th>
-                      <th scope="col">What</th>
-                      <th scope="col">{subject.kind === 'role' ? 'Person' : 'Role'}</th>
-                      <th scope="col">Scope</th>
-                      <th scope="col">By</th>
-                      <th scope="col">Reason</th>
+                      <th scope="col">{t('admin.roleTimeline.columns.when')}</th>
+                      <th scope="col">{t('admin.roleTimeline.columns.what')}</th>
+                      <th scope="col">{subject.kind === 'role' ? t('admin.roleTimeline.columns.person') : t('admin.roleTimeline.columns.role')}</th>
+                      <th scope="col">{t('admin.roleTimeline.columns.scope')}</th>
+                      <th scope="col">{t('admin.roleTimeline.columns.by')}</th>
+                      <th scope="col">{t('admin.roleTimeline.columns.reason')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -134,25 +136,25 @@ const RoleTimeline: React.FC<Props> = ({ subject }) => {
                         <td>
                           <span className={`badge ${ACTION_BADGE[entry.action]}`}>{entry.action}</span>
                           {entry.derived && (
-                            <span className="text-muted small ms-2" title="Inferred from the grant's expiry; nothing recorded it">
-                              inferred
+                            <span className="text-muted small ms-2" title={t('admin.roleTimeline.inferredTitle')}>
+                              {t('admin.roleTimeline.inferred')}
                             </span>
                           )}
                         </td>
                         <td>
                           {subject.kind === 'role'
-                            ? (entry.userName ?? `User ${entry.userId}`)
-                            : (entry.roleName ?? `Role ${entry.roleId ?? '?'}`)}
+                            ? (entry.userName ?? t('admin.roleTimeline.userFallback', { id: entry.userId }))
+                            : (entry.roleName ?? t('admin.roleTimeline.roleFallback', { id: entry.roleId ?? '?' }))}
                         </td>
-                        <td className="text-muted">{entry.scopeOrgUnitName ?? 'All units'}</td>
+                        <td className="text-muted">{entry.scopeOrgUnitName ?? t('admin.roleTimeline.allUnits')}</td>
                         <td>
                           {entry.derived ? (
-                            <span className="text-muted">nobody — it lapsed</span>
+                            <span className="text-muted">{t('admin.roleTimeline.nobodyLapsed')}</span>
                           ) : (
-                            (entry.actorName ?? <span className="text-muted">unknown</span>)
+                            (entry.actorName ?? <span className="text-muted">{t('admin.roleTimeline.unknown')}</span>)
                           )}
                         </td>
-                        <td className="text-muted small">{entry.justification ?? '—'}</td>
+                        <td className="text-muted small">{entry.justification ?? t('common.emptyValue')}</td>
                       </tr>
                     ))}
                   </tbody>
