@@ -32,6 +32,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useMyAssignmentsQuery } from '../../hooks/useAssignments';
@@ -58,11 +59,20 @@ const STATUS_BADGE: Record<string, string> = {
   cancelled: 'bg-secondary',
 };
 
-const STATUS_LABEL: Record<string, string> = {
-  pending_target: 'Awaiting response',
-  pending: 'Awaiting approval',
+/** Kept as identifiers so the badge class stays keyed on the raw enum while the visible label goes through `t()`. */
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending_target: 'shiftSwaps.status.pendingTarget',
+  pending: 'shiftSwaps.status.pending',
+  approved: 'shiftSwaps.status.approved',
+  declined: 'shiftSwaps.status.declined',
+  cancelled: 'shiftSwaps.status.cancelled',
 };
 
+const OFFER_STATUS_LABEL_KEYS: Record<string, string> = {
+  open: 'shiftSwaps.offerStatus.open',
+  claimed: 'shiftSwaps.offerStatus.claimed',
+  cancelled: 'shiftSwaps.offerStatus.cancelled',
+};
 
 const describe = (a: ShiftAssignment): string =>
   `${String(a.shiftDate ?? '').slice(0, 10)} ${shiftTime(a.startTime)}–${shiftTime(a.endTime)}`;
@@ -74,6 +84,7 @@ const describeOffer = (o: ShiftSwapOffer): string =>
   `${o.date} ${shiftTime(o.startTime)}–${shiftTime(o.endTime)}`;
 
 const ShiftSwaps: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const myId = user?.id ? Number(user.id) : null;
@@ -98,7 +109,7 @@ const ShiftSwaps: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-3">Shift swaps</h1>
+      <h1 className="h4 mb-3">{t('shiftSwaps.title')}</h1>
 
       {message && (
         <div className="alert alert-warning" role="alert">
@@ -106,18 +117,18 @@ const ShiftSwaps: React.FC = () => {
         </div>
       )}
 
-      <h2 className="h6">Propose a swap</h2>
+      <h2 className="h6">{t('shiftSwaps.proposeSwap')}</h2>
       <QueryState
         isLoading={mine.isLoading}
         isError={mine.isError}
         error={mine.error}
         onRetry={mine.refetch}
         isEmpty={swappable.length === 0}
-        loadingMessage="Loading your shifts…"
-        empty={<p className="text-muted">You have no shifts to swap.</p>}
+        loadingMessage={t('shiftSwaps.loadingYourShifts')}
+        empty={<p className="text-muted">{t('shiftSwaps.noShiftsToSwap')}</p>}
       >
         <div className="mb-3">
-          <label className="form-label" htmlFor="swap-giving">The shift you would give up</label>
+          <label className="form-label" htmlFor="swap-giving">{t('shiftSwaps.shiftYouWouldGiveUp')}</label>
           <select
             id="swap-giving"
             className="form-select"
@@ -126,10 +137,10 @@ const ShiftSwaps: React.FC = () => {
               setGiving(swappable.find((a) => String(a.id) === e.target.value) ?? null)
             }
           >
-            <option value="">Choose one of your shifts…</option>
+            <option value="">{t('shiftSwaps.chooseOneOfYourShifts')}</option>
             {swappable.map((a) => (
               <option key={String(a.id)} value={String(a.id)}>
-                {describe(a)} — {a.departmentName ?? ''}
+                {t('shiftSwaps.shiftOptionLabel', { shift: describe(a), department: a.departmentName ?? '' })}
               </option>
             ))}
           </select>
@@ -143,11 +154,10 @@ const ShiftSwaps: React.FC = () => {
           error={candidates.error}
           onRetry={candidates.refetch}
           isEmpty={(candidates.data?.candidates.length ?? 0) === 0}
-          loadingMessage="Finding shifts you could swap for…"
+          loadingMessage={t('shiftSwaps.findingCandidates')}
           empty={
             <p className="text-muted">
-              No shift can be swapped for this one — every candidate would leave someone working
-              two shifts at once, or is outside the people you work with.
+              {t('shiftSwaps.noCandidatesFound')}
             </p>
           }
         >
@@ -159,8 +169,12 @@ const ShiftSwaps: React.FC = () => {
               >
                 {/* Both sides, in one sentence, before anything is sent. */}
                 <span>
-                  You take <strong>{describeCandidate(c)}</strong> ({c.departmentName}) —{' '}
-                  {c.userName} takes <strong>{describe(giving)}</strong>
+                  {t('shiftSwaps.candidateSummary', {
+                    theirs: describeCandidate(c),
+                    theirDept: c.departmentName,
+                    userName: c.userName,
+                    yours: describe(giving),
+                  })}
                 </span>
                 <button
                   type="button"
@@ -177,27 +191,26 @@ const ShiftSwaps: React.FC = () => {
                   }
                   disabled={propose.isPending}
                 >
-                  Propose
+                  {t('shiftSwaps.propose')}
                 </button>
               </li>
             ))}
           </ul>
           {candidates.data?.truncated && (
             <p className="text-muted small">
-              Showing the first matches only — there may be more.
+              {t('shiftSwaps.truncatedNotice')}
             </p>
           )}
         </QueryState>
       )}
 
-      <h2 className="h6 mt-4">Open shift board</h2>
+      <h2 className="h6 mt-4">{t('shiftSwaps.openShiftBoard')}</h2>
       <p className="text-muted small">
-        Don't know who to ask? Post one of your shifts here for anyone eligible to claim, or claim
-        one someone else has posted by offering one of yours back.
+        {t('shiftSwaps.openShiftBoardDescription')}
       </p>
 
       <div className="mb-3">
-        <label className="form-label" htmlFor="board-posting">Post a shift to the board</label>
+        <label className="form-label" htmlFor="board-posting">{t('shiftSwaps.postToBoard')}</label>
         <div className="d-flex gap-2">
           <select
             id="board-posting"
@@ -207,10 +220,10 @@ const ShiftSwaps: React.FC = () => {
               setPosting(swappable.find((a) => String(a.id) === e.target.value) ?? null)
             }
           >
-            <option value="">Choose one of your shifts…</option>
+            <option value="">{t('shiftSwaps.chooseOneOfYourShifts')}</option>
             {swappable.map((a) => (
               <option key={String(a.id)} value={String(a.id)}>
-                {describe(a)} — {a.departmentName ?? ''}
+                {t('shiftSwaps.shiftOptionLabel', { shift: describe(a), department: a.departmentName ?? '' })}
               </option>
             ))}
           </select>
@@ -223,7 +236,7 @@ const ShiftSwaps: React.FC = () => {
               act(postOffer.mutateAsync({ assignmentId: Number(posting.id) }).then(() => setPosting(null)))
             }
           >
-            Post
+            {t('shiftSwaps.post')}
           </button>
         </div>
       </div>
@@ -236,14 +249,14 @@ const ShiftSwaps: React.FC = () => {
           onRetry={myOffers.refetch}
           isEmpty={false}
         >
-          <p className="text-muted small mb-1">Your posted offers</p>
+          <p className="text-muted small mb-1">{t('shiftSwaps.yourPostedOffers')}</p>
           <ul className="list-group mb-3">
             {(myOffers.data ?? []).map((o) => (
               <li key={o.id} className="list-group-item d-flex justify-content-between align-items-center">
                 <span>
-                  {describeOffer(o)} — {o.departmentName}
+                  {t('shiftSwaps.offerLabel', { offer: describeOffer(o), department: o.departmentName })}
                   {o.status !== 'open' && (
-                    <span className="badge bg-secondary ms-2">{o.status}</span>
+                    <span className="badge bg-secondary ms-2">{t(OFFER_STATUS_LABEL_KEYS[o.status] ?? o.status)}</span>
                   )}
                 </span>
                 {o.status === 'open' && (
@@ -253,7 +266,7 @@ const ShiftSwaps: React.FC = () => {
                     onClick={() => act(cancelOffer.mutateAsync(o.id))}
                     disabled={cancelOffer.isPending}
                   >
-                    Withdraw
+                    {t('shiftSwaps.withdraw')}
                   </button>
                 )}
               </li>
@@ -268,15 +281,15 @@ const ShiftSwaps: React.FC = () => {
         error={openOffers.error}
         onRetry={openOffers.refetch}
         isEmpty={(openOffers.data?.length ?? 0) === 0}
-        loadingMessage="Loading the open shift board…"
-        empty={<p className="text-muted">No open offers right now.</p>}
+        loadingMessage={t('shiftSwaps.loadingBoard')}
+        empty={<p className="text-muted">{t('shiftSwaps.noOpenOffers')}</p>}
       >
         <ul className="list-group mb-2">
           {(openOffers.data ?? []).map((o) => (
             <li key={o.id} className="list-group-item">
               <div className="d-flex justify-content-between align-items-center">
                 <span>
-                  <strong>{describeOffer(o)}</strong> ({o.departmentName}) — posted by {o.userName}
+                  {t('shiftSwaps.offerSummary', { offer: describeOffer(o), dept: o.departmentName, userName: o.userName })}
                 </span>
                 {claimingOfferId !== o.id && (
                   <button
@@ -287,7 +300,7 @@ const ShiftSwaps: React.FC = () => {
                       setClaimWith(null);
                     }}
                   >
-                    Claim
+                    {t('shiftSwaps.claim')}
                   </button>
                 )}
               </div>
@@ -295,16 +308,16 @@ const ShiftSwaps: React.FC = () => {
                 <div className="mt-2 d-flex gap-2 align-items-center">
                   <select
                     className="form-select form-select-sm"
-                    aria-label="Offer one of your shifts back"
+                    aria-label={t('shiftSwaps.offerOneOfYourShiftsBackAriaLabel')}
                     value={claimWith ? String(claimWith.id) : ''}
                     onChange={(e) =>
                       setClaimWith(swappable.find((a) => String(a.id) === e.target.value) ?? null)
                     }
                   >
-                    <option value="">Offer one of your shifts back…</option>
+                    <option value="">{t('shiftSwaps.offerOneOfYourShiftsBack')}</option>
                     {swappable.map((a) => (
                       <option key={String(a.id)} value={String(a.id)}>
-                        {describe(a)} — {a.departmentName ?? ''}
+                        {t('shiftSwaps.shiftOptionLabel', { shift: describe(a), department: a.departmentName ?? '' })}
                       </option>
                     ))}
                   </select>
@@ -324,14 +337,14 @@ const ShiftSwaps: React.FC = () => {
                       )
                     }
                   >
-                    Confirm claim
+                    {t('shiftSwaps.confirmClaim')}
                   </button>
                   <button
                     type="button"
                     className="btn btn-sm btn-outline-secondary"
                     onClick={() => setClaimingOfferId(null)}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               )}
@@ -340,22 +353,22 @@ const ShiftSwaps: React.FC = () => {
         </ul>
       </QueryState>
 
-      <h2 className="h6 mt-4">Swap requests</h2>
+      <h2 className="h6 mt-4">{t('shiftSwaps.swapRequests')}</h2>
       <QueryState
         isLoading={requests.isLoading}
         isError={requests.isError}
         error={requests.error}
         onRetry={requests.refetch}
         isEmpty={(requests.data?.length ?? 0) === 0}
-        loadingMessage="Loading swap requests…"
-        empty={<p className="text-muted">No swap requests.</p>}
+        loadingMessage={t('shiftSwaps.loadingRequests')}
+        empty={<p className="text-muted">{t('shiftSwaps.noRequests')}</p>}
       >
         <table className="table table-sm align-middle">
           <thead>
             <tr>
-              <th>Requester</th>
-              <th>Other person</th>
-              <th>Status</th>
+              <th>{t('shiftSwaps.columns.requester')}</th>
+              <th>{t('shiftSwaps.columns.otherPerson')}</th>
+              <th>{t('shiftSwaps.columns.status')}</th>
               <th />
             </tr>
           </thead>
@@ -365,15 +378,15 @@ const ShiftSwaps: React.FC = () => {
               const isTarget = r.targetUserId === myId;
               return (
                 <tr key={r.id}>
-                  <td>{isRequester ? 'You' : r.requesterUserId}</td>
-                  <td>{isTarget ? 'You' : r.targetUserId}</td>
+                  <td>{isRequester ? t('shiftSwaps.you') : r.requesterUserId}</td>
+                  <td>{isTarget ? t('shiftSwaps.you') : r.targetUserId}</td>
                   <td>
                     <span className={`badge ${STATUS_BADGE[r.status] ?? 'bg-secondary'}`}>
-                      {STATUS_LABEL[r.status] ?? r.status}
+                      {t(STATUS_LABEL_KEYS[r.status] ?? r.status)}
                     </span>
                     {r.status === 'declined' && r.declinedBy && (
                       <span className="text-muted small d-block">
-                        {r.declinedBy === 'target' ? 'Declined by the other person' : 'Declined by manager'}
+                        {r.declinedBy === 'target' ? t('shiftSwaps.declinedByOtherPerson') : t('shiftSwaps.declinedByManager')}
                       </span>
                     )}
                   </td>
@@ -386,7 +399,7 @@ const ShiftSwaps: React.FC = () => {
                           onClick={() => act(respond.mutateAsync({ id: r.id, accepted: true }))}
                           disabled={respond.isPending}
                         >
-                          Accept
+                          {t('shiftSwaps.accept')}
                         </button>
                         <button
                           type="button"
@@ -394,12 +407,12 @@ const ShiftSwaps: React.FC = () => {
                           onClick={() => act(respond.mutateAsync({ id: r.id, accepted: false }))}
                           disabled={respond.isPending}
                         >
-                          Decline
+                          {t('shiftSwaps.decline')}
                         </button>
                       </>
                     )}
                     {r.status === 'pending_target' && isRequester && (
-                      <span className="text-muted small">Waiting for the other person to respond</span>
+                      <span className="text-muted small">{t('shiftSwaps.waitingForOtherPerson')}</span>
                     )}
                     {(r.status === 'pending_target' || r.status === 'pending') && isRequester && (
                       <button
@@ -408,7 +421,7 @@ const ShiftSwaps: React.FC = () => {
                         onClick={() => act(cancel.mutateAsync(r.id))}
                         disabled={cancel.isPending}
                       >
-                        Withdraw
+                        {t('shiftSwaps.withdraw')}
                       </button>
                     )}
                     {r.status === 'pending' && canDecide && (
@@ -419,7 +432,7 @@ const ShiftSwaps: React.FC = () => {
                           onClick={() => act(approve.mutateAsync({ id: r.id }))}
                           disabled={approve.isPending}
                         >
-                          Approve
+                          {t('shiftSwaps.approve')}
                         </button>
                         <button
                           type="button"
@@ -427,7 +440,7 @@ const ShiftSwaps: React.FC = () => {
                           onClick={() => act(decline.mutateAsync({ id: r.id }))}
                           disabled={decline.isPending}
                         >
-                          Decline
+                          {t('shiftSwaps.decline')}
                         </button>
                       </>
                     )}
@@ -436,7 +449,7 @@ const ShiftSwaps: React.FC = () => {
                         model gives them none — their own decision already
                         happened at the pending_target step. */}
                     {r.status === 'pending' && isTarget && !canDecide && (
-                      <span className="text-muted small">A manager decides this</span>
+                      <span className="text-muted small">{t('shiftSwaps.managerDecidesThis')}</span>
                     )}
                   </td>
                 </tr>

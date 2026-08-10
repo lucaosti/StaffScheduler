@@ -29,27 +29,13 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useAuthorityQuery } from '../../hooks/useOrg';
 import type { AuthorityPerson } from '../../services/orgService';
 
 const fullName = (p: AuthorityPerson) => `${p.firstName} ${p.lastName}`;
-
-/** How an approver was chosen, in words rather than in the enum's spelling. */
-const SCOPE_LABEL: Record<string, string> = {
-  unit_manager: 'manages your unit',
-  unit_manager_chain: 'nearest manager above your unit',
-  policy_owner: 'owns the policy in question',
-  company_role: 'holds the required role',
-  company_user: 'named directly on this step',
-  responsibility_rule: 'made responsible by a rule',
-};
-
-const scopeLabel = (scope: string, permissionCode: string | null): string => {
-  const base = SCOPE_LABEL[scope] ?? scope;
-  return scope === 'responsibility_rule' && permissionCode ? `${base} (${permissionCode})` : base;
-};
 
 /** A change type as a person would say it: `time_off` → "Time off". */
 const changeTypeLabel = (changeType: string): string => {
@@ -58,10 +44,28 @@ const changeTypeLabel = (changeType: string): string => {
 };
 
 const Authority: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   // The same gate the server applies to another person's profile; the check here
   // only decides whether to offer the field, never whether the answer is given.
   const canLookUpOthers = (user?.permissions ?? []).includes('org_unit.read');
+
+  /** How an approver was chosen, in words rather than in the enum's spelling. */
+  const SCOPE_LABEL_KEYS: Record<string, string> = {
+    unit_manager: 'authority.scope.unitManager',
+    unit_manager_chain: 'authority.scope.unitManagerChain',
+    policy_owner: 'authority.scope.policyOwner',
+    company_role: 'authority.scope.companyRole',
+    company_user: 'authority.scope.companyUser',
+    responsibility_rule: 'authority.scope.responsibilityRule',
+  };
+
+  const scopeLabel = (scope: string, permissionCode: string | null): string => {
+    const base = SCOPE_LABEL_KEYS[scope] ? t(SCOPE_LABEL_KEYS[scope]) : scope;
+    return scope === 'responsibility_rule' && permissionCode
+      ? t('authority.scopeWithPermission', { base, code: permissionCode })
+      : base;
+  };
 
   // null means "mine", which is a real value here rather than "not chosen yet".
   const [subjectId, setSubjectId] = useState<number | null>(null);
@@ -76,9 +80,9 @@ const Authority: React.FC = () => {
     <div className="container-fluid py-3">
       <div className="d-flex justify-content-between align-items-start mb-3 flex-wrap gap-3">
         <div>
-          <h1 className="h4 mb-0">Authority</h1>
+          <h1 className="h4 mb-0">{t('authority.title')}</h1>
           <p className="text-muted mb-0 small">
-            Who you depend on, who can change your role, and who decides your requests.
+            {t('authority.subtitle')}
           </p>
         </div>
 
@@ -93,7 +97,7 @@ const Authority: React.FC = () => {
           >
             <div>
               <label className="form-label small mb-1" htmlFor="authority-lookup">
-                Look up another person (employee ID)
+                {t('authority.lookupLabel')}
               </label>
               <input
                 id="authority-lookup"
@@ -104,7 +108,7 @@ const Authority: React.FC = () => {
               />
             </div>
             <button type="submit" className="btn btn-outline-secondary btn-sm">
-              Show
+              {t('authority.show')}
             </button>
             {!isSelf && (
               <button
@@ -115,7 +119,7 @@ const Authority: React.FC = () => {
                   setLookup('');
                 }}
               >
-                Back to me
+                {t('authority.backToMe')}
               </button>
             )}
           </form>
@@ -127,27 +131,26 @@ const Authority: React.FC = () => {
         isError={query.isError}
         error={query.error}
         onRetry={query.refetch}
-        loadingMessage="Loading the authority profile…"
+        loadingMessage={t('authority.loadingProfile')}
       >
         {profile && (
           <>
             {!isSelf && (
               <div className="alert alert-info py-2" role="note">
-                Showing <strong>{fullName(profile.subject)}</strong> ({profile.subject.email}).
+                {t('authority.showingPrefix')} <strong>{fullName(profile.subject)}</strong> ({profile.subject.email}).
               </div>
             )}
 
             <div className="row g-4">
               <div className="col-lg-6">
                 <div className="card h-100">
-                  <div className="card-header">Who you depend on</div>
+                  <div className="card-header">{t('authority.dependsOn.title')}</div>
                   <div className="card-body">
                     {profile.managerChain.length === 0 ? (
                       // Not a cosmetic emptiness: with no unit there is no
                       // manager, and several approval scopes resolve through one.
                       <p className="text-muted mb-0">
-                        No org-unit membership, so there is no manager chain — and any approval
-                        routed through a unit manager has nobody to route to.
+                        {t('authority.dependsOn.noManagerChain')}
                       </p>
                     ) : (
                       <ol className="list-unstyled mb-0">
@@ -158,7 +161,7 @@ const Authority: React.FC = () => {
                               <div>
                                 <div className="fw-semibold">
                                   {link.manager ? fullName(link.manager) : (
-                                    <span className="text-danger">No manager set</span>
+                                    <span className="text-danger">{t('authority.dependsOn.noManagerSet')}</span>
                                   )}
                                 </div>
                                 <div className="text-muted small">{link.unitName}</div>
@@ -174,10 +177,10 @@ const Authority: React.FC = () => {
 
               <div className="col-lg-6">
                 <div className="card h-100">
-                  <div className="card-header">Who can change your role</div>
+                  <div className="card-header">{t('authority.roleAdmins.title')}</div>
                   <div className="card-body">
                     {profile.roleAdministrators.length === 0 ? (
-                      <p className="text-muted mb-0">Nobody — no responsibility rule and no permission holder.</p>
+                      <p className="text-muted mb-0">{t('authority.roleAdmins.nobody')}</p>
                     ) : (
                       <ul className="list-unstyled mb-0">
                         {profile.roleAdministrators.map((admin) => (
@@ -185,8 +188,8 @@ const Authority: React.FC = () => {
                             <div className="fw-semibold">{fullName(admin)}</div>
                             <div className="text-muted small">
                               {admin.via === 'responsibility_rule'
-                                ? 'made responsible for you by a rule'
-                                : 'holds role.manage across the organization'}
+                                ? t('authority.roleAdmins.viaRule')
+                                : t('authority.roleAdmins.viaPermission')}
                             </div>
                           </li>
                         ))}
@@ -198,19 +201,19 @@ const Authority: React.FC = () => {
             </div>
 
             <div className="card mt-4">
-              <div className="card-header">Who decides your requests</div>
+              <div className="card-header">{t('authority.decisions.title')}</div>
               <div className="card-body p-0">
                 {profile.approvals.length === 0 ? (
-                  <p className="text-muted m-3 mb-0">No approval workflows are configured.</p>
+                  <p className="text-muted m-3 mb-0">{t('authority.decisions.noWorkflows')}</p>
                 ) : (
                   <div className="table-responsive">
                     <table className="table table-sm mb-0 align-middle">
                       <thead>
                         <tr>
-                          <th scope="col">Request</th>
-                          <th scope="col">Step</th>
-                          <th scope="col">Decided by</th>
-                          <th scope="col">Because</th>
+                          <th scope="col">{t('authority.decisions.columns.request')}</th>
+                          <th scope="col">{t('authority.decisions.columns.step')}</th>
+                          <th scope="col">{t('authority.decisions.columns.decidedBy')}</th>
+                          <th scope="col">{t('authority.decisions.columns.because')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -226,7 +229,7 @@ const Authority: React.FC = () => {
                                 {step.unresolved ? (
                                   <span className="text-danger fw-semibold">
                                     <i className="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>
-                                    Nobody
+                                    {t('authority.decisions.nobody')}
                                   </span>
                                 ) : (
                                   step.approvers.map((p) => fullName(p)).join(', ')
@@ -245,9 +248,7 @@ const Authority: React.FC = () => {
               </div>
               {profile.approvals.some((w) => w.steps.some((s) => s.unresolved)) && (
                 <div className="card-footer small text-muted">
-                  A step decided by <strong>nobody</strong> means requests of that kind cannot be
-                  decided at all. Usually an org unit with no manager, or a responsibility rule
-                  pointing at a unit with no members.
+                  {t('authority.decisions.footerPrefix')} <strong>{t('authority.decisions.footerNobody')}</strong> {t('authority.decisions.footerSuffix')}
                 </div>
               )}
             </div>
