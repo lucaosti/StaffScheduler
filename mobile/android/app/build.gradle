@@ -1,5 +1,21 @@
 apply plugin: 'com.android.application'
 
+// Release signing: reads storeFile/storePassword/keyAlias/keyPassword from
+// keystore.properties (gitignored, never committed — see
+// keystore.properties.example for the placeholder and how to create the
+// real file). When that file is absent — the case for every local build and
+// for CI, since no release keystore lives in this repository — the release
+// build type falls back to the debug signing config instead of failing, so
+// `./gradlew assembleRelease` still produces an (unsigned-for-the-store)
+// build usable for local testing. A store upload requires the real
+// keystore.properties to exist, created by whoever holds the release key.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasReleaseKeystore = keystorePropertiesFile.exists()
+if (hasReleaseKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.staffscheduler.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +32,21 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseKeystore) {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig hasReleaseKeystore ? signingConfigs.release : signingConfigs.debug
         }
     }
 }
