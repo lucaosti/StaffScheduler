@@ -20,6 +20,7 @@ const Probe: React.FC = () => {
       <span data-testid="missing">{t('this.key.does.not.exist')}</span>
       <button onClick={() => void instance.changeLanguage('it')}>switch-it</button>
       <button onClick={() => void instance.changeLanguage('ar')}>switch-ar</button>
+      <button onClick={() => void instance.changeLanguage('es')}>switch-es</button>
       <button onClick={() => void instance.changeLanguage('en')}>switch-en</button>
     </div>
   );
@@ -36,6 +37,7 @@ describe('isRtl / isSupportedLocale', () => {
     expect(isSupportedLocale('en')).toBe(true);
     expect(isSupportedLocale('it')).toBe(true);
     expect(isSupportedLocale('ar')).toBe(true);
+    expect(isSupportedLocale('es')).toBe(true);
     expect(isSupportedLocale('fr')).toBe(false);
   });
 });
@@ -56,6 +58,13 @@ describe('locale switching + fallback', () => {
     await userEvent.click(screen.getByText('switch-it'));
     await waitFor(() => expect(screen.getByTestId('locale')).toHaveTextContent('it'));
     expect(screen.getByTestId('signin')).toHaveTextContent('Accedi');
+  });
+
+  it('switches to Spanish and updates the rendered text', async () => {
+    render(<Probe />);
+    await userEvent.click(screen.getByText('switch-es'));
+    await waitFor(() => expect(screen.getByTestId('locale')).toHaveTextContent('es'));
+    expect(screen.getByTestId('signin')).toHaveTextContent('Iniciar sesión');
   });
 
   it('falls back to the key itself when no locale has the key (no Italian override exists)', async () => {

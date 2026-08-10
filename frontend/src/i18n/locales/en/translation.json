@@ -35,6 +35,7 @@
   "locale.en": "English",
   "locale.it": "Italian",
   "locale.ar": "Arabic",
+  "locale.es": "Spanish",
   "dashboard.title": "Dashboard",
   "dashboard.welcome": "Welcome back, {{email}}! Here's what's happening today.",
   "dashboard.lastUpdated": "Last updated: {{time}}",

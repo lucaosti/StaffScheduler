@@ -927,7 +927,7 @@ effect (no provider component needed; `useTranslation()` reads the initialized s
 directly), and `frontend/src/setupTests.ts` does the same so any test that renders a
 component using `useTranslation()` works without importing the module itself.
 
-**Catalogs**: `frontend/src/i18n/locales/{en,it,ar}/translation.json`. Keys are **flat
+**Catalogs**: `frontend/src/i18n/locales/{en,it,ar,es}/translation.json`. Keys are **flat
 dotted strings** (`"auth.signIn"`), not nested JSON objects — `keySeparator: false` in
 the `i18next.init()` config is what makes the dot part of the literal key instead of a
 path into a nested tree. This mirrors the old `messages.ts` convention on purpose, so a
