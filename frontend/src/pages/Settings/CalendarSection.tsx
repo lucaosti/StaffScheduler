@@ -19,17 +19,12 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import AggregateFeedBuilder from './AggregateFeedBuilder';
 import { useDepartmentsQuery } from '../../hooks/useDepartments';
 import { useRolesAndPermissionsQuery } from '../../hooks/useRbac';
-import {
-  CalendarToken,
-  buildFeedUrl,
-  createCalendarToken,
-  listCalendarTokens,
-  revokeCalendarToken,
-} from '../../services/calendarService';
+import { useCalendarTokensQuery, useCalendarTokenMutations } from '../../hooks/useCalendarTokens';
+import { CalendarToken, buildFeedUrl } from '../../services/calendarService';
 
 const CLIENT_INSTRUCTIONS = [
   {
@@ -78,14 +73,11 @@ const CLIENT_INSTRUCTIONS = [
 ];
 
 const CalendarSection: React.FC = () => {
-  const [tokens, setTokens] = useState<CalendarToken[]>([]);
   const [label, setLabel] = useState('');
   /** The one token whose raw URL can be shown: the one just created. */
   const [freshUrl, setFreshUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
 
   // The filter options for the aggregate builder. Both are ordinary cached
   // queries; a failure leaves the selects empty rather than breaking the page,
@@ -93,21 +85,14 @@ const CalendarSection: React.FC = () => {
   const departmentsQuery = useDepartmentsQuery();
   const rolesQuery = useRolesAndPermissionsQuery();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setTokens(await listCalendarTokens());
-    } catch (err) {
-      setError((err as Error).message || 'Failed to load calendar tokens.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const tokensQuery = useCalendarTokensQuery();
+  const tokens: CalendarToken[] = tokensQuery.data ?? [];
+  const loading = tokensQuery.isLoading;
+  const error = tokensQuery.isError
+    ? (tokensQuery.error as Error).message || 'Failed to load calendar tokens.'
+    : actionError;
+  const { create, revoke } = useCalendarTokenMutations();
+  const busy = create.isPending || revoke.isPending;
 
   const handleCopy = async () => {
     if (!freshUrl) return;
@@ -122,17 +107,13 @@ const CalendarSection: React.FC = () => {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true);
     setError(null);
     try {
-      const created = await createCalendarToken(label);
+      const created = await create.mutateAsync(label);
       setFreshUrl(buildFeedUrl(created.token));
       setLabel('');
-      await load();
     } catch (err) {
       setError((err as Error).message || 'Failed to create token.');
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -143,15 +124,11 @@ const CalendarSection: React.FC = () => {
       )
     )
       return;
-    setBusy(true);
     setError(null);
     try {
-      await revokeCalendarToken(token.id);
-      await load();
+      await revoke.mutateAsync(token.id);
     } catch (err) {
       setError((err as Error).message || 'Failed to revoke token.');
-    } finally {
-      setBusy(false);
     }
   };
 

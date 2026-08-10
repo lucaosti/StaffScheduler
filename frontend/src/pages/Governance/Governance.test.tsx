@@ -444,7 +444,7 @@ describe('<Governance /> — change request mutations', () => {
 
     await userEvent.click(screen.getByTitle('Approve'));
 
-    await waitFor(() => expect(mockApproveCr).toHaveBeenCalledWith(42));
+    await waitFor(() => expect(mockApproveCr).toHaveBeenCalledWith(42, undefined));
   });
 
   it('rejects a pending request with a reason via the modal', async () => {

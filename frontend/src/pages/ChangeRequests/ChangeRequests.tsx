@@ -9,18 +9,13 @@
  */
 
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-  createChangeRequest,
-  approveChangeRequest,
-  rejectChangeRequest,
-  cancelChangeRequest,
   ChangeRequest,
   ChangeRequestStatus,
   CreateChangeRequestInput,
 } from '../../services/changeRequestService';
-import { useChangeRequestsQuery } from '../../hooks/useGovernance';
+import { useChangeRequestsQuery, useChangeRequestMutations } from '../../hooks/useGovernance';
 import { useAuth } from '../../contexts/AuthContext';
 
 const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
@@ -60,7 +55,6 @@ const EMPTY_FORM: Omit<CreateChangeRequestInput, 'proposedPayload'> & { payloadT
 const ChangeRequests: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const [tab, setTab] = useState<'mine' | 'all'>('mine');
   const [statusFilter, setStatusFilter] = useState<ChangeRequestStatus | ''>('');
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -68,21 +62,20 @@ const ChangeRequests: React.FC = () => {
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Review modal (approve/reject)
   const [reviewTarget, setReviewTarget] = useState<ChangeRequest | null>(null);
   const [reviewMode, setReviewMode] = useState<'approve' | 'reject'>('approve');
   const [reviewNote, setReviewNote] = useState('');
-  const [reviewing, setReviewing] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
 
   const canReview = user?.permissions?.includes('change_request.review') ?? false;
 
   // Server state via TanStack Query, keyed by the tab (mine/all) and status
-  // filter so switching either refetches. Shares the cache entry with the
-  // Governance page's change-request view.
+  // filter so switching either refetches. Shares the cache entry (and the
+  // mutations, so a decision here invalidates the Governance page's view too)
+  // with the Governance page's change-request view.
   const proposerUserId = tab === 'mine' ? Number(user?.id) : undefined;
   const crQuery = useChangeRequestsQuery(true, statusFilter, proposerUserId);
   const items = crQuery.data?.items ?? [];
@@ -92,7 +85,9 @@ const ChangeRequests: React.FC = () => {
   const error = crQuery.isError
     ? (crQuery.error as Error).message ?? t('changeRequests.loadFailed')
     : actionError;
-  const load = () => queryClient.invalidateQueries({ queryKey: ['change-requests'] });
+  const { create, approve, reject, cancel } = useChangeRequestMutations();
+  const creating = create.isPending;
+  const reviewing = approve.isPending || reject.isPending;
 
   // ---------- Create ----------
 
@@ -106,7 +101,6 @@ const ChangeRequests: React.FC = () => {
       setCreateError(t('changeRequests.validation.payloadInvalidJson'));
       return;
     }
-    setCreating(true);
     setCreateError(null);
     try {
       const body: CreateChangeRequestInput = {
@@ -116,14 +110,11 @@ const ChangeRequests: React.FC = () => {
         proposedPayload: payload,
         justification: form.justification?.trim() || null,
       };
-      await createChangeRequest(body);
+      await create.mutateAsync(body);
       setShowCreate(false);
       setForm({ ...EMPTY_FORM });
-      await load();
     } catch (e) {
       setCreateError((e as Error).message ?? t('changeRequests.createFailed'));
-    } finally {
-      setCreating(false);
     }
   };
 
@@ -142,20 +133,16 @@ const ChangeRequests: React.FC = () => {
       setReviewError(t('changeRequests.validation.rejectionReasonRequired'));
       return;
     }
-    setReviewing(true);
     setReviewError(null);
     try {
       if (reviewMode === 'approve') {
-        await approveChangeRequest(reviewTarget.id, reviewNote.trim() || null);
+        await approve.mutateAsync({ id: reviewTarget.id, justification: reviewNote.trim() || null });
       } else {
-        await rejectChangeRequest(reviewTarget.id, reviewNote.trim());
+        await reject.mutateAsync({ id: reviewTarget.id, reason: reviewNote.trim() });
       }
       setReviewTarget(null);
-      await load();
     } catch (e) {
       setReviewError((e as Error).message ?? t('changeRequests.actionFailed'));
-    } finally {
-      setReviewing(false);
     }
   };
 
@@ -163,8 +150,7 @@ const ChangeRequests: React.FC = () => {
 
   const handleCancel = async (item: ChangeRequest) => {
     try {
-      await cancelChangeRequest(item.id);
-      await load();
+      await cancel.mutateAsync(item.id);
     } catch (e) {
       setError((e as Error).message ?? t('changeRequests.cancelFailed'));
     }
