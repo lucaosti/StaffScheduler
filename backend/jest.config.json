@@ -23,7 +23,8 @@
     "!src/types/**/*",
     "!src/index.ts",
     "!src/config/database.ts",
-    "!src/optimization/ScheduleOptimizerORTools.ts"
+    "!src/optimization/ScheduleOptimizerORTools.ts",
+    "!src/optimization/constraintValidator.ts"
   ],
   "coverageDirectory": "coverage",
   "coverageReporters": [

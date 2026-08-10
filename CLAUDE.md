@@ -108,7 +108,9 @@ backend/src/
 │   └── (other per-domain services)
 └── optimization/
     ├── ScheduleOptimizerORTools.ts  # Spawns backend/optimization-scripts/schedule_optimizer.py
-    └── constraintValidator.ts       # Canonical hard-constraint set both engines are held to
+    ├── constraintValidator.ts       # Facade re-exporting constraints/* — the one import surface both engines use
+    └── constraints/                 # Per-family constraint modules: hardConstraints, coverage, restAndTimeOff,
+                                      # equity, shiftPatterns, qualifiedStaff
 ```
 
 **Approval transitions**: every status change on `pending_approvals` derives its target
