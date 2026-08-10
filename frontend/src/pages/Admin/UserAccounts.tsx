@@ -22,6 +22,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useUserAccountsQuery, useUserAccountMutations } from '../../hooks/useUserAccounts';
@@ -30,6 +31,7 @@ import type { UserAccount } from '../../services/userAccountService';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 
 const UserAccounts: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const permissions = user?.permissions ?? [];
@@ -71,18 +73,17 @@ const UserAccounts: React.FC = () => {
   if (!canRead) {
     return (
       <div className="container-fluid py-3">
-        <h1 className="h4">User accounts</h1>
-        <p className="text-muted">You do not have permission to view accounts.</p>
+        <h1 className="h4">{t('admin.userAccounts.title')}</h1>
+        <p className="text-muted">{t('admin.userAccounts.noPermission')}</p>
       </div>
     );
   }
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-1">User accounts</h1>
+      <h1 className="h4 mb-1">{t('admin.userAccounts.title')}</h1>
       <p className="text-muted">
-        Who can sign in, and with which roles. Separate from the employee record used for
-        scheduling.
+        {t('admin.userAccounts.subtitle')}
       </p>
 
       {message && (
@@ -94,7 +95,7 @@ const UserAccounts: React.FC = () => {
       {canManage && (
         <form className="row g-2 align-items-end mb-4" onSubmit={submit}>
           <div className="col-md-3">
-            <label className="form-label" htmlFor="account-email">Email</label>
+            <label className="form-label" htmlFor="account-email">{t('admin.userAccounts.form.email')}</label>
             <input
               id="account-email"
               type="email"
@@ -105,7 +106,7 @@ const UserAccounts: React.FC = () => {
             />
           </div>
           <div className="col-md-2">
-            <label className="form-label" htmlFor="account-first">First name</label>
+            <label className="form-label" htmlFor="account-first">{t('admin.userAccounts.form.firstName')}</label>
             <input
               id="account-first"
               className="form-control"
@@ -115,7 +116,7 @@ const UserAccounts: React.FC = () => {
             />
           </div>
           <div className="col-md-2">
-            <label className="form-label" htmlFor="account-last">Last name</label>
+            <label className="form-label" htmlFor="account-last">{t('admin.userAccounts.form.lastName')}</label>
             <input
               id="account-last"
               className="form-control"
@@ -125,14 +126,14 @@ const UserAccounts: React.FC = () => {
             />
           </div>
           <div className="col-md-2">
-            <label className="form-label" htmlFor="account-role">Role</label>
+            <label className="form-label" htmlFor="account-role">{t('admin.userAccounts.form.role')}</label>
             <select
               id="account-role"
               className="form-select"
               value={roleId}
               onChange={(e) => setRoleId(e.target.value)}
             >
-              <option value="">No role</option>
+              <option value="">{t('admin.userAccounts.form.noRole')}</option>
               {(rbac.data?.roles ?? []).map((r) => (
                 <option key={String(r.id)} value={String(r.id)}>{r.name}</option>
               ))}
@@ -140,20 +141,20 @@ const UserAccounts: React.FC = () => {
           </div>
           <div className="col-auto">
             <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-              Create account
+              {t('admin.userAccounts.form.createAccount')}
             </button>
           </div>
         </form>
       )}
 
       <div className="mb-3">
-        <label className="form-label" htmlFor="account-search">Search</label>
+        <label className="form-label" htmlFor="account-search">{t('admin.userAccounts.search.label')}</label>
         <input
           id="account-search"
           className="form-control"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Name or email"
+          placeholder={t('admin.userAccounts.search.placeholder')}
         />
       </div>
 
@@ -163,16 +164,16 @@ const UserAccounts: React.FC = () => {
         error={accounts.error}
         onRetry={accounts.refetch}
         isEmpty={(accounts.data?.length ?? 0) === 0}
-        loadingMessage="Loading accounts…"
-        empty={<p className="text-muted">No accounts match.</p>}
+        loadingMessage={t('admin.userAccounts.loading')}
+        empty={<p className="text-muted">{t('admin.userAccounts.empty')}</p>}
       >
         <table className="table table-sm align-middle">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Roles</th>
-              <th>Status</th>
+              <th>{t('admin.userAccounts.table.name')}</th>
+              <th>{t('admin.userAccounts.table.email')}</th>
+              <th>{t('admin.userAccounts.table.roles')}</th>
+              <th>{t('admin.userAccounts.table.status')}</th>
               {canManage && <th />}
             </tr>
           </thead>
@@ -181,10 +182,10 @@ const UserAccounts: React.FC = () => {
               <tr key={a.id}>
                 <td>{[a.firstName, a.lastName].filter(Boolean).join(' ')}</td>
                 <td>{a.email}</td>
-                <td>{(a.roles ?? []).map((r) => r.name).join(', ') || '—'}</td>
+                <td>{(a.roles ?? []).map((r) => r.name).join(', ') || t('common.emptyValue')}</td>
                 <td>
                   <span className={`badge ${a.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                    {a.isActive ? 'Active' : 'Deactivated'}
+                    {a.isActive ? t('admin.userAccounts.status.active') : t('admin.userAccounts.status.deactivated')}
                   </span>
                 </td>
                 {canManage && (
@@ -196,7 +197,7 @@ const UserAccounts: React.FC = () => {
                         onClick={() => act(deactivate.mutateAsync(a.id))}
                         disabled={deactivate.isPending}
                       >
-                        Deactivate
+                        {t('admin.userAccounts.deactivate')}
                       </button>
                     ) : (
                       <button
@@ -205,7 +206,7 @@ const UserAccounts: React.FC = () => {
                         onClick={() => act(update.mutateAsync({ id: a.id, isActive: true }))}
                         disabled={update.isPending}
                       >
-                        Reactivate
+                        {t('admin.userAccounts.reactivate')}
                       </button>
                     )}
                   </td>

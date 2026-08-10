@@ -27,6 +27,7 @@
  */
 
 import React, { useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService';
 import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
 import ErrorAlert from '../../components/ErrorAlert';
@@ -71,6 +72,7 @@ const JsonBlock: React.FC<{ data: Record<string, unknown> | null | undefined; la
 };
 
 const AuditLogs: React.FC = () => {
+  const { t } = useTranslation();
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [applied, setApplied] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
@@ -94,7 +96,7 @@ const AuditLogs: React.FC = () => {
   const total = logsQuery.data?.total ?? 0;
   const loading = logsQuery.isLoading || logsQuery.isFetching;
   const error = logsQuery.isError
-    ? (logsQuery.error as Error).message ?? 'Failed to load audit logs.'
+    ? (logsQuery.error as Error).message ?? t('admin.auditLogs.loadFailed')
     : null;
 
   const applyFilters = () => {
@@ -140,8 +142,8 @@ const AuditLogs: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Audit Log</h1>
-            <p className="text-muted mb-0 small">Immutable record of all system actions</p>
+            <h1 className="h3 mb-0">{t('admin.auditLogs.title')}</h1>
+            <p className="text-muted mb-0 small">{t('admin.auditLogs.subtitle')}</p>
           </div>
           <div className="d-flex gap-2">
             <a
@@ -149,14 +151,14 @@ const AuditLogs: React.FC = () => {
               className="btn btn-sm btn-outline-secondary"
               download="audit_log.csv"
             >
-              <i className="bi bi-filetype-csv me-1" aria-hidden="true"></i>Export CSV
+              <i className="bi bi-filetype-csv me-1" aria-hidden="true"></i>{t('admin.auditLogs.export.csv')}
             </a>
             <a
               href={exportUrl('json')}
               className="btn btn-sm btn-outline-secondary"
               download="audit_log.json"
             >
-              <i className="bi bi-filetype-json me-1" aria-hidden="true"></i>Export JSON
+              <i className="bi bi-filetype-json me-1" aria-hidden="true"></i>{t('admin.auditLogs.export.json')}
             </a>
           </div>
         </div>
@@ -166,49 +168,49 @@ const AuditLogs: React.FC = () => {
       <div className="card mb-4">
         <div className="card-header">
           <h6 className="mb-0">
-            <i className="bi bi-funnel me-2" aria-hidden="true"></i>Filters
+            <i className="bi bi-funnel me-2" aria-hidden="true"></i>{t('admin.auditLogs.filters.title')}
           </h6>
         </div>
         <div className="card-body">
           <div className="row g-2">
             <div className="col-md-3">
-              <label htmlFor="filterAction" className="form-label small">Action</label>
+              <label htmlFor="filterAction" className="form-label small">{t('admin.auditLogs.filters.action')}</label>
               <input
                 id="filterAction"
                 type="text"
                 className="form-control form-control-sm"
-                placeholder="e.g. module.toggle"
+                placeholder={t('admin.auditLogs.filters.actionPlaceholder')}
                 value={filters.action}
                 onChange={(e) => handleFilterChange('action', e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
               />
             </div>
             <div className="col-md-3">
-              <label htmlFor="filterEntityType" className="form-label small">Entity Type</label>
+              <label htmlFor="filterEntityType" className="form-label small">{t('admin.auditLogs.filters.entityType')}</label>
               <input
                 id="filterEntityType"
                 type="text"
                 className="form-control form-control-sm"
-                placeholder="e.g. user, module"
+                placeholder={t('admin.auditLogs.filters.entityTypePlaceholder')}
                 value={filters.entityType}
                 onChange={(e) => handleFilterChange('entityType', e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') applyFilters(); }}
               />
             </div>
             <div className="col-md-2">
-              <label htmlFor="filterUserId" className="form-label small">User ID</label>
+              <label htmlFor="filterUserId" className="form-label small">{t('admin.auditLogs.filters.userId')}</label>
               <input
                 id="filterUserId"
                 type="number"
                 className="form-control form-control-sm"
-                placeholder="e.g. 42"
+                placeholder={t('admin.auditLogs.filters.userIdPlaceholder')}
                 value={filters.userId}
                 onChange={(e) => handleFilterChange('userId', e.target.value)}
                 min={1}
               />
             </div>
             <div className="col-md-2">
-              <label htmlFor="filterFromDate" className="form-label small">From date</label>
+              <label htmlFor="filterFromDate" className="form-label small">{t('admin.auditLogs.filters.fromDate')}</label>
               <input
                 id="filterFromDate"
                 type="date"
@@ -218,7 +220,7 @@ const AuditLogs: React.FC = () => {
               />
             </div>
             <div className="col-md-2">
-              <label htmlFor="filterToDate" className="form-label small">To date</label>
+              <label htmlFor="filterToDate" className="form-label small">{t('admin.auditLogs.filters.toDate')}</label>
               <input
                 id="filterToDate"
                 type="date"
@@ -228,11 +230,11 @@ const AuditLogs: React.FC = () => {
               />
             </div>
             <div className="col-12 d-flex gap-2 pt-1">
-              <button className="btn btn-primary btn-sm" onClick={applyFilters} aria-label="Apply filters">
-                <i className="bi bi-search me-1" aria-hidden="true"></i>Apply
+              <button className="btn btn-primary btn-sm" onClick={applyFilters} aria-label={t('admin.auditLogs.filters.applyAriaLabel')}>
+                <i className="bi bi-search me-1" aria-hidden="true"></i>{t('admin.auditLogs.filters.apply')}
               </button>
               <button className="btn btn-outline-secondary btn-sm" onClick={resetFilters}>
-                Reset
+                {t('admin.auditLogs.filters.reset')}
               </button>
             </div>
           </div>
@@ -247,12 +249,12 @@ const AuditLogs: React.FC = () => {
         <div className="card-header d-flex align-items-center justify-content-between">
           <h6 className="mb-0">
             {loading ? (
-              <><span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Loading…</>
+              <><span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>{t('common.loading')}</>
             ) : (
-              <>{total.toLocaleString()} entries</>
+              <>{t('admin.auditLogs.entriesCount', { count: total })}</>
             )}
           </h6>
-          <small className="text-muted">Page {page} / {totalPages}</small>
+          <small className="text-muted">{t('admin.auditLogs.pageIndicator', { page, totalPages })}</small>
         </div>
         <div className="card-body p-0">
           <div className="table-responsive">
@@ -260,18 +262,18 @@ const AuditLogs: React.FC = () => {
               <thead className="table-light">
                 <tr>
                   <th scope="col" style={{ width: 60 }}>#</th>
-                  <th scope="col">Action</th>
-                  <th scope="col">Entity</th>
-                  <th scope="col">User ID</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Date</th>
-                  <th scope="col" className="text-center" style={{ width: 50 }}>Detail</th>
+                  <th scope="col">{t('admin.auditLogs.columns.action')}</th>
+                  <th scope="col">{t('admin.auditLogs.columns.entity')}</th>
+                  <th scope="col">{t('admin.auditLogs.columns.userId')}</th>
+                  <th scope="col">{t('admin.auditLogs.columns.description')}</th>
+                  <th scope="col">{t('admin.auditLogs.columns.date')}</th>
+                  <th scope="col" className="text-center" style={{ width: 50 }}>{t('admin.auditLogs.columns.detail')}</th>
                 </tr>
               </thead>
               <tbody>
                 {!loading && entries.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="text-center text-muted py-4">No audit entries match the current filters.</td>
+                    <td colSpan={7} className="text-center text-muted py-4">{t('admin.auditLogs.noEntries')}</td>
                   </tr>
                 )}
                 {entries.map((entry) => (
@@ -284,20 +286,22 @@ const AuditLogs: React.FC = () => {
                       <td>
                         {entry.entityType && (
                           <span className="text-muted small">
-                            {entry.entityType}{entry.entityId != null ? ` #${entry.entityId}` : ''}
+                            {entry.entityId != null
+                              ? t('admin.auditLogs.entityWithId', { entityType: entry.entityType, entityId: entry.entityId })
+                              : entry.entityType}
                           </span>
                         )}
                       </td>
-                      <td className="text-muted small">{entry.userId ?? '—'}</td>
+                      <td className="text-muted small">{entry.userId ?? t('common.emptyValue')}</td>
                       <td className="small" style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {entry.description ?? '—'}
+                        {entry.description ?? t('common.emptyValue')}
                       </td>
                       <td className="text-muted small text-nowrap">{formatDate(entry.createdAt)}</td>
                       <td className="text-center">
                         <button
                           className="btn btn-sm btn-outline-secondary py-0 px-1"
                           onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-                          aria-label={expandedId === entry.id ? `Collapse entry ${entry.id}` : `Expand entry ${entry.id}`}
+                          aria-label={expandedId === entry.id ? t('admin.auditLogs.collapseEntry', { id: entry.id }) : t('admin.auditLogs.expandEntry', { id: entry.id })}
                           aria-expanded={expandedId === entry.id}
                         >
                           <i
@@ -313,27 +317,27 @@ const AuditLogs: React.FC = () => {
                           <div className="p-3">
                             {entry.justification && (
                               <div className="mb-2">
-                                <span className="fw-semibold small text-muted text-uppercase me-2">Justification</span>
+                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('admin.auditLogs.detail.justification')}</span>
                                 <span className="small">{entry.justification}</span>
                               </div>
                             )}
                             {entry.onBehalfOfUserId != null && (
                               <div className="mb-2">
-                                <span className="fw-semibold small text-muted text-uppercase me-2">On behalf of User</span>
+                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('admin.auditLogs.detail.onBehalfOf')}</span>
                                 <span className="small font-monospace">{entry.onBehalfOfUserId}</span>
                               </div>
                             )}
                             {entry.requestId && (
                               <div className="mb-2">
-                                <span className="fw-semibold small text-muted text-uppercase me-2">Request ID</span>
+                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('admin.auditLogs.detail.requestId')}</span>
                                 <span className="small font-monospace">{entry.requestId}</span>
                               </div>
                             )}
-                            <JsonBlock data={entry.beforeSnapshot} label="Before" />
-                            <JsonBlock data={entry.afterSnapshot} label="After" />
+                            <JsonBlock data={entry.beforeSnapshot} label={t('admin.auditLogs.detail.before')} />
+                            <JsonBlock data={entry.afterSnapshot} label={t('admin.auditLogs.detail.after')} />
                             {entry.ipAddress && (
                               <div className="text-muted small">
-                                IP: {entry.ipAddress}
+                                {t('admin.auditLogs.detail.ip', { ip: entry.ipAddress })}
                                 {entry.userAgent && <span className="ms-3">{entry.userAgent.slice(0, 80)}</span>}
                               </div>
                             )}
@@ -353,20 +357,24 @@ const AuditLogs: React.FC = () => {
               className="btn btn-sm btn-outline-secondary"
               disabled={page <= 1}
               onClick={() => setPage((p) => p - 1)}
-              aria-label="Previous page"
+              aria-label={t('admin.auditLogs.pagination.previousAriaLabel')}
             >
-              <i className="bi bi-chevron-left" aria-hidden="true"></i> Previous
+              <i className="bi bi-chevron-left" aria-hidden="true"></i> {t('admin.auditLogs.pagination.previous')}
             </button>
             <small className="text-muted">
-              Showing {Math.min((page - 1) * PAGE_SIZE + 1, total)}–{Math.min(page * PAGE_SIZE, total)} of {total}
+              {t('admin.auditLogs.pagination.showing', {
+                from: Math.min((page - 1) * PAGE_SIZE + 1, total),
+                to: Math.min(page * PAGE_SIZE, total),
+                total,
+              })}
             </small>
             <button
               className="btn btn-sm btn-outline-secondary"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => p + 1)}
-              aria-label="Next page"
+              aria-label={t('admin.auditLogs.pagination.nextAriaLabel')}
             >
-              Next <i className="bi bi-chevron-right" aria-hidden="true"></i>
+              {t('admin.auditLogs.pagination.next')} <i className="bi bi-chevron-right" aria-hidden="true"></i>
             </button>
           </div>
         )}
