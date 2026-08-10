@@ -13,6 +13,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { MatrixEntry } from '../../services/responsibilityService';
 import { ResponsibilitySubjectType } from '../../services/responsibilityService';
 import { useResponsibilityMatrixQuery } from '../../hooks/useGovernance';
@@ -24,20 +25,21 @@ interface MatrixCol {
   label: string;
 }
 
-const subjectLabel = (type: ResponsibilitySubjectType, id: number | null): string => {
-  if (type === 'all') return 'All users';
-  if (id == null) return `${type} (any)`;
-  return `${type} #${id}`;
-};
-
 const RaciMatrix: React.FC = () => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
+
+  const subjectLabel = (type: ResponsibilitySubjectType, id: number | null): string => {
+    if (type === 'all') return t('governance.raci.allUsers');
+    if (id == null) return t('governance.raci.subjectAny', { type });
+    return t('governance.raci.subjectWithId', { type, id });
+  };
 
   const matrixQuery = useResponsibilityMatrixQuery();
   const entries = matrixQuery.data ?? [];
   const loading = matrixQuery.isLoading;
   const error = matrixQuery.isError
-    ? (matrixQuery.error as Error).message ?? 'Failed to load responsibility matrix.'
+    ? (matrixQuery.error as Error).message ?? t('governance.raci.loadFailed')
     : null;
 
   // Derive unique permission codes (rows) and subject columns
@@ -78,10 +80,10 @@ const RaciMatrix: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Responsibility Matrix</h1>
-            <p className="text-muted mb-0 small">Pivot view of responsibility rules by permission and subject</p>
+            <h1 className="h3 mb-0">{t('governance.raci.title')}</h1>
+            <p className="text-muted mb-0 small">{t('governance.raci.subtitle')}</p>
           </div>
-          <button className="btn btn-sm btn-outline-primary" onClick={() => matrixQuery.refetch()} aria-label="Refresh matrix">
+          <button className="btn btn-sm btn-outline-primary" onClick={() => matrixQuery.refetch()} aria-label={t('governance.raci.refreshAriaLabel')}>
             <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
           </button>
         </div>
@@ -91,10 +93,10 @@ const RaciMatrix: React.FC = () => {
         <input
           type="search"
           className="form-control form-control-sm w-auto"
-          placeholder="Filter permission or subject…"
+          placeholder={t('governance.raci.filterPlaceholder')}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          aria-label="Filter matrix"
+          aria-label={t('governance.raci.filterAriaLabel')}
         />
       </div>
 
@@ -108,15 +110,15 @@ const RaciMatrix: React.FC = () => {
         <div className="card-body p-0">
           {loading ? (
             <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label="Loading matrix"></span>
-              <span>Loading…</span>
+              <span className="spinner-border me-2" role="status" aria-label={t('governance.raci.loadingAriaLabel')}></span>
+              <span>{t('governance.raci.loading')}</span>
             </div>
           ) : permCodes.length === 0 ? (
             <div className="text-center text-muted py-5">
               <i className="bi bi-grid-3x3 fs-3 d-block mb-2" aria-hidden="true"></i>
               {entries.length === 0
-                ? 'No responsibility rules defined.'
-                : 'No rules match the current filter.'}
+                ? t('governance.raci.noneDefined')
+                : t('governance.raci.noneMatchFilter')}
             </div>
           ) : (
             <div style={{ overflowX: 'auto' }}>
@@ -124,7 +126,7 @@ const RaciMatrix: React.FC = () => {
                 <thead className="table-light">
                   <tr>
                     <th scope="col" className="text-nowrap" style={{ minWidth: 200 }}>
-                      Permission Code
+                      {t('governance.raci.permissionCodeHeader')}
                     </th>
                     {cols.map((col) => (
                       <th key={col.key} scope="col" className="text-nowrap text-center small" style={{ minWidth: 140 }}>
@@ -154,21 +156,21 @@ const RaciMatrix: React.FC = () => {
                                       className="badge bg-success-subtle text-success-emphasis"
                                       title={r.description ?? ''}
                                     >
-                                      OU #{r.responsibleOrgUnitId}
+                                      {t('governance.raci.orgUnitBadge', { id: r.responsibleOrgUnitId })}
                                     </span>
                                     {r.delegatedToRoleId != null && (
                                       <span className="badge bg-info-subtle text-info-emphasis ms-1">
-                                        Role #{r.delegatedToRoleId}
+                                        {t('governance.raci.roleBadge', { id: r.delegatedToRoleId })}
                                       </span>
                                     )}
                                     {!r.isActive && (
-                                      <span className="badge bg-secondary ms-1">inactive</span>
+                                      <span className="badge bg-secondary ms-1">{t('governance.raci.inactive')}</span>
                                     )}
                                   </div>
                                 ))}
                               </div>
                             ) : (
-                              <span className="text-muted">—</span>
+                              <span className="text-muted">{t('common.emptyValue')}</span>
                             )}
                           </td>
                         );
@@ -182,7 +184,16 @@ const RaciMatrix: React.FC = () => {
         </div>
         {permCodes.length > 0 && (
           <div className="card-footer text-muted small">
-            {permCodes.length} permission{permCodes.length !== 1 ? 's' : ''} &times; {cols.length} subject{cols.length !== 1 ? 's' : ''}
+            {t('governance.raci.footerCounts', {
+              permissions:
+                permCodes.length === 1
+                  ? t('governance.raci.permissionsOne', { count: permCodes.length })
+                  : t('governance.raci.permissionsOther', { count: permCodes.length }),
+              subjects:
+                cols.length === 1
+                  ? t('governance.raci.subjectsOne', { count: cols.length })
+                  : t('governance.raci.subjectsOther', { count: cols.length }),
+            })}
           </div>
         )}
       </div>

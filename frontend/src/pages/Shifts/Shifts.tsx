@@ -11,6 +11,7 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Shift } from '../../types';
 import { ApiError } from '../../services/apiUtils';
 import ShiftTable from '../Shifts/ShiftTable';
@@ -30,6 +31,7 @@ interface ConfirmState {
 }
 
 const Shifts: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   // Assigning people is `assignment.manage`; editing the shift itself is not.
   // The menu entry is omitted without it rather than shown and refused.
@@ -73,7 +75,7 @@ const Shifts: React.FC = () => {
   const loadError = shiftsQuery.isError
     ? shiftsQuery.error instanceof ApiError
       ? shiftsQuery.error.message
-      : 'Failed to load shifts.'
+      : t('shifts.loadFailed')
     : null;
   const displayError = error ?? loadError;
 
@@ -86,15 +88,15 @@ const Shifts: React.FC = () => {
   const handleDeleteShift = (shiftId: string | number) => {
     setConfirm({
       show: true,
-      title: 'Delete shift',
-      message: 'Are you sure you want to delete this shift? This action cannot be undone.',
+      title: t('shifts.deleteShift.title'),
+      message: t('shifts.deleteShift.message'),
       onConfirm: async () => {
         setConfirm((prev) => ({ ...prev, show: false }));
         try {
           await deleteShift.mutateAsync(shiftId);
-          setInfo('Shift deleted.');
+          setInfo(t('shifts.deleted'));
         } catch (err) {
-          const message = err instanceof ApiError ? err.message : 'Failed to delete shift.';
+          const message = err instanceof ApiError ? err.message : t('shifts.deleteFailed');
           setError(message);
         }
       },
@@ -132,9 +134,7 @@ const Shifts: React.FC = () => {
     const notes = (formData.get('notes') as string)?.trim() || undefined;
 
     if (!scheduleIdRaw || !departmentIdRaw || !date || !startTime || !endTime || !minStaffRaw) {
-      setFormError(
-        'Please fill in schedule, department, date, start/end times and minimum staff.'
-      );
+      setFormError(t('shifts.form.validationMessage'));
       return;
     }
 
@@ -150,16 +150,16 @@ const Shifts: React.FC = () => {
     };
 
     if (editingShift && !editingShift.id) {
-      setFormError('Cannot update shift: missing ID');
+      setFormError(t('shifts.missingIdError'));
       return;
     }
     try {
       await saveShift.mutateAsync({ id: editingShift ? editingShift.id : undefined, data: payload });
-      setInfo(editingShift ? 'Shift updated.' : 'Shift created.');
+      setInfo(editingShift ? t('shifts.updated') : t('shifts.created'));
       setShowAddModal(false);
       setEditingShift(null);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to save shift.';
+      const message = err instanceof ApiError ? err.message : t('shifts.saveFailed');
       setFormError(message);
     }
   };
@@ -167,7 +167,7 @@ const Shifts: React.FC = () => {
   if (loading) {
     return (
       <div className="container-fluid py-4">
-        <LoadingSpinner message="Loading shifts..." />
+        <LoadingSpinner message={t('shifts.loading')} />
       </div>
     );
   }
@@ -178,9 +178,9 @@ const Shifts: React.FC = () => {
         <div className="col">
           <div className="d-flex justify-content-between align-items-center">
             <div>
-              <h1 className="h3 mb-0">Shift Management</h1>
+              <h1 className="h3 mb-0">{t('shifts.title')}</h1>
               <p className="text-muted mb-0">
-                Create and manage shifts inside published or draft schedules.
+                {t('shifts.subtitle')}
               </p>
             </div>
             <div className="d-flex gap-2">
@@ -201,7 +201,7 @@ const Shifts: React.FC = () => {
               }}
             >
               <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
-              Add New Shift
+              {t('shifts.addNewShift')}
             </button>
             </div>
           </div>
@@ -217,8 +217,8 @@ const Shifts: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              placeholder="Search shifts..."
-              aria-label="Search shifts"
+              placeholder={t('shifts.searchPlaceholder')}
+              aria-label={t('shifts.searchAriaLabel')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -230,7 +230,7 @@ const Shifts: React.FC = () => {
             value={selectedDepartment}
             onChange={(e) => setSelectedDepartment(e.target.value)}
           >
-            <option value="">All Departments</option>
+            <option value="">{t('shifts.allDepartments')}</option>
             {departments.map((d) => (
               <option key={d.id} value={String(d.id)}>
                 {d.name}
@@ -240,7 +240,9 @@ const Shifts: React.FC = () => {
         </div>
         <div className="col-md-3">
           <div className="text-muted">
-            Total: {filteredShifts.length} shift{filteredShifts.length !== 1 ? 's' : ''}
+            {filteredShifts.length === 1
+              ? t('shifts.totalSingular', { count: filteredShifts.length })
+              : t('shifts.totalPlural', { count: filteredShifts.length })}
           </div>
         </div>
       </div>
@@ -302,13 +304,16 @@ const Shifts: React.FC = () => {
             <div className="modal-content">
               <div className="modal-header">
                 <h2 className="modal-title h5">
-                  Staff — {String(staffingShift.date).slice(0, 10)} {staffingShift.startTime}–
-                  {staffingShift.endTime}
+                  {t('shifts.staffModalTitle', {
+                    date: String(staffingShift.date).slice(0, 10),
+                    startTime: staffingShift.startTime,
+                    endTime: staffingShift.endTime,
+                  })}
                 </h2>
                 <button
                   type="button"
                   className="btn-close"
-                  aria-label="Close"
+                  aria-label={t('common.close')}
                   onClick={() => setStaffingShift(null)}
                 />
               </div>
