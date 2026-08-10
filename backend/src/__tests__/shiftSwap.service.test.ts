@@ -5,7 +5,7 @@
  * own state machine; compliance integration is covered in
  * compliance.engine.test.ts.
  *
- * approve()/decline() now authorize via the shared ApprovalEngineService
+ * approve()/decline() now authorize via the shared ApprovalDecisionService
  * (pending_approvals) before touching the transactional swap logic — see
  * approvalEngine.service.test.ts for that engine's own unit tests.
  */
@@ -72,7 +72,7 @@ const makePool = () => {
   return { pool: { execute, getConnection } as never, execute, conn };
 };
 
-/** Queues the pool.execute calls `ApprovalEngineService.decidePendingApproval`
+/** Queues the pool.execute calls `ApprovalDecisionService.decidePendingApproval`
  *  makes: getPendingApprovalById, guarded UPDATE, then — only when approving
  *  and no next workflow step exists (the seeded ShiftSwap.Request has exactly
  *  one step) — a next-step lookup, before the final getPendingApprovalById
@@ -334,19 +334,23 @@ describe('ShiftSwapService.cancel', () => {
 });
 
 // ── Workflow attachment, non-final steps and in-transaction diagnosis ────────
-// These paths talk to ApprovalEngineService; the engine instance is spied
-// directly (service internals) instead of sequencing its SQL through the
-// pool mock — the engine's own behaviour has its own suite, and spying keeps
-// each test about ShiftSwapService's orchestration decisions only.
+// These paths talk to the three composed approval services; each instance is
+// spied directly (service internals) instead of sequencing its SQL through
+// the pool mock — those services' own behaviour has its own suite, and
+// spying keeps each test about ShiftSwapService's orchestration decisions only.
 
 const engineOf = (service: ShiftSwapService) =>
-  (service as unknown as { engine: Record<string, jest.Mock> }).engine as unknown as {
-    getWorkflowByChangeType: (t: string) => unknown;
-    resolvePrimaryOrgUnitForUser: (u: number) => unknown;
-    canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
-    createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
-    wouldBeFinalStep: (id: number) => unknown;
-    decidePendingApproval: (...a: unknown[]) => unknown;
+  service as unknown as {
+    workflows: { getWorkflowByChangeType: (t: string) => unknown };
+    resolution: {
+      resolvePrimaryOrgUnitForUser: (u: number) => unknown;
+      canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+    };
+    decisions: {
+      createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
+      wouldBeFinalStep: (id: number) => unknown;
+      decidePendingApproval: (...a: unknown[]) => unknown;
+    };
   };
 
 const workflowFixture = {
@@ -368,10 +372,10 @@ describe('ShiftSwapService.create — approver dry run', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
-    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    const canCreate = jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
-    const createPa = jest.spyOn(engine, 'createPendingApprovalForStep');
+    jest.spyOn(engine.workflows, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
+    jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    const canCreate = jest.spyOn(engine.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+    const createPa = jest.spyOn(engine.decisions, 'createPendingApprovalForStep');
 
     const created = await service.create({
       requesterUserId: 7,
@@ -416,7 +420,7 @@ describe('ShiftSwapService.respondAsTarget', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    const getWorkflow = jest.spyOn(engine, 'getWorkflowByChangeType');
+    const getWorkflow = jest.spyOn(engine.workflows, 'getWorkflowByChangeType');
 
     const result = await service.respondAsTarget(1, 8, false, 'not a good time');
 
@@ -446,7 +450,7 @@ describe('ShiftSwapService.respondAsTarget', () => {
       .mockResolvedValueOnce([[buildSwap({ status: 'cancelled', target_user_id: 8 })], null]); // re-fetch
 
     const service = new ShiftSwapService(pool);
-    jest.spyOn(engineOf(service), 'getWorkflowByChangeType').mockResolvedValue(null as never);
+    jest.spyOn(engineOf(service).workflows, 'getWorkflowByChangeType').mockResolvedValue(null as never);
     await expect(service.respondAsTarget(1, 8, true)).rejects.toThrow(/Cannot respond to swap in status 'cancelled'/);
   });
 
@@ -460,10 +464,10 @@ describe('ShiftSwapService.respondAsTarget', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
-    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(engine.workflows, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
+    jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
     const createPa = jest
-      .spyOn(engine, 'createPendingApprovalForStep')
+      .spyOn(engine.decisions, 'createPendingApprovalForStep')
       .mockResolvedValue({ id: 501 } as never);
 
     const result = await service.respondAsTarget(1, 8, true);
@@ -486,9 +490,9 @@ describe('ShiftSwapService.respondAsTarget', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
-    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
+    jest.spyOn(engine.workflows, 'getWorkflowByChangeType').mockResolvedValue(workflowFixture as never);
+    jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(engine.decisions, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
     await expect(service.respondAsTarget(1, 8, true)).rejects.toThrow(/approver resolution changed/);
 
@@ -507,8 +511,8 @@ describe('ShiftSwapService.respondAsTarget', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(null as never);
-    const createPa = jest.spyOn(engine, 'createPendingApprovalForStep');
+    jest.spyOn(engine.workflows, 'getWorkflowByChangeType').mockResolvedValue(null as never);
+    const createPa = jest.spyOn(engine.decisions, 'createPendingApprovalForStep');
 
     const result = await service.respondAsTarget(1, 8, true);
 
@@ -527,10 +531,10 @@ describe('ShiftSwapService.approve — non-final step', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
-    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
     const decide = jest
-      .spyOn(engine, 'decidePendingApproval')
+      .spyOn(engine.decisions, 'decidePendingApproval')
       .mockImplementation(async (...args: unknown[]) => {
         // Invoke the context provider like the real engine does, so the
         // org-unit resolution closure is exercised too.
@@ -555,7 +559,7 @@ describe('ShiftSwapService.approve — in-transaction concurrency diagnosis', ()
       .mockResolvedValueOnce([[{ id: 501 }], null]); // findPendingApprovalId
     conn.execute.mockResolvedValueOnce([conRows, null]); // SELECT ... FOR UPDATE
     const service = new ShiftSwapService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
     return { service, conn };
   };
 
@@ -586,7 +590,7 @@ describe('ShiftSwapService.approve — in-transaction concurrency diagnosis', ()
         null,
       ]);
     const service = new ShiftSwapService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow(
       /Target's assignment .* has been reassigned/
@@ -613,7 +617,7 @@ describe('ShiftSwapService.approve — in-transaction concurrency diagnosis', ()
       ])
       .mockResolvedValueOnce([[{ id: 900, user_id: dupUserId, shift_id: 71 }], null]); // duplicate hit
     const service = new ShiftSwapService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow(
       new RegExp(`${who} is already assigned to the other party's shift`)
@@ -631,8 +635,8 @@ describe('ShiftSwapService.decline — diagnosis ladder', () => {
     for (const rows of refetchRows) execute.mockResolvedValueOnce([rows, null]);
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(engine, 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
+    jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(engine.decisions, 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
       await (args[4] as () => Promise<unknown>)();
       return undefined as never;
     });
@@ -673,8 +677,8 @@ describe('ShiftSwapService — residual failure arms', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
-    jest.spyOn(engine, 'decidePendingApproval').mockResolvedValue(undefined as never);
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    jest.spyOn(engine.decisions, 'decidePendingApproval').mockResolvedValue(undefined as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow('Failed to retrieve shift swap request');
   });
@@ -702,9 +706,9 @@ describe('ShiftSwapService — residual failure arms', () => {
 
     const service = new ShiftSwapService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(true as never);
-    const resolveOrg = jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(engine, 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
+    const resolveOrg = jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(engine.decisions, 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
       await (args[4] as () => Promise<unknown>)();
       return undefined as never;
     });

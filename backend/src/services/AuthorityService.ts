@@ -9,7 +9,7 @@
  *
  * WHY THIS RESOLVES NOTHING ITSELF. Every name here comes from the component
  * that would actually make the decision: the manager chain from
- * `OrgUnitService`, the approvers from `ApprovalEngineService`'s own
+ * `OrgUnitService`, the approvers from `ApproverResolutionService`'s own
  * `resolveAllApproversForStep`, the responsible parties from
  * `ResponsibilityRuleService`. A panel that re-implemented any of that would be
  * a second, unreviewed copy of the authority model — and the failure mode is
@@ -36,7 +36,8 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApprovalWorkflowService } from './ApprovalWorkflowService';
+import { ApproverResolutionService } from './ApproverResolutionService';
 import { OrgUnitService } from './OrgUnitService';
 import { ResponsibilityRuleService } from './ResponsibilityRuleService';
 import { resolveSubjectContext } from './subjectContext';
@@ -86,13 +87,15 @@ const ROLE_ADMIN_PERMISSION = 'role.manage';
 
 export class AuthorityService {
   private readonly units: OrgUnitService;
-  private readonly approvals: ApprovalEngineService;
+  private readonly workflows: ApprovalWorkflowService;
+  private readonly resolution: ApproverResolutionService;
   private readonly responsibility: ResponsibilityRuleService;
 
   constructor(private readonly pool: Pool) {
     this.units = new OrgUnitService(pool);
     this.responsibility = new ResponsibilityRuleService(pool);
-    this.approvals = new ApprovalEngineService(pool);
+    this.workflows = new ApprovalWorkflowService(pool);
+    this.resolution = new ApproverResolutionService(pool);
   }
 
   /** Names for a set of ids, in one query, preserving nothing about order. */
@@ -177,7 +180,7 @@ export class AuthorityService {
     userId: number,
     ctx: { orgUnitId: number | null; subjectDepartmentIds: number[]; subjectRoleIds: number[] }
   ): Promise<AuthorityWorkflow[]> {
-    const workflows = await this.approvals.listWorkflows();
+    const workflows = await this.workflows.listWorkflows();
     const resolveCtx = {
       actorUserId: userId,
       ...(ctx.orgUnitId !== null ? { orgUnitId: ctx.orgUnitId } : {}),
@@ -192,7 +195,7 @@ export class AuthorityService {
         // The engine's own resolution, not a copy of it. `resolveAllApprovers`
         // rather than the single-approver form because a responsibility rule can
         // name several and "either of these two" is the honest answer.
-        const ids = await this.approvals.resolveAllApproversForStep(step, resolveCtx);
+        const ids = await this.resolution.resolveAllApproversForStep(step, resolveCtx);
         const people = await this.hydrate(ids);
         steps.push({
           stepOrder: step.stepOrder,

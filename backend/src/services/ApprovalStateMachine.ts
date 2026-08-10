@@ -1,7 +1,7 @@
 /**
  * Approval lifecycle state machine.
  *
- * WHY: the approval lifecycle was spread across ApprovalEngineService,
+ * WHY: the approval lifecycle was spread across ApprovalDecisionService,
  * ApprovalMatrixService, PendingApprovalService and PendingApprovalDispatch,
  * with each place hard-coding which status a row moves to and relying on a
  * `WHERE status = 'pending'` guard in raw SQL to reject out-of-order changes.

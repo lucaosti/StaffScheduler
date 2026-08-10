@@ -4,11 +4,11 @@
  * Workflow:
  *   1. Employee creates a `time_off_requests` row with status `pending`,
  *      plus the first `pending_approvals` row for the `TimeOff.Request`
- *      workflow (see ApprovalEngineService). That step is `unit_manager` by
+ *      workflow (see ApprovalWorkflowService). That step is `unit_manager` by
  *      default, so it resolves straight to the requester's unit manager —
  *      but the workflow can be reconfigured to `unit_structure`, in which
  *      case the unit's head decides whether to keep, delegate, or open the
- *      decision to their team (ApprovalEngineService.keepForSelf /
+ *      decision to their team (ApprovalDecisionService.keepForSelf /
  *      delegateToPerson / openToStructure).
  *   2. Whoever is authorized to decide the pending_approvals row approves or
  *      rejects it. Approval inserts a row into `user_unavailability` and
@@ -25,7 +25,9 @@ import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/pro
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApprovalWorkflowService } from './ApprovalWorkflowService';
+import { ApproverResolutionService } from './ApproverResolutionService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { DateUtils } from '../utils';
 
@@ -84,11 +86,15 @@ const mapRow = (row: RowDataPacket): TimeOffRequest => ({
 
 export class TimeOffService {
   private audit: AuditLogService;
-  private engine: ApprovalEngineService;
+  private workflows: ApprovalWorkflowService;
+  private resolution: ApproverResolutionService;
+  private decisions: ApprovalDecisionService;
   private notifications: NotificationService;
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
-    this.engine = new ApprovalEngineService(pool);
+    this.workflows = new ApprovalWorkflowService(pool);
+    this.resolution = new ApproverResolutionService(pool);
+    this.decisions = new ApprovalDecisionService(pool);
     this.notifications = new NotificationService(pool);
   }
 
@@ -106,12 +112,12 @@ export class TimeOffService {
     // requester has no primary org unit for a unit-scoped step) would
     // otherwise be inserted 'pending' with no pending_approvals row —
     // permanently undecidable by anyone. Fail loudly instead.
-    const workflow = await this.engine.getWorkflowByChangeType('TimeOff.Request');
+    const workflow = await this.workflows.getWorkflowByChangeType('TimeOff.Request');
     let workflowCtx: { actorUserId: number; orgUnitId: number | undefined } | null = null;
     if (workflow && workflow.steps.length > 0) {
-      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.userId);
+      const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(input.userId);
       workflowCtx = { actorUserId: input.userId, orgUnitId: orgUnitId ?? undefined };
-      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+      if (!(await this.resolution.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this time-off request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
         );
@@ -143,7 +149,7 @@ export class TimeOffService {
     });
 
     if (workflow && workflow.steps.length > 0 && workflowCtx) {
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { timeOffRequestId: created.id },
@@ -204,7 +210,7 @@ export class TimeOffService {
 
   /**
    * Approves a pending request. Authorization is delegated to
-   * `ApprovalEngineService.decidePendingApproval` (assignee, or any member
+   * `ApprovalDecisionService.decidePendingApproval` (assignee, or any member
    * of the structure once opened). Only once the workflow is fully resolved
    * (`isFinalStep`) does this insert the `user_unavailability` row — atomic
    * with the status flip, in the same transaction.
@@ -254,8 +260,8 @@ export class TimeOffService {
 
     // A non-final step has no entity side effects to apply yet — just
     // record the decision and let the next step take over.
-    if (!(await this.engine.wouldBeFinalStep(pendingApprovalId))) {
-      await this.engine.decidePendingApproval(
+    if (!(await this.decisions.wouldBeFinalStep(pendingApprovalId))) {
+      await this.decisions.decidePendingApproval(
         pendingApprovalId,
         reviewerId,
         'approved',
@@ -300,7 +306,7 @@ export class TimeOffService {
         ]
       );
 
-      await this.engine.decidePendingApproval(
+      await this.decisions.decidePendingApproval(
         pendingApprovalId,
         reviewerId,
         'approved',
@@ -365,7 +371,7 @@ export class TimeOffService {
       throw new ConflictError('No pending approval found for this time-off request');
     }
 
-    const decision = await this.engine.decidePendingApproval(
+    const decision = await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'rejected',

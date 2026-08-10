@@ -122,7 +122,8 @@ describe('EmployeeLoanService.create — post-insert null', () => {
     // instance-boundary spying): the workflow/matrix resolution has its own
     // dedicated test suite, so this pins only the post-insert null check.
     jest.spyOn(
-      (svc as unknown as { engine: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } }).engine,
+      (svc as unknown as { resolution: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } })
+        .resolution,
       'resolveFirstStepAutoApprove'
     ).mockResolvedValue({ workflow: null, approverUserId: 8, autoApprove: true } as never);
     await expect(svc.create({

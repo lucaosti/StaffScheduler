@@ -3,7 +3,7 @@
  *
  * A target unit manager can borrow an employee from another unit for a
  * date range. Creation decides auto-approval (actor is already the
- * resolved approver) via `ApprovalEngineService.resolveFirstStepAutoApprove`
+ * resolved approver) via `ApproverResolutionService.resolveFirstStepAutoApprove`
  * — resolved from the same `Loan.Request` workflow the request is about to
  * be attached to, not a second, parallel `approval_matrix` lookup. Otherwise
  * the request is routed through the modern `approval_workflows`/
@@ -25,7 +25,8 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApproverResolutionService } from './ApproverResolutionService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
@@ -86,12 +87,14 @@ const mapRow = (row: RowDataPacket): EmployeeLoan => ({
 });
 
 export class EmployeeLoanService {
-  private engine: ApprovalEngineService;
+  private resolution: ApproverResolutionService;
+  private decisions: ApprovalDecisionService;
   private notifications: NotificationService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
-    this.engine = new ApprovalEngineService(pool);
+    this.resolution = new ApproverResolutionService(pool);
+    this.decisions = new ApprovalDecisionService(pool);
     this.notifications = new NotificationService(pool);
     this.audit = new AuditLogService(pool);
   }
@@ -109,7 +112,7 @@ export class EmployeeLoanService {
     }
 
     const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
-    const resolved = await this.engine.resolveFirstStepAutoApprove('Loan.Request', workflowCtx);
+    const resolved = await this.resolution.resolveFirstStepAutoApprove('Loan.Request', workflowCtx);
 
     const status: LoanStatus = resolved.autoApprove ? 'approved' : 'pending';
     const approverId = resolved.approverUserId;
@@ -124,7 +127,7 @@ export class EmployeeLoanService {
     // the auto-approve question above.
     const workflow = resolved.autoApprove ? null : resolved.workflow;
     if (workflow && workflow.steps.length > 0) {
-      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+      if (!(await this.resolution.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this loan request — the target organizational unit has no manager who can decide it. Ask an administrator to fix the assignment.'
         );
@@ -168,7 +171,7 @@ export class EmployeeLoanService {
     await this.fanOutNotifications(created);
 
     if (workflow && workflow.steps.length > 0) {
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { employeeLoanId: created.id },
@@ -298,7 +301,7 @@ export class EmployeeLoanService {
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this loan');
-    const decision = await this.engine.decidePendingApproval(
+    const decision = await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'approved',
@@ -357,7 +360,7 @@ export class EmployeeLoanService {
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this loan');
-    await this.engine.decidePendingApproval(
+    await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'rejected',
