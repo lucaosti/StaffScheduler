@@ -30,8 +30,9 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 import en from './locales/en/translation.json';
 import it from './locales/it/translation.json';
 import ar from './locales/ar/translation.json';
+import es from './locales/es/translation.json';
 
-export const SUPPORTED_LOCALES = ['en', 'it', 'ar'] as const;
+export const SUPPORTED_LOCALES = ['en', 'it', 'ar', 'es'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Locales that render right-to-left. Arabic is the only one shipped today. */
@@ -53,6 +54,7 @@ void i18n
       en: { translation: en },
       it: { translation: it },
       ar: { translation: ar },
+      es: { translation: es },
     },
     fallbackLng: 'en',
     supportedLngs: SUPPORTED_LOCALES as unknown as string[],

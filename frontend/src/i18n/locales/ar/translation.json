@@ -35,6 +35,7 @@
   "locale.en": "الإنجليزية",
   "locale.it": "الإيطالية",
   "locale.ar": "العربية",
+  "locale.es": "الإسبانية",
   "dashboard.title": "لوحة المعلومات",
   "dashboard.welcome": "مرحبًا بعودتك، {{email}}! إليك ما يجري اليوم.",
   "dashboard.lastUpdated": "آخر تحديث: {{time}}",
