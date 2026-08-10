@@ -14,6 +14,8 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Permission, Role, UserRoleAssignment, Employee } from '../../types';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import RoleTimeline from './RoleTimeline';
 import {
   useRolesAndPermissionsQuery,
@@ -55,11 +57,7 @@ const RbacManagement: React.FC = () => {
   const rolesQuery = useRolesAndPermissionsQuery();
   const roles = rolesQuery.data?.roles ?? [];
   const permissions = rolesQuery.data?.permissions ?? [];
-  const rolesLoading = rolesQuery.isLoading;
   const [rolesActionError, setRolesError] = useState<string | null>(null);
-  const rolesError = rolesQuery.isError
-    ? (rolesQuery.error as Error).message ?? t('admin.rbac.roles.loadFailed')
-    : rolesActionError;
   const [rolesSuccess, setRolesSuccess] = useState<string | null>(null);
   const { create: createRole, update: updateRole, remove: deleteRole } = useRoleMutations();
   const roleSaving = createRole.isPending || updateRole.isPending;
@@ -88,10 +86,6 @@ const RbacManagement: React.FC = () => {
   const empLoading = employeeSearchQuery.isFetching;
   const userRolesQuery = useUserRolesQuery(selectedUser?.id ? Number(selectedUser.id) : null);
   const userRoles = userRolesQuery.data ?? [];
-  const userRolesLoading = selectedUser !== null && userRolesQuery.isLoading;
-  const userRolesError = userRolesQuery.isError
-    ? (userRolesQuery.error as Error).message ?? t('admin.rbac.userRoles.loadFailed')
-    : userRolesActionError;
   const { grant: grantRole, revoke: revokeRole } = useUserRoleMutations();
 
   const [grantForm, setGrantForm] = useState<{
@@ -338,11 +332,7 @@ const RbacManagement: React.FC = () => {
               <button type="button" className="btn-close" onClick={() => setRolesSuccess(null)} aria-label={t('common.close')}></button>
             </div>
           )}
-          {rolesError && (
-            <div className="alert alert-danger" role="alert">
-              <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{rolesError}
-            </div>
-          )}
+          {rolesActionError && <ErrorAlert message={rolesActionError} />}
 
           <div className="d-flex justify-content-between align-items-center mb-3">
             <h5 className="mb-0">{t('admin.rbac.roles.allRoles')}</h5>
@@ -351,12 +341,14 @@ const RbacManagement: React.FC = () => {
             </button>
           </div>
 
-          {rolesLoading ? (
-            <div className="text-center py-4">
-              <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-              <span className="ms-2">{t('common.loading')}</span>
-            </div>
-          ) : (
+          <QueryState
+            isLoading={rolesQuery.isLoading}
+            isError={rolesQuery.isError}
+            error={rolesQuery.error}
+            onRetry={() => rolesQuery.refetch()}
+            isEmpty={roles.length === 0}
+            empty={<p className="text-muted text-center py-4 mb-0">{t('admin.rbac.roles.noRoles', 'No roles yet.')}</p>}
+          >
             <div className="table-responsive">
               <table className="table table-hover">
                 <thead className="table-light">
@@ -421,7 +413,7 @@ const RbacManagement: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       )}
 
@@ -435,11 +427,7 @@ const RbacManagement: React.FC = () => {
                 <button type="button" className="btn-close" onClick={() => setUserRolesSuccess(null)} aria-label={t('common.close')}></button>
               </div>
             )}
-            {userRolesError && (
-              <div className="alert alert-danger" role="alert">
-                <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{userRolesError}
-              </div>
-            )}
+            {userRolesActionError && <ErrorAlert message={userRolesActionError} />}
 
             {/* User search */}
             <div className="card mb-4">
@@ -508,14 +496,14 @@ const RbacManagement: React.FC = () => {
                     <h5 className="mb-0">{t('admin.rbac.userRoles.currentGrants')}</h5>
                   </div>
                   <div className="card-body p-0">
-                    {userRolesLoading ? (
-                      <div className="text-center py-3">
-                        <span className="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
-                        <span className="ms-2">{t('common.loading')}</span>
-                      </div>
-                    ) : userRoles.length === 0 ? (
-                      <p className="text-muted text-center py-3 mb-0">{t('admin.rbac.userRoles.noneAssigned')}</p>
-                    ) : (
+                    <QueryState
+                      isLoading={userRolesQuery.isLoading}
+                      isError={userRolesQuery.isError}
+                      error={userRolesQuery.error}
+                      onRetry={() => userRolesQuery.refetch()}
+                      isEmpty={userRoles.length === 0}
+                      empty={<p className="text-muted text-center py-3 mb-0">{t('admin.rbac.userRoles.noneAssigned')}</p>}
+                    >
                       <table className="table table-sm table-hover mb-0">
                         <thead className="table-light">
                           <tr>
@@ -552,7 +540,7 @@ const RbacManagement: React.FC = () => {
                           ))}
                         </tbody>
                       </table>
-                    )}
+                    </QueryState>
                   </div>
                 </div>
 
