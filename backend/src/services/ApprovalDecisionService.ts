@@ -1,14 +1,15 @@
 /**
- * Approval Engine Service
+ * Approval Decision Service
  *
- * Multi-step approval workflow engine. Each change type (Loan.Request,
- * TimeOff.Request, etc.) maps to an `approval_workflows` row that holds an
- * ordered list of `approval_steps`. The engine resolves the responsible
- * approver for each step and supports automatic step-escalation when
- * `escalate_after_hours` expires.
- *
- * This replaces the single-step `approval_matrix` / `ApprovalMatrixService`
- * for new request types; the legacy table is preserved for backward compat.
+ * Owns the `pending_approvals` lifecycle: creating a step's approval gate,
+ * deciding it (approve/reject, advancing to the next step), the structure
+ * head's reassignment actions (keep/delegate/open), reading the decision
+ * chain, and escalating overdue decisions. Split out of the former
+ * `ApprovalEngineService` — this is the piece that mutates decisions, as
+ * opposed to `ApprovalWorkflowService` (configuration) and
+ * `ApproverResolutionService` (read-only "who approves this" resolution),
+ * which it composes for the parts of pending-approval creation that need
+ * scope resolution.
  *
  * @author Luca Ostinelli
  */
@@ -16,32 +17,10 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { nextState, actionForDecision } from './ApprovalStateMachine';
-import {
-  ApprovalWorkflow,
-  ApprovalStep,
-  ApproverScope,
-  CreateApprovalWorkflowRequest,
-  PendingApproval,
-  DecisionChain,
-} from '../types';
+import { ApprovalStep, ApproverScope, PendingApproval, DecisionChain } from '../types';
 import { logger } from '../config/logger';
-import { ResponsibilityRuleService } from './ResponsibilityRuleService';
+import { ApproverResolutionService, ResolveContext } from './ApproverResolutionService';
 import { WebhookService } from './WebhookService';
-
-interface ResolveContext {
-  orgUnitId?: number;
-  policyOwnerId?: number;
-  actorUserId: number;
-  /** Subject context for responsibility_rule scope. */
-  subjectDepartmentIds?: number[];
-  subjectRoleIds?: number[];
-}
-
-interface ResolvedStep {
-  step: ApprovalStep;
-  approverUserId: number | null;
-  autoApprove: boolean;
-}
 
 /** Exactly one of these must be set — identifies which entity a pending_approvals row decides on. */
 export interface PendingApprovalEntityRef {
@@ -58,8 +37,6 @@ export interface DecidePendingApprovalResult {
   /** True when this was the last step (rejected, or approved with no further step). */
   isFinalStep: boolean;
 }
-
-const MAX_ORG_DEPTH = 20;
 
 const mapPendingApprovalRow = (r: any): PendingApproval => ({
   id: r.id,
@@ -83,281 +60,14 @@ const mapPendingApprovalRow = (r: any): PendingApproval => ({
   updatedAt: r.updated_at,
 });
 
-export class ApprovalEngineService {
-  private responsibilitySvc: ResponsibilityRuleService;
+export class ApprovalDecisionService {
+  private resolution: ApproverResolutionService;
   private webhooks: WebhookService;
 
   constructor(private pool: Pool) {
-    this.responsibilitySvc = new ResponsibilityRuleService(pool);
+    this.resolution = new ApproverResolutionService(pool);
     this.webhooks = new WebhookService(pool);
   }
-
-  // --------------------------------------------------------------------------
-  // Workflow CRUD
-  // --------------------------------------------------------------------------
-
-  async listWorkflows(): Promise<ApprovalWorkflow[]> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT
-         w.id, w.change_type, w.require_all, w.description, w.created_at, w.updated_at,
-         s.id AS step_id, s.workflow_id AS step_workflow_id, s.step_order,
-         s.approver_scope, s.approver_role_id, s.approver_user_id, s.approver_permission_code,
-         s.auto_approve_for_owner, s.escalate_after_hours
-       FROM approval_workflows w
-       LEFT JOIN approval_steps s ON s.workflow_id = w.id
-       ORDER BY w.change_type ASC, s.step_order ASC`
-    );
-    const workflowMap = new Map<number, ApprovalWorkflow>();
-    for (const row of rows as any[]) {
-      if (!workflowMap.has(row.id)) {
-        workflowMap.set(row.id, {
-          id: row.id,
-          changeType: row.change_type,
-          requireAll: Boolean(row.require_all),
-          description: row.description ?? null,
-          steps: [],
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        });
-      }
-      if (row.step_id !== null) {
-        workflowMap.get(row.id)!.steps.push({
-          id: row.step_id,
-          workflowId: row.step_workflow_id,
-          stepOrder: row.step_order,
-          approverScope: row.approver_scope as ApproverScope,
-          approverRoleId: row.approver_role_id ?? null,
-          approverUserId: row.approver_user_id ?? null,
-          approverPermissionCode: row.approver_permission_code ?? null,
-          autoApproveForOwner: Boolean(row.auto_approve_for_owner),
-          escalateAfterHours: row.escalate_after_hours ?? null,
-        });
-      }
-    }
-    return Array.from(workflowMap.values());
-  }
-
-  async getWorkflowByChangeType(changeType: string): Promise<ApprovalWorkflow | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, change_type, require_all, description, created_at, updated_at
-         FROM approval_workflows WHERE change_type = ? LIMIT 1`,
-      [changeType]
-    );
-    if (rows.length === 0) return null;
-    return this.hydrateWorkflow(rows[0] as any);
-  }
-
-  async createWorkflow(input: CreateApprovalWorkflowRequest): Promise<ApprovalWorkflow> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [res] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO approval_workflows (change_type, require_all, description) VALUES (?, ?, ?)`,
-        [input.changeType, input.requireAll ?? false, input.description ?? null]
-      );
-      const workflowId = res.insertId;
-      for (const s of input.steps) {
-        await connection.execute(
-          `INSERT INTO approval_steps
-             (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-              approver_permission_code, auto_approve_for_owner, escalate_after_hours)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            workflowId,
-            s.stepOrder,
-            s.approverScope,
-            s.approverRoleId ?? null,
-            s.approverUserId ?? null,
-            s.approverPermissionCode ?? null,
-            s.autoApproveForOwner ?? true,
-            s.escalateAfterHours ?? null,
-          ]
-        );
-      }
-      await connection.commit();
-      const workflow = await this.getWorkflowById(workflowId);
-      if (!workflow) throw new Error('Failed to retrieve created workflow');
-      return workflow;
-    } catch (error) {
-      await connection.rollback();
-      // change_type is unique: a duplicate INSERT surfaces as ER_DUP_ENTRY.
-      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-        throw new ConflictError('Workflow for this change type already exists');
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  async updateWorkflow(
-    id: number,
-    patch: { requireAll?: boolean; description?: string; steps?: CreateApprovalWorkflowRequest['steps'] }
-  ): Promise<ApprovalWorkflow> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const updates: string[] = [];
-      const vals: any[] = [];
-      if (patch.requireAll !== undefined) { updates.push('require_all = ?'); vals.push(patch.requireAll); }
-      if (patch.description !== undefined) { updates.push('description = ?'); vals.push(patch.description); }
-      if (updates.length > 0) {
-        vals.push(id);
-        await connection.execute(
-          `UPDATE approval_workflows SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          vals
-        );
-      }
-      if (patch.steps !== undefined) {
-        await connection.execute('DELETE FROM approval_steps WHERE workflow_id = ?', [id]);
-        for (const s of patch.steps) {
-          await connection.execute(
-            `INSERT INTO approval_steps
-               (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-                approver_permission_code, auto_approve_for_owner, escalate_after_hours)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, s.stepOrder, s.approverScope, s.approverRoleId ?? null, s.approverUserId ?? null,
-             s.approverPermissionCode ?? null, s.autoApproveForOwner ?? true, s.escalateAfterHours ?? null]
-          );
-        }
-      }
-      await connection.commit();
-      const workflow = await this.getWorkflowById(id);
-      if (!workflow) throw new NotFoundError('Workflow not found');
-      return workflow;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  async deleteWorkflow(id: number): Promise<void> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      'SELECT id FROM approval_workflows WHERE id = ? LIMIT 1',
-      [id]
-    );
-    if (rows.length === 0) throw new NotFoundError('Workflow not found');
-    await this.pool.execute('DELETE FROM approval_workflows WHERE id = ?', [id]);
-  }
-
-  // --------------------------------------------------------------------------
-  // Step resolution
-  // --------------------------------------------------------------------------
-
-  /**
-   * For a `responsibility_rule` step, returns all user IDs who hold
-   * responsibility (not just the first). Useful for fan-out notifications.
-   */
-  async resolveAllApproversForStep(step: ApprovalStep, ctx: ResolveContext): Promise<number[]> {
-    if (step.approverScope !== 'responsibility_rule') {
-      const single = await this.resolveStepApprover(step, ctx);
-      return single !== null ? [single] : [];
-    }
-    if (!step.approverPermissionCode) return [];
-    return this.responsibilitySvc.resolveResponsibleUsers({
-      permissionCode: step.approverPermissionCode,
-      orgUnitId: ctx.orgUnitId ?? null,
-      departmentIds: ctx.subjectDepartmentIds ?? [],
-      roleIds: ctx.subjectRoleIds ?? [],
-    });
-  }
-
-  /**
-   * Resolves the approver for a single step identified by its DB id.
-   * Used by ChangeRequestService to advance multi-step pending_approval chains.
-   */
-  async resolveApproverForStep(
-    stepId: number,
-    ctx: {
-      actorUserId: number;
-      orgUnitId?: number;
-      policyOwnerId?: number;
-      subjectDepartmentIds?: number[];
-      subjectRoleIds?: number[];
-    }
-  ): Promise<number | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
-              approver_user_id, approver_permission_code, auto_approve_for_owner, escalate_after_hours
-         FROM approval_steps WHERE id = ? LIMIT 1`,
-      [stepId]
-    );
-    if (rows.length === 0) return null;
-    const r = rows[0] as any;
-    const step: ApprovalStep = {
-      id: r.id,
-      workflowId: r.workflow_id,
-      stepOrder: r.step_order,
-      approverScope: r.approver_scope as ApproverScope,
-      approverRoleId: r.approver_role_id ?? null,
-      approverUserId: r.approver_user_id ?? null,
-      approverPermissionCode: r.approver_permission_code ?? null,
-      autoApproveForOwner: Boolean(r.auto_approve_for_owner),
-      escalateAfterHours: r.escalate_after_hours ?? null,
-    };
-    return this.resolveStepApprover(step, ctx);
-  }
-
-  /**
-   * Resolves ALL steps for the given change type in order. Returns the first
-   * non-auto-approved step as the active approver, or null when every step
-   * can auto-approve.
-   */
-  async resolveApprover(changeType: string, ctx: ResolveContext): Promise<ResolvedStep | null> {
-    const workflow = await this.getWorkflowByChangeType(changeType);
-    if (!workflow) {
-      throw new ConflictError(`No approval workflow configured for change type '${changeType}'`);
-    }
-
-    for (const step of workflow.steps) {
-      const approverUserId = await this.resolveStepApprover(step, ctx);
-      const autoApprove =
-        step.autoApproveForOwner &&
-        approverUserId !== null &&
-        approverUserId === ctx.actorUserId;
-      if (!autoApprove) {
-        return { step, approverUserId, autoApprove: false };
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Resolves whether `changeType`'s FIRST step would auto-approve for this
-   * actor, and who the resolved approver is either way — the same question
-   * `ApprovalMatrixService.resolve()` answers, sourced from the workflow the
-   * request is about to be attached to instead of a second, parallel
-   * configuration table. Unlike `resolveApprover` (which walks past
-   * every auto-approving step and returns `null` once everything auto-approves,
-   * discarding who each step resolved to along the way), this is specifically
-   * for a caller that is about to INSERT its entity and needs to know, for
-   * the one step it will actually attach, both facts at once: does this
-   * auto-approve, and who is `approver_user_id`/`reviewer_user_id` either way.
-   * Returns the workflow too, so a caller that needs it next (to attach the
-   * pending-approval step when this does NOT auto-approve) does not re-fetch it.
-   */
-  async resolveFirstStepAutoApprove(
-    changeType: string,
-    ctx: ResolveContext
-  ): Promise<{ workflow: ApprovalWorkflow; approverUserId: number | null; autoApprove: boolean }> {
-    const workflow = await this.getWorkflowByChangeType(changeType);
-    if (!workflow || workflow.steps.length === 0) {
-      throw new ConflictError(`No approval workflow configured for change type '${changeType}'`);
-    }
-    const step = workflow.steps[0];
-    const approverUserId = await this.resolveStepApprover(step, ctx);
-    const autoApprove =
-      step.autoApproveForOwner && approverUserId !== null && approverUserId === ctx.actorUserId;
-    return { workflow, approverUserId, autoApprove };
-  }
-
-  // --------------------------------------------------------------------------
-  // Generic pending_approval lifecycle — shared by change requests, time-off,
-  // loans, shift swaps, and policy exceptions (the five entity types a
-  // pending_approvals row can decide on; see PendingApprovalEntityRef).
-  // --------------------------------------------------------------------------
 
   async getPendingApprovalById(id: number): Promise<PendingApproval | null> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -365,21 +75,6 @@ export class ApprovalEngineService {
       [id]
     );
     return rows.length === 0 ? null : mapPendingApprovalRow(rows[0]);
-  }
-
-  /**
-   * True when `createPendingApprovalForStep` for this step/context would
-   * attach an approver. Callers use it BEFORE inserting their entity row so
-   * a request whose configured workflow cannot be satisfied (e.g. the
-   * requester has no primary org unit for a unit-scoped step) is rejected
-   * loudly at creation time instead of being inserted and then silently
-   * stranded forever with no approval gate anyone could ever decide.
-   */
-  async canCreatePendingApprovalForStep(step: ApprovalStep, ctx: ResolveContext): Promise<boolean> {
-    if (step.approverScope === 'unit_structure') {
-      return ctx.orgUnitId !== undefined && ctx.orgUnitId !== null;
-    }
-    return (await this.resolveStepApprover(step, ctx)) !== null;
   }
 
   /**
@@ -404,9 +99,9 @@ export class ApprovalEngineService {
     if (step.approverScope === 'unit_structure') {
       if (!ctx.orgUnitId) throw new ConflictError("A 'unit_structure' step requires an org unit context");
       assignedToOrgUnitId = ctx.orgUnitId;
-      assignedToUserId = await this.findUnitManager(ctx.orgUnitId);
+      assignedToUserId = await this.resolution.findUnitManager(ctx.orgUnitId);
     } else {
-      assignedToUserId = await this.resolveStepApprover(step, ctx);
+      assignedToUserId = await this.resolution.resolveStepApprover(step, ctx);
       if (assignedToUserId === null) return null;
     }
 
@@ -429,15 +124,6 @@ export class ApprovalEngineService {
       ]
     );
     return this.getPendingApprovalById(result.insertId);
-  }
-
-  /** Primary org-unit membership for a user — used to resolve context for time-off/shift-swap decisions. */
-  async resolvePrimaryOrgUnitForUser(userId: number): Promise<number | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT org_unit_id FROM user_org_units WHERE user_id = ? AND is_primary = 1 LIMIT 1`,
-      [userId]
-    );
-    return rows.length === 0 ? null : ((rows[0] as any).org_unit_id as number);
   }
 
   private async isAuthorizedToDecide(pa: PendingApproval, userId: number): Promise<boolean> {
@@ -878,120 +564,5 @@ export class ApprovalEngineService {
 
     logger.info(`Escalation run: ${items.length} pending approval(s) escalated`);
     return { escalated: items.length, items };
-  }
-
-  // --------------------------------------------------------------------------
-  // Private helpers
-  // --------------------------------------------------------------------------
-
-  private async getWorkflowById(id: number): Promise<ApprovalWorkflow | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, change_type, require_all, description, created_at, updated_at
-         FROM approval_workflows WHERE id = ? LIMIT 1`,
-      [id]
-    );
-    if (rows.length === 0) return null;
-    return this.hydrateWorkflow(rows[0] as any);
-  }
-
-  private async hydrateWorkflow(w: any): Promise<ApprovalWorkflow> {
-    const [stepRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id, workflow_id, step_order, approver_scope, approver_role_id,
-              approver_user_id, approver_permission_code, auto_approve_for_owner, escalate_after_hours
-         FROM approval_steps WHERE workflow_id = ? ORDER BY step_order ASC`,
-      [w.id]
-    );
-    const steps: ApprovalStep[] = (stepRows as any[]).map((s) => ({
-      id: s.id,
-      workflowId: s.workflow_id,
-      stepOrder: s.step_order,
-      approverScope: s.approver_scope as ApproverScope,
-      approverRoleId: s.approver_role_id ?? null,
-      approverUserId: s.approver_user_id ?? null,
-      approverPermissionCode: s.approver_permission_code ?? null,
-      autoApproveForOwner: Boolean(s.auto_approve_for_owner),
-      escalateAfterHours: s.escalate_after_hours ?? null,
-    }));
-    return {
-      id: w.id,
-      changeType: w.change_type,
-      requireAll: Boolean(w.require_all),
-      description: w.description ?? null,
-      steps,
-      createdAt: w.created_at,
-      updatedAt: w.updated_at,
-    };
-  }
-
-  private async resolveStepApprover(step: ApprovalStep, ctx: ResolveContext): Promise<number | null> {
-    switch (step.approverScope as ApproverScope) {
-      case 'policy_owner':
-        return ctx.policyOwnerId ?? null;
-      case 'unit_manager':
-        return ctx.orgUnitId ? this.findUnitManager(ctx.orgUnitId) : null;
-      case 'unit_manager_chain':
-        return ctx.orgUnitId ? this.findUnitManagerChain(ctx.orgUnitId) : null;
-      case 'company_role':
-        return step.approverRoleId ? this.findFirstActiveByRoleId(step.approverRoleId) : null;
-      case 'company_user':
-        return step.approverUserId;
-      case 'responsibility_rule': {
-        if (!step.approverPermissionCode) return null;
-        const ids = await this.responsibilitySvc.resolveResponsibleUsers({
-          permissionCode: step.approverPermissionCode,
-          orgUnitId: ctx.orgUnitId ?? null,
-          departmentIds: ctx.subjectDepartmentIds ?? [],
-          roleIds: ctx.subjectRoleIds ?? [],
-        });
-        return ids.length > 0 ? ids[0] : null;
-      }
-      default:
-        return null;
-    }
-  }
-
-  private async findUnitManager(orgUnitId: number): Promise<number | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      'SELECT manager_user_id FROM org_units WHERE id = ? LIMIT 1',
-      [orgUnitId]
-    );
-    return rows.length === 0 ? null : ((rows[0].manager_user_id as number | null) ?? null);
-  }
-
-  private async findUnitManagerChain(orgUnitId: number): Promise<number | null> {
-    // Walk the entire ancestor chain in one recursive CTE query and return the
-    // first manager found (closest ancestor with a non-null manager_user_id).
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `WITH RECURSIVE chain AS (
-         SELECT id, manager_user_id, parent_id, 0 AS depth
-           FROM org_units
-          WHERE id = ?
-         UNION ALL
-         SELECT o.id, o.manager_user_id, o.parent_id, c.depth + 1
-           FROM org_units o
-           JOIN chain c ON o.id = c.parent_id
-          WHERE c.depth < ${MAX_ORG_DEPTH}
-       )
-       SELECT manager_user_id
-         FROM chain
-        WHERE manager_user_id IS NOT NULL
-        ORDER BY depth ASC
-        LIMIT 1`,
-      [orgUnitId]
-    );
-    return rows.length === 0 ? null : (rows[0].manager_user_id as number);
-  }
-
-  private async findFirstActiveByRoleId(roleId: number): Promise<number | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT u.id
-         FROM users u
-         JOIN user_roles ur ON ur.user_id = u.id
-        WHERE ur.role_id = ? AND u.is_active = 1
-          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-        ORDER BY u.id ASC LIMIT 1`,
-      [roleId]
-    );
-    return rows.length === 0 ? null : (rows[0].id as number);
   }
 }

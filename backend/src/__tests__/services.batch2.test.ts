@@ -8,7 +8,7 @@
  *                        decline: null refresh after decline (258);
  *                        cancel: null refresh after cancel (276)
  *   DepartmentService  — post-update null check (lines 283-284)
- *   ApprovalEngineService — post-create null (122), post-update null (165)
+ *   ApprovalWorkflowService — post-create null (122), post-update null (165)
  *
  * @author Luca Ostinelli
  */
@@ -19,7 +19,7 @@ import { AuditLogService } from '../services/AuditLogService';
 import { OrgUnitService } from '../services/OrgUnitService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
 import { DepartmentService } from '../services/DepartmentService';
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApprovalWorkflowService } from '../services/ApprovalWorkflowService';
 
 jest.mock('../services/ComplianceEngine', () => ({
   evaluateAssignmentCompliance: jest.fn().mockResolvedValue({ ok: true, violations: [] }),
@@ -177,7 +177,7 @@ const queueApprovePreChecks = (execute: jest.Mock) => {
     .mockResolvedValueOnce([[], null] as Tuple); // wouldBeFinalStep: next-step lookup -> none (final)
 };
 
-/** Queues the pool.execute calls ApprovalEngineService.decidePendingApproval
+/** Queues the pool.execute calls ApprovalDecisionService.decidePendingApproval
  *  makes once the swap itself has already been validated and applied inside
  *  the transaction — pre-fetch, guarded UPDATE, next-step lookup (none,
  *  since ShiftSwap.Request is single-step), and the post-decision fetch. */
@@ -289,31 +289,31 @@ describe('DepartmentService.updateDepartment — various update paths', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ApprovalEngineService — post-create / post-update null guards
+// ApprovalWorkflowService — post-create / post-update null guards
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('ApprovalEngineService.createWorkflow — null after insert', () => {
+describe('ApprovalWorkflowService.createWorkflow — null after insert', () => {
   it('throws Failed to retrieve created workflow when getWorkflowById returns null', async () => {
     const { pool, conn, execute } = makePool();
     conn.execute
       .mockResolvedValueOnce([{ insertId: 42 }, null]); // INSERT workflow
     // getWorkflowById uses pool.execute
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ApprovalEngineService(pool);
+    const svc = new ApprovalWorkflowService(pool);
     await expect(svc.createWorkflow({ changeType: 'Loan.Request', requireAll: false, steps: [] }))
       .rejects.toThrow('Failed to retrieve created workflow');
     expect(conn.rollback).toHaveBeenCalled();
   });
 });
 
-describe('ApprovalEngineService.updateWorkflow — null after update', () => {
+describe('ApprovalWorkflowService.updateWorkflow — null after update', () => {
   it('throws Workflow not found when getWorkflowById returns null after update', async () => {
     const { pool, conn, execute } = makePool();
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // UPDATE workflow
     // getWorkflowById uses pool.execute → returns null
     execute.mockResolvedValueOnce([[], null] as Tuple);
-    const svc = new ApprovalEngineService(pool);
+    const svc = new ApprovalWorkflowService(pool);
     await expect(svc.updateWorkflow(1, { requireAll: true })).rejects.toThrow('Workflow not found');
     expect(conn.rollback).toHaveBeenCalled();
   });

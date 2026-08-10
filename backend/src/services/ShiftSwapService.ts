@@ -11,7 +11,7 @@
  * unchanged: routed through the `approval_workflows`/`pending_approvals`
  * engine (`ShiftSwap.Request`, demo-seeded as `unit_structure` — assigned to
  * the requester's unit as a whole; the unit head can keep it, delegate it to
- * a team member, or open it to the team, see ApprovalEngineService), and its
+ * a team member, or open it to the team, see ApprovalDecisionService), and its
  * `pending_approvals` row is created only once B accepts — there is nothing
  * for a manager to decide before that. Once the manager approves, this
  * atomically rewrites the `user_id` on both `shift_assignments` rows so
@@ -24,7 +24,9 @@ import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/pro
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApprovalWorkflowService } from './ApprovalWorkflowService';
+import { ApproverResolutionService } from './ApproverResolutionService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
@@ -109,12 +111,16 @@ const mapRow = (row: RowDataPacket): ShiftSwapRequest => ({
 export class ShiftSwapService {
   private notifications: NotificationService;
   private audit: AuditLogService;
-  private engine: ApprovalEngineService;
+  private workflows: ApprovalWorkflowService;
+  private resolution: ApproverResolutionService;
+  private decisions: ApprovalDecisionService;
 
   constructor(private pool: Pool, notifications?: NotificationService) {
     this.notifications = notifications ?? new NotificationService(pool);
     this.audit = new AuditLogService(pool);
-    this.engine = new ApprovalEngineService(pool);
+    this.workflows = new ApprovalWorkflowService(pool);
+    this.resolution = new ApproverResolutionService(pool);
+    this.decisions = new ApprovalDecisionService(pool);
   }
 
   /**
@@ -131,11 +137,11 @@ export class ShiftSwapService {
     // loudly instead — the actual pending_approvals row isn't created until
     // the target accepts (respondAsTarget), since there is nothing for a
     // manager to decide before that; this is a dry-run check only.
-    const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
+    const workflow = await this.workflows.getWorkflowByChangeType('ShiftSwap.Request');
     if (workflow && workflow.steps.length > 0) {
-      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(input.requesterUserId);
+      const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(input.requesterUserId);
       const workflowCtx = { actorUserId: input.requesterUserId, orgUnitId: orgUnitId ?? undefined };
-      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+      if (!(await this.resolution.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this shift swap request — the requester has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
         );
@@ -267,7 +273,7 @@ export class ShiftSwapService {
     // requester's org-unit membership (or the workflow itself) may have
     // changed in the time between request and response, so this is
     // re-checked rather than trusted from create()'s earlier dry run.
-    const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
+    const workflow = await this.workflows.getWorkflowByChangeType('ShiftSwap.Request');
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE shift_swap_requests SET status = 'pending' WHERE id = ? AND status = 'pending_target'`,
       [id]
@@ -278,9 +284,9 @@ export class ShiftSwapService {
     }
 
     if (workflow && workflow.steps.length > 0) {
-      const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
+      const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
       const workflowCtx = { actorUserId: existing.requesterUserId, orgUnitId: orgUnitId ?? undefined };
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { shiftSwapRequestId: id },
@@ -469,14 +475,14 @@ export class ShiftSwapService {
     // A non-final step (an earlier approver in a multi-step workflow) has no
     // swap side effects to apply yet — just record the decision and let the
     // next step take over.
-    if (!(await this.engine.wouldBeFinalStep(pendingApprovalId))) {
-      await this.engine.decidePendingApproval(
+    if (!(await this.decisions.wouldBeFinalStep(pendingApprovalId))) {
+      await this.decisions.decidePendingApproval(
         pendingApprovalId,
         reviewerId,
         'approved',
         notes,
         async () => {
-          const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
+          const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(existingForAuth.requesterUserId);
           return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
         },
         organizationName
@@ -534,13 +540,13 @@ export class ShiftSwapService {
         [swap.requesterUserId, swap.targetAssignmentId]
       );
 
-      await this.engine.decidePendingApproval(
+      await this.decisions.decidePendingApproval(
         pendingApprovalId,
         reviewerId,
         'approved',
         notes,
         async () => {
-          const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(swap.requesterUserId);
+          const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(swap.requesterUserId);
           return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
         },
         organizationName
@@ -602,13 +608,13 @@ export class ShiftSwapService {
     }
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this shift swap');
-    await this.engine.decidePendingApproval(
+    await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'rejected',
       notes,
       async () => {
-        const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
+        const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(existing.requesterUserId);
         return { actorUserId: reviewerId, orgUnitId: orgUnitId ?? undefined };
       },
       organizationName
@@ -852,11 +858,11 @@ export class ShiftSwapService {
     // since they are the requester of record; reused after commit instead of
     // re-fetched, since nothing changes between resolving it here and using
     // it a few lines later within the same call.
-    const workflow = await this.engine.getWorkflowByChangeType('ShiftSwap.Request');
-    const orgUnitId = await this.engine.resolvePrimaryOrgUnitForUser(offer.userId);
+    const workflow = await this.workflows.getWorkflowByChangeType('ShiftSwap.Request');
+    const orgUnitId = await this.resolution.resolvePrimaryOrgUnitForUser(offer.userId);
     const workflowCtx = { actorUserId: offer.userId, orgUnitId: orgUnitId ?? undefined };
     if (workflow && workflow.steps.length > 0) {
-      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+      if (!(await this.resolution.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this shift swap — the offer owner has no primary organizational unit whose manager can decide it. Ask an administrator to fix the assignment.'
         );
@@ -902,7 +908,7 @@ export class ShiftSwapService {
     }
 
     if (workflow && workflow.steps.length > 0) {
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { shiftSwapRequestId: created.id },

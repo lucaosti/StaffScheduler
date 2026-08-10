@@ -442,7 +442,7 @@ describe('ShiftSwapService', () => {
   /** Queues the conn.execute calls the transaction makes up through a
    *  successful checkSwapCompliance (pair read + duplicate check -> none)
    *  and the two assignment UPDATEs, plus the pool.execute calls
-   *  ApprovalEngineService.decidePendingApproval makes once that succeeds:
+   *  ApprovalDecisionService.decidePendingApproval makes once that succeeds:
    *  getPendingApprovalById(pre) + guarded UPDATE + (approved only)
    *  next-step lookup + getPendingApprovalById(post). */
   const queueApproveTransactionAndDecide = (

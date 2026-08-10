@@ -5,8 +5,8 @@
  *   ApprovalMatrixService — update: null refresh (line 114)
  *   AssignmentService     — createAssignment: null getAssignmentById (line 136)
  *   EmployeeLoanService   — create: pending loan with approverUserId (line 285)
- *   ApprovalEngineService — resolveApprover: unknown scope → null (line 303)
- *   ApprovalEngineService — resolveApprover: unit_manager_chain empty rows → null (line 330)
+ *   ApproverResolutionService — resolveApprover: unknown scope → null (line 303)
+ *   ApproverResolutionService — resolveApprover: unit_manager_chain empty rows → null (line 330)
  *
  * @author Luca Ostinelli
  */
@@ -16,7 +16,7 @@ import { TwoFactorService } from '../services/TwoFactorService';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
 import { AssignmentService } from '../services/AssignmentService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApproverResolutionService } from '../services/ApproverResolutionService';
 
 jest.mock('../services/ComplianceEngine', () => ({
   evaluateAssignmentCompliance: jest.fn().mockResolvedValue({ ok: true, violations: [] }),
@@ -191,18 +191,20 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
     // ApprovalMatrixService's company_user scope used to produce; see
     // employeeLoan.service.test.ts for the dedicated workflow-attachment suite.
     const internals = svc as unknown as {
-      engine: {
+      resolution: {
         resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
         canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+      };
+      decisions: {
         createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       };
     };
     const workflow = { id: 1, changeType: 'Loan.Request', requireAll: false, description: null, steps: [{ id: 1, workflowId: 1, stepOrder: 1, approverScope: 'company_user' }] };
-    jest.spyOn(internals.engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+    jest.spyOn(internals.resolution, 'resolveFirstStepAutoApprove').mockResolvedValue({
       workflow, approverUserId: 8, autoApprove: false,
     } as never);
-    jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
+    jest.spyOn(internals.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue({ id: 501 } as never);
 
     const result = await svc.create({
       userId: 10,
@@ -219,10 +221,10 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ApprovalEngineService — resolveStepApprover: unknown scope → null (line 303)
+// ApproverResolutionService — resolveStepApprover: unknown scope → null (line 303)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('ApprovalEngineService.resolveApprover — unknown approver scope returns null', () => {
+describe('ApproverResolutionService.resolveApprover — unknown approver scope returns null', () => {
   it('returns ResolvedStep with null approverUserId for an unrecognised scope', async () => {
     const { pool, execute } = makePool();
     const workflowRow = {
@@ -246,7 +248,7 @@ describe('ApprovalEngineService.resolveApprover — unknown approver scope retur
     execute
       .mockResolvedValueOnce([[workflowRow], null] as Tuple) // getWorkflowByChangeType
       .mockResolvedValueOnce([[stepRow], null] as Tuple);    // hydrateWorkflow steps
-    const svc = new ApprovalEngineService(pool);
+    const svc = new ApproverResolutionService(pool);
     const result = await svc.resolveApprover('Test.Change', { actorUserId: 1 });
     expect(result).not.toBeNull();
     expect(result!.approverUserId).toBeNull();
@@ -255,10 +257,10 @@ describe('ApprovalEngineService.resolveApprover — unknown approver scope retur
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ApprovalEngineService — findUnitManagerChain: empty chainRows → null (line 330)
+// ApproverResolutionService — findUnitManagerChain: empty chainRows → null (line 330)
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('ApprovalEngineService.resolveApprover — unit_manager_chain empty chainRows returns null', () => {
+describe('ApproverResolutionService.resolveApprover — unit_manager_chain empty chainRows returns null', () => {
   it('returns null approverUserId when org_unit not found in chain walk', async () => {
     const { pool, execute } = makePool();
     const workflowRow = {
@@ -283,7 +285,7 @@ describe('ApprovalEngineService.resolveApprover — unit_manager_chain empty cha
       .mockResolvedValueOnce([[workflowRow], null] as Tuple) // getWorkflowByChangeType
       .mockResolvedValueOnce([[stepRow], null] as Tuple)     // hydrateWorkflow steps
       .mockResolvedValueOnce([[], null] as Tuple);           // findUnitManagerChain SELECT → empty
-    const svc = new ApprovalEngineService(pool);
+    const svc = new ApproverResolutionService(pool);
     const result = await svc.resolveApprover('Chain.Test', { actorUserId: 1, orgUnitId: 42 });
     expect(result).not.toBeNull();
     expect(result!.approverUserId).toBeNull();

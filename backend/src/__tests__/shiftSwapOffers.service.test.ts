@@ -231,19 +231,21 @@ describe('ShiftSwapService.cancelOpenOffer', () => {
 describe('ShiftSwapService.claimOpenOffer', () => {
   const internalsOf = (service: ShiftSwapService) =>
     service as unknown as {
-      engine: {
-        getWorkflowByChangeType: (t: string) => unknown;
+      workflows: { getWorkflowByChangeType: (t: string) => unknown };
+      resolution: {
         resolvePrimaryOrgUnitForUser: (u: number) => unknown;
         canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+      };
+      decisions: {
         createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       };
     };
 
   const spyWorkflowResolution = (service: ShiftSwapService, canCreate = true) => {
     const internals = internalsOf(service);
-    jest.spyOn(internals.engine, 'getWorkflowByChangeType').mockResolvedValue(workflow as never);
-    jest.spyOn(internals.engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-    jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(canCreate as never);
+    jest.spyOn(internals.workflows, 'getWorkflowByChangeType').mockResolvedValue(workflow as never);
+    jest.spyOn(internals.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+    jest.spyOn(internals.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(canCreate as never);
     return internals;
   };
 
@@ -320,7 +322,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
     execute.mockResolvedValue([[swapRow()], null] as Tuple); // getById + cleanup UPDATEs fall through
     const svc = new ShiftSwapService(pool);
     const internals = spyWorkflowResolution(svc);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
     await expect(svc.claimOpenOffer(1, 9, 200)).rejects.toThrow(/approver resolution changed/);
 
@@ -342,7 +344,7 @@ describe('ShiftSwapService.claimOpenOffer', () => {
     execute.mockResolvedValue([[swapRow()], null] as Tuple);
     const svc = new ShiftSwapService(pool);
     const internals = spyWorkflowResolution(svc);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue({ id: 900 } as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue({ id: 900 } as never);
 
     const created = await svc.claimOpenOffer(1, 9, 200, 'happy to take this one');
     expect(created.id).toBe(501);

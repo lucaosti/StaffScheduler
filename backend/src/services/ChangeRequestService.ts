@@ -24,7 +24,8 @@ import {
 } from '../types';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApprovalWorkflowService } from './ApprovalWorkflowService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { resolveSubjectContext } from './subjectContext';
 
 const mapRow = (row: RowDataPacket): ChangeRequest => ({
@@ -50,11 +51,13 @@ const mapRow = (row: RowDataPacket): ChangeRequest => ({
 
 export class ChangeRequestService {
   private audit: AuditLogService;
-  private engine: ApprovalEngineService;
+  private workflows: ApprovalWorkflowService;
+  private decisions: ApprovalDecisionService;
 
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
-    this.engine = new ApprovalEngineService(pool);
+    this.workflows = new ApprovalWorkflowService(pool);
+    this.decisions = new ApprovalDecisionService(pool);
   }
 
   // --------------------------------------------------------------------------
@@ -153,10 +156,10 @@ export class ChangeRequestService {
     const proposerCtx = await this.resolveProposerContext(proposerUserId);
 
     // Create first pending_approval if an approval workflow is configured for this change type.
-    const workflow = await this.engine.getWorkflowByChangeType(input.changeType);
+    const workflow = await this.workflows.getWorkflowByChangeType(input.changeType);
     if (workflow && workflow.steps.length > 0) {
       const firstStep = workflow.steps[0];
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         firstStep,
         { changeRequestId: created.id },
@@ -343,7 +346,7 @@ export class ChangeRequestService {
    * immediately set to 'rejected'.
    *
    * The generic authorization/transition/next-step machinery lives in
-   * `ApprovalEngineService.decidePendingApproval` (shared with time-off,
+   * `ApprovalDecisionService.decidePendingApproval` (shared with time-off,
    * loans, and shift-swap decisions); this method only applies the
    * change_request-specific side effect once the workflow is fully resolved.
    */
@@ -354,13 +357,13 @@ export class ChangeRequestService {
     note?: string | null,
     organizationName: string | null = null
   ): Promise<{ pendingApproval: PendingApproval; changeRequest: ChangeRequest }> {
-    const pa = await this.engine.getPendingApprovalById(pendingApprovalId);
+    const pa = await this.decisions.getPendingApprovalById(pendingApprovalId);
     if (!pa || pa.changeRequestId === null) throw new NotFoundError('Pending approval not found');
 
     const cr = await this.getById(pa.changeRequestId);
     if (!cr) throw new NotFoundError('Change request not found');
 
-    const result = await this.engine.decidePendingApproval(
+    const result = await this.decisions.decidePendingApproval(
       pendingApprovalId,
       userId,
       decision,

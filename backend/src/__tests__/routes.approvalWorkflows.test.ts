@@ -2,7 +2,7 @@
  * Route handler tests for `routes/approvalWorkflows.ts`.
  *
  * Auth middleware is stubbed so that req.user is configurable per test.
- * ApprovalEngineService is fully mocked. Auth rejection is simulated by
+ * ApprovalWorkflowService and ApprovalDecisionService are fully mocked. Auth rejection is simulated by
  * controlling `authMode` (pass | reject401 | reject403).
  *
  * @author Luca Ostinelli
@@ -34,9 +34,11 @@ jest.mock('../middleware/auth', () => ({
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
 
-jest.mock('../services/ApprovalEngineService');
+jest.mock('../services/ApprovalWorkflowService');
+jest.mock('../services/ApprovalDecisionService');
 
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApprovalWorkflowService } from '../services/ApprovalWorkflowService';
+import { ApprovalDecisionService } from '../services/ApprovalDecisionService';
 import { createApprovalWorkflowsRouter } from '../routes/approvalWorkflows';
 import { ConflictError, NotFoundError } from '../errors';
 import { errorHandler } from '../middleware/errorHandler';
@@ -74,7 +76,7 @@ describe('approval workflows GET /', () => {
   });
 
   it('returns 200 with workflow list', async () => {
-    (ApprovalEngineService.prototype.listWorkflows as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.listWorkflows as jest.Mock) = jest
       .fn()
       .mockResolvedValue([{ id: 1, changeType: 'shift_swap' }, { id: 2, changeType: 'time_off' }]);
 
@@ -85,7 +87,7 @@ describe('approval workflows GET /', () => {
   });
 
   it('returns 200 with empty list', async () => {
-    (ApprovalEngineService.prototype.listWorkflows as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.listWorkflows as jest.Mock) = jest
       .fn()
       .mockResolvedValue([]);
 
@@ -95,7 +97,7 @@ describe('approval workflows GET /', () => {
   });
 
   it('returns 500 on service error', async () => {
-    (ApprovalEngineService.prototype.listWorkflows as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.listWorkflows as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -109,7 +111,7 @@ describe('approval workflows GET /', () => {
 
 describe('approval workflows GET /:type', () => {
   it('returns 200 when workflow found', async () => {
-    (ApprovalEngineService.prototype.getWorkflowByChangeType as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.getWorkflowByChangeType as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1, changeType: 'shift_swap', steps: [] });
 
@@ -120,7 +122,7 @@ describe('approval workflows GET /:type', () => {
   });
 
   it('returns 404 when workflow not found', async () => {
-    (ApprovalEngineService.prototype.getWorkflowByChangeType as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.getWorkflowByChangeType as jest.Mock) = jest
       .fn()
       .mockResolvedValue(null);
 
@@ -130,7 +132,7 @@ describe('approval workflows GET /:type', () => {
   });
 
   it('returns 500 on service error', async () => {
-    (ApprovalEngineService.prototype.getWorkflowByChangeType as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.getWorkflowByChangeType as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -151,7 +153,7 @@ describe('approval workflows POST /', () => {
   };
 
   it('returns 201 on successful creation', async () => {
-    (ApprovalEngineService.prototype.createWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.createWorkflow as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 5, ...validBody });
 
@@ -193,7 +195,7 @@ describe('approval workflows POST /', () => {
   });
 
   it('returns 409 on duplicate change type', async () => {
-    (ApprovalEngineService.prototype.createWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.createWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new ConflictError('Workflow for this change type already exists'));
 
@@ -206,7 +208,7 @@ describe('approval workflows POST /', () => {
   });
 
   it('returns 500 on unknown service error', async () => {
-    (ApprovalEngineService.prototype.createWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.createWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db failure'));
 
@@ -239,7 +241,7 @@ describe('approval workflows POST /', () => {
 
 describe('approval workflows PUT /:id', () => {
   it('returns 200 on successful update', async () => {
-    (ApprovalEngineService.prototype.updateWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.updateWorkflow as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 3, changeType: 'time_off', steps: [] });
 
@@ -254,7 +256,7 @@ describe('approval workflows PUT /:id', () => {
   });
 
   it('returns 404 when workflow not found', async () => {
-    (ApprovalEngineService.prototype.updateWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.updateWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new NotFoundError('Workflow not found'));
 
@@ -274,7 +276,7 @@ describe('approval workflows PUT /:id', () => {
   });
 
   it('returns 500 on unexpected error', async () => {
-    (ApprovalEngineService.prototype.updateWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.updateWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -291,7 +293,7 @@ describe('approval workflows PUT /:id', () => {
 
 describe('approval workflows DELETE /:id', () => {
   it('returns 200 on successful delete', async () => {
-    (ApprovalEngineService.prototype.deleteWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.deleteWorkflow as jest.Mock) = jest
       .fn()
       .mockResolvedValue(undefined);
 
@@ -302,7 +304,7 @@ describe('approval workflows DELETE /:id', () => {
   });
 
   it('returns 404 when workflow not found', async () => {
-    (ApprovalEngineService.prototype.deleteWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.deleteWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new NotFoundError('Workflow not found'));
 
@@ -317,7 +319,7 @@ describe('approval workflows DELETE /:id', () => {
   });
 
   it('returns 500 on unexpected error', async () => {
-    (ApprovalEngineService.prototype.deleteWorkflow as jest.Mock) = jest
+    (ApprovalWorkflowService.prototype.deleteWorkflow as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db failure'));
 
@@ -332,7 +334,7 @@ describe('approval workflows DELETE /:id', () => {
 describe('approval workflows POST /escalate', () => {
   it('returns 200 with overdue escalations', async () => {
     const mockResult = { escalated: 1, items: [{ pendingApprovalId: 10, changeRequestId: 5, escalatedToUserId: 3 }] };
-    (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
+    (ApprovalDecisionService.prototype.processEscalations as jest.Mock) = jest
       .fn()
       .mockResolvedValue(mockResult);
 
@@ -348,7 +350,7 @@ describe('approval workflows POST /escalate', () => {
 
   it('returns 200 with no escalations', async () => {
     const mockResult = { escalated: 0, items: [] };
-    (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
+    (ApprovalDecisionService.prototype.processEscalations as jest.Mock) = jest
       .fn()
       .mockResolvedValue(mockResult);
 
@@ -358,11 +360,11 @@ describe('approval workflows POST /escalate', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.data.escalated).toBe(0);
-    expect(ApprovalEngineService.prototype.processEscalations).toHaveBeenCalledWith();
+    expect(ApprovalDecisionService.prototype.processEscalations).toHaveBeenCalledWith();
   });
 
   it('returns 500 on service error', async () => {
-    (ApprovalEngineService.prototype.processEscalations as jest.Mock) = jest
+    (ApprovalDecisionService.prototype.processEscalations as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error during escalation sweep'));
 

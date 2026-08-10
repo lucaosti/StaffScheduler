@@ -8,14 +8,14 @@
  */
 
 import { dispatchPendingApprovalDecision } from '../services/PendingApprovalDispatch';
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApprovalDecisionService } from '../services/ApprovalDecisionService';
 import { ChangeRequestService } from '../services/ChangeRequestService';
 import { TimeOffService } from '../services/TimeOffService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
 
-jest.mock('../services/ApprovalEngineService');
+jest.mock('../services/ApprovalDecisionService');
 jest.mock('../services/ChangeRequestService');
 jest.mock('../services/TimeOffService');
 jest.mock('../services/EmployeeLoanService');
@@ -37,21 +37,21 @@ afterEach(() => jest.clearAllMocks());
 
 describe('dispatchPendingApprovalDecision', () => {
   it('throws when the pending approval does not exist', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce(null);
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce(null);
     await expect(dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null)).rejects.toThrow(
       'Pending approval not found'
     );
   });
 
   it('throws when the row has no linked entity (all four FKs null)', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce(basePa);
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce(basePa);
     await expect(dispatchPendingApprovalDecision(pool, 1, 9, 'approved', null)).rejects.toThrow(
       'Pending approval has no linked entity'
     );
   });
 
   it('dispatches to ChangeRequestService.advancePendingApproval', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       changeRequestId: 5,
     });
@@ -63,7 +63,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches approved to TimeOffService.approve', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       timeOffRequestId: 7,
     });
@@ -75,7 +75,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches rejected to TimeOffService.reject', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       timeOffRequestId: 7,
     });
@@ -86,7 +86,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches approved to EmployeeLoanService.approve (previously untested branch)', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       employeeLoanId: 3,
     });
@@ -98,7 +98,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches rejected to EmployeeLoanService.reject', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       employeeLoanId: 3,
     });
@@ -109,7 +109,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches approved to ShiftSwapService.approve', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       shiftSwapRequestId: 2,
     });
@@ -120,7 +120,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches rejected to ShiftSwapService.decline, not .reject', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       shiftSwapRequestId: 2,
     });
@@ -131,7 +131,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches approved to PolicyExceptionService.approve', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       policyExceptionId: 6,
     });
@@ -142,7 +142,7 @@ describe('dispatchPendingApprovalDecision', () => {
   });
 
   it('dispatches rejected to PolicyExceptionService.reject', async () => {
-    (ApprovalEngineService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
+    (ApprovalDecisionService.prototype.getPendingApprovalById as jest.Mock).mockResolvedValueOnce({
       ...basePa,
       policyExceptionId: 6,
     });

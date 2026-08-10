@@ -142,7 +142,7 @@ describe('EmployeeLoanService — residual arms', () => {
 
     const service = new EmployeeLoanService(pool);
     jest
-      .spyOn((service as unknown as { engine: { decidePendingApproval: () => unknown } }).engine, 'decidePendingApproval')
+      .spyOn((service as unknown as { decisions: { decidePendingApproval: () => unknown } }).decisions, 'decidePendingApproval')
       .mockResolvedValue({ isFinalStep: false } as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow('Failed to refresh loan');

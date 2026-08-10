@@ -7,7 +7,7 @@
  * state machine, and cancel ownership rules.
  *
  * create()/approve()/reject() now also drive the shared
- * ApprovalEngineService (pending_approvals) — see approvalEngine.service.test.ts
+ * ApprovalDecisionService (pending_approvals) — see approvalDecision.service.test.ts
  * for that engine's own unit tests. Here, `getWorkflowByChangeType` is left
  * to resolve "not found" (empty rows) by default so tests that aren't about
  * the workflow-creation path don't need to mock its extra queries.
@@ -252,13 +252,17 @@ describe('TimeOffService.cancel', () => {
 // (the engine's own behaviour has a dedicated suite).
 
 const engineOf = (service: TimeOffService) =>
-  (service as unknown as { engine: Record<string, jest.Mock> }).engine as unknown as {
-    getWorkflowByChangeType: (t: string) => unknown;
-    resolvePrimaryOrgUnitForUser: (u: number) => unknown;
-    canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
-    createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
-    wouldBeFinalStep: (id: number) => unknown;
-    decidePendingApproval: (...a: unknown[]) => unknown;
+  service as unknown as {
+    workflows: { getWorkflowByChangeType: (t: string) => unknown };
+    resolution: {
+      resolvePrimaryOrgUnitForUser: (u: number) => unknown;
+      canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+    };
+    decisions: {
+      createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
+      wouldBeFinalStep: (id: number) => unknown;
+      decidePendingApproval: (...a: unknown[]) => unknown;
+    };
   };
 
 const timeOffWorkflow = {
@@ -271,10 +275,10 @@ const timeOffWorkflow = {
 
 const spyWorkflowCreation = (service: TimeOffService, paResult: unknown) => {
   const engine = engineOf(service);
-  jest.spyOn(engine, 'getWorkflowByChangeType').mockResolvedValue(timeOffWorkflow as never);
-  jest.spyOn(engine, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
-  jest.spyOn(engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
-  return jest.spyOn(engine, 'createPendingApprovalForStep').mockResolvedValue(paResult as never);
+  jest.spyOn(engine.workflows, 'getWorkflowByChangeType').mockResolvedValue(timeOffWorkflow as never);
+  jest.spyOn(engine.resolution, 'resolvePrimaryOrgUnitForUser').mockResolvedValue(3 as never);
+  jest.spyOn(engine.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+  return jest.spyOn(engine.decisions, 'createPendingApprovalForStep').mockResolvedValue(paResult as never);
 };
 
 describe('TimeOffService.create — workflow attachment', () => {
@@ -346,9 +350,9 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
 
     const service = new TimeOffService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(false as never);
     const decide = jest
-      .spyOn(engine, 'decidePendingApproval')
+      .spyOn(engine.decisions, 'decidePendingApproval')
       .mockImplementation(async (...args: unknown[]) => {
         await (args[4] as () => Promise<unknown>)();
         return undefined as never;
@@ -370,8 +374,8 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
 
     const service = new TimeOffService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(false as never);
-    jest.spyOn(engine, 'decidePendingApproval').mockResolvedValue(undefined as never);
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(false as never);
+    jest.spyOn(engine.decisions, 'decidePendingApproval').mockResolvedValue(undefined as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow('Failed to retrieve time-off request');
   });
@@ -384,7 +388,7 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
     conn.execute.mockResolvedValueOnce([[], null]); // FOR UPDATE -> gone
 
     const service = new TimeOffService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow('Time-off request not found');
     expect(conn.rollback).toHaveBeenCalled();
@@ -398,7 +402,7 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
     conn.execute.mockResolvedValueOnce([[buildRow({ status: 'approved' })], null]);
 
     const service = new TimeOffService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow(/Cannot approve request in status 'approved'/);
   });
@@ -413,7 +417,7 @@ describe('TimeOffService.approve — steps and diagnosis', () => {
       .mockResolvedValueOnce([[{ id: 77 }], null]); // duplicate unavailability
 
     const service = new TimeOffService(pool);
-    jest.spyOn(engineOf(service), 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engineOf(service).decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
 
     await expect(service.approve(1, 99)).rejects.toThrow(/already has unavailability recorded/);
     expect(conn.rollback).toHaveBeenCalled();
@@ -429,7 +433,7 @@ describe('TimeOffService.reject — diagnosis arms', () => {
       .mockResolvedValueOnce([updateResult, null]); // guarded UPDATE
     for (const rows of refetchRows) execute.mockResolvedValueOnce([rows, null]);
     const service = new TimeOffService(pool);
-    jest.spyOn(engineOf(service), 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
+    jest.spyOn(engineOf(service).decisions, 'decidePendingApproval').mockImplementation(async (...args: unknown[]) => {
       await (args[4] as () => Promise<unknown>)();
       return undefined as never;
     });
@@ -469,9 +473,9 @@ describe('TimeOffService — residual arms', () => {
 
     const service = new TimeOffService(pool);
     const engine = engineOf(service);
-    jest.spyOn(engine, 'wouldBeFinalStep').mockResolvedValue(true as never);
+    jest.spyOn(engine.decisions, 'wouldBeFinalStep').mockResolvedValue(true as never);
     const decide = jest
-      .spyOn(engine, 'decidePendingApproval')
+      .spyOn(engine.decisions, 'decidePendingApproval')
       .mockImplementation(async (...args: unknown[]) => {
         const ctx = await (args[4] as () => Promise<{ actorUserId: number }>)();
         expect(ctx).toEqual({ actorUserId: 99 });

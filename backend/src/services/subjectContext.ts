@@ -4,7 +4,7 @@
  * WHY THIS IS ONE FUNCTION NOW. There were two versions of it, and they
  * disagreed. `ChangeRequestService.resolveProposerContext` took
  * `ORDER BY org_unit_id ASC LIMIT 1` — the lowest membership id, whichever that
- * happens to be — while `ApprovalEngineService.resolvePrimaryOrgUnitForUser`
+ * happens to be — while `ApproverResolutionService.resolvePrimaryOrgUnitForUser`
  * read `is_primary = 1`. For anyone belonging to exactly one unit the two agree,
  * which is why this survived; for anyone belonging to two, their change requests
  * were routed against a different org unit than their time off, and neither the
