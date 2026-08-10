@@ -4,7 +4,7 @@
  * @author Luca Ostinelli
  */
 
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 import ChangeRequests from './ChangeRequests';
@@ -216,6 +216,93 @@ describe('<ChangeRequests />', () => {
     await waitFor(() => expect(mockCreate).toHaveBeenCalled());
     await waitFor(() => expect(mockList).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('requires a change type before submitting', async () => {
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.click(screen.getByRole('button', { name: /submit change request/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/change type/i);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('requires an entity type before submitting', async () => {
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.type(screen.getByLabelText(/change type/i), 'Shift.Swap');
+    await userEvent.click(screen.getByRole('button', { name: /submit change request/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/entity type/i);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a proposed payload that is not valid JSON', async () => {
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.type(screen.getByLabelText(/change type/i), 'Shift.Swap');
+    await userEvent.type(screen.getByLabelText(/entity type/i), 'shift');
+    fireEvent.change(screen.getByLabelText(/proposed payload/i), { target: { value: '{not json' } });
+    await userEvent.click(screen.getByRole('button', { name: /submit change request/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/json/i);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it('submits the optional entity id and justification when provided', async () => {
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.type(screen.getByLabelText(/change type/i), 'Shift.Swap');
+    await userEvent.type(screen.getByLabelText(/entity type/i), 'shift');
+    await userEvent.type(screen.getByLabelText(/entity id/i), '42');
+    await userEvent.type(screen.getByLabelText(/^justification/i), 'Covering a colleague');
+    await userEvent.click(screen.getByRole('button', { name: /submit change request/i }));
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          changeType: 'Shift.Swap',
+          targetEntityType: 'shift',
+          targetEntityId: 42,
+          justification: 'Covering a colleague',
+        })
+      )
+    );
+  });
+
+  it('relays a create failure and leaves the modal open', async () => {
+    mockCreate.mockRejectedValueOnce(new Error('Change type already has a pending request'));
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.type(screen.getByLabelText(/change type/i), 'Shift.Swap');
+    await userEvent.type(screen.getByLabelText(/entity type/i), 'shift');
+    await userEvent.click(screen.getByRole('button', { name: /submit change request/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already has a pending request/i);
+    expect(screen.getByRole('dialog', { name: /new change request/i })).toBeInTheDocument();
+  });
+
+  it('resets the form each time the modal is reopened', async () => {
+    render(<ChangeRequests />);
+    await screen.findByText('TimeOff.Request');
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    await userEvent.type(screen.getByLabelText(/change type/i), 'Shift.Swap');
+    const dialog = screen.getByRole('dialog', { name: /new change request/i });
+    await userEvent.click(within(dialog).getByRole('button', { name: /cancel/i }));
+
+    await userEvent.click(screen.getByRole('button', { name: /new request/i }));
+    expect(screen.getByLabelText(/change type/i)).toHaveValue('');
   });
 
   it('shows All Requests tab for reviewers and loads all when clicked', async () => {

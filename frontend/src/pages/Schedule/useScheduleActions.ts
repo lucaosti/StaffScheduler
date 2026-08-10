@@ -92,11 +92,16 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
       const state = status.data?.state;
       if (state === 'completed') return status.data?.result;
       if (state === 'failed') {
-        throw new Error(status.data?.failedReason || t('schedule.optimizationFailedDefault'));
+        // ApiError, not a plain Error: handleGenerateSchedule's catch only
+        // trusts ApiError messages for display (a raw Error's message might
+        // be an unhelpful JS runtime string), and the reason the job itself
+        // reports is exactly the kind of safe, human-readable message that
+        // trust is for.
+        throw new ApiError(status.data?.failedReason || t('schedule.optimizationFailedDefault'));
       }
       // 'waiting' / 'active' / 'unknown' → keep polling.
     }
-    throw new Error(t('schedule.optimizationTimedOut'));
+    throw new ApiError(t('schedule.optimizationTimedOut'));
   };
 
   // A completion message that makes the engine unmistakable: the optimal run is
