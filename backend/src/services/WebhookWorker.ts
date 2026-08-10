@@ -2,12 +2,13 @@
  * Outbound webhook delivery worker (#315).
  *
  * Same shape as OutboxWorker/PushWorker (interval poll, FOR UPDATE SKIP
- * LOCKED batch claim, unref'd timer — see OutboxWorker for the #394
- * rationale), plus exponential backoff: `next_attempt_at` is pushed forward
- * on every failure (2^attempts minutes, capped at 60) instead of the flat
- * "eligible again next poll" the other two outboxes use, because a webhook
- * endpoint that's down tends to stay down — see the migration header for why
- * that distinction matters here specifically.
+ * LOCKED batch claim, unref'd timer, now both via `PollingWorker.ts` — see
+ * that file for the #394 rationale), plus exponential backoff:
+ * `next_attempt_at` is pushed forward on every failure (2^attempts minutes,
+ * capped at 60) instead of the flat "eligible again next poll" the other
+ * outboxes use, because a webhook endpoint that's down tends to stay down —
+ * see the migration header for why that distinction matters here
+ * specifically.
  *
  * Unlike email/push, there is no "is this configured" gate: a webhook
  * delivery only exists because WebhookService.dispatch already found a
@@ -20,14 +21,13 @@
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { signPayload } from './WebhookService';
+import { createPollingWorker, runPollingBatch } from './PollingWorker';
 
 const MAX_ATTEMPTS = 6;
 const BATCH_SIZE = 20;
 const DEFAULT_POLL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_BACKOFF_MINUTES = 60;
-
-let timer: ReturnType<typeof setInterval> | null = null;
 
 interface WebhookDeliveryRow extends RowDataPacket {
   id: number;
@@ -70,34 +70,36 @@ async function deliver(row: WebhookDeliveryRow): Promise<{ status: number }> {
 
 /** Process one batch of pending deliveries. Returns the number attempted. */
 export async function processWebhookOutboxOnce(pool: Pool): Promise<number> {
-  const conn: PoolConnection = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const [rows] = await conn.query<WebhookDeliveryRow[]>(
-      `SELECT wd.id, wd.subscription_id, wd.event_type, wd.payload, wd.attempts,
-              ws.url, ws.secret
-         FROM webhook_deliveries wd
-         JOIN webhook_subscriptions ws ON ws.id = wd.subscription_id
-        WHERE wd.status = 'pending' AND wd.attempts < ? AND wd.next_attempt_at <= NOW()
-        ORDER BY wd.created_at
-        LIMIT ${BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED`,
-      [MAX_ATTEMPTS]
-    );
-
-    for (const row of rows) {
-      try {
-        const { status } = await deliver(row);
-        await conn.execute(
-          `UPDATE webhook_deliveries
-              SET status = 'sent', attempts = attempts + 1, response_status = ?, processed_at = NOW()
-            WHERE id = ?`,
-          [status, row.id]
-        );
-      } catch (err) {
-        const attempts = row.attempts + 1;
+  return runPollingBatch<WebhookDeliveryRow, { status: number }>(pool, {
+    label: 'Webhook outbox',
+    attemptsOf: (row) => row.attempts,
+    claim: (conn: PoolConnection) =>
+      conn
+        .query<WebhookDeliveryRow[]>(
+          `SELECT wd.id, wd.subscription_id, wd.event_type, wd.payload, wd.attempts,
+                  ws.url, ws.secret
+             FROM webhook_deliveries wd
+             JOIN webhook_subscriptions ws ON ws.id = wd.subscription_id
+            WHERE wd.status = 'pending' AND wd.attempts < ? AND wd.next_attempt_at <= NOW()
+            ORDER BY wd.created_at
+            LIMIT ${BATCH_SIZE}
+            FOR UPDATE SKIP LOCKED`,
+          [MAX_ATTEMPTS]
+        )
+        .then(([rows]) => rows),
+    deliver,
+    outcome: {
+      onSent: (conn, row, result) =>
+        conn
+          .execute(
+            `UPDATE webhook_deliveries
+                SET status = 'sent', attempts = attempts + 1, response_status = ?, processed_at = NOW()
+              WHERE id = ?`,
+            [result.status, row.id]
+          )
+          .then(() => undefined),
+      onFailure: async (conn, row, attempts, message, err) => {
         const failed = attempts >= MAX_ATTEMPTS;
-        const message = err instanceof Error ? err.message : String(err);
         const responseStatus = (err as { responseStatus?: number } | undefined)?.responseStatus ?? null;
         await conn.execute(
           `UPDATE webhook_deliveries
@@ -117,34 +119,19 @@ export async function processWebhookOutboxOnce(pool: Pool): Promise<number> {
         logger.warn(
           `Webhook delivery ${row.id} failed (attempt ${attempts}/${MAX_ATTEMPTS})${failed ? ' — giving up' : ` — retrying in ${backoffMinutes(attempts)}m`}: ${message}`
         );
-      }
-    }
-
-    await conn.commit();
-    return rows.length;
-  } catch (err) {
-    await conn.rollback();
-    logger.error('Webhook outbox poll failed', { error: err instanceof Error ? err.message : err });
-    return 0;
-  } finally {
-    conn.release();
-  }
+      },
+    },
+  });
 }
+
+const worker = createPollingWorker('Webhook outbox', processWebhookOutboxOnce);
 
 /** Starts the poller. Call once at startup; the timer is unref'd so it never keeps the process alive on its own. */
 export function startWebhookWorker(pool: Pool, pollMs: number = DEFAULT_POLL_MS): void {
-  if (timer) return;
-  timer = setInterval(() => {
-    void processWebhookOutboxOnce(pool);
-  }, pollMs);
-  timer.unref?.();
-  logger.info('Webhook outbox worker started');
+  worker.start(pool, pollMs);
 }
 
 /** Stop the poller on graceful shutdown. */
 export function stopWebhookWorker(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+  worker.stop();
 }
