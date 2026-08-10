@@ -2,7 +2,7 @@
  * Route handler tests for `routes/shifts.ts`.
  *
  * Auth middleware is stubbed so that req.user is configurable per test.
- * ShiftService is fully mocked.
+ * ShiftService and ShiftTemplateService are fully mocked.
  *
  * @author Luca Ostinelli
  */
@@ -32,9 +32,11 @@ jest.mock('../middleware/auth', () => ({
 }));
 
 jest.mock('../services/ShiftService');
+jest.mock('../services/ShiftTemplateService');
 jest.mock('../services/DemandForecastService');
 
 import { ShiftService } from '../services/ShiftService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 import { DemandForecastService } from '../services/DemandForecastService';
 import { createShiftsRouter } from '../routes/shifts';
 import { NotFoundError } from '../errors';
@@ -59,7 +61,7 @@ beforeEach(() => {
 
 describe('shifts router GET /templates', () => {
   it('returns 200 with all templates', async () => {
-    (ShiftService.prototype.getAllShiftTemplates as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getAllShiftTemplates as jest.Mock) = jest
       .fn()
       .mockResolvedValue([{ id: 1, name: 'Morning' }, { id: 2, name: 'Evening' }]);
 
@@ -71,7 +73,7 @@ describe('shifts router GET /templates', () => {
   });
 
   it('returns 500 on error', async () => {
-    (ShiftService.prototype.getAllShiftTemplates as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getAllShiftTemplates as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -84,7 +86,7 @@ describe('shifts router GET /templates', () => {
 
 describe('shifts router GET /templates/:id', () => {
   it('returns 200 when template found', async () => {
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 5, name: 'Morning' });
 
@@ -96,7 +98,7 @@ describe('shifts router GET /templates/:id', () => {
   });
 
   it('returns 404 when template not found', async () => {
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockResolvedValue(null);
 
@@ -112,7 +114,7 @@ describe('shifts router GET /templates/:id', () => {
   });
 
   it('returns 500 on error', async () => {
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -136,7 +138,7 @@ describe('shifts router POST /templates', () => {
   };
 
   it('returns 201 on successful creation', async () => {
-    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.createShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 10, name: 'Night' });
 
@@ -150,7 +152,7 @@ describe('shifts router POST /templates', () => {
   });
 
   it('returns 500 on service error', async () => {
-    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.createShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -165,7 +167,7 @@ describe('shifts router POST /templates', () => {
 
 describe('shifts router PUT /templates/:id', () => {
   it('returns 200 on successful update', async () => {
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 5, name: 'Updated Template' });
 
@@ -179,7 +181,7 @@ describe('shifts router PUT /templates/:id', () => {
   });
 
   it('returns 404 when template not found', async () => {
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue(null);
 
@@ -197,7 +199,7 @@ describe('shifts router PUT /templates/:id', () => {
   });
 
   it('returns 500 on service error', async () => {
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
@@ -212,7 +214,7 @@ describe('shifts router PUT /templates/:id', () => {
 
 describe('shifts router DELETE /templates/:id', () => {
   it('returns 200 on successful delete', async () => {
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue(true);
 
@@ -223,7 +225,7 @@ describe('shifts router DELETE /templates/:id', () => {
   });
 
   it('returns 404 when template not found', async () => {
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue(false);
 
@@ -239,7 +241,7 @@ describe('shifts router DELETE /templates/:id', () => {
   });
 
   it('returns 500 on service error', async () => {
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('db error'));
 
