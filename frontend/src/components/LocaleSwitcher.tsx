@@ -1,7 +1,7 @@
 /**
  * Locale switcher dropdown.
  *
- * Runtime UI-language selection: EN/IT/AR today (`SUPPORTED_LOCALES`).
+ * Runtime UI-language selection: EN/IT/AR/ES today (`SUPPORTED_LOCALES`).
  * Selecting a locale calls `i18n.changeLanguage`, which persists the choice
  * (via `i18next-browser-languagedetector`'s localStorage cache) and re-renders
  * every mounted `useTranslation()` consumer, including `DirectionSync`, which
