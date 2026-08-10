@@ -1,5 +1,5 @@
 /**
- * Current-user preferences hook (TanStack Query).
+ * Current-user preferences hooks (TanStack Query).
  *
  * The Settings page hydrates an editable local form from the saved preferences.
  * Fetching them through a cached query (instead of a bespoke mount effect) means
@@ -11,16 +11,32 @@
  * @author Luca Ostinelli
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { getMyPreferences, type UserPreferences } from '../services/preferencesService';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  getMyPreferences,
+  updateMyPreferences,
+  type UpsertPreferencesInput,
+  type UserPreferences,
+} from '../services/preferencesService';
+
+export const myPreferencesKey = ['my-preferences'] as const;
 
 /** The current user's saved preferences (null when none/failed). */
 export function useMyPreferencesQuery() {
   return useQuery({
-    queryKey: ['my-preferences'],
+    queryKey: myPreferencesKey,
     queryFn: async (): Promise<UserPreferences | null> => {
       const res = await getMyPreferences();
       return res?.success && res?.data ? (res.data as UserPreferences) : null;
     },
+  });
+}
+
+/** Saves the current user's preferences and invalidates the cached copy. */
+export function useUpdateMyPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpsertPreferencesInput) => updateMyPreferences(input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: myPreferencesKey }),
   });
 }

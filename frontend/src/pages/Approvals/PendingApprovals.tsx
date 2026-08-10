@@ -19,21 +19,15 @@
  */
 
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import {
-  approvePendingItem,
-  rejectPendingItem,
-  keepPendingItem,
-  delegatePendingItem,
-  openPendingItemToStructure,
   getDecisionChain,
   PendingApprovalItem,
   DecisionChain,
 } from '../../services/pendingApprovalService';
 import { listMembersDetailed, OrgUnitMemberDetail } from '../../services/orgService';
-import { pendingApprovalsKey, usePendingApprovalsQuery } from '../../hooks/usePendingApprovals';
+import { usePendingApprovalsQuery, usePendingApprovalMutations } from '../../hooks/usePendingApprovals';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 
@@ -64,7 +58,6 @@ const PendingApprovals: React.FC = () => {
   const { user } = useAuth();
   const currentUserId = user?.id ? Number(user.id) : null;
 
-  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
   const [actionError, setError] = useState<string | null>(null);
 
@@ -72,7 +65,6 @@ const PendingApprovals: React.FC = () => {
   const [decisionTarget, setDecisionTarget] = useState<PendingApprovalItem | null>(null);
   const [decisionMode, setDecisionMode] = useState<DecisionMode>('approve');
   const [note, setNote] = useState('');
-  const [deciding, setDeciding] = useState(false);
   const [decisionError, setDecisionError] = useState<string | null>(null);
 
   // Expanded row: chain-of-command panel + (for structure heads) delegation controls
@@ -81,19 +73,20 @@ const PendingApprovals: React.FC = () => {
   const [chainLoading, setChainLoading] = useState(false);
   const [members, setMembers] = useState<OrgUnitMemberDetail[]>([]);
   const [delegateTargetId, setDelegateTargetId] = useState<string>('');
-  const [delegating, setDelegating] = useState(false);
   const [delegateError, setDelegateError] = useState<string | null>(null);
 
-  // Main queue via TanStack Query (keyed by filter); decision mutations call
-  // load() to invalidate it. Load errors come from the query; action/chain
-  // errors are set locally.
+  // Main queue via TanStack Query (keyed by filter). Load errors come from
+  // the query; action/chain errors are set locally.
   const queueQuery = usePendingApprovalsQuery(filter);
   const items = queueQuery.data ?? [];
   const loading = queueQuery.isLoading;
   const error = queueQuery.isError
     ? (queueQuery.error as Error).message ?? t('approvals.loadFailed')
     : actionError;
-  const load = () => queryClient.invalidateQueries({ queryKey: pendingApprovalsKey });
+  const { approve, reject, keep, delegate, openToStructure } = usePendingApprovalMutations();
+  const deciding = approve.isPending || reject.isPending;
+  const delegating = keep.isPending || delegate.isPending || openToStructure.isPending;
+  const load = () => queueQuery.refetch();
 
   const toggleExpand = async (item: PendingApprovalItem) => {
     if (expandedId === item.id) {
@@ -134,64 +127,48 @@ const PendingApprovals: React.FC = () => {
 
   const handleDecisionConfirm = async () => {
     if (!decisionTarget) return;
-    setDeciding(true);
     setDecisionError(null);
     try {
       if (decisionMode === 'approve') {
-        await approvePendingItem(decisionTarget.id, note || undefined);
+        await approve.mutateAsync({ id: decisionTarget.id, note: note || undefined });
       } else {
-        await rejectPendingItem(decisionTarget.id, note || undefined);
+        await reject.mutateAsync({ id: decisionTarget.id, note: note || undefined });
       }
       setDecisionTarget(null);
-      await load();
     } catch (e) {
       setDecisionError((e as Error).message ?? t('approvals.actionFailed'));
-    } finally {
-      setDeciding(false);
     }
   };
 
   const handleKeep = async (item: PendingApprovalItem) => {
-    setDelegating(true);
     setDelegateError(null);
     try {
-      await keepPendingItem(item.id);
+      await keep.mutateAsync(item.id);
       await refreshChain(item.id);
-      await load();
     } catch (e) {
       setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    } finally {
-      setDelegating(false);
     }
   };
 
   const handleDelegate = async (item: PendingApprovalItem) => {
     const targetUserId = Number(delegateTargetId);
     if (!targetUserId) return;
-    setDelegating(true);
     setDelegateError(null);
     try {
-      await delegatePendingItem(item.id, targetUserId);
+      await delegate.mutateAsync({ id: item.id, targetUserId });
       await refreshChain(item.id);
-      await load();
     } catch (e) {
       setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    } finally {
-      setDelegating(false);
     }
   };
 
   const handleOpenToStructure = async (item: PendingApprovalItem) => {
-    setDelegating(true);
     setDelegateError(null);
     try {
-      await openPendingItemToStructure(item.id);
+      await openToStructure.mutateAsync(item.id);
       await refreshChain(item.id);
-      await load();
     } catch (e) {
       setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
-    } finally {
-      setDelegating(false);
     }
   };
 

@@ -20,8 +20,7 @@ import GeofenceSection from '../Settings/GeofenceSection';
 import KioskDevicesSection from '../Settings/KioskDevicesSection';
 import CostPlansSection from '../Settings/CostPlansSection';
 import TranslationOverridesSection from '../Settings/TranslationOverridesSection';
-import { updateMyPreferences } from '../../services/preferencesService';
-import { useMyPreferencesQuery } from '../../hooks/usePreferences';
+import { useMyPreferencesQuery, useUpdateMyPreferences } from '../../hooks/usePreferences';
 
 interface UserSettings {
   personalSettings: {
@@ -83,6 +82,7 @@ const Settings: React.FC = () => {
   // the editable work-settings state once they resolve. Failure is non-fatal —
   // the query yields null and the defaults above stand.
   const { data: savedPreferences } = useMyPreferencesQuery();
+  const updatePreferences = useUpdateMyPreferences();
   useEffect(() => {
     if (!savedPreferences) return;
     setSettings((prev) => ({
@@ -106,7 +106,7 @@ const Settings: React.FC = () => {
       timezone: personalSettings.timezone,
       notifications: personalSettings.notifications,
     });
-    await updateMyPreferences({ notes });
+    await updatePreferences.mutateAsync({ notes });
   };
 
   // Work scheduling constraints map directly to the preferences API fields.
