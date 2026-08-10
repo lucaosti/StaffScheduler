@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { PendingApprovalItem } from '../../services/pendingApprovalService';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 type DecisionMode = 'approve' | 'reject';
 
@@ -81,7 +82,7 @@ const DecisionModal: React.FC<Props> = ({ target, mode, deciding, onClose, onCon
               aria-label={mode === 'approve' ? t('approvals.confirmApproveAriaLabel') : t('approvals.confirmRejectAriaLabel')}
             >
               {deciding ? (
-                <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('approvals.saving')}</>
+                <><ButtonSpinner />{t('approvals.saving')}</>
               ) : (
                 mode === 'approve' ? t('approvals.approve') : t('approvals.reject')
               )}
