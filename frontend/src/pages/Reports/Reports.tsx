@@ -18,6 +18,8 @@ import { formatCurrency, todayIso, firstOfMonthIso } from '../../utils/format';
 import BarChart from '../../components/BarChart';
 import ExportCsvLink from '../../components/ExportCsvLink';
 import { errorMessage } from '../../utils/notify';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import {
   useRangeReportsQuery,
   useReportSchedulesQuery,
@@ -44,10 +46,6 @@ const Reports: React.FC = () => {
 
   const schedules = schedulesQuery.data ?? [];
   const fairness = fairnessQuery.data ?? null;
-  const fairnessLoading = selectedScheduleId !== null && fairnessQuery.isLoading;
-  const fairnessError = fairnessQuery.isError
-    ? errorMessage(fairnessQuery.error, t('reports.fairness.loadFailed'))
-    : null;
 
   // Explicit "reload" from the form submit; the range query already reacts to
   // date changes, so this covers re-running with the same dates.
@@ -93,9 +91,7 @@ const Reports: React.FC = () => {
         </div>
       </form>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">{error}</div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={reload} />}
 
       <div className="row g-4 mb-4">
         <div className="col-lg-6">
@@ -245,16 +241,18 @@ const Reports: React.FC = () => {
           <div className="card-body text-muted">
             {t('reports.fairness.selectPrompt')}
           </div>
-        ) : fairnessLoading ? (
-          <div className="card-body text-muted">{t('common.loading')}</div>
-        ) : fairnessError ? (
+        ) : (
           <div className="card-body">
-            <div className="alert alert-danger mb-0" role="alert">{fairnessError}</div>
-          </div>
-        ) : fairness && fairness.perUser.length === 0 ? (
-          <div className="card-body text-muted">{t('reports.fairness.noAssignments')}</div>
-        ) : fairness ? (
-          <div className="card-body">
+            <QueryState
+              isLoading={fairnessQuery.isLoading}
+              isError={fairnessQuery.isError}
+              error={fairnessQuery.isError ? errorMessage(fairnessQuery.error, t('reports.fairness.loadFailed')) : null}
+              onRetry={() => fairnessQuery.refetch()}
+              isEmpty={!fairness || fairness.perUser.length === 0}
+              empty={<span className="text-muted">{t('reports.fairness.noAssignments')}</span>}
+            >
+            {fairness && (
+            <>
             <div className="row g-3 mb-3">
               {[
                 { label: t('reports.fairness.stats.employees'), value: fairness.stats.count },
@@ -308,8 +306,11 @@ const Reports: React.FC = () => {
                 </tbody>
               </table>
             </div>
+            </>
+            )}
+            </QueryState>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
