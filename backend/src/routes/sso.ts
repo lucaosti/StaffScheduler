@@ -6,9 +6,10 @@
  * the same class of action that permission already covers for the rest of
  * this application's configuration.
  *
- * The actual login/callback flow lives in `routes/auth.ts`, alongside the
- * password-login session-issuance code it shares (`setAccessCookie`/
- * `setRefreshCookie`) — this router is administration only.
+ * The actual login/callback flow lives in `routes/authSso.ts`, which shares
+ * the session-cookie issuance (`routes/authSession.ts`) with the
+ * password-login flow in `routes/auth.ts` — this router is administration
+ * only.
  *
  * @author Luca Ostinelli
  */

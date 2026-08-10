@@ -22,6 +22,7 @@ import { requestId } from './middleware/requestContext';
 import { requestLogger } from './middleware/requestLogger';
 
 import { createAuthRouter } from './routes/auth';
+import { createSsoAuthRouter } from './routes/authSso';
 import { createUsersRouter } from './routes/users';
 import { createDashboardRouter } from './routes/dashboard';
 import { createEmployeesRouter } from './routes/employees';
@@ -216,6 +217,8 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     app.use(`${prefix}/system`, createSystemRouter(pool));
     app.use(`${prefix}/auth/2fa`, createTwoFactorRouter(pool));
     app.use(`${prefix}/auth`, createAuthRouter(pool));
+    // Same prefix, separate Router instance — see routes/authSso.ts header.
+    app.use(`${prefix}/auth`, createSsoAuthRouter(pool));
     app.use(`${prefix}/users`, createUsersRouter(pool));
     app.use(`${prefix}/dashboard`, createDashboardRouter(pool));
     app.use(`${prefix}/employees`, createEmployeesRouter(pool));
