@@ -20,6 +20,7 @@ import { eventBus } from './services/EventBus';
 import { initOptimizationWorker, closeOptimizationQueue } from './services/OptimizationQueue';
 import { startOutboxWorker, stopOutboxWorker } from './services/OutboxWorker';
 import { startPushWorker, stopPushWorker } from './services/PushWorker';
+import { startNativePushWorker, stopNativePushWorker } from './services/NativePushWorker';
 import { startWebhookWorker, stopWebhookWorker } from './services/WebhookWorker';
 import { startPayrollExportWorker, stopPayrollExportWorker } from './services/PayrollExportWorker';
 import { initModuleCacheInvalidation } from './services/moduleCache';
@@ -80,6 +81,10 @@ export async function startServer(): Promise<void> {
     // Start the Web Push outbox delivery worker (no-op unless VAPID keys are configured).
     startPushWorker(pool);
 
+    // Start the native (Capacitor) push outbox delivery worker (no-op unless
+    // FCM/APNs credentials are configured).
+    startNativePushWorker(pool);
+
     // Start the webhook delivery worker. No config gate: it only ever has
     // rows to find once an organization creates a subscription, so an
     // unused deployment just polls an empty table.
@@ -102,6 +107,7 @@ export async function startServer(): Promise<void> {
       server.close(async () => {
         try { stopOutboxWorker(); } catch { /* ignore */ }
         try { stopPushWorker(); } catch { /* ignore */ }
+        try { stopNativePushWorker(); } catch { /* ignore */ }
         try { stopWebhookWorker(); } catch { /* ignore */ }
         try { stopPayrollExportWorker(); } catch { /* ignore */ }
         try { await closeOptimizationQueue(); } catch { /* ignore */ }

@@ -850,20 +850,34 @@ In-app notifications (`notifications` table) are the base layer — `Notificatio
 
 - **Email**: `email_outbox` — see `MailerService`/`OutboxWorker`, gated by `isEmailConfigured()`.
 - **Web Push** (#310): `push_subscriptions` (per-device registration) + `push_outbox` (delivery queue) — `PushService`/`PushWorker`, gated by `isPushConfigured()` (`VAPID_PUBLIC_KEY` + `VAPID_PRIVATE_KEY` both set; generate a pair with `npx web-push generate-vapid-keys`).
+- **Native push**: `device_push_tokens` (per-device registration) + `native_push_outbox` (delivery queue) — `NativePushService`/`NativePushWorker`, gated by `isNativePushConfigured()`. See below.
 
-`NotificationService.notifyWithin()` is the single seam: inside the SAME transaction as the notification row, it inserts one `email_outbox` row (if email is configured and the recipient has an address) and one `push_outbox` row **per active subscription** the recipient has registered (a person with push on two devices gets it on both). Either channel's write failing rolls back the whole notification — a notification that exists is a notification whose delivery intents are durably recorded, never a phantom promise.
+`NotificationService.notifyWithin()` is the single seam: inside the SAME transaction as the notification row, it inserts one `email_outbox` row (if email is configured and the recipient has an address), one `push_outbox` row **per active subscription** the recipient has registered (a person with Web Push on two browsers gets it on both), and one `native_push_outbox` row **per active device token** the recipient has registered (a person with the mobile app on two devices gets it on both). Any channel's write failing rolls back the whole notification — a notification that exists is a notification whose delivery intents are durably recorded, never a phantom promise.
 
 ```
-GET    /api/notifications/push/public-key   VAPID public key + `enabled` flag (always 200, never 404 — an
-                                              unconfigured deployment answers `enabled: false` so the SPA can
-                                              hide the toggle rather than surface a broken feature)
-POST   /api/notifications/push/subscribe    register/reactivate a device's push subscription
-DELETE /api/notifications/push/subscribe    deactivate a device's push subscription
+GET    /api/notifications/push/public-key     VAPID public key + `enabled` flag (always 200, never 404 — an
+                                                unconfigured deployment answers `enabled: false` so the SPA can
+                                                hide the toggle rather than surface a broken feature)
+POST   /api/notifications/push/subscribe      register/reactivate a device's Web Push subscription
+DELETE /api/notifications/push/subscribe      deactivate a device's Web Push subscription
+POST   /api/notifications/push/device-token   register/reactivate a mobile client's native push device token
+DELETE /api/notifications/push/device-token   deactivate a mobile client's native push device token
 ```
 
 **Delivery**: `PushWorker` polls `push_outbox` the same way `OutboxWorker` polls `email_outbox` (interval poll, `FOR UPDATE SKIP LOCKED` batch claim so multiple backend replicas coexist safely, retries up to 5 attempts). The one real difference: a send failing with HTTP 404/410 means the push service has permanently discarded the subscription (uninstalled, permission revoked, endpoint rotated) — that subscription is deactivated immediately rather than retried, since retrying a permanently-gone endpoint would just burn attempts until the generic cap kicked in anyway.
 
 **Frontend**: `usePushNotifications()` (`frontend/src/hooks/usePushNotifications.ts`) resolves subscription state by asking the browser's `PushManager.getSubscription()` first — the server only knows which endpoints it has been told about, and a browser can silently drop a subscription without ever telling it, so the browser is the source of truth for "is this device currently subscribed," not the backend. The toggle lives in Settings → Personal (`WebPushToggle.tsx`), deliberately separate from the pre-existing "Push Notifications" preference checkbox: that checkbox is a stored preference ("do I want push at all"), this is the per-device subscription mechanic ("has this specific browser completed the one-time subscribe step") — the two can legitimately disagree. `public/service-worker.js` handles the `push` event (shows the notification the payload describes) and `notificationclick` (focuses an already-open tab rather than piling up duplicates, falling back to opening one).
+
+### Native (mobile) push
+
+A genuinely separate transport from Web Push above, not a reuse: `PushService`/`PushWorker` speak VAPID/`web-push` to a browser's `PushManager`, a mechanism that does not exist inside a Capacitor WebView (no browser Push API). Native push instead needs a device token from Apple Push Notification service (iOS) or Firebase Cloud Messaging (Android), obtained on the client via `@capacitor/push-notifications`, and delivered server-side directly to APNs/FCM.
+
+`NativePushService` (`backend/src/services/NativePushService.ts`) owns `device_push_tokens` CRUD (`registerToken` upserts by token — an app reinstall or OS-issued rotation updates the row in place rather than duplicating it) and `sendNativePush(device, payload)`, which dispatches to FCM's legacy HTTP API for `platform: 'android'` or to APNs (a bearer JWT, ES256-signed with `jsonwebtoken`, refreshed roughly hourly) for `platform: 'ios'`. `isNativePushConfigured()` is true when EITHER transport has credentials (`FCM_SERVER_KEY`, or all of `APNS_KEY_ID`/`APNS_TEAM_ID`/`APNS_PRIVATE_KEY`/`APNS_BUNDLE_ID`) — a deployment can ship one platform before the other. A send attempted for a platform with no credentials fails loudly with a descriptive error rather than doing nothing, the same posture `GustoProvider` takes for its own vendor integration; no real FCM/APNs credentials ship with this repository, so both providers are implementation-and-fixture-only here, unverified against a live account (the exact caveat `GustoProvider`'s own header carries).
+
+**Delivery**: `NativePushWorker` polls `native_push_outbox` with the same shape as `PushWorker` (interval poll, `FOR UPDATE SKIP LOCKED`, 5 retries). The one real difference from the Web Push worker: a `NativePushGoneError` (FCM reporting `NotRegistered`/`InvalidRegistration`, or APNs reporting `Unregistered`/`BadDeviceToken`) deactivates the device token immediately instead of retrying — each vendor signals "this token is permanently invalid" in its own response shape rather than a shared 404/410, so the worker relies on a typed error the provider throws instead of an HTTP status code.
+
+**Mobile client**: `frontend/src/services/nativePushService.ts` runs only under `Capacitor.isNativePlatform()`. `registerForNativePush()` is called once, right after a successful login (`AuthContext.tsx`) — the same lifecycle point the mobile auth flow's token persistence hooks into (§5 "Mobile client:
+token-based variant"). It requests push permission, calls `PushNotifications.register()`, and on the plugin's `registration` event POSTs the token to `/api/notifications/push/device-token`. A `pushNotificationActionPerformed` tap navigates to the notifications list; deep-linking to the specific notification's target is out of scope for this first version (a fast-follow), matching the design decision that motivated this feature.
 
 ---
 
@@ -1037,8 +1051,11 @@ directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` o
 - Placeholder app icon and splash screen assets are the Capacitor template defaults for
   both platforms (`mobile/ios/App/App/Assets.xcassets`,
   `mobile/android/app/src/main/res/**`); no custom branded assets have been designed yet.
-- Auth flow, calendar views, push notifications, and store publishing are **not**
-  implemented — each is tracked as its own follow-up issue and builds on this scaffold.
+- Auth flow (mobile-client token-in-body mode, see §5 "Mobile client:
+  token-based variant") and push notifications (native device tokens
+  delivered through FCM/APNs, see §7c) are implemented. Calendar views and
+  store publishing are **not** — each is tracked as its own follow-up issue
+  and builds on this scaffold.
 
 **CI**: `mobile/` is covered by the root `npm install`/`npm ci` step (it is a workspace
 member like `backend`, `frontend`, and `packages/*`), but has no dedicated lint/test/build

@@ -12804,6 +12804,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/notifications/push/device-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register or reactivate a mobile client's native push device token
+         * @description A separate transport from Web Push above: the APNs (iOS) / FCM (Android) device token a mobile client's `@capacitor/push-notifications` `registration` listener returns, not a browser `PushSubscription`. Re-registering the same token (app reinstall, OS-issued rotation) updates the row in place rather than creating a duplicate. Module `notifications` must be enabled (404 otherwise).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        platform: "ios" | "android";
+                        token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description The stored device token. */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        /**
+         * Deactivate a mobile client's native push device token
+         * @description Deactivates rather than deletes — same audit-trail reasoning as the email outbox and the Web Push subscription. Module `notifications` must be enabled (404 otherwise).
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        token: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Deactivated. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                400: components["responses"]["ValidationError"];
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/webhooks": {
         parameters: {
             query?: never;
