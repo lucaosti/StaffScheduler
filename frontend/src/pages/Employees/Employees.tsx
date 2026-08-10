@@ -4,14 +4,9 @@
  * Comprehensive employee management interface providing CRUD operations,
  * search functionality, and detailed employee information display.
  *
- * Features:
- * - Employee listing with pagination and sorting
- * - Advanced search and filtering capabilities
- * - Add, edit, and delete employee operations
- * - Employee details modal with full information
- * - Bulk operations for multiple employees
- * - Export functionality for employee data
- * - Real-time updates and error handling
+ * The row list (with per-row actions and the empty state) lives in
+ * EmployeeTable; the create/edit form lives in EmployeeModal. This file owns
+ * the filters, the query wiring, and the delete-confirm flow.
  *
  * @author Luca Ostinelli
  */
@@ -25,13 +20,14 @@ import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import ExportCsvLink from '../../components/ExportCsvLink';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
+import EmployeeTable from './EmployeeTable';
+import EmployeeModal from './EmployeeModal';
 import {
   useEmployeesQuery,
   useDepartmentsQuery,
   useDeleteEmployee,
   useSaveEmployee,
 } from '../../hooks/useEmployees';
-
 
 /**
  * Employees page component providing complete employee management.
@@ -82,6 +78,28 @@ const Employees: React.FC = () => {
       await deleteEmployee.mutateAsync(id);
     } catch (_err) {
       setActionError(t('employees.deleteFailed'));
+    }
+  };
+
+  const closeModal = () => {
+    setShowAddModal(false);
+    setEditingEmployee(null);
+  };
+
+  const handleSaveEmployee = async (data: Parameters<typeof employeeService.createEmployee>[0]) => {
+    if (editingEmployee && !editingEmployee.id) {
+      // Guard: leave modal open so the user can see the error message.
+      setActionError(t('employees.missingIdError'));
+      return;
+    }
+    try {
+      await saveEmployee.mutateAsync({
+        id: editingEmployee ? editingEmployee.id!.toString() : undefined,
+        data,
+      });
+      closeModal();
+    } catch (_err) {
+      setActionError(t('employees.saveFailed'));
     }
   };
 
@@ -184,95 +202,14 @@ const Employees: React.FC = () => {
             onRetry={() => employeesQuery.refetch()}
             loadingMessage={t('employees.loading')}
           >
-          <div className="table-responsive">
-            <table className="table table-hover mb-0">
-              <thead>
-                <tr>
-                  <th scope="col">{t('employees.columns.employee')}</th>
-                  <th scope="col">{t('employees.columns.department')}</th>
-                  <th scope="col">{t('employees.columns.position')}</th>
-                  <th scope="col">{t('employees.columns.hourlyRate')}</th>
-                  <th scope="col">{t('employees.columns.status')}</th>
-                  <th scope="col" style={{ width: '120px' }}>{t('employees.columns.actions')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEmployees.map((employee) => (
-                  <tr key={employee.id || employee.employeeId}>
-                    <td>
-                      <div className="d-flex align-items-center">
-                        <div className="bg-primary bg-opacity-10 rounded-circle p-2 me-3">
-                          <i className="bi bi-person text-primary" aria-hidden="true"></i>
-                        </div>
-                        <div>
-                          <div className="fw-medium">
-                            {employee.firstName} {employee.lastName}
-                          </div>
-                          <small className="text-muted">{employee.email}</small>
-                          <br />
-                          <small className="text-muted">{t('employees.idPrefix')} {employee.employeeId}</small>
-                        </div>
-                      </div>
-                    </td>
-                    <td>{employee.department || t('common.emptyValue')}</td>
-                    <td>{employee.position || t('common.emptyValue')}</td>
-                    <td>
-                      {employee.hourlyRate ? `€${employee.hourlyRate.toFixed(2)}` : t('common.emptyValue')}
-                    </td>
-                    <td>
-                      <span className={`badge ${
-                        employee.isActive ? 'bg-success' : 'bg-secondary'
-                      }`}>
-                        {employee.isActive ? t('employees.status.active') : t('employees.status.inactive')}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="btn-group btn-group-sm">
-                        <button
-                          className="btn btn-outline-primary"
-                          onClick={() => setEditingEmployee(employee)}
-                          title={t('employees.editEmployeeTitle')}
-                          aria-label={t('employees.editEmployeeAriaLabel')}
-                        >
-                          <i className="bi bi-pencil" aria-hidden="true"></i>
-                        </button>
-                        <button
-                          className="btn btn-outline-danger"
-                          onClick={() => employee.id !== undefined && handleDeleteEmployee(employee.id)}
-                          title={t('employees.deleteEmployeeTitle')}
-                          aria-label={t('employees.deleteEmployeeAriaLabel')}
-                        >
-                          <i className="bi bi-trash" aria-hidden="true"></i>
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {filteredEmployees.length === 0 && (
-            <div className="text-center py-5">
-              <i className="bi bi-people text-muted" style={{ fontSize: '3rem' }} aria-hidden="true"></i>
-              <h5 className="mt-3">{t('employees.noneFound')}</h5>
-              <p className="text-muted">
-                {searchTerm || selectedDepartment
-                  ? t('employees.tryAdjustingFilters')
-                  : t('employees.getStarted')
-                }
-              </p>
-              {!searchTerm && !selectedDepartment && (
-                <button
-                  className="btn btn-primary"
-                  onClick={() => setShowAddModal(true)}
-                >
-                  <i className="bi bi-plus-lg me-2"></i>
-                  {t('employees.addFirstEmployee')}
-                </button>
-              )}
-            </div>
-          )}
+            <EmployeeTable
+              employees={filteredEmployees}
+              searchTerm={searchTerm}
+              selectedDepartment={selectedDepartment}
+              onEdit={setEditingEmployee}
+              onDelete={handleDeleteEmployee}
+              onAddFirst={() => setShowAddModal(true)}
+            />
           </QueryState>
         </div>
       </div>
@@ -286,217 +223,13 @@ const Employees: React.FC = () => {
         onCancel={() => setConfirmDelete({ open: false, employeeId: null })}
       />
 
-      {/* Add/Edit Modal Placeholder */}
-      {(showAddModal || editingEmployee) && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-lg">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  {editingEmployee ? t('employees.modal.editTitle') : t('employees.modal.addTitle')}
-                </h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={() => {
-                    setShowAddModal(false);
-                    setEditingEmployee(null);
-                  }}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  const formData = new FormData(e.currentTarget);
-
-                  const rawDeptId = formData.get('departmentId') as string;
-                  const deptId = rawDeptId ? parseInt(rawDeptId, 10) : NaN;
-                  const rawHourlyRate = formData.get('hourlyRate') as string;
-                  const parsedHourlyRate = rawHourlyRate ? parseFloat(rawHourlyRate) : NaN;
-                  const employeeData: Parameters<typeof employeeService.createEmployee>[0] = {
-                    employeeId: formData.get('employeeId') as string,
-                    firstName: formData.get('firstName') as string,
-                    lastName: formData.get('lastName') as string,
-                    email: formData.get('email') as string,
-                    // Required by createUserBody on create; absent on update.
-                    password: (formData.get('password') as string) ?? '',
-                    phone: (formData.get('phone') as string) || undefined,
-                    position: (formData.get('position') as string) || undefined,
-                    departmentIds: !isNaN(deptId) && deptId > 0 ? [deptId] : undefined,
-                    hourlyRate: !isNaN(parsedHourlyRate) && parsedHourlyRate >= 0 ? parsedHourlyRate : undefined,
-                  };
-
-                  try {
-                    if (editingEmployee && !editingEmployee.id) {
-                      // Guard: leave modal open so the user can see the error message.
-                      setActionError(t('employees.missingIdError'));
-                      return;
-                    }
-                    await saveEmployee.mutateAsync({
-                      id: editingEmployee ? editingEmployee.id!.toString() : undefined,
-                      data: employeeData,
-                    });
-                    setShowAddModal(false);
-                    setEditingEmployee(null);
-                  } catch (_err) {
-                    setActionError(t('employees.saveFailed'));
-                  }
-                }}>
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="employeeId" className="form-label">{t('employees.form.employeeId')}</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        id="employeeId"
-                        name="employeeId"
-                        defaultValue={editingEmployee?.employeeId || ''}
-                        required
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="email" className="form-label">{t('employees.form.email')}</label>
-                      <input
-                        type="email"
-                        className="form-control"
-                        id="email"
-                        name="email"
-                        defaultValue={editingEmployee?.email || ''}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  {/*
-                    POST /employees validates against the shared createUserBody
-                    schema, which requires a password of at least 8 characters.
-                    The form did not collect one, so every creation from the UI
-                    was rejected with a 400 — invisible because the frontend
-                    payload type did not declare the field either. Updates go
-                    through updateUserBody, which has no password, so this is
-                    shown and required only when creating.
-                  */}
-                  {!editingEmployee && (
-                    <div className="row">
-                      <div className="col-md-6 mb-3">
-                        <label htmlFor="password" className="form-label">{t('employees.form.initialPassword')}</label>
-                        <input
-                          type="password"
-                          className="form-control"
-                          id="password"
-                          name="password"
-                          minLength={8}
-                          autoComplete="new-password"
-                          required
-                        />
-                        <div className="form-text">{t('employees.form.passwordHelp')}</div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="firstName" className="form-label">{t('employees.form.firstName')}</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        id="firstName"
-                        name="firstName"
-                        defaultValue={editingEmployee?.firstName || ''}
-                        required
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="lastName" className="form-label">{t('employees.form.lastName')}</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        id="lastName"
-                        name="lastName"
-                        defaultValue={editingEmployee?.lastName || ''}
-                        required
-                      />
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="phone" className="form-label">{t('employees.form.phone')}</label>
-                      <input
-                        type="tel"
-                        className="form-control"
-                        id="phone"
-                        name="phone"
-                        defaultValue={editingEmployee?.phone || ''}
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="departmentId" className="form-label">{t('employees.form.department')}</label>
-                      <select
-                        className="form-select"
-                        id="departmentId"
-                        name="departmentId"
-                        defaultValue={
-                          editingEmployee?.department
-                            ? (allDepartments.find((d) => d.name === editingEmployee.department)?.id?.toString() ?? '')
-                            : ''
-                        }
-                      >
-                        <option value="">{t('employees.form.noneOption')}</option>
-                        {allDepartments.map((d) => (
-                          <option key={d.id} value={d.id}>{d.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="position" className="form-label">{t('employees.form.position')}</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        id="position"
-                        name="position"
-                        defaultValue={editingEmployee?.position || ''}
-                        placeholder={t('employees.form.positionPlaceholder')}
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label htmlFor="hourlyRate" className="form-label">{t('employees.form.hourlyRate')}</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        className="form-control"
-                        id="hourlyRate"
-                        name="hourlyRate"
-                        defaultValue={editingEmployee?.hourlyRate ?? ''}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="modal-footer">
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      onClick={() => {
-                        setShowAddModal(false);
-                        setEditingEmployee(null);
-                      }}
-                    >
-                      {t('common.cancel')}
-                    </button>
-                    <button type="submit" className="btn btn-primary">
-                      {editingEmployee ? t('employees.modal.update') : t('employees.modal.create')}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <EmployeeModal
+        show={showAddModal || !!editingEmployee}
+        editingEmployee={editingEmployee}
+        departments={allDepartments}
+        onClose={closeModal}
+        onSubmit={handleSaveEmployee}
+      />
     </div>
   );
 };
