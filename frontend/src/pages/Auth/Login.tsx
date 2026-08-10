@@ -32,6 +32,7 @@ import { TwoFactorMethodType, requestLoginChallenge } from '../../services/twoFa
 import { runWebAuthnAuthentication } from '../../services/webAuthnClient';
 import ErrorAlert from '../../components/ErrorAlert';
 import type { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/browser';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 /**
  * Interface for location state with redirect information
@@ -301,7 +302,7 @@ const Login: React.FC = () => {
                     >
                       {isLoading ? (
                         <>
-                          <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                          <ButtonSpinner className="me-2" />
                           {t('auth.signingIn')}
                         </>
                       ) : (

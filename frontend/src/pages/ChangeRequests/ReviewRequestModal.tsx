@@ -8,6 +8,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChangeRequest } from '../../services/changeRequestService';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 type ReviewMode = 'approve' | 'reject';
 
@@ -85,7 +86,7 @@ const ReviewRequestModal: React.FC<Props> = ({ target, mode, reviewing, onClose,
               aria-label={mode === 'approve' ? t('changeRequests.confirmApproveAriaLabel') : t('changeRequests.confirmRejectAriaLabel')}
             >
               {reviewing ? (
-                <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('changeRequests.saving')}</>
+                <><ButtonSpinner />{t('changeRequests.saving')}</>
               ) : (
                 mode === 'approve' ? t('changeRequests.approve') : t('changeRequests.reject')
               )}

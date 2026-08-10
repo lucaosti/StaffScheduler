@@ -22,6 +22,7 @@ import WorkflowTable from './WorkflowTable';
 import WorkflowModal, { type WorkflowUpdatePayload } from './WorkflowModal';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 const ApprovalWorkflows: React.FC = () => {
   const { t } = useTranslation();
@@ -136,7 +137,7 @@ const ApprovalWorkflows: React.FC = () => {
                   aria-label={t('admin.approvalWorkflows.deleteModal.confirmAriaLabel', { changeType: deleteTarget.changeType })}
                 >
                   {deleting ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.approvalWorkflows.deleteModal.deleting')}</>
+                    <><ButtonSpinner />{t('admin.approvalWorkflows.deleteModal.deleting')}</>
                   ) : t('common.delete')}
                 </button>
               </div>

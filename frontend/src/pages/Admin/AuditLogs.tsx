@@ -32,6 +32,7 @@ import { buildExportUrl, AuditLogFilters } from '../../services/auditLogService'
 import { useAuditLogsQuery } from '../../hooks/useAuditLogs';
 import ErrorAlert from '../../components/ErrorAlert';
 import type { Timestamp } from '../../types';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 const PAGE_SIZE = 50;
 
@@ -249,7 +250,7 @@ const AuditLogs: React.FC = () => {
         <div className="card-header d-flex align-items-center justify-content-between">
           <h6 className="mb-0">
             {loading ? (
-              <><span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>{t('common.loading')}</>
+              <><ButtonSpinner className="me-2" />{t('common.loading')}</>
             ) : (
               <>{t('admin.auditLogs.entriesCount', { count: total })}</>
             )}
