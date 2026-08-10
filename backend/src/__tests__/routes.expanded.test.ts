@@ -2114,6 +2114,18 @@ describe('directory router (extended)', () => {
 describe('events router', () => {
   it('GET /stream emits hello frame and unsubscribes on close', async () => {
     const { createEventsRouter } = await import('../routes/events');
+    const { eventBus } = await import('../services/EventBus');
+    // Waiting on the CLIENT socket's 'close' only proves the client saw the
+    // connection end — the server-side cleanup (clearInterval + unsubscribe)
+    // runs on its own 'close'/'end' listeners and is not guaranteed to have
+    // completed by then. That race once left the real, unref'd heartbeat
+    // timer armed past the end of this test (#556) — waiting on the spy
+    // instead pins that server-side cleanup has actually run before the
+    // test, and the server, tear down.
+    const unsubscribed = new Promise<void>((resolve) => {
+      jest.spyOn(eventBus, 'unsubscribe').mockImplementation(() => resolve());
+    });
+
     const app = mountApp('/api/events', createEventsRouter());
     const http = await import('http');
     const server = http.createServer(app);
@@ -2131,6 +2143,7 @@ describe('events router', () => {
       req.on('error', () => resolve());
       req.end();
     });
+    await unsubscribed;
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 });

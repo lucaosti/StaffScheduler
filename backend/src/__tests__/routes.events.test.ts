@@ -33,12 +33,14 @@ const buildFakePair = () => {
   req.user = { id: 42 };
   req.headers = {};
 
-  const res = {
+  // A real EventEmitter (not a plain jest.fn() bag) so tests can fire
+  // `error` on the response the same way an actual destroyed stream would.
+  const res = Object.assign(new EventEmitter(), {
     set: jest.fn().mockReturnThis(),
     flushHeaders: jest.fn(),
     write: jest.fn().mockReturnValue(true),
     end: jest.fn(),
-  } as unknown as Response;
+  }) as unknown as Response;
 
   return { req, res };
 };
@@ -108,6 +110,37 @@ describe('GET /stream — cleanup idempotency', () => {
     invokeStreamHandler(req, res);
 
     req.emit('end');
+
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up on a response error without throwing (#556)', () => {
+    // Writing to an already-destroyed response emits 'error' asynchronously,
+    // outside the heartbeat's try/catch. With no listener, Node treats that
+    // as an unhandled EventEmitter error and raises it as an uncaught
+    // exception — this pins that the route always has a listener, so the
+    // emit is absorbed instead of taking down the process.
+    const { req, res } = buildFakePair();
+    invokeStreamHandler(req, res);
+
+    expect(() => (res as unknown as EventEmitter).emit('error', new Error('write after end'))).not.toThrow();
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up on a request error without throwing (#556)', () => {
+    const { req, res } = buildFakePair();
+    invokeStreamHandler(req, res);
+
+    expect(() => req.emit('error', new Error('socket hang up'))).not.toThrow();
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not unsubscribe twice when close fires after an error already cleaned up', () => {
+    const { req, res } = buildFakePair();
+    invokeStreamHandler(req, res);
+
+    (res as unknown as EventEmitter).emit('error', new Error('write after end'));
+    req.emit('close');
 
     expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
   });
