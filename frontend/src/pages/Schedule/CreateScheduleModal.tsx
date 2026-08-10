@@ -19,6 +19,7 @@
  */
 
 import React, { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -44,6 +45,7 @@ const CreateScheduleModal: React.FC<Props> = ({
   onClose,
   onSubmit,
 }) => {
+  const { t } = useTranslation();
   const {
     register,
     handleSubmit,
@@ -74,12 +76,12 @@ const CreateScheduleModal: React.FC<Props> = ({
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title" id="create-schedule-title">
-              Create Schedule
+              {t('schedule.createModal.title')}
             </h5>
             <button
               type="button"
               className="btn-close"
-              aria-label="Close"
+              aria-label={t('common.close')}
               disabled={isCreating}
               onClick={onClose}
             ></button>
@@ -93,13 +95,13 @@ const CreateScheduleModal: React.FC<Props> = ({
               )}
               <div className="mb-3">
                 <label htmlFor="schedule-name" className="form-label">
-                  Name *
+                  {t('schedule.createModal.name')}
                 </label>
                 <input
                   id="schedule-name"
                   type="text"
                   className={`form-control${errors.name ? ' is-invalid' : ''}`}
-                  placeholder="e.g. April 2026 — ER"
+                  placeholder={t('schedule.createModal.namePlaceholder')}
                   disabled={isCreating}
                   {...register('name')}
                 />
@@ -108,7 +110,7 @@ const CreateScheduleModal: React.FC<Props> = ({
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="schedule-start" className="form-label">
-                    Start Date *
+                    {t('schedule.createModal.startDate')}
                   </label>
                   <input
                     id="schedule-start"
@@ -123,7 +125,7 @@ const CreateScheduleModal: React.FC<Props> = ({
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="schedule-end" className="form-label">
-                    End Date *
+                    {t('schedule.createModal.endDate')}
                   </label>
                   <input
                     id="schedule-end"
@@ -139,7 +141,7 @@ const CreateScheduleModal: React.FC<Props> = ({
               </div>
               <div className="mb-3">
                 <label htmlFor="schedule-department" className="form-label">
-                  Department *
+                  {t('schedule.createModal.department')}
                 </label>
                 <select
                   id="schedule-department"
@@ -150,8 +152,8 @@ const CreateScheduleModal: React.FC<Props> = ({
                 >
                   <option value="" disabled>
                     {departments.length === 0
-                      ? 'No departments available'
-                      : 'Select a department'}
+                      ? t('schedule.createModal.noDepartmentsAvailable')
+                      : t('schedule.createModal.selectDepartment')}
                   </option>
                   {departments.map((d) => (
                     <option key={d.id} value={String(d.id)}>
@@ -160,18 +162,18 @@ const CreateScheduleModal: React.FC<Props> = ({
                   ))}
                 </select>
                 {errors.departmentId && (
-                  <div className="invalid-feedback">Please select a department.</div>
+                  <div className="invalid-feedback">{t('schedule.createModal.departmentRequired')}</div>
                 )}
               </div>
               <div className="mb-3">
                 <label htmlFor="schedule-description" className="form-label">
-                  Description
+                  {t('schedule.createModal.description')}
                 </label>
                 <textarea
                   id="schedule-description"
                   className="form-control"
                   rows={2}
-                  placeholder="Optional notes about this schedule"
+                  placeholder={t('schedule.createModal.descriptionPlaceholder')}
                   disabled={isCreating}
                   {...register('notes')}
                 />
@@ -184,17 +186,17 @@ const CreateScheduleModal: React.FC<Props> = ({
                 onClick={onClose}
                 disabled={isCreating}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button type="submit" className="btn btn-primary" disabled={isCreating}>
                 {isCreating ? (
                   <>
                     <span className="spinner-border spinner-border-sm me-2" role="status"></span>
-                    Creating...
+                    {t('schedule.createModal.creating')}
                   </>
                 ) : (
                   <>
-                    <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>Create Schedule
+                    <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>{t('schedule.createModal.title')}
                   </>
                 )}
               </button>
