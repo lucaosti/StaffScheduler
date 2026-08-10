@@ -12,17 +12,13 @@
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
 import {
-  createWorkflow,
-  updateWorkflow,
-  deleteWorkflow,
   ApprovalWorkflow,
   ApprovalStep,
   ApproverScope,
   CreateWorkflowBody,
 } from '../../services/approvalWorkflowService';
-import { approvalWorkflowsKey, useApprovalWorkflowsQuery } from '../../hooks/useApprovalWorkflows';
+import { useApprovalWorkflowsQuery, useApprovalWorkflowMutations } from '../../hooks/useApprovalWorkflows';
 
 const SCOPE_LABEL_KEYS: Record<ApproverScope, string> = {
   policy_owner: 'admin.approvalWorkflows.scopes.policyOwner',
@@ -45,14 +41,12 @@ const EMPTY_STEP: ApprovalStep = {
 
 const ApprovalWorkflows: React.FC = () => {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const [actionError, setError] = useState<string | null>(null);
 
   // Modal state
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
   const [editing, setEditing] = useState<ApprovalWorkflow | null>(null);
-  const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   // Form state
@@ -63,19 +57,19 @@ const ApprovalWorkflows: React.FC = () => {
 
   // Delete confirm state
   const [deleteTarget, setDeleteTarget] = useState<ApprovalWorkflow | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // Expand state for viewing steps inline
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Server state via TanStack Query; mutation handlers call load() to invalidate.
   const workflowsQuery = useApprovalWorkflowsQuery();
   const workflows = workflowsQuery.data ?? [];
   const loading = workflowsQuery.isLoading;
+  const { create, update, remove } = useApprovalWorkflowMutations();
+  const saving = create.isPending || update.isPending;
+  const deleting = remove.isPending;
   const error = workflowsQuery.isError
     ? (workflowsQuery.error as Error).message ?? t('admin.approvalWorkflows.errors.loadFailed')
     : actionError;
-  const load = () => queryClient.invalidateQueries({ queryKey: approvalWorkflowsKey });
 
   // ---------- Modal helpers ----------
 
@@ -114,17 +108,16 @@ const ApprovalWorkflows: React.FC = () => {
       setSaveError(t('admin.approvalWorkflows.errors.atLeastOneStep'));
       return;
     }
-    setSaving(true);
     setSaveError(null);
+    const stepsPayload = formSteps.map((s, i) => ({
+      stepOrder: i + 1,
+      approverScope: s.approverScope,
+      approverRoleId: s.approverRoleId ?? null,
+      approverUserId: s.approverUserId ?? null,
+      autoApproveForOwner: s.autoApproveForOwner ?? false,
+      escalateAfterHours: s.escalateAfterHours ?? null,
+    }));
     try {
-      const stepsPayload = formSteps.map((s, i) => ({
-        stepOrder: i + 1,
-        approverScope: s.approverScope,
-        approverRoleId: s.approverRoleId ?? null,
-        approverUserId: s.approverUserId ?? null,
-        autoApproveForOwner: s.autoApproveForOwner ?? false,
-        escalateAfterHours: s.escalateAfterHours ?? null,
-      }));
       if (modalMode === 'create') {
         const body: CreateWorkflowBody = {
           changeType: formChangeType.trim(),
@@ -132,20 +125,18 @@ const ApprovalWorkflows: React.FC = () => {
           description: formDescription.trim() || undefined,
           steps: stepsPayload,
         };
-        await createWorkflow(body);
+        await create.mutateAsync(body);
       } else if (editing) {
-        await updateWorkflow(editing.id, {
+        await update.mutateAsync({
+          id: editing.id,
           requireAll: formRequireAll,
           description: formDescription.trim() || undefined,
           steps: stepsPayload,
         });
       }
       setShowModal(false);
-      await load();
     } catch (e) {
       setSaveError((e as Error).message ?? t('admin.approvalWorkflows.errors.saveFailed'));
-    } finally {
-      setSaving(false);
     }
   };
 
@@ -172,15 +163,11 @@ const ApprovalWorkflows: React.FC = () => {
 
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
-    setDeleting(true);
     try {
-      await deleteWorkflow(deleteTarget.id);
+      await remove.mutateAsync(deleteTarget.id);
       setDeleteTarget(null);
-      await load();
     } catch (e) {
       setError((e as Error).message ?? t('admin.approvalWorkflows.errors.deleteFailed'));
-    } finally {
-      setDeleting(false);
     }
   };
 

@@ -11,16 +11,24 @@
  * @author Luca Ostinelli
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Permission, Role, UserRoleAssignment, Employee } from '../types';
 import { listUnits, type OrgUnit } from '../services/orgService';
 import {
-  listPermissions,
-  listRoles,
+  assignRole,
+  createRole,
+  deleteRole,
   getUserRoles,
   getUserRoleTimeline,
   getRoleTimeline,
+  listPermissions,
+  listRoles,
+  removeRole,
+  updateRole,
+  type AssignRoleBody,
+  type CreateRoleBody,
   type RoleTimeline,
+  type UpdateRoleBody,
 } from '../services/rbacService';
 import { getEmployees } from '../services/employeeService';
 
@@ -105,4 +113,57 @@ export function useRoleTimelineQuery(subject: { kind: 'user' | 'role'; id: numbe
     },
     enabled: subject !== null,
   });
+}
+
+/** Create / update / delete a role. Each invalidates the roles+permissions catalog. */
+export function useRoleMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: rbacKeys.rolesAndPerms });
+
+  return {
+    create: useMutation({
+      mutationFn: (body: CreateRoleBody) => createRole(body),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, ...body }: { id: number } & UpdateRoleBody) => updateRole(id, body),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: number) => deleteRole(id),
+      onSuccess: invalidate,
+    }),
+  };
+}
+
+/**
+ * Grant / revoke a role for a user. Each invalidates the whole `user-roles`
+ * family (every selected-user variant), matching `rbacKeys.userRoles`'s own
+ * prefix — the page only ever has one user selected at a time, but this
+ * keeps the invalidation correct regardless of which one it was.
+ */
+export function useUserRoleMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['rbac', 'user-roles'] });
+
+  return {
+    grant: useMutation({
+      mutationFn: ({ userId, ...body }: { userId: number } & AssignRoleBody) => assignRole(userId, body),
+      onSuccess: invalidate,
+    }),
+    revoke: useMutation({
+      mutationFn: ({
+        userId,
+        roleId,
+        scopeOrgUnitId,
+        justification,
+      }: {
+        userId: number;
+        roleId: number;
+        scopeOrgUnitId?: number | null;
+        justification?: string;
+      }) => removeRole(userId, roleId, scopeOrgUnitId, justification),
+      onSuccess: invalidate,
+    }),
+  };
 }
