@@ -24,6 +24,7 @@ import { Pool, RowDataPacket } from 'mysql2/promise';
 import { DateUtils } from '../utils';
 import { EmploymentContractService } from './EmploymentContractService';
 import { PolicyService } from './PolicyService';
+import { shiftBoundsMs, shiftHours, dateToMs, DAY_MS, ShiftTimes } from '../optimization/shiftTime';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
 export interface CandidateShift {
@@ -92,49 +93,25 @@ export const DEFAULT_COMPLIANCE_POLICY: CompliancePolicy = {
 /* ------------------------------------------------------------------ */
 
 /**
- * Parses a `(date, time)` pair into an absolute Date. Times are interpreted
- * as wall-clock UTC; the engine works in elapsed-hours arithmetic so the
- * choice of zone is irrelevant as long as it is consistent.
+ * Overnight-aware shift-bounds/duration arithmetic is NOT reimplemented here.
+ * `optimization/shiftTime.ts` is the canonical module for it — its own header
+ * documents two production defects that came from independent copies of
+ * exactly this rule, which is why this engine adapts to that module's
+ * `ShiftTimes` shape (`start_time`/`end_time`) rather than keeping its own.
+ * `CandidateShift`'s public field names (`startTime`/`endTime`) are unchanged
+ * — this engine has its own callers — so only this adapter is new.
  */
-const toDate = (date: string, time: string): Date => {
-  const normalizedTime = time.length === 5 ? `${time}:00` : time;
-  return new Date(`${date}T${normalizedTime}Z`);
-};
+const toShiftTimes = (s: CandidateShift): ShiftTimes => ({
+  date: s.date,
+  start_time: s.startTime,
+  end_time: s.endTime,
+});
 
-/**
- * Returns the [start, end] timestamps of a shift, accounting for overnight
- * shifts where the end time wraps past midnight.
- */
-const shiftBounds = (shift: CandidateShift): [Date, Date] => {
-  const start = toDate(shift.date, shift.startTime);
-  let end = toDate(shift.date, shift.endTime);
-  if (end <= start) {
-    // Overnight: roll the end into the next calendar day.
-    end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
-  }
-  return [start, end];
-};
+const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
 
-const hoursBetween = (a: Date, b: Date): number =>
-  Math.abs(a.getTime() - b.getTime()) / (1000 * 60 * 60);
+const dayDiff = (a: string, b: string): number => Math.round((dateToMs(a) - dateToMs(b)) / DAY_MS);
 
-const shiftDurationHours = (shift: CandidateShift): number => {
-  const [start, end] = shiftBounds(shift);
-  return hoursBetween(start, end);
-};
-
-const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
-
-const dayDiff = (a: string, b: string): number => {
-  const da = Date.parse(`${a}T00:00:00Z`);
-  const db = Date.parse(`${b}T00:00:00Z`);
-  return Math.round((da - db) / (24 * 60 * 60 * 1000));
-};
-
-const addIsoDays = (date: string, days: number): string => {
-  const d = new Date(Date.parse(`${date}T00:00:00Z`) + days * 24 * 60 * 60 * 1000);
-  return isoDay(d);
-};
+const addIsoDays = (date: string, days: number): string => isoDay(dateToMs(date) + days * DAY_MS);
 
 /* ------------------------------------------------------------------ */
 /* Individual rules                                                    */
@@ -185,18 +162,18 @@ const checkMaxConsecutiveDays = (input: ComplianceInput): ComplianceViolation | 
 
 const checkMinRest = (input: ComplianceInput): ComplianceViolation | null => {
   const { candidate, existing, policy } = input;
-  const [candStart, candEnd] = shiftBounds(candidate);
+  const [candStart, candEnd] = shiftBoundsMs(toShiftTimes(candidate));
 
   for (const other of existing) {
-    const [otherStart, otherEnd] = shiftBounds(other);
+    const [otherStart, otherEnd] = shiftBoundsMs(toShiftTimes(other));
 
     // If candidate ends before `other` starts, rest is otherStart - candEnd.
     // If other ends before candidate starts, rest is candStart - otherEnd.
     let restHours: number;
     if (candEnd <= otherStart) {
-      restHours = hoursBetween(candEnd, otherStart);
+      restHours = (otherStart - candEnd) / 3_600_000;
     } else if (otherEnd <= candStart) {
-      restHours = hoursBetween(candStart, otherEnd);
+      restHours = (candStart - otherEnd) / 3_600_000;
     } else {
       // Overlap is a different kind of conflict and is handled by the existing
       // assignment-conflict check upstream; the compliance engine doesn't
@@ -224,8 +201,8 @@ const checkMaxWeeklyHours = (input: ComplianceInput): ComplianceViolation | null
   const { candidate, existing, policy } = input;
 
   const all = [
-    { date: candidate.date, hours: shiftDurationHours(candidate) },
-    ...existing.map((s) => ({ date: s.date, hours: shiftDurationHours(s) })),
+    { date: candidate.date, hours: shiftHours(toShiftTimes(candidate)) },
+    ...existing.map((s) => ({ date: s.date, hours: shiftHours(toShiftTimes(s)) })),
   ];
 
   // "No more than maxHoursPerWeek in any 7-day window" means checking every
