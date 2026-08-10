@@ -20,6 +20,7 @@
 
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   approvePendingItem,
@@ -45,13 +46,21 @@ const STATUS_BADGE: Record<string, string> = {
   escalated: 'bg-secondary',
 };
 
-const REASSIGNMENT_LABEL: Record<string, string> = {
-  kept: 'kept it',
-  delegated_to_person: 'delegated it to',
-  opened_to_structure: 'opened it to the team',
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending: 'approvals.status.pending',
+  approved: 'approvals.status.approved',
+  rejected: 'approvals.status.rejected',
+  escalated: 'approvals.status.escalated',
+};
+
+const REASSIGNMENT_LABEL_KEYS: Record<string, string> = {
+  kept: 'approvals.reassignment.kept',
+  delegated_to_person: 'approvals.reassignment.delegatedToPerson',
+  opened_to_structure: 'approvals.reassignment.openedToStructure',
 };
 
 const PendingApprovals: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const currentUserId = user?.id ? Number(user.id) : null;
 
@@ -82,7 +91,7 @@ const PendingApprovals: React.FC = () => {
   const items = queueQuery.data ?? [];
   const loading = queueQuery.isLoading;
   const error = queueQuery.isError
-    ? (queueQuery.error as Error).message ?? 'Failed to load pending approvals.'
+    ? (queueQuery.error as Error).message ?? t('approvals.loadFailed')
     : actionError;
   const load = () => queryClient.invalidateQueries({ queryKey: pendingApprovalsKey });
 
@@ -105,7 +114,7 @@ const PendingApprovals: React.FC = () => {
         setMembers([]);
       }
     } catch (e) {
-      setError((e as Error).message ?? 'Failed to load chain of command.');
+      setError((e as Error).message ?? t('approvals.chainLoadFailed'));
     } finally {
       setChainLoading(false);
     }
@@ -136,7 +145,7 @@ const PendingApprovals: React.FC = () => {
       setDecisionTarget(null);
       await load();
     } catch (e) {
-      setDecisionError((e as Error).message ?? 'Action failed.');
+      setDecisionError((e as Error).message ?? t('approvals.actionFailed'));
     } finally {
       setDeciding(false);
     }
@@ -150,7 +159,7 @@ const PendingApprovals: React.FC = () => {
       await refreshChain(item.id);
       await load();
     } catch (e) {
-      setDelegateError((e as Error).message ?? 'Action failed.');
+      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
     } finally {
       setDelegating(false);
     }
@@ -166,7 +175,7 @@ const PendingApprovals: React.FC = () => {
       await refreshChain(item.id);
       await load();
     } catch (e) {
-      setDelegateError((e as Error).message ?? 'Action failed.');
+      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
     } finally {
       setDelegating(false);
     }
@@ -180,7 +189,7 @@ const PendingApprovals: React.FC = () => {
       await refreshChain(item.id);
       await load();
     } catch (e) {
-      setDelegateError((e as Error).message ?? 'Action failed.');
+      setDelegateError((e as Error).message ?? t('approvals.actionFailed'));
     } finally {
       setDelegating(false);
     }
@@ -204,27 +213,27 @@ const PendingApprovals: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Pending Approvals</h1>
-            <p className="text-muted mb-0 small">Items assigned to you for review</p>
+            <h1 className="h3 mb-0">{t('approvals.title')}</h1>
+            <p className="text-muted mb-0 small">{t('approvals.subtitle')}</p>
           </div>
           <div className="d-flex gap-2 align-items-center">
-            <div className="btn-group btn-group-sm" role="group" aria-label="Filter by status">
+            <div className="btn-group btn-group-sm" role="group" aria-label={t('approvals.filterAriaLabel')}>
               <button
                 type="button"
                 className={`btn ${filter === 'pending' ? 'btn-primary' : 'btn-outline-secondary'}`}
                 onClick={() => setFilter('pending')}
               >
-                Pending
+                {t('approvals.filterPending')}
               </button>
               <button
                 type="button"
                 className={`btn ${filter === 'all' ? 'btn-primary' : 'btn-outline-secondary'}`}
                 onClick={() => setFilter('all')}
               >
-                All
+                {t('approvals.all')}
               </button>
             </div>
-            <button className="btn btn-sm btn-outline-secondary" onClick={load} aria-label="Refresh">
+            <button className="btn btn-sm btn-outline-secondary" onClick={load} aria-label={t('approvals.refresh')}>
               <i className="bi bi-arrow-clockwise" aria-hidden="true"></i>
             </button>
           </div>
@@ -237,12 +246,12 @@ const PendingApprovals: React.FC = () => {
         <div className="card-body p-0">
           <QueryState
             isLoading={loading}
-            loadingMessage="Loading…"
+            loadingMessage={t('common.loading')}
             isEmpty={items.length === 0}
             empty={
               <div className="text-center text-muted py-5">
                 <i className="bi bi-inbox fs-3 d-block mb-2" aria-hidden="true"></i>
-                No pending approvals for you.
+                {t('approvals.empty')}
               </div>
             }
           >
@@ -251,13 +260,13 @@ const PendingApprovals: React.FC = () => {
                 <thead className="table-light">
                   <tr>
                     <th scope="col">#</th>
-                    <th scope="col">Change Type</th>
-                    <th scope="col">Entity</th>
-                    <th scope="col">Proposer ID</th>
-                    <th scope="col">Step</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Created</th>
-                    <th scope="col" className="text-end">Actions</th>
+                    <th scope="col">{t('approvals.columns.changeType')}</th>
+                    <th scope="col">{t('approvals.columns.entity')}</th>
+                    <th scope="col">{t('approvals.columns.proposerId')}</th>
+                    <th scope="col">{t('approvals.columns.step')}</th>
+                    <th scope="col">{t('approvals.columns.status')}</th>
+                    <th scope="col">{t('approvals.columns.created')}</th>
+                    <th scope="col" className="text-end">{t('approvals.columns.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -269,11 +278,13 @@ const PendingApprovals: React.FC = () => {
                           <button
                             className="btn btn-link btn-sm p-0 text-decoration-none fw-semibold text-start"
                             onClick={() => void toggleExpand(item)}
-                            aria-label={expandedId === item.id ? `Collapse details for item ${item.id}` : `Expand details for item ${item.id}`}
+                            aria-label={expandedId === item.id
+                              ? t('approvals.collapseAriaLabel', { id: item.id })
+                              : t('approvals.expandAriaLabel', { id: item.id })}
                           >
                             {item.changeType}
                             {item.assignedToOrgUnitId !== null && (
-                              <span className="badge bg-info-subtle text-info-emphasis ms-2">Structure</span>
+                              <span className="badge bg-info-subtle text-info-emphasis ms-2">{t('approvals.structureBadge')}</span>
                             )}
                             <i className={`bi ms-1 ${expandedId === item.id ? 'bi-chevron-up' : 'bi-chevron-down'}`} aria-hidden="true"></i>
                           </button>
@@ -286,7 +297,7 @@ const PendingApprovals: React.FC = () => {
                         <td className="small">{item.stepOrder}</td>
                         <td>
                           <span className={`badge ${STATUS_BADGE[item.status] ?? 'bg-secondary'}`}>
-                            {item.status}
+                            {STATUS_LABEL_KEYS[item.status] ? t(STATUS_LABEL_KEYS[item.status]) : item.status}
                           </span>
                         </td>
                         <td className="small text-muted text-nowrap">{formatDate(item.createdAt)}</td>
@@ -296,14 +307,14 @@ const PendingApprovals: React.FC = () => {
                               <button
                                 className="btn btn-sm btn-success me-1"
                                 onClick={() => openDecision(item, 'approve')}
-                                aria-label={`Approve item ${item.id}`}
+                                aria-label={t('approvals.approveAriaLabel', { id: item.id })}
                               >
                                 <i className="bi bi-check" aria-hidden="true"></i>
                               </button>
                               <button
                                 className="btn btn-sm btn-danger"
                                 onClick={() => openDecision(item, 'reject')}
-                                aria-label={`Reject item ${item.id}`}
+                                aria-label={t('approvals.rejectAriaLabel', { id: item.id })}
                               >
                                 <i className="bi bi-x" aria-hidden="true"></i>
                               </button>
@@ -317,21 +328,21 @@ const PendingApprovals: React.FC = () => {
                             <div className="p-3">
                               {item.justification && (
                                 <div className="mb-2">
-                                  <span className="fw-semibold small text-muted text-uppercase me-2">Justification</span>
+                                  <span className="fw-semibold small text-muted text-uppercase me-2">{t('approvals.justification')}</span>
                                   <span className="small">{item.justification}</span>
                                 </div>
                               )}
                               <div className="mb-3">
-                                <span className="fw-semibold small text-muted text-uppercase me-2">Proposed Payload</span>
+                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('approvals.proposedPayload')}</span>
                                 <pre className="bg-white border rounded p-2 small mb-0" style={{ maxHeight: 200, overflow: 'auto', fontSize: '0.75rem' }}>
                                   {JSON.stringify(item.proposedPayload, null, 2)}
                                 </pre>
                               </div>
 
                               <div className="border-top pt-3">
-                                <span className="fw-semibold small text-muted text-uppercase d-block mb-2">Chain of command</span>
+                                <span className="fw-semibold small text-muted text-uppercase d-block mb-2">{t('approvals.chainOfCommand')}</span>
                                 {chainLoading && !chains[item.id] ? (
-                                  <span className="small text-muted">Loading…</span>
+                                  <span className="small text-muted">{t('common.loading')}</span>
                                 ) : chains[item.id] ? (
                                   <div className="small d-flex flex-wrap align-items-center gap-2">
                                     {chains[item.id].assignedToOrgUnit ? (
@@ -339,13 +350,13 @@ const PendingApprovals: React.FC = () => {
                                         <span className="badge bg-secondary">{chains[item.id].assignedToOrgUnit!.name}</span>
                                         <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
                                         <span>
-                                          Head: <strong>{chains[item.id].assignedToOrgUnit!.headName ?? 'unassigned'}</strong>
+                                          {t('approvals.head')} <strong>{chains[item.id].assignedToOrgUnit!.headName ?? t('approvals.unassigned')}</strong>
                                         </span>
                                         {chains[item.id].reassignments.map((r) => (
                                           <React.Fragment key={r.id}>
                                             <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
                                             <span>
-                                              {r.actorName} {REASSIGNMENT_LABEL[r.action] ?? r.action}
+                                              {r.actorName} {REASSIGNMENT_LABEL_KEYS[r.action] ? t(REASSIGNMENT_LABEL_KEYS[r.action]) : r.action}
                                               {r.targetName ? ` ${r.targetName}` : ''}
                                             </span>
                                           </React.Fragment>
@@ -353,14 +364,14 @@ const PendingApprovals: React.FC = () => {
                                         <i className="bi bi-arrow-right text-muted" aria-hidden="true"></i>
                                         <span>
                                           {chains[item.id].decidedByName
-                                            ? <>Decided by <strong>{chains[item.id].decidedByName}</strong></>
+                                            ? <>{t('approvals.decidedBy')} <strong>{chains[item.id].decidedByName}</strong></>
                                             : chains[item.id].openToStructure
-                                              ? 'Open to the whole team — awaiting decision'
-                                              : 'Awaiting decision'}
+                                              ? t('approvals.openToTeamAwaiting')
+                                              : t('approvals.awaitingDecision')}
                                         </span>
                                       </>
                                     ) : (
-                                      <span className="text-muted">Assigned directly to a person — no structure delegation involved.</span>
+                                      <span className="text-muted">{t('approvals.assignedDirectly')}</span>
                                     )}
                                   </div>
                                 ) : null}
@@ -369,7 +380,7 @@ const PendingApprovals: React.FC = () => {
                               {canManageStructureDecision(item) && (
                                 <div className="border-top pt-3 mt-3">
                                   <span className="fw-semibold small text-muted text-uppercase d-block mb-2">
-                                    You head this structure — decide what happens to it
+                                    {t('approvals.youHeadThisStructure')}
                                   </span>
                                   {delegateError && (
                                     <div className="alert alert-danger py-2 small" role="alert">{delegateError}</div>
@@ -380,16 +391,16 @@ const PendingApprovals: React.FC = () => {
                                       disabled={delegating}
                                       onClick={() => void handleKeep(item)}
                                     >
-                                      Keep for myself
+                                      {t('approvals.keepForMyself')}
                                     </button>
                                     <select
                                       className="form-select form-select-sm"
                                       style={{ width: 'auto' }}
                                       value={delegateTargetId}
                                       onChange={(e) => setDelegateTargetId(e.target.value)}
-                                      aria-label="Delegate to team member"
+                                      aria-label={t('approvals.delegateToTeamMemberAriaLabel')}
                                     >
-                                      <option value="">Delegate to…</option>
+                                      <option value="">{t('approvals.delegateToPlaceholder')}</option>
                                       {members
                                         .filter((m) => m.userId !== currentUserId)
                                         .map((m) => (
@@ -403,14 +414,14 @@ const PendingApprovals: React.FC = () => {
                                       disabled={delegating || !delegateTargetId}
                                       onClick={() => void handleDelegate(item)}
                                     >
-                                      Delegate
+                                      {t('approvals.delegate')}
                                     </button>
                                     <button
                                       className="btn btn-sm btn-outline-secondary"
                                       disabled={delegating}
                                       onClick={() => void handleOpenToStructure(item)}
                                     >
-                                      Open to my team
+                                      {t('approvals.openToMyTeam')}
                                     </button>
                                   </div>
                                 </div>
@@ -431,14 +442,19 @@ const PendingApprovals: React.FC = () => {
       {/* Decision Modal */}
       {decisionTarget && (
         <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true"
-          aria-label={decisionMode === 'approve' ? `Approve item ${decisionTarget.id}` : `Reject item ${decisionTarget.id}`}>
+          aria-label={decisionMode === 'approve'
+            ? t('approvals.approveAriaLabel', { id: decisionTarget.id })
+            : t('approvals.rejectAriaLabel', { id: decisionTarget.id })}>
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">
-                  {decisionMode === 'approve' ? 'Approve' : 'Reject'} — {decisionTarget.changeType}
+                  {t('approvals.reviewModalTitle', {
+                    action: decisionMode === 'approve' ? t('approvals.approve') : t('approvals.reject'),
+                    changeType: decisionTarget.changeType,
+                  })}
                 </h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setDecisionTarget(null)}></button>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setDecisionTarget(null)}></button>
               </div>
               <div className="modal-body">
                 {decisionError && (
@@ -446,13 +462,13 @@ const PendingApprovals: React.FC = () => {
                 )}
                 <div className="mb-3">
                   <label htmlFor="decisionNote" className="form-label">
-                    Note <span className="text-muted small">(optional)</span>
+                    {t('approvals.note')} <span className="text-muted small">{t('approvals.optional')}</span>
                   </label>
                   <textarea
                     id="decisionNote"
                     className="form-control"
                     rows={3}
-                    placeholder="Optional note recorded in the audit log"
+                    placeholder={t('approvals.notePlaceholder')}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
                   />
@@ -460,19 +476,19 @@ const PendingApprovals: React.FC = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setDecisionTarget(null)}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   type="button"
                   className={`btn ${decisionMode === 'approve' ? 'btn-success' : 'btn-danger'}`}
                   onClick={handleDecisionConfirm}
                   disabled={deciding}
-                  aria-label={decisionMode === 'approve' ? 'Confirm approve' : 'Confirm reject'}
+                  aria-label={decisionMode === 'approve' ? t('approvals.confirmApproveAriaLabel') : t('approvals.confirmRejectAriaLabel')}
                 >
                   {deciding ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('approvals.saving')}</>
                   ) : (
-                    decisionMode === 'approve' ? 'Approve' : 'Reject'
+                    decisionMode === 'approve' ? t('approvals.approve') : t('approvals.reject')
                   )}
                 </button>
               </div>

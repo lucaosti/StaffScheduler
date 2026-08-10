@@ -10,6 +10,7 @@
 
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import {
   createChangeRequest,
   approveChangeRequest,
@@ -30,6 +31,24 @@ const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
   cancelled: 'bg-secondary',
 };
 
+const STATUS_LABEL_KEYS: Record<ChangeRequestStatus, string> = {
+  pending: 'changeRequests.status.pending',
+  approved: 'changeRequests.status.approved',
+  rejected: 'changeRequests.status.rejected',
+  applied: 'changeRequests.status.applied',
+  cancelled: 'changeRequests.status.cancelled',
+};
+
+const STATUS_FILTER_LABEL_KEYS: Record<ChangeRequestStatus, string> = {
+  pending: 'changeRequests.filterStatus.pending',
+  approved: 'changeRequests.filterStatus.approved',
+  rejected: 'changeRequests.filterStatus.rejected',
+  applied: 'changeRequests.filterStatus.applied',
+  cancelled: 'changeRequests.filterStatus.cancelled',
+};
+
+const STATUS_FILTER_OPTIONS: ChangeRequestStatus[] = ['pending', 'approved', 'rejected', 'applied', 'cancelled'];
+
 const EMPTY_FORM: Omit<CreateChangeRequestInput, 'proposedPayload'> & { payloadText: string } = {
   changeType: '',
   targetEntityType: '',
@@ -39,6 +58,7 @@ const EMPTY_FORM: Omit<CreateChangeRequestInput, 'proposedPayload'> & { payloadT
 };
 
 const ChangeRequests: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<'mine' | 'all'>('mine');
@@ -70,20 +90,20 @@ const ChangeRequests: React.FC = () => {
   const loading = crQuery.isLoading;
   const [actionError, setError] = useState<string | null>(null);
   const error = crQuery.isError
-    ? (crQuery.error as Error).message ?? 'Failed to load change requests.'
+    ? (crQuery.error as Error).message ?? t('changeRequests.loadFailed')
     : actionError;
   const load = () => queryClient.invalidateQueries({ queryKey: ['change-requests'] });
 
   // ---------- Create ----------
 
   const handleCreate = async () => {
-    if (!form.changeType.trim()) { setCreateError('Change type is required.'); return; }
-    if (!form.targetEntityType.trim()) { setCreateError('Entity type is required.'); return; }
+    if (!form.changeType.trim()) { setCreateError(t('changeRequests.validation.changeTypeRequired')); return; }
+    if (!form.targetEntityType.trim()) { setCreateError(t('changeRequests.validation.entityTypeRequired')); return; }
     let payload: Record<string, unknown>;
     try {
       payload = JSON.parse(form.payloadText || '{}');
     } catch {
-      setCreateError('Proposed payload must be valid JSON.');
+      setCreateError(t('changeRequests.validation.payloadInvalidJson'));
       return;
     }
     setCreating(true);
@@ -101,7 +121,7 @@ const ChangeRequests: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       await load();
     } catch (e) {
-      setCreateError((e as Error).message ?? 'Failed to submit change request.');
+      setCreateError((e as Error).message ?? t('changeRequests.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -119,7 +139,7 @@ const ChangeRequests: React.FC = () => {
   const handleReview = async () => {
     if (!reviewTarget) return;
     if (reviewMode === 'reject' && !reviewNote.trim()) {
-      setReviewError('A rejection reason is required.');
+      setReviewError(t('changeRequests.validation.rejectionReasonRequired'));
       return;
     }
     setReviewing(true);
@@ -133,7 +153,7 @@ const ChangeRequests: React.FC = () => {
       setReviewTarget(null);
       await load();
     } catch (e) {
-      setReviewError((e as Error).message ?? 'Action failed.');
+      setReviewError((e as Error).message ?? t('changeRequests.actionFailed'));
     } finally {
       setReviewing(false);
     }
@@ -146,12 +166,12 @@ const ChangeRequests: React.FC = () => {
       await cancelChangeRequest(item.id);
       await load();
     } catch (e) {
-      setError((e as Error).message ?? 'Cancel failed.');
+      setError((e as Error).message ?? t('changeRequests.cancelFailed'));
     }
   };
 
   const formatDate = (iso: string | null) => {
-    if (!iso) return '—';
+    if (!iso) return t('common.emptyValue');
     try { return new Date(iso).toLocaleString(); } catch { return iso; }
   };
 
@@ -160,11 +180,11 @@ const ChangeRequests: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Change Requests</h1>
-            <p className="text-muted mb-0 small">Propose changes that appear as manager decisions when approved</p>
+            <h1 className="h3 mb-0">{t('changeRequests.title')}</h1>
+            <p className="text-muted mb-0 small">{t('changeRequests.subtitle')}</p>
           </div>
           <button className="btn btn-primary btn-sm" onClick={() => { setForm({ ...EMPTY_FORM }); setCreateError(null); setShowCreate(true); }}>
-            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>New Request
+            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>{t('changeRequests.newRequest')}
           </button>
         </div>
       </div>
@@ -178,7 +198,7 @@ const ChangeRequests: React.FC = () => {
               role="tab"
               onClick={() => setTab('mine')}
             >
-              My Requests
+              {t('changeRequests.tabs.mine')}
             </button>
           </li>
           {canReview && (
@@ -188,7 +208,7 @@ const ChangeRequests: React.FC = () => {
                 role="tab"
                 onClick={() => setTab('all')}
               >
-                All Requests
+                {t('changeRequests.tabs.all')}
               </button>
             </li>
           )}
@@ -197,14 +217,12 @@ const ChangeRequests: React.FC = () => {
           className="form-select form-select-sm w-auto"
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as ChangeRequestStatus | '')}
-          aria-label="Filter by status"
+          aria-label={t('changeRequests.filterAriaLabel')}
         >
-          <option value="">All statuses</option>
-          <option value="pending">Pending</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-          <option value="applied">Applied</option>
-          <option value="cancelled">Cancelled</option>
+          <option value="">{t('changeRequests.allStatuses')}</option>
+          {STATUS_FILTER_OPTIONS.map((status) => (
+            <option key={status} value={status}>{t(STATUS_FILTER_LABEL_KEYS[status])}</option>
+          ))}
         </select>
       </div>
 
@@ -216,26 +234,26 @@ const ChangeRequests: React.FC = () => {
 
       <div className="card">
         <div className="card-header d-flex align-items-center justify-content-between">
-          <small className="text-muted">{loading ? 'Loading…' : `${total} request${total !== 1 ? 's' : ''}`}</small>
+          <small className="text-muted">{loading ? t('common.loading') : t('changeRequests.count', { count: total })}</small>
         </div>
         <div className="card-body p-0">
           {loading ? (
             <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label="Loading"></span>
+              <span className="spinner-border me-2" role="status" aria-label={t('common.loading')}></span>
             </div>
           ) : items.length === 0 ? (
-            <div className="text-center text-muted py-5">No change requests found.</div>
+            <div className="text-center text-muted py-5">{t('changeRequests.empty')}</div>
           ) : (
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
                   <tr>
                     <th scope="col">#</th>
-                    <th scope="col">Change Type</th>
-                    <th scope="col">Entity</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Submitted</th>
-                    <th scope="col" className="text-end">Actions</th>
+                    <th scope="col">{t('changeRequests.columns.changeType')}</th>
+                    <th scope="col">{t('changeRequests.columns.entity')}</th>
+                    <th scope="col">{t('changeRequests.columns.status')}</th>
+                    <th scope="col">{t('changeRequests.columns.submitted')}</th>
+                    <th scope="col" className="text-end">{t('changeRequests.columns.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -247,7 +265,9 @@ const ChangeRequests: React.FC = () => {
                           <button
                             className="btn btn-link btn-sm p-0 text-decoration-none fw-semibold text-start"
                             onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                            aria-label={expandedId === item.id ? `Collapse request ${item.id}` : `Expand request ${item.id}`}
+                            aria-label={expandedId === item.id
+                              ? t('changeRequests.collapseAriaLabel', { id: item.id })
+                              : t('changeRequests.expandAriaLabel', { id: item.id })}
                           >
                             {item.changeType}
                             <i className={`bi ms-1 ${expandedId === item.id ? 'bi-chevron-up' : 'bi-chevron-down'}`} aria-hidden="true"></i>
@@ -258,7 +278,7 @@ const ChangeRequests: React.FC = () => {
                           {item.targetEntityId != null && ` #${item.targetEntityId}`}
                         </td>
                         <td>
-                          <span className={`badge ${STATUS_BADGE[item.status]}`}>{item.status}</span>
+                          <span className={`badge ${STATUS_BADGE[item.status]}`}>{t(STATUS_LABEL_KEYS[item.status])}</span>
                         </td>
                         <td className="small text-muted text-nowrap">{formatDate(item.createdAt)}</td>
                         <td className="text-end">
@@ -267,14 +287,14 @@ const ChangeRequests: React.FC = () => {
                               <button
                                 className="btn btn-sm btn-success me-1"
                                 onClick={() => openReview(item, 'approve')}
-                                aria-label={`Approve request ${item.id}`}
+                                aria-label={t('changeRequests.approveAriaLabel', { id: item.id })}
                               >
                                 <i className="bi bi-check" aria-hidden="true"></i>
                               </button>
                               <button
                                 className="btn btn-sm btn-danger me-1"
                                 onClick={() => openReview(item, 'reject')}
-                                aria-label={`Reject request ${item.id}`}
+                                aria-label={t('changeRequests.rejectAriaLabel', { id: item.id })}
                               >
                                 <i className="bi bi-x" aria-hidden="true"></i>
                               </button>
@@ -284,7 +304,7 @@ const ChangeRequests: React.FC = () => {
                             <button
                               className="btn btn-sm btn-outline-secondary"
                               onClick={() => handleCancel(item)}
-                              aria-label={`Cancel request ${item.id}`}
+                              aria-label={t('changeRequests.cancelAriaLabel', { id: item.id })}
                             >
                               <i className="bi bi-slash-circle" aria-hidden="true"></i>
                             </button>
@@ -297,18 +317,18 @@ const ChangeRequests: React.FC = () => {
                             <div className="p-3">
                               {item.justification && (
                                 <div className="mb-2">
-                                  <span className="fw-semibold small text-muted text-uppercase me-2">Justification</span>
+                                  <span className="fw-semibold small text-muted text-uppercase me-2">{t('changeRequests.justification')}</span>
                                   <span className="small">{item.justification}</span>
                                 </div>
                               )}
                               {item.rejectionReason && (
                                 <div className="mb-2">
-                                  <span className="fw-semibold small text-danger text-uppercase me-2">Rejection Reason</span>
+                                  <span className="fw-semibold small text-danger text-uppercase me-2">{t('changeRequests.rejectionReason')}</span>
                                   <span className="small">{item.rejectionReason}</span>
                                 </div>
                               )}
                               <div>
-                                <span className="fw-semibold small text-muted text-uppercase me-2">Proposed Payload</span>
+                                <span className="fw-semibold small text-muted text-uppercase me-2">{t('changeRequests.proposedPayload')}</span>
                                 <pre className="bg-white border rounded p-2 small mb-0" style={{ maxHeight: 200, overflow: 'auto', fontSize: '0.75rem' }}>
                                   {JSON.stringify(item.proposedPayload, null, 2)}
                                 </pre>
@@ -328,12 +348,12 @@ const ChangeRequests: React.FC = () => {
 
       {/* Create Modal */}
       {showCreate && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label="New change request">
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('changeRequests.newChangeRequest')}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">New Change Request</h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setShowCreate(false)}></button>
+                <h5 className="modal-title">{t('changeRequests.newChangeRequest')}</h5>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setShowCreate(false)}></button>
               </div>
               <div className="modal-body">
                 {createError && (
@@ -341,41 +361,41 @@ const ChangeRequests: React.FC = () => {
                 )}
                 <div className="row g-3">
                   <div className="col-md-6">
-                    <label htmlFor="crChangeType" className="form-label">Change Type <span className="text-danger">*</span></label>
+                    <label htmlFor="crChangeType" className="form-label">{t('changeRequests.form.changeType')} <span className="text-danger">*</span></label>
                     <input
                       id="crChangeType"
                       type="text"
                       className="form-control"
-                      placeholder="e.g. TimeOff.Request"
+                      placeholder={t('changeRequests.form.changeTypePlaceholder')}
                       value={form.changeType}
                       onChange={(e) => setForm((f) => ({ ...f, changeType: e.target.value }))}
                     />
                   </div>
                   <div className="col-md-6">
-                    <label htmlFor="crEntityType" className="form-label">Entity Type <span className="text-danger">*</span></label>
+                    <label htmlFor="crEntityType" className="form-label">{t('changeRequests.form.entityType')} <span className="text-danger">*</span></label>
                     <input
                       id="crEntityType"
                       type="text"
                       className="form-control"
-                      placeholder="e.g. leave, shift"
+                      placeholder={t('changeRequests.form.entityTypePlaceholder')}
                       value={form.targetEntityType}
                       onChange={(e) => setForm((f) => ({ ...f, targetEntityType: e.target.value }))}
                     />
                   </div>
                   <div className="col-md-4">
-                    <label htmlFor="crEntityId" className="form-label">Entity ID <span className="text-muted small">(optional)</span></label>
+                    <label htmlFor="crEntityId" className="form-label">{t('changeRequests.form.entityId')} <span className="text-muted small">{t('changeRequests.form.optional')}</span></label>
                     <input
                       id="crEntityId"
                       type="number"
                       className="form-control"
-                      placeholder="Optional"
+                      placeholder={t('changeRequests.form.entityIdPlaceholder')}
                       value={form.targetEntityId ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, targetEntityId: e.target.value ? Number(e.target.value) : undefined }))}
                       min={1}
                     />
                   </div>
                   <div className="col-12">
-                    <label htmlFor="crPayload" className="form-label">Proposed Payload (JSON) <span className="text-danger">*</span></label>
+                    <label htmlFor="crPayload" className="form-label">{t('changeRequests.form.proposedPayload')} <span className="text-danger">*</span></label>
                     <textarea
                       id="crPayload"
                       className="form-control font-monospace"
@@ -386,30 +406,30 @@ const ChangeRequests: React.FC = () => {
                     />
                   </div>
                   <div className="col-12">
-                    <label htmlFor="crJustification" className="form-label">Justification <span className="text-muted small">(optional)</span></label>
+                    <label htmlFor="crJustification" className="form-label">{t('changeRequests.form.justification')} <span className="text-muted small">{t('changeRequests.form.optional')}</span></label>
                     <textarea
                       id="crJustification"
                       className="form-control"
                       rows={2}
                       value={form.justification ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, justification: e.target.value }))}
-                      placeholder="Reason for this change request"
+                      placeholder={t('changeRequests.form.justificationPlaceholder')}
                     />
                   </div>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-primary"
                   onClick={handleCreate}
                   disabled={creating}
-                  aria-label="Submit change request"
+                  aria-label={t('changeRequests.form.submitAriaLabel')}
                 >
                   {creating ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Submitting…</>
-                  ) : 'Submit'}
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('changeRequests.submitting')}</>
+                  ) : t('changeRequests.submit')}
                 </button>
               </div>
             </div>
@@ -421,14 +441,19 @@ const ChangeRequests: React.FC = () => {
       {/* Review Modal */}
       {reviewTarget && (
         <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true"
-          aria-label={reviewMode === 'approve' ? `Approve request ${reviewTarget.id}` : `Reject request ${reviewTarget.id}`}>
+          aria-label={reviewMode === 'approve'
+            ? t('changeRequests.approveAriaLabel', { id: reviewTarget.id })
+            : t('changeRequests.rejectAriaLabel', { id: reviewTarget.id })}>
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">
-                  {reviewMode === 'approve' ? 'Approve' : 'Reject'} — {reviewTarget.changeType}
+                  {t('changeRequests.reviewModalTitle', {
+                    action: reviewMode === 'approve' ? t('changeRequests.approve') : t('changeRequests.reject'),
+                    changeType: reviewTarget.changeType,
+                  })}
                 </h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setReviewTarget(null)}></button>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setReviewTarget(null)}></button>
               </div>
               <div className="modal-body">
                 {reviewError && (
@@ -436,9 +461,9 @@ const ChangeRequests: React.FC = () => {
                 )}
                 <div>
                   <label htmlFor="reviewNote" className="form-label">
-                    {reviewMode === 'reject' ? 'Rejection Reason' : 'Justification'}
+                    {reviewMode === 'reject' ? t('changeRequests.rejectionReason') : t('changeRequests.justification')}
                     {reviewMode === 'reject' && <span className="text-danger"> *</span>}
-                    {reviewMode === 'approve' && <span className="text-muted small"> (optional)</span>}
+                    {reviewMode === 'approve' && <span className="text-muted small"> {t('changeRequests.form.optional')}</span>}
                   </label>
                   <textarea
                     id="reviewNote"
@@ -446,23 +471,23 @@ const ChangeRequests: React.FC = () => {
                     rows={3}
                     value={reviewNote}
                     onChange={(e) => setReviewNote(e.target.value)}
-                    placeholder={reviewMode === 'reject' ? 'Required — reason for rejection' : 'Optional justification'}
+                    placeholder={reviewMode === 'reject' ? t('changeRequests.form.rejectionReasonPlaceholder') : t('changeRequests.form.optionalJustificationPlaceholder')}
                   />
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setReviewTarget(null)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setReviewTarget(null)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className={`btn ${reviewMode === 'approve' ? 'btn-success' : 'btn-danger'}`}
                   onClick={handleReview}
                   disabled={reviewing}
-                  aria-label={reviewMode === 'approve' ? 'Confirm approve' : 'Confirm reject'}
+                  aria-label={reviewMode === 'approve' ? t('changeRequests.confirmApproveAriaLabel') : t('changeRequests.confirmRejectAriaLabel')}
                 >
                   {reviewing ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('changeRequests.saving')}</>
                   ) : (
-                    reviewMode === 'approve' ? 'Approve' : 'Reject'
+                    reviewMode === 'approve' ? t('changeRequests.approve') : t('changeRequests.reject')
                   )}
                 </button>
               </div>
