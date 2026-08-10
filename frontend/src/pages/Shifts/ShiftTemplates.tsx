@@ -16,6 +16,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useShiftTemplatesQuery, useShiftTemplateMutations } from '../../hooks/useShiftTemplates';
@@ -28,6 +29,7 @@ const shiftTime = (value?: string): string => formatTime(value) || '—';
 
 
 const ShiftTemplates: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const { message, run: act } = useActionFeedback();
   const canManage = (user?.permissions ?? []).includes('shift.manage');
@@ -64,10 +66,9 @@ const ShiftTemplates: React.FC = () => {
 
   return (
     <div className="container-fluid py-3">
-      <h1 className="h4 mb-1">Shift templates</h1>
+      <h1 className="h4 mb-1">{t('shiftTemplates.title')}</h1>
       <p className="text-muted">
-        Patterns shifts are created from. Retiring one stops it being offered; shifts already
-        created from it are unaffected.
+        {t('shiftTemplates.subtitle')}
       </p>
 
       {message && (
@@ -79,7 +80,7 @@ const ShiftTemplates: React.FC = () => {
       {canManage && (
         <form className="row g-2 align-items-end mb-4" onSubmit={submit}>
           <div className="col-md-3">
-            <label className="form-label" htmlFor="template-name">Name</label>
+            <label className="form-label" htmlFor="template-name">{t('shiftTemplates.form.name')}</label>
             <input
               id="template-name"
               className="form-control"
@@ -89,7 +90,7 @@ const ShiftTemplates: React.FC = () => {
             />
           </div>
           <div className="col-md-3">
-            <label className="form-label" htmlFor="template-department">Department</label>
+            <label className="form-label" htmlFor="template-department">{t('shiftTemplates.form.department')}</label>
             <select
               id="template-department"
               className="form-select"
@@ -97,14 +98,14 @@ const ShiftTemplates: React.FC = () => {
               onChange={(e) => setDepartmentId(e.target.value)}
               required
             >
-              <option value="">Choose a department…</option>
+              <option value="">{t('shiftTemplates.form.chooseDepartment')}</option>
               {(departments.data ?? []).map((d) => (
                 <option key={String(d.id)} value={String(d.id)}>{d.name}</option>
               ))}
             </select>
           </div>
           <div className="col-auto">
-            <label className="form-label" htmlFor="template-start">Starts</label>
+            <label className="form-label" htmlFor="template-start">{t('shiftTemplates.form.starts')}</label>
             <input
               id="template-start"
               type="time"
@@ -115,7 +116,7 @@ const ShiftTemplates: React.FC = () => {
             />
           </div>
           <div className="col-auto">
-            <label className="form-label" htmlFor="template-end">Ends</label>
+            <label className="form-label" htmlFor="template-end">{t('shiftTemplates.form.ends')}</label>
             <input
               id="template-end"
               type="time"
@@ -126,7 +127,7 @@ const ShiftTemplates: React.FC = () => {
             />
           </div>
           <div className="col-auto">
-            <label className="form-label" htmlFor="template-min">Min staff</label>
+            <label className="form-label" htmlFor="template-min">{t('shiftTemplates.form.minStaff')}</label>
             <input
               id="template-min"
               type="number"
@@ -137,7 +138,7 @@ const ShiftTemplates: React.FC = () => {
             />
           </div>
           <div className="col-auto">
-            <label className="form-label" htmlFor="template-max">Max staff</label>
+            <label className="form-label" htmlFor="template-max">{t('shiftTemplates.form.maxStaff')}</label>
             <input
               id="template-max"
               type="number"
@@ -149,7 +150,7 @@ const ShiftTemplates: React.FC = () => {
           </div>
           <div className="col-auto">
             <button type="submit" className="btn btn-primary" disabled={create.isPending}>
-              Add template
+              {t('shiftTemplates.form.addTemplate')}
             </button>
           </div>
         </form>
@@ -161,39 +162,39 @@ const ShiftTemplates: React.FC = () => {
         error={templates.error}
         onRetry={templates.refetch}
         isEmpty={(templates.data?.length ?? 0) === 0}
-        loadingMessage="Loading templates…"
-        empty={<p className="text-muted">No shift templates defined yet.</p>}
+        loadingMessage={t('shiftTemplates.loading')}
+        empty={<p className="text-muted">{t('shiftTemplates.empty')}</p>}
       >
         <table className="table table-sm align-middle">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Department</th>
-              <th>Hours</th>
-              <th>Staffing</th>
+              <th>{t('shiftTemplates.columns.name')}</th>
+              <th>{t('shiftTemplates.columns.department')}</th>
+              <th>{t('shiftTemplates.columns.hours')}</th>
+              <th>{t('shiftTemplates.columns.staffing')}</th>
               {canManage && <th />}
             </tr>
           </thead>
           <tbody>
-            {(templates.data ?? []).map((t) => (
-              <tr key={t.id}>
-                <td>{t.name}</td>
-                <td>{t.departmentName ?? t.departmentId}</td>
+            {(templates.data ?? []).map((t2) => (
+              <tr key={t2.id}>
+                <td>{t2.name}</td>
+                <td>{t2.departmentName ?? t2.departmentId}</td>
                 <td>
-                  {shiftTime(t.startTime)}–{shiftTime(t.endTime)}
+                  {t('common.timeRange', { start: shiftTime(t2.startTime), end: shiftTime(t2.endTime) })}
                 </td>
                 <td>
-                  {t.minStaff}–{t.maxStaff}
+                  {t('shiftTemplates.staffingRange', { min: t2.minStaff, max: t2.maxStaff })}
                 </td>
                 {canManage && (
                   <td className="text-end">
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-danger"
-                      onClick={() => act(remove.mutateAsync(t.id))}
+                      onClick={() => act(remove.mutateAsync(t2.id))}
                       disabled={remove.isPending}
                     >
-                      Retire
+                      {t('shiftTemplates.retire')}
                     </button>
                   </td>
                 )}

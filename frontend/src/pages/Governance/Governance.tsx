@@ -14,6 +14,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
 import * as responsibilitySvc from '../../services/responsibilityService';
@@ -36,11 +37,11 @@ import LoadingSpinner from '../../components/LoadingSpinner';
 
 type Tab = 'matrix' | 'changeRequests';
 
-const SUBJECT_TYPE_LABELS: Record<ResponsibilitySubjectType, string> = {
-  org_unit: 'Org Unit',
-  department: 'Department',
-  role: 'Role',
-  all: 'All Users',
+const SUBJECT_TYPE_LABEL_KEYS: Record<ResponsibilitySubjectType, string> = {
+  org_unit: 'governance.subjectTypes.orgUnit',
+  department: 'governance.subjectTypes.department',
+  role: 'governance.subjectTypes.role',
+  all: 'governance.subjectTypes.all',
 };
 
 const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
@@ -51,7 +52,20 @@ const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
   cancelled: 'secondary',
 };
 
+// Kept as identifiers (not JSX literals) so the option `value`s stay the raw
+// enum the backend expects while the visible label goes through `t()`.
+const CR_STATUSES: ChangeRequestStatus[] = ['pending', 'approved', 'applied', 'rejected', 'cancelled'];
+
+const CR_STATUS_LABEL_KEYS: Record<ChangeRequestStatus, string> = {
+  pending: 'governance.changeRequests.status.pending',
+  approved: 'governance.changeRequests.status.approved',
+  applied: 'governance.changeRequests.status.applied',
+  rejected: 'governance.changeRequests.status.rejected',
+  cancelled: 'governance.changeRequests.status.cancelled',
+};
+
 const Governance: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAuth();
   const canManageMatrix = user?.permissions?.includes('responsibility.manage') ?? false;
   const canReadMatrix = user?.permissions?.includes('responsibility.read') ?? false;
@@ -92,10 +106,10 @@ const Governance: React.FC = () => {
         setRuleForm({ subjectType: 'department', permissionCode: '', responsibleOrgUnitId: 0 });
         await loadRules();
       } else {
-        setError((res as { error?: { message?: string } }).error?.message ?? 'Failed to create rule');
+        setError((res as { error?: { message?: string } }).error?.message ?? t('governance.matrix.createFailed'));
       }
     } catch {
-      setError('Failed to create responsibility rule');
+      setError(t('governance.matrix.createFailed'));
     } finally {
       setBusy(false);
     }
@@ -107,20 +121,20 @@ const Governance: React.FC = () => {
       await responsibilitySvc.updateResponsibilityRule(rule.id, { isActive: !rule.isActive });
       await loadRules();
     } catch {
-      setError('Failed to update rule');
+      setError(t('governance.matrix.updateFailed'));
     } finally {
       setBusy(false);
     }
   };
 
   const handleDeleteRule = async (id: number) => {
-    if (!window.confirm('Delete this responsibility rule?')) return;
+    if (!window.confirm(t('governance.matrix.confirmDelete'))) return;
     setBusy(true);
     try {
       await responsibilitySvc.deleteResponsibilityRule(id);
       await loadRules();
     } catch {
-      setError('Failed to delete rule');
+      setError(t('governance.matrix.deleteFailed'));
     } finally {
       setBusy(false);
     }
@@ -156,7 +170,7 @@ const Governance: React.FC = () => {
   const handleCreateCr = async (e: React.FormEvent) => {
     e.preventDefault();
     let payload: Record<string, unknown> = {};
-    try { payload = JSON.parse(crPayloadText); } catch { setError('Proposed payload must be valid JSON'); return; }
+    try { payload = JSON.parse(crPayloadText); } catch { setError(t('governance.changeRequests.invalidJson')); return; }
     setBusy(true);
     setError(null);
     try {
@@ -167,10 +181,10 @@ const Governance: React.FC = () => {
         setCrPayloadText('{}');
         await loadChangeRequests();
       } else {
-        setError((res as { error?: { message?: string } }).error?.message ?? 'Failed to submit');
+        setError((res as { error?: { message?: string } }).error?.message ?? t('governance.changeRequests.submitFailed'));
       }
     } catch {
-      setError('Failed to submit change request');
+      setError(t('governance.changeRequests.submitFailed'));
     } finally {
       setBusy(false);
     }
@@ -184,7 +198,7 @@ const Governance: React.FC = () => {
       if (crAction === 'approve') await changeRequestSvc.approveChangeRequest(actionTargetId);
       else if (crAction === 'apply') await changeRequestSvc.applyChangeRequest(actionTargetId);
       else if (crAction === 'reject') {
-        if (!rejectReason.trim()) { setError('Rejection reason is required'); setBusy(false); return; }
+        if (!rejectReason.trim()) { setError(t('governance.changeRequests.rejectionReasonRequired')); setBusy(false); return; }
         await changeRequestSvc.rejectChangeRequest(actionTargetId, rejectReason);
       }
       setActionTargetId(null);
@@ -192,20 +206,20 @@ const Governance: React.FC = () => {
       setRejectReason('');
       await loadChangeRequests();
     } catch {
-      setError(`Failed to ${crAction} change request`);
+      setError(t('governance.changeRequests.actionFailed', { action: crAction }));
     } finally {
       setBusy(false);
     }
   };
 
   const handleCancelCr = async (id: number) => {
-    if (!window.confirm('Cancel this change request?')) return;
+    if (!window.confirm(t('governance.changeRequests.confirmCancel'))) return;
     setBusy(true);
     try {
       await changeRequestSvc.cancelChangeRequest(id);
       await loadChangeRequests();
     } catch {
-      setError('Failed to cancel change request');
+      setError(t('governance.changeRequests.cancelFailed'));
     } finally {
       setBusy(false);
     }
@@ -216,8 +230,8 @@ const Governance: React.FC = () => {
   return (
     <div className="governance-page">
       <div className="page-header">
-        <h1>Governance</h1>
-        <p className="text-muted">Responsibility matrix and change request management</p>
+        <h1>{t('governance.title')}</h1>
+        <p className="text-muted">{t('governance.subtitle')}</p>
       </div>
 
       {error && (
@@ -235,7 +249,7 @@ const Governance: React.FC = () => {
               onClick={() => setActiveTab('matrix')}
             >
               <i className="bi bi-table me-2" />
-              Responsibility Matrix
+              {t('governance.tabs.matrix')}
             </button>
           </li>
         )}
@@ -246,7 +260,7 @@ const Governance: React.FC = () => {
               onClick={() => setActiveTab('changeRequests')}
             >
               <i className="bi bi-pencil-square me-2" />
-              Change Requests
+              {t('governance.tabs.changeRequests')}
               {crTotal > 0 && crFilter === 'pending' && (
                 <span className="badge bg-warning text-dark ms-2">{crTotal}</span>
               )}
@@ -259,11 +273,11 @@ const Governance: React.FC = () => {
       {activeTab === 'matrix' && canReadMatrix && (
         <div>
           <div className="d-flex justify-content-between align-items-center mb-3">
-            <h5 className="mb-0">Active Rules</h5>
+            <h5 className="mb-0">{t('governance.matrix.activeRules')}</h5>
             {canManageMatrix && (
               <button className="btn btn-primary btn-sm" onClick={() => setShowRuleForm(!showRuleForm)}>
                 <i className="bi bi-plus-lg me-1" />
-                Add Rule
+                {t('governance.matrix.addRule')}
               </button>
             )}
           </div>
@@ -271,61 +285,61 @@ const Governance: React.FC = () => {
           {showRuleForm && canManageMatrix && (
             <div className="card mb-4">
               <div className="card-body">
-                <h6 className="card-title">New Responsibility Rule</h6>
+                <h6 className="card-title">{t('governance.matrix.newRuleTitle')}</h6>
                 <form onSubmit={handleCreateRule}>
                   <div className="row g-3">
                     <div className="col-md-3">
-                      <label className="form-label">Subject Type</label>
+                      <label className="form-label">{t('governance.matrix.form.subjectType')}</label>
                       <select
                         className="form-select"
                         value={ruleForm.subjectType}
                         onChange={e => setRuleForm(f => ({ ...f, subjectType: e.target.value as ResponsibilitySubjectType, subjectId: undefined }))}
                       >
-                        {Object.entries(SUBJECT_TYPE_LABELS).map(([v, l]) => (
-                          <option key={v} value={v}>{l}</option>
+                        {(Object.keys(SUBJECT_TYPE_LABEL_KEYS) as ResponsibilitySubjectType[]).map((v) => (
+                          <option key={v} value={v}>{t(SUBJECT_TYPE_LABEL_KEYS[v])}</option>
                         ))}
                       </select>
                     </div>
                     {ruleForm.subjectType !== 'all' && (
                       <div className="col-md-2">
-                        <label className="form-label">Subject ID</label>
+                        <label className="form-label">{t('governance.matrix.form.subjectId')}</label>
                         <input
                           type="number"
                           className="form-control"
-                          placeholder="e.g. 5"
+                          placeholder={t('governance.matrix.form.subjectIdPlaceholder')}
                           value={ruleForm.subjectId ?? ''}
                           onChange={e => setRuleForm(f => ({ ...f, subjectId: e.target.value ? Number(e.target.value) : undefined }))}
                         />
                       </div>
                     )}
                     <div className="col-md-3">
-                      <label className="form-label">Permission Code</label>
+                      <label className="form-label">{t('governance.matrix.form.permissionCode')}</label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="e.g. schedule.manage"
+                        placeholder={t('governance.matrix.form.permissionCodePlaceholder')}
                         value={ruleForm.permissionCode}
                         onChange={e => setRuleForm(f => ({ ...f, permissionCode: e.target.value }))}
                         required
                       />
                     </div>
                     <div className="col-md-2">
-                      <label className="form-label">Responsible Org Unit ID</label>
+                      <label className="form-label">{t('governance.matrix.form.responsibleOrgUnitId')}</label>
                       <input
                         type="number"
                         className="form-control"
-                        placeholder="e.g. 3"
+                        placeholder={t('governance.matrix.form.responsibleOrgUnitIdPlaceholder')}
                         value={ruleForm.responsibleOrgUnitId || ''}
                         onChange={e => setRuleForm(f => ({ ...f, responsibleOrgUnitId: Number(e.target.value) }))}
                         required
                       />
                     </div>
                     <div className="col-md-2">
-                      <label className="form-label">Description</label>
+                      <label className="form-label">{t('governance.matrix.form.description')}</label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="Optional"
+                        placeholder={t('governance.matrix.form.descriptionPlaceholder')}
                         value={ruleForm.description ?? ''}
                         onChange={e => setRuleForm(f => ({ ...f, description: e.target.value || null }))}
                       />
@@ -333,10 +347,10 @@ const Governance: React.FC = () => {
                   </div>
                   <div className="mt-3 d-flex gap-2">
                     <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
-                      {busy ? 'Saving…' : 'Save Rule'}
+                      {busy ? t('governance.matrix.saving') : t('governance.matrix.saveRule')}
                     </button>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowRuleForm(false)}>
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </form>
@@ -351,29 +365,29 @@ const Governance: React.FC = () => {
               <table className="table table-hover">
                 <thead>
                   <tr>
-                    <th>Subject Type</th>
-                    <th>Subject ID</th>
-                    <th>Permission</th>
-                    <th>Responsible Org Unit</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    {canManageMatrix && <th>Actions</th>}
+                    <th>{t('governance.matrix.columns.subjectType')}</th>
+                    <th>{t('governance.matrix.columns.subjectId')}</th>
+                    <th>{t('governance.matrix.columns.permission')}</th>
+                    <th>{t('governance.matrix.columns.responsibleOrgUnit')}</th>
+                    <th>{t('governance.matrix.columns.description')}</th>
+                    <th>{t('governance.matrix.columns.status')}</th>
+                    {canManageMatrix && <th>{t('governance.matrix.columns.actions')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {rules.length === 0 && (
-                    <tr><td colSpan={canManageMatrix ? 7 : 6} className="text-center text-muted py-4">No rules defined</td></tr>
+                    <tr><td colSpan={canManageMatrix ? 7 : 6} className="text-center text-muted py-4">{t('governance.matrix.noRules')}</td></tr>
                   )}
                   {rules.map(rule => (
                     <tr key={rule.id}>
-                      <td><span className="badge bg-secondary">{SUBJECT_TYPE_LABELS[rule.subjectType]}</span></td>
-                      <td>{rule.subjectId ?? <em className="text-muted">—</em>}</td>
+                      <td><span className="badge bg-secondary">{t(SUBJECT_TYPE_LABEL_KEYS[rule.subjectType])}</span></td>
+                      <td>{rule.subjectId ?? <em className="text-muted">{t('common.emptyValue')}</em>}</td>
                       <td><code>{rule.permissionCode}</code></td>
                       <td>{rule.responsibleOrgUnitId}</td>
-                      <td>{rule.description ?? <em className="text-muted">—</em>}</td>
+                      <td>{rule.description ?? <em className="text-muted">{t('common.emptyValue')}</em>}</td>
                       <td>
                         <span className={`badge ${rule.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                          {rule.isActive ? 'Active' : 'Inactive'}
+                          {rule.isActive ? t('governance.matrix.status.active') : t('governance.matrix.status.inactive')}
                         </span>
                       </td>
                       {canManageMatrix && (
@@ -382,7 +396,7 @@ const Governance: React.FC = () => {
                             className="btn btn-sm btn-outline-secondary me-1"
                             onClick={() => handleToggleRule(rule)}
                             disabled={busy}
-                            title={rule.isActive ? 'Deactivate' : 'Activate'}
+                            title={rule.isActive ? t('governance.matrix.deactivate') : t('governance.matrix.activate')}
                           >
                             <i className={`bi ${rule.isActive ? 'bi-toggle-on' : 'bi-toggle-off'}`} />
                           </button>
@@ -390,7 +404,7 @@ const Governance: React.FC = () => {
                             className="btn btn-sm btn-outline-danger"
                             onClick={() => handleDeleteRule(rule.id)}
                             disabled={busy}
-                            title="Delete"
+                            title={t('common.delete')}
                           >
                             <i className="bi bi-trash" />
                           </button>
@@ -416,12 +430,10 @@ const Governance: React.FC = () => {
                 value={crFilter}
                 onChange={e => setCrFilter(e.target.value as ChangeRequestStatus | '')}
               >
-                <option value="">All statuses</option>
-                <option value="pending">Pending</option>
-                <option value="approved">Approved</option>
-                <option value="applied">Applied</option>
-                <option value="rejected">Rejected</option>
-                <option value="cancelled">Cancelled</option>
+                <option value="">{t('governance.changeRequests.allStatuses')}</option>
+                {CR_STATUSES.map((status) => (
+                  <option key={status} value={status}>{t(CR_STATUS_LABEL_KEYS[status])}</option>
+                ))}
               </select>
               {canReview && (
                 <div className="form-check mb-0">
@@ -432,14 +444,14 @@ const Governance: React.FC = () => {
                     checked={myOnly}
                     onChange={e => setMyOnly(e.target.checked)}
                   />
-                  <label className="form-check-label" htmlFor="myOnly">My requests only</label>
+                  <label className="form-check-label" htmlFor="myOnly">{t('governance.changeRequests.myRequestsOnly')}</label>
                 </div>
               )}
             </div>
             {canCreate && (
               <button className="btn btn-primary btn-sm" onClick={() => setShowCrForm(!showCrForm)}>
                 <i className="bi bi-plus-lg me-1" />
-                New Request
+                {t('governance.changeRequests.newRequest')}
               </button>
             )}
           </div>
@@ -447,68 +459,68 @@ const Governance: React.FC = () => {
           {showCrForm && canCreate && (
             <div className="card mb-4">
               <div className="card-body">
-                <h6 className="card-title">Propose a Change</h6>
+                <h6 className="card-title">{t('governance.changeRequests.proposeTitle')}</h6>
                 <form onSubmit={handleCreateCr}>
                   <div className="row g-3">
                     <div className="col-md-3">
-                      <label className="form-label">Change Type</label>
+                      <label className="form-label">{t('governance.changeRequests.form.changeType')}</label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="e.g. Schedule.Override"
+                        placeholder={t('governance.changeRequests.form.changeTypePlaceholder')}
                         value={crForm.changeType}
                         onChange={e => setCrForm(f => ({ ...f, changeType: e.target.value }))}
                         required
                       />
                     </div>
                     <div className="col-md-3">
-                      <label className="form-label">Target Entity Type</label>
+                      <label className="form-label">{t('governance.changeRequests.form.targetEntityType')}</label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="e.g. schedule"
+                        placeholder={t('governance.changeRequests.form.targetEntityTypePlaceholder')}
                         value={crForm.targetEntityType}
                         onChange={e => setCrForm(f => ({ ...f, targetEntityType: e.target.value }))}
                         required
                       />
                     </div>
                     <div className="col-md-2">
-                      <label className="form-label">Target Entity ID</label>
+                      <label className="form-label">{t('governance.changeRequests.form.targetEntityId')}</label>
                       <input
                         type="number"
                         className="form-control"
-                        placeholder="Optional"
+                        placeholder={t('governance.changeRequests.form.optional')}
                         value={crForm.targetEntityId ?? ''}
                         onChange={e => setCrForm(f => ({ ...f, targetEntityId: e.target.value ? Number(e.target.value) : null }))}
                       />
                     </div>
                     <div className="col-md-4">
-                      <label className="form-label">Justification</label>
+                      <label className="form-label">{t('governance.changeRequests.form.justification')}</label>
                       <input
                         type="text"
                         className="form-control"
-                        placeholder="Why is this change needed?"
+                        placeholder={t('governance.changeRequests.form.justificationPlaceholder')}
                         value={crForm.justification ?? ''}
                         onChange={e => setCrForm(f => ({ ...f, justification: e.target.value || null }))}
                       />
                     </div>
                     <div className="col-12">
-                      <label className="form-label">Proposed Payload (JSON)</label>
+                      <label className="form-label">{t('governance.changeRequests.form.proposedPayload')}</label>
                       <textarea
                         className="form-control font-monospace"
                         rows={4}
                         value={crPayloadText}
                         onChange={e => setCrPayloadText(e.target.value)}
                       />
-                      <small className="text-muted">Must be valid JSON describing the proposed change.</small>
+                      <small className="text-muted">{t('governance.changeRequests.form.payloadHint')}</small>
                     </div>
                   </div>
                   <div className="mt-3 d-flex gap-2">
                     <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
-                      {busy ? 'Submitting…' : 'Submit Request'}
+                      {busy ? t('governance.changeRequests.submitting') : t('governance.changeRequests.submitRequest')}
                     </button>
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setShowCrForm(false); setError(null); }}>
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </form>
@@ -522,23 +534,23 @@ const Governance: React.FC = () => {
               <div className="modal-dialog">
                 <div className="modal-content">
                   <div className="modal-header">
-                    <h5 className="modal-title">Reject Change Request #{actionTargetId}</h5>
+                    <h5 className="modal-title">{t('governance.changeRequests.rejectModalTitle', { id: actionTargetId })}</h5>
                     <button className="btn-close" onClick={() => { setCrAction(null); setActionTargetId(null); }} />
                   </div>
                   <div className="modal-body">
-                    <label className="form-label">Rejection reason <span className="text-danger">*</span></label>
+                    <label className="form-label">{t('governance.changeRequests.rejectionReason')} <span className="text-danger">*</span></label>
                     <textarea
                       className="form-control"
                       rows={3}
                       value={rejectReason}
                       onChange={e => setRejectReason(e.target.value)}
-                      placeholder="Explain why this request is being rejected…"
+                      placeholder={t('governance.changeRequests.rejectionReasonPlaceholder')}
                     />
                   </div>
                   <div className="modal-footer">
-                    <button className="btn btn-secondary" onClick={() => { setCrAction(null); setActionTargetId(null); setRejectReason(''); }}>Cancel</button>
+                    <button className="btn btn-secondary" onClick={() => { setCrAction(null); setActionTargetId(null); setRejectReason(''); }}>{t('common.cancel')}</button>
                     <button className="btn btn-danger" onClick={handleCrAction} disabled={busy || !rejectReason.trim()}>
-                      {busy ? 'Rejecting…' : 'Reject'}
+                      {busy ? t('governance.changeRequests.rejecting') : t('governance.changeRequests.reject')}
                     </button>
                   </div>
                 </div>
@@ -553,19 +565,19 @@ const Governance: React.FC = () => {
               <table className="table table-hover">
                 <thead>
                   <tr>
-                    <th>#</th>
-                    <th>Type</th>
-                    <th>Target</th>
-                    <th>Proposer</th>
-                    <th>Justification</th>
-                    <th>Status</th>
-                    <th>Submitted</th>
-                    {(canReview || canCreate) && <th>Actions</th>}
+                    <th>{t('governance.changeRequests.columns.id')}</th>
+                    <th>{t('governance.changeRequests.columns.type')}</th>
+                    <th>{t('governance.changeRequests.columns.target')}</th>
+                    <th>{t('governance.changeRequests.columns.proposer')}</th>
+                    <th>{t('governance.changeRequests.columns.justification')}</th>
+                    <th>{t('governance.changeRequests.columns.status')}</th>
+                    <th>{t('governance.changeRequests.columns.submitted')}</th>
+                    {(canReview || canCreate) && <th>{t('governance.changeRequests.columns.actions')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {changeRequests.length === 0 && (
-                    <tr><td colSpan={8} className="text-center text-muted py-4">No change requests found</td></tr>
+                    <tr><td colSpan={8} className="text-center text-muted py-4">{t('governance.changeRequests.noneFound')}</td></tr>
                   )}
                   {changeRequests.map(cr => (
                     <tr key={cr.id}>
@@ -578,8 +590,8 @@ const Governance: React.FC = () => {
                       <td>{cr.proposerUserId}</td>
                       <td>
                         {cr.justification
-                          ? <span title={cr.justification}>{cr.justification.length > 40 ? `${cr.justification.slice(0, 40)}…` : cr.justification}</span>
-                          : <em className="text-muted">—</em>
+                          ? <span title={cr.justification}>{cr.justification.length > 40 ? `${cr.justification.slice(0, 40)}${t('common.ellipsis')}` : cr.justification}</span>
+                          : <em className="text-muted">{t('common.emptyValue')}</em>
                         }
                       </td>
                       <td>
@@ -597,7 +609,7 @@ const Governance: React.FC = () => {
                                 className="btn btn-sm btn-outline-success me-1"
                                 onClick={() => { setActionTargetId(cr.id); setCrAction('approve'); handleCrAction(); }}
                                 disabled={busy}
-                                title="Approve"
+                                title={t('governance.changeRequests.approve')}
                               >
                                 <i className="bi bi-check-lg" />
                               </button>
@@ -605,7 +617,7 @@ const Governance: React.FC = () => {
                                 className="btn btn-sm btn-outline-danger me-1"
                                 onClick={() => { setActionTargetId(cr.id); setCrAction('reject'); }}
                                 disabled={busy}
-                                title="Reject"
+                                title={t('governance.changeRequests.reject')}
                               >
                                 <i className="bi bi-x-lg" />
                               </button>
@@ -616,7 +628,7 @@ const Governance: React.FC = () => {
                               className="btn btn-sm btn-outline-primary me-1"
                               onClick={() => { setActionTargetId(cr.id); setCrAction('apply'); handleCrAction(); }}
                               disabled={busy}
-                              title="Apply"
+                              title={t('governance.changeRequests.apply')}
                             >
                               <i className="bi bi-lightning" />
                             </button>
@@ -626,7 +638,7 @@ const Governance: React.FC = () => {
                               className="btn btn-sm btn-outline-secondary"
                               onClick={() => handleCancelCr(cr.id)}
                               disabled={busy}
-                              title="Cancel"
+                              title={t('governance.changeRequests.cancel')}
                             >
                               <i className="bi bi-slash-circle" />
                             </button>
@@ -638,7 +650,9 @@ const Governance: React.FC = () => {
                 </tbody>
               </table>
               {crTotal > changeRequests.length && (
-                <p className="text-muted text-center small">Showing {changeRequests.length} of {crTotal} requests</p>
+                <p className="text-muted text-center small">
+                  {t('governance.changeRequests.showingCount', { shown: changeRequests.length, total: crTotal })}
+                </p>
               )}
             </div>
           )}

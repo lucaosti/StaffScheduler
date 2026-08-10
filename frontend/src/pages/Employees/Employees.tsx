@@ -1,9 +1,9 @@
 /**
  * Employees Page Component for Staff Scheduler
- * 
+ *
  * Comprehensive employee management interface providing CRUD operations,
  * search functionality, and detailed employee information display.
- * 
+ *
  * Features:
  * - Employee listing with pagination and sorting
  * - Advanced search and filtering capabilities
@@ -12,11 +12,12 @@
  * - Bulk operations for multiple employees
  * - Export functionality for employee data
  * - Real-time updates and error handling
- * 
+ *
  * @author Luca Ostinelli
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Employee } from '../../types';
 import * as employeeService from '../../services/employeeService';
 import ConfirmModal from '../../components/ConfirmModal';
@@ -44,6 +45,7 @@ import {
  * @returns JSX element containing the employee management interface
  */
 const Employees: React.FC = () => {
+  const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -69,7 +71,7 @@ const Employees: React.FC = () => {
   // filter changes keep the previous list visible via placeholderData.
   const loading = employeesQuery.isLoading;
   const error = employeesQuery.isError
-    ? 'Failed to load employees. Please ensure the backend is running and database is populated.'
+    ? t('employees.loadFailed')
     : actionError;
   const setError = setActionError;
 
@@ -84,7 +86,7 @@ const Employees: React.FC = () => {
     try {
       await deleteEmployee.mutateAsync(id);
     } catch (_err) {
-      setActionError('Failed to delete employee');
+      setActionError(t('employees.deleteFailed'));
     }
   };
 
@@ -109,9 +111,9 @@ const Employees: React.FC = () => {
       <div className="container-fluid py-4">
         <div className="text-center">
           <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">Loading...</span>
+            <span className="visually-hidden">{t('common.loading')}</span>
           </div>
-          <p className="mt-2">Loading employees...</p>
+          <p className="mt-2">{t('employees.loading')}</p>
         </div>
       </div>
     );
@@ -124,9 +126,9 @@ const Employees: React.FC = () => {
         <div className="col">
           <div className="d-flex justify-content-between align-items-center">
             <div>
-              <h1 className="h3 mb-0">Employees</h1>
+              <h1 className="h3 mb-0">{t('employees.title')}</h1>
               <p className="text-muted mb-0">
-                Manage your workforce and employee information
+                {t('employees.subtitle')}
               </p>
             </div>
             <div className="d-flex gap-2">
@@ -138,12 +140,12 @@ const Employees: React.FC = () => {
               disabled={filteredEmployees.length === 0}
               className="btn btn-outline-secondary"
             />
-            <button 
+            <button
               className="btn btn-primary"
               onClick={() => setShowAddModal(true)}
             >
               <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
-              Add Employee
+              {t('employees.addEmployee')}
             </button>
             </div>
           </div>
@@ -160,8 +162,8 @@ const Employees: React.FC = () => {
             <input
               type="text"
               className="form-control"
-              placeholder="Search employees..."
-              aria-label="Search employees"
+              placeholder={t('employees.searchPlaceholder')}
+              aria-label={t('employees.searchAriaLabel')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -173,7 +175,7 @@ const Employees: React.FC = () => {
             value={selectedDepartment}
             onChange={(e) => setSelectedDepartment(e.target.value)}
           >
-            <option value="">All Departments</option>
+            <option value="">{t('employees.allDepartments')}</option>
             {departments.map(dept => (
               <option key={dept} value={dept}>{dept}</option>
             ))}
@@ -182,7 +184,7 @@ const Employees: React.FC = () => {
         <div className="col-md-3">
           <div className="text-end">
             <small className="text-muted">
-              {filteredEmployees.length} of {employees.length} employees
+              {t('employees.countSummary', { filtered: filteredEmployees.length, total: employees.length })}
             </small>
           </div>
         </div>
@@ -192,10 +194,10 @@ const Employees: React.FC = () => {
       {error && (
         <div className="alert alert-warning alert-dismissible fade show" role="alert">
           <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-          {error} - Showing sample data
-          <button 
-            type="button" 
-            className="btn-close" 
+          {t('employees.errorWithSampleData', { error })}
+          <button
+            type="button"
+            className="btn-close"
             onClick={() => setError(null)}
           ></button>
         </div>
@@ -208,12 +210,12 @@ const Employees: React.FC = () => {
             <table className="table table-hover mb-0">
               <thead>
                 <tr>
-                  <th scope="col">Employee</th>
-                  <th scope="col">Department</th>
-                  <th scope="col">Position</th>
-                  <th scope="col">Hourly Rate</th>
-                  <th scope="col">Status</th>
-                  <th scope="col" style={{ width: '120px' }}>Actions</th>
+                  <th scope="col">{t('employees.columns.employee')}</th>
+                  <th scope="col">{t('employees.columns.department')}</th>
+                  <th scope="col">{t('employees.columns.position')}</th>
+                  <th scope="col">{t('employees.columns.hourlyRate')}</th>
+                  <th scope="col">{t('employees.columns.status')}</th>
+                  <th scope="col" style={{ width: '120px' }}>{t('employees.columns.actions')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,20 +232,20 @@ const Employees: React.FC = () => {
                           </div>
                           <small className="text-muted">{employee.email}</small>
                           <br />
-                          <small className="text-muted">ID: {employee.employeeId}</small>
+                          <small className="text-muted">{t('employees.idPrefix')} {employee.employeeId}</small>
                         </div>
                       </div>
                     </td>
-                    <td>{employee.department || '-'}</td>
-                    <td>{employee.position || '-'}</td>
+                    <td>{employee.department || t('common.emptyValue')}</td>
+                    <td>{employee.position || t('common.emptyValue')}</td>
                     <td>
-                      {employee.hourlyRate ? `€${employee.hourlyRate.toFixed(2)}` : '-'}
+                      {employee.hourlyRate ? `€${employee.hourlyRate.toFixed(2)}` : t('common.emptyValue')}
                     </td>
                     <td>
                       <span className={`badge ${
                         employee.isActive ? 'bg-success' : 'bg-secondary'
                       }`}>
-                        {employee.isActive ? 'Active' : 'Inactive'}
+                        {employee.isActive ? t('employees.status.active') : t('employees.status.inactive')}
                       </span>
                     </td>
                     <td>
@@ -251,16 +253,16 @@ const Employees: React.FC = () => {
                         <button
                           className="btn btn-outline-primary"
                           onClick={() => setEditingEmployee(employee)}
-                          title="Edit Employee"
-                          aria-label="Edit employee"
+                          title={t('employees.editEmployeeTitle')}
+                          aria-label={t('employees.editEmployeeAriaLabel')}
                         >
                           <i className="bi bi-pencil" aria-hidden="true"></i>
                         </button>
                         <button
                           className="btn btn-outline-danger"
                           onClick={() => employee.id !== undefined && handleDeleteEmployee(employee.id)}
-                          title="Delete Employee"
-                          aria-label="Delete employee"
+                          title={t('employees.deleteEmployeeTitle')}
+                          aria-label={t('employees.deleteEmployeeAriaLabel')}
                         >
                           <i className="bi bi-trash" aria-hidden="true"></i>
                         </button>
@@ -275,20 +277,20 @@ const Employees: React.FC = () => {
           {filteredEmployees.length === 0 && (
             <div className="text-center py-5">
               <i className="bi bi-people text-muted" style={{ fontSize: '3rem' }} aria-hidden="true"></i>
-              <h5 className="mt-3">No employees found</h5>
+              <h5 className="mt-3">{t('employees.noneFound')}</h5>
               <p className="text-muted">
-                {searchTerm || selectedDepartment 
-                  ? 'Try adjusting your filters' 
-                  : 'Get started by adding your first employee'
+                {searchTerm || selectedDepartment
+                  ? t('employees.tryAdjustingFilters')
+                  : t('employees.getStarted')
                 }
               </p>
               {!searchTerm && !selectedDepartment && (
-                <button 
+                <button
                   className="btn btn-primary"
                   onClick={() => setShowAddModal(true)}
                 >
                   <i className="bi bi-plus-lg me-2"></i>
-                  Add First Employee
+                  {t('employees.addFirstEmployee')}
                 </button>
               )}
             </div>
@@ -298,9 +300,9 @@ const Employees: React.FC = () => {
 
       <ConfirmModal
         show={confirmDelete.open}
-        title="Delete Employee"
-        message="Are you sure you want to delete this employee?"
-        confirmLabel="Delete"
+        title={t('employees.deleteModal.title')}
+        message={t('employees.deleteModal.message')}
+        confirmLabel={t('common.delete')}
         onConfirm={executeDelete}
         onCancel={() => setConfirmDelete({ open: false, employeeId: null })}
       />
@@ -312,7 +314,7 @@ const Employees: React.FC = () => {
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">
-                  {editingEmployee ? 'Edit Employee' : 'Add New Employee'}
+                  {editingEmployee ? t('employees.modal.editTitle') : t('employees.modal.addTitle')}
                 </h5>
                 <button
                   type="button"
@@ -327,7 +329,7 @@ const Employees: React.FC = () => {
                 <form onSubmit={async (e) => {
                   e.preventDefault();
                   const formData = new FormData(e.currentTarget);
-                  
+
                   const rawDeptId = formData.get('departmentId') as string;
                   const deptId = rawDeptId ? parseInt(rawDeptId, 10) : NaN;
                   const rawHourlyRate = formData.get('hourlyRate') as string;
@@ -348,7 +350,7 @@ const Employees: React.FC = () => {
                   try {
                     if (editingEmployee && !editingEmployee.id) {
                       // Guard: leave modal open so the user can see the error message.
-                      setError('Cannot update employee: missing ID');
+                      setError(t('employees.missingIdError'));
                       return;
                     }
                     await saveEmployee.mutateAsync({
@@ -358,12 +360,12 @@ const Employees: React.FC = () => {
                     setShowAddModal(false);
                     setEditingEmployee(null);
                   } catch (_err) {
-                    setError('Failed to save employee');
+                    setError(t('employees.saveFailed'));
                   }
                 }}>
                   <div className="row">
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="employeeId" className="form-label">Employee ID *</label>
+                      <label htmlFor="employeeId" className="form-label">{t('employees.form.employeeId')}</label>
                       <input
                         type="text"
                         className="form-control"
@@ -374,7 +376,7 @@ const Employees: React.FC = () => {
                       />
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="email" className="form-label">Email *</label>
+                      <label htmlFor="email" className="form-label">{t('employees.form.email')}</label>
                       <input
                         type="email"
                         className="form-control"
@@ -398,7 +400,7 @@ const Employees: React.FC = () => {
                   {!editingEmployee && (
                     <div className="row">
                       <div className="col-md-6 mb-3">
-                        <label htmlFor="password" className="form-label">Initial Password *</label>
+                        <label htmlFor="password" className="form-label">{t('employees.form.initialPassword')}</label>
                         <input
                           type="password"
                           className="form-control"
@@ -408,14 +410,14 @@ const Employees: React.FC = () => {
                           autoComplete="new-password"
                           required
                         />
-                        <div className="form-text">At least 8 characters.</div>
+                        <div className="form-text">{t('employees.form.passwordHelp')}</div>
                       </div>
                     </div>
                   )}
-                  
+
                   <div className="row">
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="firstName" className="form-label">First Name *</label>
+                      <label htmlFor="firstName" className="form-label">{t('employees.form.firstName')}</label>
                       <input
                         type="text"
                         className="form-control"
@@ -426,7 +428,7 @@ const Employees: React.FC = () => {
                       />
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="lastName" className="form-label">Last Name *</label>
+                      <label htmlFor="lastName" className="form-label">{t('employees.form.lastName')}</label>
                       <input
                         type="text"
                         className="form-control"
@@ -440,7 +442,7 @@ const Employees: React.FC = () => {
 
                   <div className="row">
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="phone" className="form-label">Phone</label>
+                      <label htmlFor="phone" className="form-label">{t('employees.form.phone')}</label>
                       <input
                         type="tel"
                         className="form-control"
@@ -450,7 +452,7 @@ const Employees: React.FC = () => {
                       />
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="departmentId" className="form-label">Department</label>
+                      <label htmlFor="departmentId" className="form-label">{t('employees.form.department')}</label>
                       <select
                         className="form-select"
                         id="departmentId"
@@ -461,7 +463,7 @@ const Employees: React.FC = () => {
                             : ''
                         }
                       >
-                        <option value="">— none —</option>
+                        <option value="">{t('employees.form.noneOption')}</option>
                         {allDepartments.map((d) => (
                           <option key={d.id} value={d.id}>{d.name}</option>
                         ))}
@@ -471,18 +473,18 @@ const Employees: React.FC = () => {
 
                   <div className="row">
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="position" className="form-label">Position</label>
+                      <label htmlFor="position" className="form-label">{t('employees.form.position')}</label>
                       <input
                         type="text"
                         className="form-control"
                         id="position"
                         name="position"
                         defaultValue={editingEmployee?.position || ''}
-                        placeholder="e.g. Engineer, Manager"
+                        placeholder={t('employees.form.positionPlaceholder')}
                       />
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label htmlFor="hourlyRate" className="form-label">Hourly Rate (€)</label>
+                      <label htmlFor="hourlyRate" className="form-label">{t('employees.form.hourlyRate')}</label>
                       <input
                         type="number"
                         step="0.01"
@@ -504,10 +506,10 @@ const Employees: React.FC = () => {
                         setEditingEmployee(null);
                       }}
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                     <button type="submit" className="btn btn-primary">
-                      {editingEmployee ? 'Update' : 'Create'} Employee
+                      {editingEmployee ? t('employees.modal.update') : t('employees.modal.create')}
                     </button>
                   </div>
                 </form>

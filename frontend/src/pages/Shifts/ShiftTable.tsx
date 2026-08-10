@@ -5,6 +5,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Shift } from '../../types';
 import EmptyState from '../../components/EmptyState';
 import { toLocalDateString } from '../../utils/format';
@@ -50,21 +51,23 @@ const ShiftTable: React.FC<Props> = ({
   onAddNew,
   hasSchedules,
 }) => {
+  const { t } = useTranslation();
+
   if (shifts.length === 0) {
     return (
       <EmptyState
         icon="bi-clock"
-        title="No Shifts Found"
+        title={t('shifts.table.emptyTitle')}
         message={
           searchTerm
-            ? 'No shifts match your search criteria'
+            ? t('shifts.table.emptySearchMessage')
             : !hasSchedules
-              ? 'Create a schedule first, then add shifts to it.'
-              : 'Start by creating your first shift.'
+              ? t('shifts.table.emptyNoSchedulesMessage')
+              : t('shifts.table.emptyStartMessage')
         }
         action={
           !searchTerm && hasSchedules
-            ? { label: 'Create First Shift', onClick: onAddNew }
+            ? { label: t('shifts.table.createFirstShift'), onClick: onAddNew }
             : undefined
         }
       />
@@ -77,7 +80,7 @@ const ShiftTable: React.FC<Props> = ({
         const deptName =
           shift.departmentName ||
           (shift.departmentId ? departmentNameById.get(Number(shift.departmentId)) : '') ||
-          'Unknown';
+          t('shifts.table.unknownDepartment');
         const dateStr = toLocalDateString(shift.date);
 
         return (
@@ -89,7 +92,7 @@ const ShiftTable: React.FC<Props> = ({
                   <button
                     className="btn btn-sm btn-outline-secondary"
                     type="button"
-                    aria-label="Shift actions"
+                    aria-label={t('shifts.table.shiftActionsAriaLabel')}
                     data-bs-toggle="dropdown"
                   >
                     <i className="bi bi-three-dots" aria-hidden="true"></i>
@@ -101,7 +104,7 @@ const ShiftTable: React.FC<Props> = ({
                         type="button"
                         onClick={() => onEdit(shift)}
                       >
-                        <i className="bi bi-pencil me-2" aria-hidden="true"></i>Edit
+                        <i className="bi bi-pencil me-2" aria-hidden="true"></i>{t('common.edit')}
                       </button>
                     </li>
                     {onManageStaff && (
@@ -111,7 +114,7 @@ const ShiftTable: React.FC<Props> = ({
                           type="button"
                           onClick={() => onManageStaff(shift)}
                         >
-                          <i className="bi bi-people me-2" aria-hidden="true"></i>Staff
+                          <i className="bi bi-people me-2" aria-hidden="true"></i>{t('shifts.table.staff')}
                         </button>
                       </li>
                     )}
@@ -124,7 +127,7 @@ const ShiftTable: React.FC<Props> = ({
                         type="button"
                         onClick={() => onDelete(shift.id!)}
                       >
-                        <i className="bi bi-trash me-2" aria-hidden="true"></i>Delete
+                        <i className="bi bi-trash me-2" aria-hidden="true"></i>{t('common.delete')}
                       </button>
                     </li>
                   </ul>
@@ -138,27 +141,27 @@ const ShiftTable: React.FC<Props> = ({
                       shift.status === 'confirmed' ? 'bg-success' : 'bg-secondary'
                     }`}
                   >
-                    {shift.status || 'open'}
+                    {shift.status || t('shifts.table.statusOpen')}
                   </span>
                 </div>
                 <div className="row g-2">
                   <div className="col-6">
-                    <strong>Date:</strong>
+                    <strong>{t('shifts.table.date')}</strong>
                     <br />
                     <span className="text-muted">{dateStr}</span>
                   </div>
                   <div className="col-6">
-                    <strong>Time:</strong>
+                    <strong>{t('shifts.table.time')}</strong>
                     <br />
                     <span className="text-muted">{formatShiftTime(shift)}</span>
                   </div>
                   <div className="col-6">
-                    <strong>Duration:</strong>
+                    <strong>{t('shifts.table.duration')}</strong>
                     <br />
                     <span className="text-muted">{getShiftDuration(shift)}</span>
                   </div>
                   <div className="col-6">
-                    <strong>Required Staff:</strong>
+                    <strong>{t('shifts.table.requiredStaff')}</strong>
                     <br />
                     <span className="text-muted">
                       {shift.minStaff ?? 0}
@@ -168,7 +171,7 @@ const ShiftTable: React.FC<Props> = ({
                 </div>
                 {shift.notes && (
                   <div className="mt-3">
-                    <strong>Notes:</strong>
+                    <strong>{t('shifts.table.notes')}</strong>
                     <br />
                     <span className="text-muted">{shift.notes}</span>
                   </div>

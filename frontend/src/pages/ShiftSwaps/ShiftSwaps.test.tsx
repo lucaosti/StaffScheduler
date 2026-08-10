@@ -328,7 +328,7 @@ describe('deciding (the manager step, after the target has accepted)', () => {
   it('offers nothing on a request already decided', async () => {
     getSwapRequests.mockImplementation(() => okResponse([swapRequest({ status: 'approved' })]));
     render(<ShiftSwaps />);
-    await screen.findByText('approved');
+    await screen.findByText('Approved');
     expect(screen.queryByRole('button', { name: 'Withdraw' })).not.toBeInTheDocument();
   });
 });

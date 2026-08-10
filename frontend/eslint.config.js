@@ -47,6 +47,16 @@ const I18N_ENFORCED_FILES = [
   'src/pages/Delegations/Delegations.tsx',
   'src/pages/ChangeRequests/ChangeRequests.tsx',
   'src/pages/Approvals/PendingApprovals.tsx',
+  'src/pages/Employees/Employees.tsx',
+  'src/pages/ShiftSwaps/ShiftSwaps.tsx',
+  'src/pages/Shifts/Shifts.tsx',
+  'src/pages/Shifts/ShiftTable.tsx',
+  'src/pages/Shifts/TemplateModal.tsx',
+  'src/pages/Shifts/ShiftTemplates.tsx',
+  'src/pages/Governance/Governance.tsx',
+  'src/pages/Governance/RaciMatrix.tsx',
+  'src/pages/Org/Authority.tsx',
+  'src/pages/Org/OrgManagement.tsx',
 ];
 
 module.exports = [

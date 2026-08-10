@@ -5,6 +5,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Shift, Schedule } from '../../types';
 import type { Department } from '../../services/departmentService';
 import { toLocalDateString, todayIso } from '../../utils/format';
@@ -31,6 +32,7 @@ const TemplateModal: React.FC<Props> = ({
   onClose,
   onSubmit,
 }) => {
+  const { t } = useTranslation();
   const editingDateDefault = toLocalDateString(editingShift?.date) || todayIso();
 
   // Tracked separately from the rest of the (uncontrolled) form, purely to
@@ -67,12 +69,12 @@ const TemplateModal: React.FC<Props> = ({
         <div className="modal-content">
           <div className="modal-header">
             <h5 className="modal-title" id="shift-modal-title">
-              {editingShift ? 'Edit Shift' : 'Add New Shift'}
+              {editingShift ? t('shifts.modal.editTitle') : t('shifts.modal.addTitle')}
             </h5>
             <button
               type="button"
               className="btn-close"
-              aria-label="Close"
+              aria-label={t('common.close')}
               disabled={submitting}
               onClick={onClose}
             ></button>
@@ -87,7 +89,7 @@ const TemplateModal: React.FC<Props> = ({
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-schedule" className="form-label">
-                    Schedule *
+                    {t('shifts.form.schedule')}
                   </label>
                   <select
                     id="shift-schedule"
@@ -100,7 +102,7 @@ const TemplateModal: React.FC<Props> = ({
                     disabled={submitting || schedules.length === 0}
                   >
                     <option value="" disabled>
-                      {schedules.length === 0 ? 'No schedules available' : 'Select a schedule'}
+                      {schedules.length === 0 ? t('shifts.form.noSchedulesAvailable') : t('shifts.form.selectSchedule')}
                     </option>
                     {schedules.map((s) => (
                       <option key={s.id} value={String(s.id)}>
@@ -111,7 +113,7 @@ const TemplateModal: React.FC<Props> = ({
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-department" className="form-label">
-                    Department *
+                    {t('shifts.form.department')}
                   </label>
                   <select
                     id="shift-department"
@@ -124,8 +126,8 @@ const TemplateModal: React.FC<Props> = ({
                   >
                     <option value="" disabled>
                       {departments.length === 0
-                        ? 'No departments available'
-                        : 'Select a department'}
+                        ? t('shifts.form.noDepartmentsAvailable')
+                        : t('shifts.form.selectDepartment')}
                     </option>
                     {departments.map((d) => (
                       <option key={d.id} value={String(d.id)}>
@@ -139,7 +141,7 @@ const TemplateModal: React.FC<Props> = ({
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-date" className="form-label">
-                    Date *
+                    {t('shifts.form.date')}
                   </label>
                   <input
                     type="date"
@@ -157,7 +159,7 @@ const TemplateModal: React.FC<Props> = ({
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-start" className="form-label">
-                    Start Time *
+                    {t('shifts.form.startTime')}
                   </label>
                   <input
                     type="time"
@@ -172,7 +174,7 @@ const TemplateModal: React.FC<Props> = ({
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-end" className="form-label">
-                    End Time *
+                    {t('shifts.form.endTime')}
                   </label>
                   <input
                     type="time"
@@ -185,7 +187,7 @@ const TemplateModal: React.FC<Props> = ({
                     disabled={submitting}
                   />
                   <div className="form-text">
-                    End time can be on the next day for overnight shifts.
+                    {t('shifts.form.overnightHint')}
                   </div>
                 </div>
               </div>
@@ -193,7 +195,7 @@ const TemplateModal: React.FC<Props> = ({
               <div className="row">
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-min" className="form-label">
-                    Min Staff *
+                    {t('shifts.form.minStaff')}
                   </label>
                   <input
                     type="number"
@@ -207,23 +209,30 @@ const TemplateModal: React.FC<Props> = ({
                     disabled={submitting}
                   />
                   {suggestionLoading && (
-                    <div className="form-text">Checking staffing history…</div>
+                    <div className="form-text">{t('shifts.form.checkingHistory')}</div>
                   )}
                   {!suggestionLoading && suggestion && (
                     <div className="form-text">
                       {suggestion.basedOnOccurrences > 0
-                        ? `Suggested: ${suggestion.suggestedMinStaff} staff, based on ` +
-                          `${suggestion.basedOnOccurrences} past occurrence` +
-                          `${suggestion.basedOnOccurrences === 1 ? '' : 's'} in the last ` +
-                          `${suggestion.lookbackWeeks} weeks.`
-                        : `Suggested: ${suggestion.suggestedMinStaff} staff (no matching history yet — ` +
-                          'this is a default, not a measurement).'}
+                        ? t(
+                            suggestion.basedOnOccurrences === 1
+                              ? 'shifts.form.suggestionWithHistoryOne'
+                              : 'shifts.form.suggestionWithHistoryOther',
+                            {
+                              count: suggestion.suggestedMinStaff,
+                              occurrences: suggestion.basedOnOccurrences,
+                              weeks: suggestion.lookbackWeeks,
+                            }
+                          )
+                        : t('shifts.form.suggestionWithoutHistory', {
+                            count: suggestion.suggestedMinStaff,
+                          })}
                     </div>
                   )}
                 </div>
                 <div className="col-md-6 mb-3">
                   <label htmlFor="shift-max" className="form-label">
-                    Max Staff
+                    {t('shifts.form.maxStaff')}
                   </label>
                   <input
                     type="number"
@@ -240,7 +249,7 @@ const TemplateModal: React.FC<Props> = ({
 
               <div className="mb-3">
                 <label htmlFor="shift-notes" className="form-label">
-                  Notes
+                  {t('shifts.form.notes')}
                 </label>
                 <textarea
                   id="shift-notes"
@@ -248,7 +257,7 @@ const TemplateModal: React.FC<Props> = ({
                   className="form-control"
                   rows={3}
                   defaultValue={editingShift?.notes || ''}
-                  placeholder="Optional notes for this shift"
+                  placeholder={t('shifts.form.notesPlaceholder')}
                   disabled={submitting}
                 />
               </div>
@@ -260,7 +269,7 @@ const TemplateModal: React.FC<Props> = ({
                 onClick={onClose}
                 disabled={submitting}
               >
-                Cancel
+                {t('common.cancel')}
               </button>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
                 {submitting ? (
@@ -269,10 +278,10 @@ const TemplateModal: React.FC<Props> = ({
                       className="spinner-border spinner-border-sm me-2"
                       role="status"
                     ></span>
-                    Saving...
+                    {t('shifts.form.saving')}
                   </>
                 ) : (
-                  <>{editingShift ? 'Update' : 'Create'} Shift</>
+                  <>{editingShift ? t('shifts.modal.updateShift') : t('shifts.modal.createShift')}</>
                 )}
               </button>
             </div>
