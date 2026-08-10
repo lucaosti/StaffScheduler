@@ -14,6 +14,7 @@ import {
   type TimePeriod,
 } from '../../services/settingsService';
 import { useSystemSettingsQuery, useSaveSystemSettings } from '../../hooks/useSystemSettings';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 /**
  * Option lists typed against the contract enums.
@@ -43,8 +44,7 @@ const SystemSection: React.FC = () => {
   // back to a PUT that rejects it.
   const [currency, setCurrency] = useState<Currency>('EUR');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('monthly');
-  const [success, setSuccess] = useState<string | null>(null);
-  const [actionError, setError] = useState<string | null>(null);
+  const { success, error: actionError, saving, run } = useSettingsSectionSave();
 
   const settingsQuery = useSystemSettingsQuery();
   const loading = settingsQuery.isLoading;
@@ -52,7 +52,6 @@ const SystemSection: React.FC = () => {
     ? null // Non-critical: the form defaults are still usable, matching the prior fetch-error tolerance.
     : actionError;
   const save = useSaveSystemSettings();
-  const saving = save.isPending;
 
   useEffect(() => {
     const data = settingsQuery.data;
@@ -75,14 +74,11 @@ const SystemSection: React.FC = () => {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSuccess(null);
-    setError(null);
-    try {
-      await save.mutateAsync({ currency, timePeriod });
-      setSuccess('System settings saved successfully.');
-    } catch (err) {
-      setError((err as Error).message || 'Failed to save system settings.');
-    }
+    await run(
+      () => save.mutateAsync({ currency, timePeriod }),
+      'System settings saved successfully.',
+      'Failed to save system settings.'
+    );
   };
 
   return (

@@ -22,6 +22,7 @@ import {
 } from '../../hooks/useCostPlans';
 import type { CostPlan } from '../../services/costPlanService';
 import { formatCurrency } from '../../utils/format';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 interface Draft {
   departmentId: string;
@@ -35,8 +36,7 @@ const EMPTY_DRAFT: Draft = { departmentId: '', startDate: '', endDate: '', targe
 const CostPlansSection: React.FC = () => {
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { success: message, error, run, setSuccess: setMessage, setError } = useSettingsSectionSave();
 
   const plansQuery = useCostPlansQuery();
   const departmentsQuery = useDepartmentsQuery();
@@ -69,36 +69,26 @@ const CostPlansSection: React.FC = () => {
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    setError(null);
     const targetAmount = Number(draft.targetAmount);
-    try {
-      if (editingId !== null) {
-        await update.mutateAsync({ id: editingId, targetAmount });
-        setMessage('Cost plan updated.');
-      } else {
-        await create.mutateAsync({
-          departmentId: Number(draft.departmentId),
-          startDate: draft.startDate,
-          endDate: draft.endDate,
-          targetAmount,
-        });
-        setMessage('Cost plan created.');
-      }
-      resetForm();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to save the cost plan');
-    }
+    const ok = await run(
+      () =>
+        editingId !== null
+          ? update.mutateAsync({ id: editingId, targetAmount })
+          : create.mutateAsync({
+              departmentId: Number(draft.departmentId),
+              startDate: draft.startDate,
+              endDate: draft.endDate,
+              targetAmount,
+            }),
+      editingId !== null ? 'Cost plan updated.' : 'Cost plan created.',
+      'Failed to save the cost plan'
+    );
+    if (ok) resetForm();
   };
 
   const handleDelete = async (plan: CostPlan) => {
     if (!window.confirm(`Remove the cost plan for ${departmentName(plan.departmentId)}?`)) return;
-    setError(null);
-    try {
-      await remove.mutateAsync(plan.id);
-      setMessage('Cost plan removed.');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Failed to remove the cost plan');
-    }
+    await run(() => remove.mutateAsync(plan.id), 'Cost plan removed.', 'Failed to remove the cost plan');
   };
 
   return (
