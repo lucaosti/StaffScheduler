@@ -12,17 +12,16 @@
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
 import { Permission, Role, UserRoleAssignment, Employee } from '../../types';
-import { createRole, updateRole, deleteRole, assignRole, removeRole } from '../../services/rbacService';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import RoleTimeline from './RoleTimeline';
 import {
-  rbacKeys,
   useRolesAndPermissionsQuery,
   useRbacOrgUnitsQuery,
   useEmployeeSearchQuery,
   useUserRolesQuery,
+  useRoleMutations,
+  useUserRoleMutations,
 } from '../../hooks/useRbac';
 
 // ---------------------------------------------------------------------------
@@ -52,8 +51,6 @@ const RbacManagement: React.FC = () => {
   const [historyKind, setHistoryKind] = useState<'user' | 'role'>('user');
   const [historyRoleId, setHistoryRoleId] = useState<number | null>(null);
 
-  const queryClient = useQueryClient();
-
   // ---- Roles tab state (server state via TanStack Query) ----
   const rolesQuery = useRolesAndPermissionsQuery();
   const roles = rolesQuery.data?.roles ?? [];
@@ -64,17 +61,17 @@ const RbacManagement: React.FC = () => {
     ? (rolesQuery.error as Error).message ?? t('admin.rbac.roles.loadFailed')
     : rolesActionError;
   const [rolesSuccess, setRolesSuccess] = useState<string | null>(null);
-  const loadRoles = () => queryClient.invalidateQueries({ queryKey: rbacKeys.rolesAndPerms });
+  const { create: createRole, update: updateRole, remove: deleteRole } = useRoleMutations();
+  const roleSaving = createRole.isPending || updateRole.isPending;
+  const deleting = deleteRole.isPending;
 
   const [roleModal, setRoleModal] = useState<{ open: boolean; editing: Role | null }>({
     open: false,
     editing: null,
   });
   const [roleForm, setRoleForm] = useState<RoleFormState>(EMPTY_FORM);
-  const [roleSaving, setRoleSaving] = useState(false);
 
   const [deleteConfirm, setDeleteConfirm] = useState<Role | null>(null);
-  const [deleting, setDeleting] = useState(false);
 
   // ---- User-roles tab state ----
   const [employeeSearch, setEmployeeSearch] = useState('');
@@ -95,8 +92,7 @@ const RbacManagement: React.FC = () => {
   const userRolesError = userRolesQuery.isError
     ? (userRolesQuery.error as Error).message ?? t('admin.rbac.userRoles.loadFailed')
     : userRolesActionError;
-  const loadUserRoles = () =>
-    queryClient.invalidateQueries({ queryKey: ['rbac', 'user-roles'] });
+  const { grant: grantRole, revoke: revokeRole } = useUserRoleMutations();
 
   const [grantForm, setGrantForm] = useState<{
     roleId: number | '';
@@ -104,11 +100,11 @@ const RbacManagement: React.FC = () => {
     expiresAt: string;
     justification: string;
   }>({ roleId: '', scopeOrgUnitId: '', expiresAt: '', justification: '' });
-  const [granting, setGranting] = useState(false);
+  const granting = grantRole.isPending;
 
   const [revokeTarget, setRevokeTarget] = useState<UserRoleAssignment | null>(null);
   const [revokeJustification, setRevokeJustification] = useState('');
-  const [revoking, setRevoking] = useState(false);
+  const revoking = revokeRole.isPending;
 
   // ---------------------------------------------------------------------------
   // Selection — the queries above react to selectedUser / employeeSearch.
@@ -152,7 +148,6 @@ const RbacManagement: React.FC = () => {
 
   const saveRole = async () => {
     if (!roleForm.name.trim()) return;
-    setRoleSaving(true);
     setRolesError(null);
     setRolesSuccess(null);
     try {
@@ -162,36 +157,29 @@ const RbacManagement: React.FC = () => {
         permissionCodes: roleForm.permissionCodes,
       };
       if (roleModal.editing) {
-        await updateRole(roleModal.editing.id, body);
+        await updateRole.mutateAsync({ id: roleModal.editing.id, ...body });
         setRolesSuccess(t('admin.rbac.roles.updatedMessage', { name: roleForm.name }));
       } else {
-        await createRole(body);
+        await createRole.mutateAsync(body);
         setRolesSuccess(t('admin.rbac.roles.createdMessage', { name: roleForm.name }));
       }
       setRoleModal({ open: false, editing: null });
-      await loadRoles();
     } catch (e) {
       setRolesError((e as Error).message ?? t('admin.rbac.roles.saveFailed'));
-    } finally {
-      setRoleSaving(false);
     }
   };
 
   const confirmDelete = async () => {
     if (!deleteConfirm) return;
-    setDeleting(true);
     setRolesError(null);
     setRolesSuccess(null);
     try {
-      await deleteRole(deleteConfirm.id);
+      await deleteRole.mutateAsync(deleteConfirm.id);
       setRolesSuccess(t('admin.rbac.roles.deletedMessage', { name: deleteConfirm.name }));
       setDeleteConfirm(null);
-      await loadRoles();
     } catch (e) {
       setRolesError((e as Error).message ?? t('admin.rbac.roles.deleteFailed'));
       setDeleteConfirm(null);
-    } finally {
-      setDeleting(false);
     }
   };
 
@@ -202,11 +190,11 @@ const RbacManagement: React.FC = () => {
   const handleGrant = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedUser || grantForm.roleId === '') return;
-    setGranting(true);
     setUserRolesError(null);
     setUserRolesSuccess(null);
     try {
-      await assignRole(Number(selectedUser.id), {
+      await grantRole.mutateAsync({
+        userId: Number(selectedUser.id),
         roleId: Number(grantForm.roleId),
         scopeOrgUnitId: grantForm.scopeOrgUnitId !== '' ? Number(grantForm.scopeOrgUnitId) : null,
         expiresAt: grantForm.expiresAt || null,
@@ -214,34 +202,27 @@ const RbacManagement: React.FC = () => {
       });
       setGrantForm({ roleId: '', scopeOrgUnitId: '', expiresAt: '', justification: '' });
       setUserRolesSuccess(t('admin.rbac.userRoles.grantedMessage'));
-      await loadUserRoles();
     } catch (e) {
       setUserRolesError((e as Error).message ?? t('admin.rbac.userRoles.grantFailed'));
-    } finally {
-      setGranting(false);
     }
   };
 
   const confirmRevoke = async () => {
     if (!selectedUser || !revokeTarget) return;
-    setRevoking(true);
     setUserRolesError(null);
     setUserRolesSuccess(null);
     try {
-      await removeRole(
-        Number(selectedUser.id),
-        revokeTarget.roleId,
-        revokeTarget.scopeOrgUnitId,
-        revokeJustification || undefined
-      );
+      await revokeRole.mutateAsync({
+        userId: Number(selectedUser.id),
+        roleId: revokeTarget.roleId,
+        scopeOrgUnitId: revokeTarget.scopeOrgUnitId,
+        justification: revokeJustification || undefined,
+      });
       setUserRolesSuccess(t('admin.rbac.userRoles.revokedMessage', { name: revokeTarget.roleName }));
       setRevokeTarget(null);
       setRevokeJustification('');
-      await loadUserRoles();
     } catch (e) {
       setUserRolesError((e as Error).message ?? t('admin.rbac.userRoles.revokeFailed'));
-    } finally {
-      setRevoking(false);
     }
   };
 
