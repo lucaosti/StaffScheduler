@@ -96,8 +96,8 @@ const connection = (): ConnectionOptions => ({
   maxRetriesPerRequest: null,
 });
 
-/** Minimal redis:// URL parser sufficient for host/port/password/db. */
-const parseRedisUrl = (url: string): { host: string; port: number; password?: string; db?: number } => {
+/** Minimal redis:// URL parser sufficient for host/port/password/db. Exported for direct unit testing. */
+export const parseRedisUrl = (url: string): { host: string; port: number; password?: string; db?: number } => {
   try {
     const u = new URL(url);
     return {

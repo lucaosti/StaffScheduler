@@ -175,6 +175,21 @@ describe('ChangeRequestService.create', () => {
     expect(insertParams).toContain(10);
   });
 
+  it('throws when the newly inserted change request cannot be re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 7, affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]); // getById finds nothing
+
+    const svc = new ChangeRequestService(pool);
+    await expect(
+      svc.create(
+        { changeType: 'Schedule.Override', targetEntityType: 'schedule', proposedPayload: { shift: 1 } },
+        10
+      )
+    ).rejects.toThrow('Failed to retrieve created change request');
+  });
+
   it('serialises proposedPayload as JSON', async () => {
     const { pool, execute } = makePool();
     execute
@@ -307,6 +322,17 @@ describe('ChangeRequestService.approve', () => {
     await expect(svc.approve(999, 20)).rejects.toThrow('not found');
   });
 
+  it('throws when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null]) // getById
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // UPDATE succeeds
+      .mockResolvedValueOnce([[], null]); // re-read finds nothing
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.approve(1, 20)).rejects.toThrow('Failed to retrieve updated change request');
+  });
+
   it('only the first of two concurrent approve calls succeeds (status guard is in the UPDATE, not just the prior read)', async () => {
     const { pool, execute } = makePool();
     // Both calls read the same pending row (simulating two requests racing
@@ -367,6 +393,25 @@ describe('ChangeRequestService.reject', () => {
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.reject(1, 20, 'reason')).rejects.toThrow("Cannot reject");
+  });
+
+  it('throws not found when request does not exist', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.reject(999, 20, 'reason')).rejects.toThrow('not found');
+  });
+
+  it('throws when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.reject(1, 20, 'reason')).rejects.toThrow('Failed to retrieve updated change request');
   });
 });
 
@@ -433,6 +478,17 @@ describe('ChangeRequestService.apply', () => {
     const svc = new ChangeRequestService(pool);
     await expect(svc.apply(999, 20)).rejects.toThrow('not found');
   });
+
+  it('throws when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow({ status: 'approved' })], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.apply(1, 20)).rejects.toThrow('Failed to retrieve updated change request');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -470,6 +526,17 @@ describe('ChangeRequestService.cancel', () => {
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.cancel(999, 10)).rejects.toThrow('not found');
+  });
+
+  it('throws when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.cancel(1, 10)).rejects.toThrow('Failed to retrieve updated change request');
   });
 
   it('writes an audit entry after cancellation', async () => {
@@ -515,6 +582,16 @@ describe('ChangeRequestService.advancePendingApproval', () => {
 
     const svc = new ChangeRequestService(pool);
     await expect(svc.advancePendingApproval(99, 20, 'approved')).rejects.toThrow('not found');
+  });
+
+  it('throws not found when the pending approval points at a change request that no longer exists', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildPaRow()], null]) // getPendingApprovalById
+      .mockResolvedValueOnce([[], null]); // getById change_request → gone
+
+    const svc = new ChangeRequestService(pool);
+    await expect(svc.advancePendingApproval(1, 20, 'approved')).rejects.toThrow('Change request not found');
   });
 
   it('throws when pending approval is not in pending status', async () => {

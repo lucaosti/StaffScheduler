@@ -137,6 +137,68 @@ describe('the timeline for one person', () => {
     expect(sql).toContain("al.entity_type = 'user'");
     expect(sql).not.toContain('JSON_EXTRACT');
   });
+
+  it('falls back to 0 when neither the snapshot nor the entity column has a user id', async () => {
+    const row = auditRow({
+      entity_id: null,
+      after_snapshot: { userId: 'not-a-number', roleId: 3, scopeOrgUnitId: null, expiresAt: null },
+    });
+    const { pool } = makePool({ audit: [row], grants: [], ...names });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ roleId: 3 });
+    expect(timeline.entries[0].userId).toBe(0);
+  });
+
+  it('records a stored expiresAt string from the snapshot payload', async () => {
+    const row = auditRow({
+      after_snapshot: { userId: 5, roleId: 3, scopeOrgUnitId: null, expiresAt: '2027-01-01T00:00:00.000Z' },
+    });
+    const { pool } = makePool({ audit: [row], grants: [], ...names });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ userId: 5 });
+    expect(timeline.entries[0].expiresAt).toBe('2027-01-01T00:00:00.000Z');
+  });
+
+  it('treats a missing snapshot as an empty payload rather than throwing', async () => {
+    const row = auditRow({ after_snapshot: null, entity_id: 5 });
+    const { pool } = makePool({ audit: [row], grants: [], ...names });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ userId: 5 });
+    expect(timeline.entries[0]).toMatchObject({ userId: 5, roleId: null });
+  });
+
+  it('formats a created_at the driver returned as a plain string', async () => {
+    const row = auditRow({ created_at: '2026-03-01T10:00:00.000Z' });
+    const { pool } = makePool({ audit: [row], grants: [], ...names });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ userId: 5 });
+    expect(timeline.entries[0].at).toBe('2026-03-01T10:00:00.000Z');
+  });
+
+  it('leaves name fields null when a referenced user/role/org-unit has no matching row', async () => {
+    const row = auditRow({
+      user_id: 999, // actor id with no row in `names.users`
+      after_snapshot: { userId: 5, roleId: 3, scopeOrgUnitId: 42, expiresAt: null }, // unit 42 unknown
+    });
+    const { pool } = makePool({ audit: [row], grants: [grantRow({ scope_org_unit_id: 42 })], ...names });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ userId: 5 });
+
+    expect(timeline.entries[0].actorName).toBeNull();
+    expect(timeline.entries[0].scopeOrgUnitName).toBeNull();
+    expect(timeline.current[0].scopeOrgUnitName).toBeNull();
+  });
+
+  it('leaves userName/roleName null for a current grant or event pointing at an unknown id', async () => {
+    // roleId 404 has no row in `names.roles`, and the grant's own user (5) is
+    // known — pairing a known and an unknown id in the same fixture exercises
+    // both sides of the `?? null` fallback without a second query round.
+    const row = auditRow({ after_snapshot: { userId: 5, roleId: 404, scopeOrgUnitId: null, expiresAt: null } });
+    const { pool } = makePool({
+      audit: [row],
+      grants: [grantRow({ role_id: 404 })],
+      ...names,
+    });
+    const timeline = await new RoleTimelineService(pool).getTimeline({ userId: 5 });
+
+    expect(timeline.current[0].roleName).toBeNull();
+    expect(timeline.entries[0].roleName).toBeNull();
+  });
 });
 
 describe('what the audit log cannot explain', () => {

@@ -182,6 +182,11 @@ describe('the events it emits', () => {
     expect(result.body).toContain('20260730');
   });
 
+  it('falls back to a generic "Shift" summary and blank location when the department has no name', async () => {
+    const { result } = await build({ visibleOrgUnitIds: null }, [shiftRow({ department_name: null })]);
+    expect(result.body).toContain('Shift — 2 on duty');
+  });
+
   it('changes its ETag when the newest shift changes', async () => {
     const a = await build({ visibleOrgUnitIds: null }, [shiftRow()]);
     const b = await build({ visibleOrgUnitIds: null }, [shiftRow({ shift_updated: '2026-07-02 10:00:00' })]);

@@ -33,6 +33,17 @@ describe('GeofenceService.listForDepartment', () => {
   });
 });
 
+describe('GeofenceService.listForDepartment', () => {
+  it('passes through an already-parsed polygon (driver-dependent JSON column type)', async () => {
+    const { pool, execute } = makePool();
+    const polygon = [{ lat: 2, lng: 2 }];
+    execute.mockResolvedValueOnce([[buildRow({ polygon })], null] as Tuple);
+
+    const [fence] = await new GeofenceService(pool).listForDepartment(10);
+    expect(fence.polygon).toEqual(polygon);
+  });
+});
+
 describe('GeofenceService.create', () => {
   it('stores the polygon as JSON and re-reads the created row', async () => {
     const { pool, execute } = makePool();
@@ -55,6 +66,17 @@ describe('GeofenceService.create', () => {
 
     await new GeofenceService(pool).create(10, { name: 'X', polygon: [] });
     expect(execute.mock.calls[0][1][3]).toBe(true);
+  });
+
+  it('throws when the newly inserted row cannot be re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 5 }, null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+
+    await expect(
+      new GeofenceService(pool).create(10, { name: 'X', polygon: [] })
+    ).rejects.toThrow('Failed to retrieve created geofence');
   });
 });
 
@@ -99,11 +121,30 @@ describe('GeofenceService.update', () => {
     expect(execute.mock.calls[0][1]).toEqual([0, 1]);
   });
 
+  it('sets isActive to true when given', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ is_active: 1 })], null] as Tuple);
+
+    await new GeofenceService(pool).update(1, { isActive: true });
+    expect(execute.mock.calls[0][1]).toEqual([1, 1]);
+  });
+
   it('throws NotFoundError when no row matches the id', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([{ affectedRows: 0 }, null] as Tuple);
 
     await expect(new GeofenceService(pool).update(999, { name: 'X' })).rejects.toThrow(/not found/i);
+  });
+
+  it('throws NotFoundError when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+
+    await expect(new GeofenceService(pool).update(1, { name: 'X' })).rejects.toThrow(/not found/i);
   });
 
   it('is a no-op re-read when no fields are given', async () => {
@@ -165,6 +206,14 @@ describe('GeofenceService.isCallerWithinAllowedGeofence', () => {
 
     const result = await new GeofenceService(pool).isCallerWithinAllowedGeofence(5, { lat: 50, lng: 50 });
     expect(result).toEqual({ required: true, allowed: false });
+  });
+
+  it('passes through an already-parsed polygon (driver-dependent JSON column type)', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ polygon: square }], null] as Tuple);
+
+    const result = await new GeofenceService(pool).isCallerWithinAllowedGeofence(5, { lat: 0.5, lng: 0.5 });
+    expect(result).toEqual({ required: true, allowed: true });
   });
 
   it('scopes the lookup to the given user and only active fences', async () => {
