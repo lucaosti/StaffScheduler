@@ -17,20 +17,22 @@
  * a no-SMTP deployment never creates outbox rows and never starts the worker, so
  * there is nothing to poll and no wasted work.
  *
+ * The poll/claim/deliver/commit skeleton itself lives in `PollingWorker.ts`,
+ * shared with the other four outbox-style workers — see that file.
+ *
  * @author Luca Ostinelli
  */
 
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 import { isEmailConfigured, sendEmail } from './MailerService';
+import { createPollingWorker, runPollingBatch } from './PollingWorker';
 
 /** Give up after this many attempts and mark the row failed (poison-message guard). */
 const MAX_ATTEMPTS = 5;
 /** Rows processed per poll — small so a lock during SMTP send is short-lived. */
 const BATCH_SIZE = 20;
 const DEFAULT_POLL_MS = 30_000;
-
-let timer: ReturnType<typeof setInterval> | null = null;
 
 interface OutboxRow extends RowDataPacket {
   id: number;
@@ -47,32 +49,33 @@ interface OutboxRow extends RowDataPacket {
  * failed once MAX_ATTEMPTS is reached. Exported for tests and one-shot drains.
  */
 export async function processOutboxOnce(pool: Pool): Promise<number> {
-  const conn: PoolConnection = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    // Claim a disjoint batch; SKIP LOCKED lets parallel workers coexist.
-    const [rows] = await conn.query<OutboxRow[]>(
-      `SELECT id, recipient_email, subject, body, attempts
-         FROM email_outbox
-        WHERE status = 'pending' AND attempts < ?
-        ORDER BY created_at
-        LIMIT ${BATCH_SIZE}
-        FOR UPDATE SKIP LOCKED`,
-      [MAX_ATTEMPTS]
-    );
-
-    for (const row of rows) {
-      try {
-        await sendEmail({ to: row.recipient_email, subject: row.subject, text: row.body ?? '' });
-        await conn.execute(
-          `UPDATE email_outbox SET status = 'sent', attempts = attempts + 1, processed_at = NOW()
-            WHERE id = ?`,
-          [row.id]
-        );
-      } catch (err) {
-        const attempts = row.attempts + 1;
+  return runPollingBatch<OutboxRow>(pool, {
+    label: 'Outbox',
+    attemptsOf: (row) => row.attempts,
+    claim: (conn: PoolConnection) =>
+      conn
+        .query<OutboxRow[]>(
+          `SELECT id, recipient_email, subject, body, attempts
+             FROM email_outbox
+            WHERE status = 'pending' AND attempts < ?
+            ORDER BY created_at
+            LIMIT ${BATCH_SIZE}
+            FOR UPDATE SKIP LOCKED`,
+          [MAX_ATTEMPTS]
+        )
+        .then(([rows]) => rows),
+    deliver: (row) => sendEmail({ to: row.recipient_email, subject: row.subject, text: row.body ?? '' }),
+    outcome: {
+      onSent: (conn, row) =>
+        conn
+          .execute(
+            `UPDATE email_outbox SET status = 'sent', attempts = attempts + 1, processed_at = NOW()
+              WHERE id = ?`,
+            [row.id]
+          )
+          .then(() => undefined),
+      onFailure: async (conn, row, attempts, message) => {
         const failed = attempts >= MAX_ATTEMPTS;
-        const message = err instanceof Error ? err.message : String(err);
         await conn.execute(
           `UPDATE email_outbox
               SET status = ?, attempts = ?, last_error = ?, processed_at = ?
@@ -82,19 +85,12 @@ export async function processOutboxOnce(pool: Pool): Promise<number> {
         logger.warn(
           `Outbox email ${row.id} delivery failed (attempt ${attempts}/${MAX_ATTEMPTS})${failed ? ' — giving up' : ''}: ${message}`
         );
-      }
-    }
-
-    await conn.commit();
-    return rows.length;
-  } catch (err) {
-    await conn.rollback();
-    logger.error('Outbox poll failed', { error: err instanceof Error ? err.message : err });
-    return 0;
-  } finally {
-    conn.release();
-  }
+      },
+    },
+  });
 }
+
+const worker = createPollingWorker('Email outbox', processOutboxOnce);
 
 /**
  * Start the periodic poller. No-op (returns without starting) when email is not
@@ -102,18 +98,10 @@ export async function processOutboxOnce(pool: Pool): Promise<number> {
  * process alive on its own.
  */
 export function startOutboxWorker(pool: Pool, pollMs: number = DEFAULT_POLL_MS): void {
-  if (!isEmailConfigured() || timer) return;
-  timer = setInterval(() => {
-    void processOutboxOnce(pool);
-  }, pollMs);
-  timer.unref?.();
-  logger.info('Email outbox worker started');
+  worker.start(pool, pollMs, isEmailConfigured);
 }
 
 /** Stop the poller on graceful shutdown. */
 export function stopOutboxWorker(): void {
-  if (timer) {
-    clearInterval(timer);
-    timer = null;
-  }
+  worker.stop();
 }
