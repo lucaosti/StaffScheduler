@@ -94,6 +94,16 @@ jest.mock('../services/PayrollExportWorker', () => ({
   stopPayrollExportWorker: (...args: unknown[]) => mockStopPayrollExportWorker(...args),
 }));
 
+// Same #394 pattern as PayrollExportWorker above, for the worker added
+// alongside native push: left unmocked, the happy path would call the REAL
+// startNativePushWorker(pool) against mockPool, arming a real leaked timer.
+const mockStartNativePushWorker = jest.fn();
+const mockStopNativePushWorker = jest.fn();
+jest.mock('../services/NativePushWorker', () => ({
+  startNativePushWorker: (...args: unknown[]) => mockStartNativePushWorker(...args),
+  stopNativePushWorker: (...args: unknown[]) => mockStopNativePushWorker(...args),
+}));
+
 import { startServer } from '../index';
 import { logger } from '../config/logger';
 import { buildApp } from '../app';
@@ -117,6 +127,8 @@ describe('startServer()', () => {
     mockStopWebhookWorker.mockReset();
     mockStartPayrollExportWorker.mockReset();
     mockStopPayrollExportWorker.mockReset();
+    mockStartNativePushWorker.mockReset();
+    mockStopNativePushWorker.mockReset();
 
     // Prevent process.exit from terminating the test runner.
     exitSpy = jest
@@ -202,6 +214,7 @@ describe('startServer()', () => {
       expect(mockStartPushWorker).not.toHaveBeenCalled();
       expect(mockStartWebhookWorker).not.toHaveBeenCalled();
       expect(mockStartPayrollExportWorker).not.toHaveBeenCalled();
+      expect(mockStartNativePushWorker).not.toHaveBeenCalled();
       expect(mockListen).not.toHaveBeenCalled();
     });
   });
@@ -227,6 +240,7 @@ describe('startServer()', () => {
       expect(mockStartPushWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartWebhookWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartPayrollExportWorker).toHaveBeenCalledWith(mockPool);
+      expect(mockStartNativePushWorker).toHaveBeenCalledWith(mockPool);
     });
   });
 });
