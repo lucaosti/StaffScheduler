@@ -294,5 +294,69 @@ describe('<Schedule />', () => {
       ).toBe(0);
     });
   });
+
+  describe('at phone viewport width', () => {
+    // The week/month grid has a column per day, which cannot be reflowed into
+    // something usable at phone width by CSS alone. Below the breakpoint the
+    // page renders the same data as a day-by-day agenda list instead — this
+    // stubs `matchMedia` to report "narrow" so that path is exercised.
+    const originalMatchMedia = window.matchMedia;
+
+    beforeEach(() => {
+      window.matchMedia = (query: string) =>
+        ({
+          matches: true,
+          media: query,
+          onchange: null,
+          addListener: () => {},
+          removeListener: () => {},
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          dispatchEvent: () => false,
+        }) as MediaQueryList;
+    });
+
+    afterEach(() => {
+      window.matchMedia = originalMatchMedia;
+    });
+
+    it('renders the week view as an agenda list instead of a wide grid', async () => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date('2026-08-05T12:00:00.000Z')); // Wednesday, midday UTC
+
+      mockGetScheduleWithShifts.mockResolvedValue(
+        ok({
+          id: 1,
+          shifts: [
+            {
+              id: 100,
+              assignments: [
+                { id: 501, shiftId: 100, userId: 1, shiftDate: '2026-08-06', status: 'pending' }, // Thursday
+              ],
+            },
+          ],
+        })
+      );
+
+      render(<Schedule />);
+      await screen.findByRole('heading', { name: /schedule management/i });
+
+      // No wide multi-column grid at all — one card per day instead.
+      expect(screen.queryByRole('table')).not.toBeInTheDocument();
+      expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    });
+
+    it('renders the month view as a day list instead of a 7-column grid', async () => {
+      render(<Schedule />);
+      await screen.findByRole('heading', { name: /schedule management/i });
+
+      await userEvent.click(screen.getByRole('button', { name: /month/i }));
+
+      expect(screen.queryByRole('table', { name: /monthly shift calendar/i })).not.toBeInTheDocument();
+      expect(
+        await screen.findByText((_, el) => el?.tagName === 'SPAN' && (el.textContent ?? '').includes('08:00'))
+      ).toBeInTheDocument();
+    });
+  });
 });
 

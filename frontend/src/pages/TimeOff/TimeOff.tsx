@@ -68,8 +68,8 @@ const TimeOff: React.FC = () => {
     r.startDate === r.endDate ? r.startDate : t('timeOff.periodRange', { start: r.startDate, end: r.endDate });
 
   return (
-    <div className="container-fluid py-3">
-      <div className="d-flex justify-content-between align-items-center mb-3">
+    <div className="container-fluid py-3 timeoff-page">
+      <div className="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <h1 className="h4 mb-0">{t('timeOff.title')}</h1>
         <ExportCsvLink path="/time-off/export" disabled={(mine.data?.length ?? 0) === 0} />
       </div>
@@ -142,54 +142,56 @@ const TimeOff: React.FC = () => {
         loadingMessage={t('timeOff.loadingMine')}
         empty={<p className="text-muted">{t('timeOff.emptyMine')}</p>}
       >
-        <table className="table table-sm align-middle mb-4">
-          <thead>
-            <tr>
-              <th>{t('timeOff.columns.period')}</th>
-              <th>{t('timeOff.columns.type')}</th>
-              <th>{t('timeOff.columns.status')}</th>
-              <th>{t('timeOff.columns.inSchedule')}</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {(mine.data ?? []).map((r) => (
-              <tr key={r.id}>
-                <td>{period(r)}</td>
-                <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
-                <td>
-                  <span className={`badge ${STATUS_BADGE[r.status] ?? 'bg-secondary'}`}>
-                    {t(`timeOff.status.${r.status}`, r.status)}
-                  </span>
-                </td>
-                <td>
-                  {/* Approved is not the same as off. Approval writes an
-                      unavailability row; until it exists, the optimizer has
-                      never been told. */}
-                  {r.status !== 'approved' ? (
-                    <span className="text-muted">{t('common.emptyValue')}</span>
-                  ) : r.unavailabilityId ? (
-                    <span className="text-success">{t('timeOff.recorded')}</span>
-                  ) : (
-                    <span className="text-warning">{t('timeOff.notYetRecorded')}</span>
-                  )}
-                </td>
-                <td className="text-end">
-                  {r.status === 'pending' && (
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-secondary"
-                      onClick={() => act(cancel.mutateAsync(r.id))}
-                      disabled={cancel.isPending}
-                    >
-                      {t('common.cancel')}
-                    </button>
-                  )}
-                </td>
+        <div className="table-responsive">
+          <table className="table table-sm align-middle mb-4">
+            <thead>
+              <tr>
+                <th>{t('timeOff.columns.period')}</th>
+                <th>{t('timeOff.columns.type')}</th>
+                <th>{t('timeOff.columns.status')}</th>
+                <th>{t('timeOff.columns.inSchedule')}</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {(mine.data ?? []).map((r) => (
+                <tr key={r.id}>
+                  <td>{period(r)}</td>
+                  <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
+                  <td>
+                    <span className={`badge ${STATUS_BADGE[r.status] ?? 'bg-secondary'}`}>
+                      {t(`timeOff.status.${r.status}`, r.status)}
+                    </span>
+                  </td>
+                  <td>
+                    {/* Approved is not the same as off. Approval writes an
+                        unavailability row; until it exists, the optimizer has
+                        never been told. */}
+                    {r.status !== 'approved' ? (
+                      <span className="text-muted">{t('common.emptyValue')}</span>
+                    ) : r.unavailabilityId ? (
+                      <span className="text-success">{t('timeOff.recorded')}</span>
+                    ) : (
+                      <span className="text-warning">{t('timeOff.notYetRecorded')}</span>
+                    )}
+                  </td>
+                  <td className="text-end">
+                    {r.status === 'pending' && (
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => act(cancel.mutateAsync(r.id))}
+                        disabled={cancel.isPending}
+                      >
+                        {t('common.cancel')}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </QueryState>
 
       {canApprove && (
@@ -204,45 +206,49 @@ const TimeOff: React.FC = () => {
             loadingMessage={t('timeOff.loadingQueue')}
             empty={<p className="text-muted">{t('timeOff.emptyQueue')}</p>}
           >
-            <table className="table table-sm align-middle">
-              <thead>
-                <tr>
-                  <th>{t('timeOff.columns.person')}</th>
-                  <th>{t('timeOff.columns.period')}</th>
-                  <th>{t('timeOff.columns.type')}</th>
-                  <th>{t('timeOff.columns.reason')}</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {(queue.data ?? []).map((r) => (
-                  <tr key={r.id}>
-                    <td>{r.userId}</td>
-                    <td>{period(r)}</td>
-                    <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
-                    <td className="text-muted">{r.reason ?? t('common.emptyValue')}</td>
-                    <td className="text-end">
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-success me-2"
-                        onClick={() => act(approve.mutateAsync({ id: r.id }))}
-                        disabled={approve.isPending}
-                      >
-                        {t('timeOff.approve')}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-danger"
-                        onClick={() => act(reject.mutateAsync({ id: r.id }))}
-                        disabled={reject.isPending}
-                      >
-                        {t('timeOff.reject')}
-                      </button>
-                    </td>
+            <div className="table-responsive">
+              <table className="table table-sm align-middle">
+                <thead>
+                  <tr>
+                    <th>{t('timeOff.columns.person')}</th>
+                    <th>{t('timeOff.columns.period')}</th>
+                    <th>{t('timeOff.columns.type')}</th>
+                    <th>{t('timeOff.columns.reason')}</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(queue.data ?? []).map((r) => (
+                    <tr key={r.id}>
+                      <td>{r.userId}</td>
+                      <td>{period(r)}</td>
+                      <td>{t(`timeOff.types.${r.type}`, r.type)}</td>
+                      <td className="text-muted">{r.reason ?? t('common.emptyValue')}</td>
+                      <td className="text-end">
+                        <div className="d-flex flex-wrap justify-content-end gap-2">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-success"
+                            onClick={() => act(approve.mutateAsync({ id: r.id }))}
+                            disabled={approve.isPending}
+                          >
+                            {t('timeOff.approve')}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-danger"
+                            onClick={() => act(reject.mutateAsync({ id: r.id }))}
+                            disabled={reject.isPending}
+                          >
+                            {t('timeOff.reject')}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </QueryState>
         </>
       )}
