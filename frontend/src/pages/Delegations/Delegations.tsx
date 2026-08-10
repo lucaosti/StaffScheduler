@@ -9,15 +9,9 @@
  */
 
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import {
-  createDelegation,
-  revokeDelegation,
-  Delegation,
-  CreateDelegationBody,
-} from '../../services/delegationService';
-import { delegationsKey, useDelegationsQuery } from '../../hooks/useDelegations';
+import { Delegation, CreateDelegationBody } from '../../services/delegationService';
+import { useDelegationsQuery, useDelegationMutations } from '../../hooks/useDelegations';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 
@@ -32,26 +26,22 @@ const EMPTY_FORM: CreateDelegationBody & { permissionInput: string } = {
 
 const Delegations: React.FC = () => {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const delegationsQuery = useDelegationsQuery();
   const items = delegationsQuery.data ?? [];
   const loading = delegationsQuery.isLoading;
   const error = delegationsQuery.isError
     ? (delegationsQuery.error as Error).message ?? t('delegations.loadFailed')
     : null;
-  // Reload after a mutation = invalidate the cached list.
-  const load = () => queryClient.invalidateQueries({ queryKey: delegationsKey });
+  const { create, revoke } = useDelegationMutations();
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
-  const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   // Revoke modal
   const [revokeTarget, setRevokeTarget] = useState<Delegation | null>(null);
   const [revokeNote, setRevokeNote] = useState('');
-  const [revoking, setRevoking] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
 
   // ---------- Create ----------
@@ -71,10 +61,9 @@ const Delegations: React.FC = () => {
     if (form.permissionCodes.length === 0) { setCreateError(t('delegations.validation.permissionRequired')); return; }
     if (!form.expiresAt) { setCreateError(t('delegations.validation.expiryRequired')); return; }
 
-    setCreating(true);
     setCreateError(null);
     try {
-      await createDelegation({
+      await create.mutateAsync({
         delegateeId: form.delegateeId,
         permissionCodes: form.permissionCodes,
         expiresAt: form.expiresAt,
@@ -83,11 +72,8 @@ const Delegations: React.FC = () => {
       });
       setShowCreate(false);
       setForm({ ...EMPTY_FORM });
-      await load();
     } catch (e) {
       setCreateError((e as Error).message ?? t('delegations.createFailed'));
-    } finally {
-      setCreating(false);
     }
   };
 
@@ -101,16 +87,12 @@ const Delegations: React.FC = () => {
 
   const handleRevoke = async () => {
     if (!revokeTarget) return;
-    setRevoking(true);
     setRevokeError(null);
     try {
-      await revokeDelegation(revokeTarget.id, revokeNote.trim() || null);
+      await revoke.mutateAsync({ id: revokeTarget.id, justification: revokeNote.trim() || null });
       setRevokeTarget(null);
-      await load();
     } catch (e) {
       setRevokeError((e as Error).message ?? t('delegations.revokeFailed'));
-    } finally {
-      setRevoking(false);
     }
   };
 
@@ -307,10 +289,10 @@ const Delegations: React.FC = () => {
                   type="button"
                   className="btn btn-primary"
                   onClick={handleCreate}
-                  disabled={creating}
+                  disabled={create.isPending}
                   aria-label={t('delegations.form.submitAriaLabel')}
                 >
-                  {creating ? (
+                  {create.isPending ? (
                     <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.saving')}</>
                   ) : t('delegations.create')}
                 </button>
@@ -363,10 +345,10 @@ const Delegations: React.FC = () => {
                   type="button"
                   className="btn btn-danger"
                   onClick={handleRevoke}
-                  disabled={revoking}
+                  disabled={revoke.isPending}
                   aria-label={t('delegations.confirmRevokeAriaLabel')}
                 >
-                  {revoking ? (
+                  {revoke.isPending ? (
                     <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.revoking')}</>
                   ) : t('delegations.revoke')}
                 </button>

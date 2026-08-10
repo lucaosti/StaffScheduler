@@ -1,15 +1,22 @@
 /**
- * Approval-workflows list hook (TanStack Query).
+ * Approval-workflows server-state hooks (TanStack Query).
  *
  * The admin page lists configurable approval workflows and mutates them
- * (create / update / delete). As a cached query the list dedupes/retries; the
- * page's mutation handlers call `reload()` which invalidates this key.
+ * (create / update / delete); each mutation invalidates the list on success.
  *
  * @author Luca Ostinelli
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { listWorkflows, type ApprovalWorkflow } from '../services/approvalWorkflowService';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  createWorkflow,
+  deleteWorkflow,
+  listWorkflows,
+  updateWorkflow,
+  type ApprovalWorkflow,
+  type CreateWorkflowBody,
+  type UpdateWorkflowBody,
+} from '../services/approvalWorkflowService';
 
 export const approvalWorkflowsKey = ['approval-workflows'] as const;
 
@@ -22,4 +29,25 @@ export function useApprovalWorkflowsQuery() {
       return res.data ?? [];
     },
   });
+}
+
+/** Create / update / delete a workflow. Each invalidates the whole list. */
+export function useApprovalWorkflowMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: approvalWorkflowsKey });
+
+  return {
+    create: useMutation({
+      mutationFn: (body: CreateWorkflowBody) => createWorkflow(body),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, ...body }: { id: number } & UpdateWorkflowBody) => updateWorkflow(id, body),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: number) => deleteWorkflow(id),
+      onSuccess: invalidate,
+    }),
+  };
 }

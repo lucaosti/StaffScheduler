@@ -1,15 +1,20 @@
 /**
- * Delegations server-state hook (TanStack Query).
+ * Delegations server-state hooks (TanStack Query).
  *
- * The page lists active delegations and mutates them (create / revoke). As a
- * cached query it gains dedup/retry; the page's create/revoke handlers call
- * `reload()` which invalidates this key so the list refreshes from one place.
+ * The page lists active delegations and mutates them (create / revoke); each
+ * mutation invalidates the list on success.
  *
  * @author Luca Ostinelli
  */
 
-import { useQuery } from '@tanstack/react-query';
-import { listDelegations, type Delegation } from '../services/delegationService';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  createDelegation,
+  listDelegations,
+  revokeDelegation,
+  type CreateDelegationBody,
+  type Delegation,
+} from '../services/delegationService';
 
 export const delegationsKey = ['delegations'] as const;
 
@@ -22,4 +27,22 @@ export function useDelegationsQuery() {
       return res.data ?? [];
     },
   });
+}
+
+/** Create / revoke a delegation. Each invalidates the whole list. */
+export function useDelegationMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: delegationsKey });
+
+  return {
+    create: useMutation({
+      mutationFn: (body: CreateDelegationBody) => createDelegation(body),
+      onSuccess: invalidate,
+    }),
+    revoke: useMutation({
+      mutationFn: ({ id, justification }: { id: number; justification: string | null }) =>
+        revokeDelegation(id, justification),
+      onSuccess: invalidate,
+    }),
+  };
 }
