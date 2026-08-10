@@ -39,6 +39,11 @@ describe('parseCsv', () => {
 });
 
 describe('mapEmployeeRows', () => {
+  it('reports an empty CSV', () => {
+    const out = mapEmployeeRows([]);
+    expect(out.errors[0].message).toBe('CSV is empty');
+  });
+
   it('reports missing required columns', () => {
     const out = mapEmployeeRows([['email', 'firstName']]);
     expect(out.errors[0].message).toMatch(/Missing required columns/);
@@ -57,14 +62,72 @@ describe('mapEmployeeRows', () => {
     expect(out.errors[0].row).toBe(3);
   });
 
+  it('rejects a blank email cell as invalid rather than crashing', () => {
+    const out = mapEmployeeRows([
+      ['email', 'firstName', 'lastName', 'role'],
+      ['', 'A', 'A', 'Manager'],
+    ]);
+    expect(out.errors[0].message).toMatch(/Invalid email/);
+  });
+
   it('rejects rows with malformed emails', () => {
     const csv = parseCsv('email,firstName,lastName,role\nnot-an-email,X,Y,employee\n');
     const out = mapEmployeeRows(csv);
     expect(out.errors[0].message).toMatch(/Invalid email/);
   });
+
+  it('leaves optional fields undefined when their columns are absent', () => {
+    const csv = parseCsv('email,firstName,lastName,role\na@x.com,A,A,Manager\n');
+    const [row] = mapEmployeeRows(csv).rows;
+    expect(row.employeeId).toBeUndefined();
+    expect(row.phone).toBeUndefined();
+    expect(row.position).toBeUndefined();
+    expect(row.hourlyRate).toBeUndefined();
+  });
+
+  it('reads employeeId, phone, position and hourlyRate when their columns are present', () => {
+    const csv = parseCsv(
+      'email,firstName,lastName,role,employeeId,phone,position,hourlyRate\n' +
+        'a@x.com,A,Ann,Manager,EMP1,555-1234,Lead,25.5\n'
+    );
+    const [row] = mapEmployeeRows(csv).rows;
+    expect(row.employeeId).toBe('EMP1');
+    expect(row.phone).toBe('555-1234');
+    expect(row.position).toBe('Lead');
+    expect(row.hourlyRate).toBe(25.5);
+  });
+
+  it('treats blank optional cells as undefined even when the column is present', () => {
+    const csv = parseCsv(
+      'email,firstName,lastName,role,employeeId,phone,position,hourlyRate\n' + 'a@x.com,A,Ann,Manager,,,,\n'
+    );
+    const [row] = mapEmployeeRows(csv).rows;
+    expect(row.employeeId).toBeUndefined();
+    expect(row.phone).toBeUndefined();
+    expect(row.position).toBeUndefined();
+    expect(row.hourlyRate).toBeUndefined();
+  });
+
+  it('drops a non-numeric hourlyRate to undefined instead of NaN', () => {
+    const csv = parseCsv('email,firstName,lastName,role,hourlyRate\na@x.com,A,Ann,Manager,not-a-number\n');
+    const [row] = mapEmployeeRows(csv).rows;
+    expect(row.hourlyRate).toBeUndefined();
+  });
+
+  it('falls back to empty strings when firstName/lastName cells are blank', () => {
+    const csv = parseCsv('email,firstName,lastName,role\na@x.com,,,Manager\n');
+    const [row] = mapEmployeeRows(csv).rows;
+    expect(row.firstName).toBe('');
+    expect(row.lastName).toBe('');
+  });
 });
 
 describe('mapShiftRows', () => {
+  it('reports an empty CSV', () => {
+    const out = mapShiftRows([]);
+    expect(out.errors[0].message).toBe('CSV is empty');
+  });
+
   it('parses numbers, dates, and times; rejects malformed rows', () => {
     const csv = parseCsv(
       'scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n' +
@@ -90,6 +153,17 @@ describe('mapShiftRows', () => {
   it('reports missing columns when the header is incomplete', () => {
     const out = mapShiftRows([['scheduleId', 'departmentId']]);
     expect(out.errors[0].message).toMatch(/Missing required columns/);
+  });
+
+  it('treats a row shorter than the header as blank date/startTime/endTime cells', () => {
+    const out = mapShiftRows([
+      ['scheduleId', 'departmentId', 'date', 'startTime', 'endTime', 'minStaff', 'maxStaff'],
+      ['1', '2'], // date/startTime/endTime/minStaff/maxStaff cells missing entirely
+    ]);
+    expect(out.rows).toHaveLength(0);
+    // minStaff/maxStaff parse to NaN first, so this hits the numeric-column error,
+    // not the date one — mapShiftRows checks numbers before dates/times.
+    expect(out.errors[0].message).toMatch(/Numeric column failed to parse/);
   });
 });
 
@@ -125,6 +199,20 @@ describe('BulkImportService.importEmployees', () => {
     const out = await service.importEmployees(csv, 'pw');
     expect(out.inserted).toBe(0);
     expect(out.errors[0].message).toMatch(/already exists/);
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+
+  it('rolls back when the role name does not exist', async () => {
+    const csv = 'email,firstName,lastName,role\nnew@x.com,A,A,NoSuchRole\n';
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[], null]) // email check: no duplicate
+      .mockResolvedValueOnce([[], null]); // role lookup: not found
+
+    const service = new BulkImportService(pool);
+    const out = await service.importEmployees(csv, 'pw');
+    expect(out.inserted).toBe(0);
+    expect(out.errors[0].message).toMatch(/Unknown role/);
     expect(conn.rollback).toHaveBeenCalled();
   });
 

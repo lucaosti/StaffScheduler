@@ -45,6 +45,27 @@ describe('parsePagination', () => {
     expect(p!.page).toBe(1);
     expect(p!.offset).toBe(0);
   });
+
+  it('defaults page to 1 when only pageSize is present', () => {
+    const p = parsePagination(makeReq({ pageSize: '10' }));
+    expect(p!.page).toBe(1);
+    expect(p!.pageSize).toBe(10);
+  });
+
+  it('falls back to page 1 when the page param is not a number', () => {
+    const p = parsePagination(makeReq({ page: 'abc' }));
+    expect(p!.page).toBe(1);
+  });
+
+  it('falls back to the default pageSize when pageSize is not a number', () => {
+    const p = parsePagination(makeReq({ page: '1', pageSize: 'abc' }));
+    expect(p!.pageSize).toBe(25);
+  });
+
+  it('clamps pageSize to minimum 1', () => {
+    const p = parsePagination(makeReq({ page: '1', pageSize: '0' }));
+    expect(p!.pageSize).toBe(1);
+  });
 });
 
 describe('sendPaginated', () => {

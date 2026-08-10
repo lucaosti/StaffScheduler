@@ -82,6 +82,15 @@ interface BuildAppOptions {
   readPool?: Pool;
 }
 
+/**
+ * Strips a `token=` query value from a request URL before it reaches the
+ * access log. Exported (rather than inlined in the morgan token callback)
+ * so the redaction itself is directly unit-testable.
+ */
+export function redactTokenFromUrl(url: string | undefined): string {
+  return (url ?? '').replace(/([?&]token=)[^&]*/gi, '$1[REDACTED]');
+}
+
 export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Express {
   const app = express();
   const readPool = options.readPool ?? pool;
@@ -173,10 +182,7 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
     // Credential-bearing query parameters must never reach the access log:
     // calendar feeds authenticate via ?token=... (calendar clients cannot set
     // headers), and the default 'combined' format logs the full request URL.
-    morgan.token('url', (req) => {
-      const original = (req as express.Request).originalUrl || req.url || '';
-      return original.replace(/([?&]token=)[^&]*/gi, '$1[REDACTED]');
-    });
+    morgan.token('url', (req) => redactTokenFromUrl((req as express.Request).originalUrl || req.url));
     app.use(
       morgan('combined', {
         stream: { write: (message) => logger.info(message.trim()) },

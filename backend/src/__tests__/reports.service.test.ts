@@ -36,6 +36,14 @@ describe('ReportsService.hoursWorkedByUser', () => {
     expect(execute.mock.calls[0][0]).toMatch(/s\.department_id = \?/);
     expect(execute.mock.calls[0][1]).toEqual(['2026-04-01', '2026-04-30', 5]);
   });
+
+  it('falls back to zero hours when the aggregate is not a number', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ user_id: 1, full_name: 'Anna Demo', hours: null }], null]);
+    const service = new ReportsService(pool);
+    const rows = await service.hoursWorkedByUser('2026-04-01', '2026-04-30');
+    expect(rows[0].hours).toBe(0);
+  });
 });
 
 describe('ReportsService.fairnessForSchedule', () => {
@@ -67,6 +75,14 @@ describe('ReportsService.fairnessForSchedule', () => {
     // Population stddev of [40,30,20] = sqrt(((10^2 + 0 + 10^2)/3)) = sqrt(200/3)
     expect(out.stats.stddev).toBeCloseTo(Math.sqrt(200 / 3), 5);
   });
+
+  it('falls back to zero hours per-user when the aggregate is not a number', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ user_id: 1, full_name: 'A', hours: null }], null]);
+    const service = new ReportsService(pool);
+    const out = await service.fairnessForSchedule(1);
+    expect(out.perUser[0].hours).toBe(0);
+  });
 });
 
 describe('ReportsService.costByDepartment', () => {
@@ -82,6 +98,19 @@ describe('ReportsService.costByDepartment', () => {
     const rows = await service.costByDepartment('2026-04-01', '2026-04-30');
     expect(rows).toEqual([
       { departmentId: 1, departmentName: 'Emergency', hours: 160, cost: 4000 },
+    ]);
+  });
+
+  it('falls back to zero hours and cost when the aggregates are not numbers', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ department_id: 1, department_name: 'Emergency', hours: null, cost: null }],
+      null,
+    ]);
+    const service = new ReportsService(pool);
+    const rows = await service.costByDepartment('2026-04-01', '2026-04-30');
+    expect(rows).toEqual([
+      { departmentId: 1, departmentName: 'Emergency', hours: 0, cost: 0 },
     ]);
   });
 });
@@ -123,5 +152,16 @@ describe('ReportsService.complianceViolationsTrend', () => {
     execute.mockResolvedValueOnce([[], null]);
     const service = new ReportsService(pool);
     expect(await service.complianceViolationsTrend('2026-05-01', '2026-05-31')).toEqual([]);
+  });
+
+  it('falls back to zero when the count aggregate is not a number', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([
+      [{ date: '2026-05-01', code: 'MAX_WEEKLY_HOURS', count: null }],
+      null,
+    ]);
+    const service = new ReportsService(pool);
+    const rows = await service.complianceViolationsTrend('2026-05-01', '2026-05-31');
+    expect(rows[0].count).toBe(0);
   });
 });

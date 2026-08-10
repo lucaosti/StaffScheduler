@@ -1923,12 +1923,34 @@ describe('bulk-import router (extended)', () => {
     expect(res.status).toBe(400);
   });
 
-  it('POST /employees 400 with errors', async () => {
+  it('POST /employees 200 when every row imports cleanly', async () => {
+    (BulkImportService.prototype.importEmployees as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ inserted: 2, errors: [] });
+    const res = await request(app())
+      .post('/api/import/employees')
+      .send({ csv: 'x', defaultPassword: 'Pass123!' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('POST /employees 400 with a body that fails schema validation', async () => {
     (BulkImportService.prototype.importEmployees as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ inserted: 0, errors: [{ row: 1, error: 'bad' }] });
     const res = await request(app()).post('/api/import/employees').send({ csv: 'x' });
     expect(res.status).toBe(400);
+  });
+
+  it('POST /employees 400 when the import itself reports row errors', async () => {
+    (BulkImportService.prototype.importEmployees as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ inserted: 0, errors: [{ row: 1, error: 'bad' }] });
+    const res = await request(app())
+      .post('/api/import/employees')
+      .send({ csv: 'x', defaultPassword: 'Pass123!' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 
   it('POST /employees 500 on throw', async () => {
@@ -1942,6 +1964,15 @@ describe('bulk-import router (extended)', () => {
   it('POST /shifts 400 missing csv', async () => {
     const res = await request(app()).post('/api/import/shifts').send({});
     expect(res.status).toBe(400);
+  });
+
+  it('POST /shifts 200 when every row imports cleanly', async () => {
+    (BulkImportService.prototype.importShifts as jest.Mock) = jest
+      .fn()
+      .mockResolvedValue({ inserted: 2, errors: [] });
+    const res = await request(app()).post('/api/import/shifts').send({ csv: 'x' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
   });
 
   it('POST /shifts 400 with errors', async () => {

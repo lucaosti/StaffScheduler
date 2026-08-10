@@ -207,6 +207,21 @@ describe('ResponsibilityRuleService.create', () => {
     expect(insertParams).toContain(3);
   });
 
+  it('throws when the newly inserted rule cannot be re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([{ insertId: 7, affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]); // getById finds nothing
+
+    const svc = new ResponsibilityRuleService(pool);
+    await expect(
+      svc.create(
+        { subjectType: 'department', subjectId: 10, permissionCode: 'schedule.manage', responsibleOrgUnitId: 3 },
+        42
+      )
+    ).rejects.toThrow('Failed to retrieve created responsibility rule');
+  });
+
   it('throws when subjectId is missing for non-all subject_type', async () => {
     const { pool } = makePool();
     const svc = new ResponsibilityRuleService(pool);
@@ -295,6 +310,37 @@ describe('ResponsibilityRuleService.update', () => {
 
     const svc = new ResponsibilityRuleService(pool);
     await expect(svc.update(999, { isActive: false }, 1)).rejects.toThrow('not found');
+  });
+
+  it('throws when the row disappears between the update and the re-read', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[buildRow()], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[], null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    await expect(svc.update(1, { description: 'x' }, 1)).rejects.toThrow(
+      'Failed to retrieve updated responsibility rule'
+    );
+  });
+
+  it('applies patched subjectId, delegatedToRoleId and isActive rather than falling back to existing', async () => {
+    const { pool, execute } = makePool();
+    const existing = buildRow();
+    execute
+      .mockResolvedValueOnce([[existing], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[buildRow({ subject_id: 20, delegated_to_role_id: 5, is_active: 0 })], null])
+      .mockResolvedValue([{ insertId: 1, affectedRows: 1 }, null]);
+
+    const svc = new ResponsibilityRuleService(pool);
+    await svc.update(1, { subjectId: 20, delegatedToRoleId: 5, isActive: false }, 42);
+
+    const [, params] = execute.mock.calls[1];
+    expect(params).toContain(20);
+    expect(params).toContain(5);
+    expect(params).toContain(0); // isActive false → 0
   });
 
   it('rejects update that would leave non-all subject without subjectId', async () => {
