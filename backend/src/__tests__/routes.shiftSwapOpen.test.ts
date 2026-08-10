@@ -15,9 +15,11 @@ jest.mock('../middleware/auth', () => ({
 }));
 
 jest.mock('../services/ShiftSwapService');
+jest.mock('../services/ShiftSwapOfferService');
 jest.mock('../services/RbacService');
 
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { ShiftSwapOfferService } from '../services/ShiftSwapOfferService';
 import { RbacService } from '../services/RbacService';
 import { createShiftSwapRouter } from '../routes/shiftSwap';
 import { NotFoundError, ConflictError, ForbiddenError } from '../errors';
@@ -49,14 +51,14 @@ describe('POST /shift-swap/:id/respond', () => {
 
 describe('POST /shift-swap/open', () => {
   it('creates an offer for the caller', async () => {
-    (ShiftSwapService.prototype.createOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 1, status: 'open' });
+    (ShiftSwapOfferService.prototype.createOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 1, status: 'open' });
     const res = await request(mount()).post('/api/shift-swap/open').send({ assignmentId: 100 });
     expect(res.status).toBe(201);
-    expect(ShiftSwapService.prototype.createOpenOffer).toHaveBeenCalledWith(7, 100, null);
+    expect(ShiftSwapOfferService.prototype.createOpenOffer).toHaveBeenCalledWith(7, 100, null);
   });
 
   it('propagates a conflict from the service', async () => {
-    (ShiftSwapService.prototype.createOpenOffer as jest.Mock).mockRejectedValueOnce(
+    (ShiftSwapOfferService.prototype.createOpenOffer as jest.Mock).mockRejectedValueOnce(
       new ConflictError('already posted as an open offer')
     );
     const res = await request(mount()).post('/api/shift-swap/open').send({ assignmentId: 100 });
@@ -66,37 +68,37 @@ describe('POST /shift-swap/open', () => {
   it('rejects a missing assignmentId', async () => {
     const res = await request(mount()).post('/api/shift-swap/open').send({});
     expect(res.status).toBe(400);
-    expect(ShiftSwapService.prototype.createOpenOffer).not.toHaveBeenCalled();
+    expect(ShiftSwapOfferService.prototype.createOpenOffer).not.toHaveBeenCalled();
   });
 });
 
 describe('GET /shift-swap/open', () => {
   it('resolves the caller visible org units and lists offers', async () => {
-    (ShiftSwapService.prototype.listOpenOffers as jest.Mock).mockResolvedValueOnce([{ id: 1 }]);
+    (ShiftSwapOfferService.prototype.listOpenOffers as jest.Mock).mockResolvedValueOnce([{ id: 1 }]);
     const res = await request(mount()).get('/api/shift-swap/open');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([{ id: 1 }]);
-    expect(ShiftSwapService.prototype.listOpenOffers).toHaveBeenCalledWith(7, [1, 2], false);
+    expect(ShiftSwapOfferService.prototype.listOpenOffers).toHaveBeenCalledWith(7, [1, 2], false);
   });
 
   it('passes mine=true when requested', async () => {
-    (ShiftSwapService.prototype.listOpenOffers as jest.Mock).mockResolvedValueOnce([]);
+    (ShiftSwapOfferService.prototype.listOpenOffers as jest.Mock).mockResolvedValueOnce([]);
     const res = await request(mount()).get('/api/shift-swap/open').query({ mine: '1' });
     expect(res.status).toBe(200);
-    expect(ShiftSwapService.prototype.listOpenOffers).toHaveBeenCalledWith(7, [1, 2], true);
+    expect(ShiftSwapOfferService.prototype.listOpenOffers).toHaveBeenCalledWith(7, [1, 2], true);
   });
 });
 
 describe('POST /shift-swap/open/:id/claim', () => {
   it('claims an offer', async () => {
-    (ShiftSwapService.prototype.claimOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 501, status: 'pending' });
+    (ShiftSwapOfferService.prototype.claimOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 501, status: 'pending' });
     const res = await request(mount()).post('/api/shift-swap/open/1/claim').send({ assignmentId: 200 });
     expect(res.status).toBe(201);
-    expect(ShiftSwapService.prototype.claimOpenOffer).toHaveBeenCalledWith(1, 7, 200, null);
+    expect(ShiftSwapOfferService.prototype.claimOpenOffer).toHaveBeenCalledWith(1, 7, 200, null);
   });
 
   it('returns 404 when the offer does not exist', async () => {
-    (ShiftSwapService.prototype.claimOpenOffer as jest.Mock).mockRejectedValueOnce(
+    (ShiftSwapOfferService.prototype.claimOpenOffer as jest.Mock).mockRejectedValueOnce(
       new NotFoundError('Open shift offer not found')
     );
     const res = await request(mount()).post('/api/shift-swap/open/1/claim').send({ assignmentId: 200 });
@@ -106,14 +108,14 @@ describe('POST /shift-swap/open/:id/claim', () => {
 
 describe('POST /shift-swap/open/:id/cancel', () => {
   it('cancels the caller own offer', async () => {
-    (ShiftSwapService.prototype.cancelOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 1, status: 'cancelled' });
+    (ShiftSwapOfferService.prototype.cancelOpenOffer as jest.Mock).mockResolvedValueOnce({ id: 1, status: 'cancelled' });
     const res = await request(mount()).post('/api/shift-swap/open/1/cancel');
     expect(res.status).toBe(200);
-    expect(ShiftSwapService.prototype.cancelOpenOffer).toHaveBeenCalledWith(1, 7);
+    expect(ShiftSwapOfferService.prototype.cancelOpenOffer).toHaveBeenCalledWith(1, 7);
   });
 
   it('returns 403 when the caller does not own the offer', async () => {
-    (ShiftSwapService.prototype.cancelOpenOffer as jest.Mock).mockRejectedValueOnce(new ForbiddenError('Forbidden'));
+    (ShiftSwapOfferService.prototype.cancelOpenOffer as jest.Mock).mockRejectedValueOnce(new ForbiddenError('Forbidden'));
     const res = await request(mount()).post('/api/shift-swap/open/1/cancel');
     expect(res.status).toBe(403);
   });

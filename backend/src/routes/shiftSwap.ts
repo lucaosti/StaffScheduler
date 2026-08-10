@@ -20,6 +20,7 @@ import {
   shiftSwapOpenListQuery,
 } from '../schemas';
 import { ShiftSwapService } from '../services/ShiftSwapService';
+import { ShiftSwapOfferService } from '../services/ShiftSwapOfferService';
 import { RbacService } from '../services/RbacService';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
@@ -29,6 +30,7 @@ const respondError = (res: Response, status: number, code: string, message: stri
 export const createShiftSwapRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new ShiftSwapService(pool);
+  const offers = new ShiftSwapOfferService(pool, service);
   const rbac = new RbacService(pool);
 
   router.use(authenticate);
@@ -47,7 +49,7 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
   // never captured as a numeric :id. -------------
 
   router.post('/open', validateBody(createShiftSwapOfferBody), async (req: Request, res: Response) => {
-    const created = await service.createOpenOffer(
+    const created = await offers.createOpenOffer(
       req.user!.id,
       res.locals.body.assignmentId,
       (res.locals.body.notes as string | null | undefined) ?? null
@@ -64,13 +66,13 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
     const scoped = actor.allowedOrgUnitIds ?? null;
     const own = await rbac.getUserOrgUnitSubtreeIds(actor.id);
     const orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
-    const offers = await service.listOpenOffers(actor.id, orgUnitIds, mine);
-    res.json({ success: true, data: offers });
+    const listing = await offers.listOpenOffers(actor.id, orgUnitIds, mine);
+    res.json({ success: true, data: listing });
   });
 
   router.post('/open/:id/claim', validateParams(idParam), validateBody(claimShiftSwapOfferBody), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
-    const created = await service.claimOpenOffer(
+    const created = await offers.claimOpenOffer(
       id,
       req.user!.id,
       res.locals.body.assignmentId,
@@ -81,7 +83,7 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
 
   router.post('/open/:id/cancel', validateParams(idParam), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
-    const updated = await service.cancelOpenOffer(id, req.user!.id);
+    const updated = await offers.cancelOpenOffer(id, req.user!.id);
     res.json({ success: true, data: updated });
   });
 

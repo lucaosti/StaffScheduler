@@ -630,19 +630,6 @@ export class DepartmentService {
   }
 
   /**
-   * Gets aggregate statistics across all departments
-   */
-  async getDepartmentStats(): Promise<{
-    total: number;
-    active: number;
-    inactive: number;
-    totalEmployees: number;
-    averageEmployeesPerDepartment: number;
-  }> {
-    return this.getDepartmentStatistics();
-  }
-
-  /**
    * Gets statistics for a specific department
    *
    * @param departmentId - The department to get stats for

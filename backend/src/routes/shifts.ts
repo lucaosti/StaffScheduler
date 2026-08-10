@@ -24,6 +24,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { ShiftService } from '../services/ShiftService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 import { DemandForecastService } from '../services/DemandForecastService';
 import { z } from 'zod';
 import { AuditLogService } from '../services/AuditLogService';
@@ -47,6 +48,7 @@ import {
 export const createShiftsRouter = (pool: Pool) => {
   const router = Router();
   const shiftService = new ShiftService(pool);
+  const templateService = new ShiftTemplateService(pool);
 const forecastService = new DemandForecastService(pool);
 const exporter = new ExportService(new AuditLogService(pool));
 
@@ -73,14 +75,14 @@ const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
 // Shift Template Routes
 
 router.get('/templates', authenticate, requirePermission('schedule.read'), async (_req: Request, res: Response) => {
-  const templates = await shiftService.getAllShiftTemplates();
+  const templates = await templateService.getAllShiftTemplates();
   res.json({ success: true, data: templates });
 });
 
 router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  const template = await shiftService.getShiftTemplateById(id);
+  const template = await templateService.getShiftTemplateById(id);
   if (!template) {
     return res.status(404).json({
       success: false,
@@ -92,7 +94,7 @@ router.get('/templates/:id', authenticate, requirePermission('schedule.read'), v
 });
 
 router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (_req: Request, res: Response) => {
-  const template = await shiftService.createShiftTemplate(res.locals.body);
+  const template = await templateService.createShiftTemplate(res.locals.body);
 
   res.status(201).json({
     success: true,
@@ -104,7 +106,7 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), valid
 router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  const template = await shiftService.updateShiftTemplate(id, res.locals.body);
+  const template = await templateService.updateShiftTemplate(id, res.locals.body);
   if (!template) {
     return res.status(404).json({
       success: false,
@@ -122,7 +124,7 @@ router.put('/templates/:id', authenticate, requirePermission('shift.manage'), va
 router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  const success = await shiftService.deleteShiftTemplate(id);
+  const success = await templateService.deleteShiftTemplate(id);
   if (!success) {
     return res.status(404).json({
       success: false,

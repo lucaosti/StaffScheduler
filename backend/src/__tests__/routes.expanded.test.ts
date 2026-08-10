@@ -45,6 +45,7 @@ jest.mock('../services/EmployeeFieldPolicyService', () => {
 jest.mock('../services/AssignmentService');
 jest.mock('../services/ScheduleService');
 jest.mock('../services/ShiftService');
+jest.mock('../services/ShiftTemplateService');
 jest.mock('../services/EmployeeService');
 jest.mock('../services/DepartmentService');
 jest.mock('../services/UserService');
@@ -67,6 +68,7 @@ jest.mock('../services/RbacService');
 import { AssignmentService } from '../services/AssignmentService';
 import { ScheduleService } from '../services/ScheduleService';
 import { ShiftService } from '../services/ShiftService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 import { EmployeeService } from '../services/EmployeeService';
 import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
@@ -723,7 +725,7 @@ describe('shifts router (extended)', () => {
   const app = () => mountApp('/api/shifts', createShiftsRouter(fakePool));
 
   it('GET /templates 500 on error', async () => {
-    (ShiftService.prototype.getAllShiftTemplates as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getAllShiftTemplates as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
     const res = await request(app()).get('/api/shifts/templates');
@@ -734,17 +736,17 @@ describe('shifts router (extended)', () => {
     let res = await request(app()).get('/api/shifts/templates/abc');
     expect(res.status).toBe(400);
 
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest.fn().mockResolvedValue(null);
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest.fn().mockResolvedValue(null);
     res = await request(app()).get('/api/shifts/templates/1');
     expect(res.status).toBe(404);
 
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1 });
     res = await request(app()).get('/api/shifts/templates/1');
     expect(res.status).toBe(200);
 
-    (ShiftService.prototype.getShiftTemplateById as jest.Mock) = jest
+    (ShiftTemplateService.prototype.getShiftTemplateById as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
     res = await request(app()).get('/api/shifts/templates/1');
@@ -753,11 +755,11 @@ describe('shifts router (extended)', () => {
 
   it('POST /templates 201/500', async () => {
     const validTplBody = { name: 'Day', departmentId: 1, startTime: '08:00', endTime: '16:00', minStaff: 1, maxStaff: 4 };
-    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue({ id: 7 });
+    (ShiftTemplateService.prototype.createShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue({ id: 7 });
     let res = await request(app()).post('/api/shifts/templates').send(validTplBody);
     expect(res.status).toBe(201);
 
-    (ShiftService.prototype.createShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.createShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
     res = await request(app()).post('/api/shifts/templates').send(validTplBody);
@@ -768,17 +770,17 @@ describe('shifts router (extended)', () => {
     let res = await request(app()).put('/api/shifts/templates/abc').send({});
     expect(res.status).toBe(400);
 
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(null);
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(null);
     res = await request(app()).put('/api/shifts/templates/1').send({});
     expect(res.status).toBe(404);
 
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1 });
     res = await request(app()).put('/api/shifts/templates/1').send({});
     expect(res.status).toBe(200);
 
-    (ShiftService.prototype.updateShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.updateShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
     res = await request(app()).put('/api/shifts/templates/1').send({});
@@ -789,15 +791,15 @@ describe('shifts router (extended)', () => {
     let res = await request(app()).delete('/api/shifts/templates/abc');
     expect(res.status).toBe(400);
 
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(false);
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(false);
     res = await request(app()).delete('/api/shifts/templates/1');
     expect(res.status).toBe(404);
 
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(true);
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest.fn().mockResolvedValue(true);
     res = await request(app()).delete('/api/shifts/templates/1');
     expect(res.status).toBe(200);
 
-    (ShiftService.prototype.deleteShiftTemplate as jest.Mock) = jest
+    (ShiftTemplateService.prototype.deleteShiftTemplate as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('x'));
     res = await request(app()).delete('/api/shifts/templates/1');
