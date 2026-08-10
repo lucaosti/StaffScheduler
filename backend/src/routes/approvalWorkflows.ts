@@ -15,32 +15,34 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { ApprovalEngineService } from '../services/ApprovalEngineService';
+import { ApprovalWorkflowService } from '../services/ApprovalWorkflowService';
+import { ApprovalDecisionService } from '../services/ApprovalDecisionService';
 import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import { idParam, typeParam, createApprovalWorkflowBody, updateApprovalWorkflowBody } from '../schemas';
 
 export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   const router = Router();
-  const engine = new ApprovalEngineService(pool);
+  const workflows = new ApprovalWorkflowService(pool);
+  const decisions = new ApprovalDecisionService(pool);
 
   // Escalation trigger — called by cron or admin; requires approval.manage.
   // Marks overdue pending_approvals as 'escalated' and creates new pending_approvals
   // for the escalated approver (manager chain walk).
   router.post('/escalate', authenticate, requirePermission('approval.manage'), async (_req: Request, res: Response) => {
-    const result = await engine.processEscalations();
+    const result = await decisions.processEscalations();
     res.json({ success: true, data: result });
   });
 
   // List all workflows
   router.get('/', authenticate, requirePermission('approval.manage'), async (_req: Request, res: Response) => {
-    const workflows = await engine.listWorkflows();
-    res.json({ success: true, data: workflows });
+    const list = await workflows.listWorkflows();
+    res.json({ success: true, data: list });
   });
 
   // Get workflow by change type
   router.get('/:type', authenticate, requirePermission('approval.manage'), validateParams(typeParam), async (_req: Request, res: Response) => {
-    const workflow = await engine.getWorkflowByChangeType(res.locals.params.type);
+    const workflow = await workflows.getWorkflowByChangeType(res.locals.params.type);
     if (!workflow) {
       return res.status(404).json({ success: false, error: { code: 'NOT_FOUND', message: 'Workflow not found' } });
     }
@@ -50,21 +52,21 @@ export const createApprovalWorkflowsRouter = (pool: Pool): Router => {
   // Create a workflow
   router.post('/', authenticate, requirePermission('approval.manage'), validateBody(createApprovalWorkflowBody), async (_req: Request, res: Response) => {
     const { changeType, requireAll, description, steps } = res.locals.body;
-    const workflow = await engine.createWorkflow({ changeType, requireAll, description, steps });
+    const workflow = await workflows.createWorkflow({ changeType, requireAll, description, steps });
     res.status(201).json({ success: true, data: workflow, message: 'Workflow created' });
   });
 
   // Update a workflow
   router.put('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), validateBody(updateApprovalWorkflowBody), async (_req: Request, res: Response) => {
     const { id } = res.locals.params;
-    const workflow = await engine.updateWorkflow(id, res.locals.body);
+    const workflow = await workflows.updateWorkflow(id, res.locals.body);
     res.json({ success: true, data: workflow, message: 'Workflow updated' });
   });
 
   // Delete a workflow
   router.delete('/:id', authenticate, requirePermission('approval.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
     const { id } = res.locals.params;
-    await engine.deleteWorkflow(id);
+    await workflows.deleteWorkflow(id);
     res.json({ success: true, message: 'Workflow deleted' });
   });
 

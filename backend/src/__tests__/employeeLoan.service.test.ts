@@ -1,7 +1,8 @@
 /**
  * EmployeeLoanService unit tests.
  *
- * The service composes ApprovalEngineService + NotificationService, so the
+ * The service composes ApproverResolutionService, ApprovalDecisionService,
+ * and NotificationService, so the
  * mock pool needs to satisfy queries from both.
  */
 
@@ -81,7 +82,7 @@ describe('EmployeeLoanService.create', () => {
       ] as Tuple);
 
     const service = new EmployeeLoanService(pool);
-    jest.spyOn(internalsOf(service).engine, 'resolveFirstStepAutoApprove').mockResolvedValue({
+    jest.spyOn(internalsOf(service).resolution, 'resolveFirstStepAutoApprove').mockResolvedValue({
       workflow: loanWorkflow,
       approverUserId: 99,
       autoApprove: true,
@@ -159,10 +160,11 @@ describe('EmployeeLoanService.listActiveLoansInto', () => {
 
 const internalsOf = (service: EmployeeLoanService) =>
   service as unknown as {
-    engine: {
-      getWorkflowByChangeType: (t: string) => unknown;
+    resolution: {
       resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown;
       canCreatePendingApprovalForStep: (s: unknown, c: unknown) => unknown;
+    };
+    decisions: {
       createPendingApprovalForStep: (w: number, s: unknown, l: unknown, c: unknown) => unknown;
       decidePendingApproval: (...a: unknown[]) => unknown;
     };
@@ -179,9 +181,9 @@ const loanWorkflow = {
 const spyLoanCreation = (service: EmployeeLoanService) => {
   const internals = internalsOf(service);
   jest
-    .spyOn(internals.engine, 'resolveFirstStepAutoApprove')
+    .spyOn(internals.resolution, 'resolveFirstStepAutoApprove')
     .mockResolvedValue({ workflow: loanWorkflow, autoApprove: false, approverUserId: 99 } as never);
-  jest.spyOn(internals.engine, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
+  jest.spyOn(internals.resolution, 'canCreatePendingApprovalForStep').mockResolvedValue(true as never);
   return internals;
 };
 
@@ -200,7 +202,7 @@ describe('EmployeeLoanService.create — workflow attachment', () => {
     const { pool } = makePool();
     const service = new EmployeeLoanService(pool);
     const internals = spyLoanCreation(service);
-    (internals.engine.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);
+    (internals.resolution.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);
 
     await expect(
       service.create({ userId: 7, fromOrgUnitId: 1, toOrgUnitId: 2, startDate: '2026-05-10', endDate: '2026-05-15', requestedBy: 5 })
@@ -213,7 +215,7 @@ describe('EmployeeLoanService.create — workflow attachment', () => {
     const service = new EmployeeLoanService(pool);
     const internals = spyLoanCreation(service);
     const createPa = jest
-      .spyOn(internals.engine, 'createPendingApprovalForStep')
+      .spyOn(internals.decisions, 'createPendingApprovalForStep')
       .mockResolvedValue({ id: 501 } as never);
 
     const created = await service.create({
@@ -235,7 +237,7 @@ describe('EmployeeLoanService.create — workflow attachment', () => {
     queueCreate(execute); // the permissive default also serves the cleanup DELETE
     const service = new EmployeeLoanService(pool);
     const internals = spyLoanCreation(service);
-    jest.spyOn(internals.engine, 'createPendingApprovalForStep').mockResolvedValue(null as never);
+    jest.spyOn(internals.decisions, 'createPendingApprovalForStep').mockResolvedValue(null as never);
 
     await expect(
       service.create({ userId: 7, fromOrgUnitId: 1, toOrgUnitId: 2, startDate: '2026-05-10', endDate: '2026-05-15', requestedBy: 5 })
@@ -249,7 +251,7 @@ describe('EmployeeLoanService.create — workflow attachment', () => {
 describe('EmployeeLoanService.approve/reject — decision arms', () => {
   const spyDecide = (service: EmployeeLoanService, result: unknown) =>
     jest
-      .spyOn(internalsOf(service).engine, 'decidePendingApproval')
+      .spyOn(internalsOf(service).decisions, 'decidePendingApproval')
       .mockImplementation(async (...args: unknown[]) => {
         const ctx = await (args[4] as () => Promise<{ orgUnitId: number }>)();
         expect(ctx.orgUnitId).toBe(2); // decisions are scoped to the receiving unit

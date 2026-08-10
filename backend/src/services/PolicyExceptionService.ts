@@ -3,7 +3,7 @@
  *
  * A user requests a per-target derogation to a specific policy. Creation
  * decides auto-approval (actor is already the resolved policy owner) via
- * `ApprovalEngineService.resolveFirstStepAutoApprove` — resolved from the
+ * `ApproverResolutionService.resolveFirstStepAutoApprove` — resolved from the
  * same `Policy.Exception` workflow the request is about to be attached to,
  * not a second, parallel `approval_matrix` lookup, the same fast path
  * `EmployeeLoanService` uses. Otherwise the request is routed through the
@@ -21,7 +21,8 @@
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
-import { ApprovalEngineService } from './ApprovalEngineService';
+import { ApproverResolutionService } from './ApproverResolutionService';
+import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { PolicyService } from './PolicyService';
 import { AuditLogService } from './AuditLogService';
@@ -75,13 +76,15 @@ const mapRow = (row: RowDataPacket): PolicyExceptionRequest => ({
 });
 
 export class PolicyExceptionService {
-  private engine: ApprovalEngineService;
+  private resolution: ApproverResolutionService;
+  private decisions: ApprovalDecisionService;
   private notifications: NotificationService;
   private policies: PolicyService;
   private audit: AuditLogService;
 
   constructor(private pool: Pool) {
-    this.engine = new ApprovalEngineService(pool);
+    this.resolution = new ApproverResolutionService(pool);
+    this.decisions = new ApprovalDecisionService(pool);
     this.notifications = new NotificationService(pool);
     this.policies = new PolicyService(pool);
     this.audit = new AuditLogService(pool);
@@ -97,7 +100,7 @@ export class PolicyExceptionService {
     if (!policy) throw new NotFoundError('Policy not found');
 
     const workflowCtx = { actorUserId: input.requestedByUserId, policyOwnerId: policy.imposedByUserId };
-    const resolved = await this.engine.resolveFirstStepAutoApprove('Policy.Exception', workflowCtx);
+    const resolved = await this.resolution.resolveFirstStepAutoApprove('Policy.Exception', workflowCtx);
     const status: ExceptionStatus = resolved.autoApprove ? 'approved' : 'pending';
     const reviewerId = resolved.autoApprove ? resolved.approverUserId : null;
 
@@ -109,7 +112,7 @@ export class PolicyExceptionService {
     // `resolved.workflow` is reused rather than re-fetched.
     const workflow = resolved.autoApprove ? null : resolved.workflow;
     if (workflow && workflow.steps.length > 0) {
-      if (!(await this.engine.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
+      if (!(await this.resolution.canCreatePendingApprovalForStep(workflow.steps[0], workflowCtx))) {
         throw new ConflictError(
           'No approver could be resolved for this exception request — the policy has no owner who can decide it. Ask an administrator to fix the assignment.'
         );
@@ -161,7 +164,7 @@ export class PolicyExceptionService {
     }
 
     if (workflow && workflow.steps.length > 0) {
-      const pa = await this.engine.createPendingApprovalForStep(
+      const pa = await this.decisions.createPendingApprovalForStep(
         workflow.id,
         workflow.steps[0],
         { policyExceptionId: created.id },
@@ -251,7 +254,7 @@ export class PolicyExceptionService {
     if (!policy) throw new NotFoundError('Policy not found');
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this exception request');
-    const decision = await this.engine.decidePendingApproval(
+    const decision = await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'approved',
@@ -308,7 +311,7 @@ export class PolicyExceptionService {
     if (!policy) throw new NotFoundError('Policy not found');
     const pendingApprovalId = await this.findPendingApprovalId(id);
     if (pendingApprovalId === null) throw new ConflictError('No pending approval found for this exception request');
-    await this.engine.decidePendingApproval(
+    await this.decisions.decidePendingApproval(
       pendingApprovalId,
       reviewerId,
       'rejected',

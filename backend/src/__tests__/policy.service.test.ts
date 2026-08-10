@@ -118,7 +118,8 @@ describe('PolicyExceptionService', () => {
     // workflow-attachment/decision-arm suite.
     const workflow = { id: 1, changeType: 'Policy.Exception', requireAll: false, description: null, steps: [{ id: 1, workflowId: 1, stepOrder: 1, approverScope: 'policy_owner' }] };
     jest.spyOn(
-      (service as unknown as { engine: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } }).engine,
+      (service as unknown as { resolution: { resolveFirstStepAutoApprove: (t: string, c: unknown) => unknown } })
+        .resolution,
       'resolveFirstStepAutoApprove'
     ).mockResolvedValue({ workflow, approverUserId: 7, autoApprove: true } as never);
 
