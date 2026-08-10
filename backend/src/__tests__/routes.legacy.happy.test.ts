@@ -41,6 +41,7 @@ jest.mock('../services/EmployeeFieldPolicyService', () => {
 jest.mock('../services/EmployeeService');
 jest.mock('../services/ScheduleService');
 jest.mock('../services/ShiftService');
+jest.mock('../services/ShiftTemplateService');
 jest.mock('../services/DepartmentService');
 jest.mock('../services/AssignmentService');
 jest.mock('../services/SystemSettingsService');
@@ -48,6 +49,7 @@ jest.mock('../services/SystemSettingsService');
 import { EmployeeService } from '../services/EmployeeService';
 import { ScheduleService } from '../services/ScheduleService';
 import { ShiftService } from '../services/ShiftService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 import { DepartmentService } from '../services/DepartmentService';
 import { AssignmentService } from '../services/AssignmentService';
 import { SystemSettingsService } from '../services/SystemSettingsService';
@@ -194,7 +196,7 @@ describe('schedules router happy paths', () => {
 
 describe('shifts router happy paths', () => {
   it('GET /templates returns the list', async () => {
-    (ShiftService.prototype.getAllShiftTemplates as jest.Mock) = jest.fn().mockResolvedValue([]);
+    (ShiftTemplateService.prototype.getAllShiftTemplates as jest.Mock) = jest.fn().mockResolvedValue([]);
     const app = mountApp('/api/shifts', createShiftsRouter(fakePool));
     const res = await request(app).get('/api/shifts/templates');
     expect(res.status).toBe(200);
