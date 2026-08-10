@@ -341,6 +341,7 @@ const Directory: React.FC = () => {
                           type="password"
                           className="form-control"
                           minLength={8}
+                          autoComplete="new-password"
                           value={importPassword}
                           onChange={(e) => setImportPassword(e.target.value)}
                           required
