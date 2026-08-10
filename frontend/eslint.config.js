@@ -44,6 +44,9 @@ const I18N_ENFORCED_FILES = [
   'src/pages/Directory/Directory.tsx',
   'src/pages/Reports/Reports.tsx',
   'src/pages/OrgChart/OrgChart.tsx',
+  'src/pages/Delegations/Delegations.tsx',
+  'src/pages/ChangeRequests/ChangeRequests.tsx',
+  'src/pages/Approvals/PendingApprovals.tsx',
 ];
 
 module.exports = [

@@ -10,6 +10,7 @@
 
 import React, { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import {
   createDelegation,
   revokeDelegation,
@@ -30,12 +31,13 @@ const EMPTY_FORM: CreateDelegationBody & { permissionInput: string } = {
 };
 
 const Delegations: React.FC = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const delegationsQuery = useDelegationsQuery();
   const items = delegationsQuery.data ?? [];
   const loading = delegationsQuery.isLoading;
   const error = delegationsQuery.isError
-    ? (delegationsQuery.error as Error).message ?? 'Failed to load delegations.'
+    ? (delegationsQuery.error as Error).message ?? t('delegations.loadFailed')
     : null;
   // Reload after a mutation = invalidate the cached list.
   const load = () => queryClient.invalidateQueries({ queryKey: delegationsKey });
@@ -65,9 +67,9 @@ const Delegations: React.FC = () => {
   };
 
   const handleCreate = async () => {
-    if (!form.delegateeId || form.delegateeId <= 0) { setCreateError('Delegatee user ID is required.'); return; }
-    if (form.permissionCodes.length === 0) { setCreateError('At least one permission code is required.'); return; }
-    if (!form.expiresAt) { setCreateError('Expiry date/time is required.'); return; }
+    if (!form.delegateeId || form.delegateeId <= 0) { setCreateError(t('delegations.validation.delegateeRequired')); return; }
+    if (form.permissionCodes.length === 0) { setCreateError(t('delegations.validation.permissionRequired')); return; }
+    if (!form.expiresAt) { setCreateError(t('delegations.validation.expiryRequired')); return; }
 
     setCreating(true);
     setCreateError(null);
@@ -83,7 +85,7 @@ const Delegations: React.FC = () => {
       setForm({ ...EMPTY_FORM });
       await load();
     } catch (e) {
-      setCreateError((e as Error).message ?? 'Failed to create delegation.');
+      setCreateError((e as Error).message ?? t('delegations.createFailed'));
     } finally {
       setCreating(false);
     }
@@ -106,14 +108,14 @@ const Delegations: React.FC = () => {
       setRevokeTarget(null);
       await load();
     } catch (e) {
-      setRevokeError((e as Error).message ?? 'Failed to revoke delegation.');
+      setRevokeError((e as Error).message ?? t('delegations.revokeFailed'));
     } finally {
       setRevoking(false);
     }
   };
 
   const formatDate = (iso: string | null) => {
-    if (!iso) return '—';
+    if (!iso) return t('common.emptyValue');
     try { return new Date(iso).toLocaleString(); } catch { return iso; }
   };
 
@@ -122,14 +124,14 @@ const Delegations: React.FC = () => {
       <div className="row mb-3">
         <div className="col d-flex align-items-center justify-content-between">
           <div>
-            <h1 className="h3 mb-0">Delegations</h1>
-            <p className="text-muted mb-0 small">Temporarily grant your permissions to another user</p>
+            <h1 className="h3 mb-0">{t('delegations.title')}</h1>
+            <p className="text-muted mb-0 small">{t('delegations.subtitle')}</p>
           </div>
           <button
             className="btn btn-primary btn-sm"
             onClick={() => { setForm({ ...EMPTY_FORM }); setCreateError(null); setShowCreate(true); }}
           >
-            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>New Delegation
+            <i className="bi bi-plus-lg me-1" aria-hidden="true"></i>{t('delegations.newDelegation')}
           </button>
         </div>
       </div>
@@ -144,7 +146,7 @@ const Delegations: React.FC = () => {
             empty={
               <div className="text-center text-muted py-5">
                 <i className="bi bi-people fs-3 d-block mb-2" aria-hidden="true"></i>
-                No delegations found.
+                {t('delegations.empty')}
               </div>
             }
           >
@@ -153,12 +155,12 @@ const Delegations: React.FC = () => {
                 <thead className="table-light">
                   <tr>
                     <th scope="col">#</th>
-                    <th scope="col">Delegatee ID</th>
-                    <th scope="col">Permissions</th>
-                    <th scope="col">Scope Org Unit</th>
-                    <th scope="col">Active</th>
-                    <th scope="col">Expires</th>
-                    <th scope="col" className="text-end">Actions</th>
+                    <th scope="col">{t('delegations.columns.delegateeId')}</th>
+                    <th scope="col">{t('delegations.columns.permissions')}</th>
+                    <th scope="col">{t('delegations.columns.scopeOrgUnit')}</th>
+                    <th scope="col">{t('delegations.columns.active')}</th>
+                    <th scope="col">{t('delegations.columns.expires')}</th>
+                    <th scope="col" className="text-end">{t('delegations.columns.actions')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -174,11 +176,11 @@ const Delegations: React.FC = () => {
                         </div>
                       </td>
                       <td className="small text-muted">
-                        {item.scopeOrgUnitId != null ? `Unit #${item.scopeOrgUnitId}` : 'Global'}
+                        {item.scopeOrgUnitId != null ? t('delegations.unitLabel', { id: item.scopeOrgUnitId }) : t('delegations.global')}
                       </td>
                       <td>
                         <span className={`badge ${item.isActive ? 'bg-success' : 'bg-secondary'}`}>
-                          {item.isActive ? 'Active' : 'Inactive'}
+                          {item.isActive ? t('delegations.status.active') : t('delegations.status.inactive')}
                         </span>
                       </td>
                       <td className="small text-muted text-nowrap">{formatDate(item.expiresAt)}</td>
@@ -187,9 +189,9 @@ const Delegations: React.FC = () => {
                           <button
                             className="btn btn-sm btn-outline-danger"
                             onClick={() => openRevoke(item)}
-                            aria-label={`Revoke delegation ${item.id}`}
+                            aria-label={t('delegations.revokeAriaLabel', { id: item.id })}
                           >
-                            <i className="bi bi-x-circle me-1" aria-hidden="true"></i>Revoke
+                            <i className="bi bi-x-circle me-1" aria-hidden="true"></i>{t('delegations.revoke')}
                           </button>
                         )}
                       </td>
@@ -204,12 +206,12 @@ const Delegations: React.FC = () => {
 
       {/* Create Modal */}
       {showCreate && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label="New delegation">
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('delegations.newDelegation')}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">New Delegation</h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setShowCreate(false)}></button>
+                <h5 className="modal-title">{t('delegations.newDelegation')}</h5>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setShowCreate(false)}></button>
               </div>
               <div className="modal-body">
                 {createError && (
@@ -217,7 +219,7 @@ const Delegations: React.FC = () => {
                 )}
                 <div className="row g-3">
                   <div className="col-md-6">
-                    <label htmlFor="delegDelegateeId" className="form-label">Delegatee User ID <span className="text-danger">*</span></label>
+                    <label htmlFor="delegDelegateeId" className="form-label">{t('delegations.form.delegateeId')} <span className="text-danger">*</span></label>
                     <input
                       id="delegDelegateeId"
                       type="number"
@@ -228,7 +230,7 @@ const Delegations: React.FC = () => {
                     />
                   </div>
                   <div className="col-md-6">
-                    <label htmlFor="delegExpiry" className="form-label">Expires At <span className="text-danger">*</span></label>
+                    <label htmlFor="delegExpiry" className="form-label">{t('delegations.form.expiresAt')} <span className="text-danger">*</span></label>
                     <input
                       id="delegExpiry"
                       type="datetime-local"
@@ -238,20 +240,20 @@ const Delegations: React.FC = () => {
                     />
                   </div>
                   <div className="col-12">
-                    <label className="form-label">Permission Codes <span className="text-danger">*</span></label>
+                    <label className="form-label">{t('delegations.form.permissionCodes')} <span className="text-danger">*</span></label>
                     <div className="input-group">
                       <input
                         id="delegPermissionInput"
                         type="text"
                         className="form-control"
-                        placeholder="e.g. schedule.manage"
+                        placeholder={t('delegations.form.permissionCodePlaceholder')}
                         value={form.permissionInput}
                         onChange={(e) => setForm((f) => ({ ...f, permissionInput: e.target.value }))}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPermission(); } }}
-                        aria-label="Permission code input"
+                        aria-label={t('delegations.form.permissionCodeInputAriaLabel')}
                       />
-                      <button className="btn btn-outline-secondary" type="button" onClick={addPermission} aria-label="Add permission code">
-                        Add
+                      <button className="btn btn-outline-secondary" type="button" onClick={addPermission} aria-label={t('delegations.form.addPermissionAriaLabel')}>
+                        {t('delegations.form.add')}
                       </button>
                     </div>
                     {form.permissionCodes.length > 0 && (
@@ -262,7 +264,7 @@ const Delegations: React.FC = () => {
                             <button
                               type="button"
                               className="btn-close btn-close-white"
-                              aria-label={`Remove permission ${code}`}
+                              aria-label={t('delegations.form.removePermissionAriaLabel', { code })}
                               onClick={() => removePermission(code)}
                               style={{ fontSize: '0.55rem' }}
                             ></button>
@@ -272,13 +274,13 @@ const Delegations: React.FC = () => {
                     )}
                   </div>
                   <div className="col-md-6">
-                    <label htmlFor="delegScopeOrgUnit" className="form-label">Scope Org Unit ID <span className="text-muted small">(optional)</span></label>
+                    <label htmlFor="delegScopeOrgUnit" className="form-label">{t('delegations.form.scopeOrgUnitId')} <span className="text-muted small">{t('delegations.form.optional')}</span></label>
                     <input
                       id="delegScopeOrgUnit"
                       type="number"
                       className="form-control"
                       min={1}
-                      placeholder="Optional — leave blank for global"
+                      placeholder={t('delegations.form.scopeOrgUnitPlaceholder')}
                       value={form.scopeOrgUnitId ?? ''}
                       onChange={(e) => setForm((f) => ({
                         ...f,
@@ -287,30 +289,30 @@ const Delegations: React.FC = () => {
                     />
                   </div>
                   <div className="col-12">
-                    <label htmlFor="delegJustification" className="form-label">Justification <span className="text-muted small">(optional)</span></label>
+                    <label htmlFor="delegJustification" className="form-label">{t('delegations.form.justification')} <span className="text-muted small">{t('delegations.form.optional')}</span></label>
                     <textarea
                       id="delegJustification"
                       className="form-control"
                       rows={2}
                       value={form.justification ?? ''}
                       onChange={(e) => setForm((f) => ({ ...f, justification: e.target.value }))}
-                      placeholder="Reason for this delegation"
+                      placeholder={t('delegations.form.justificationPlaceholder')}
                     />
                   </div>
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowCreate(false)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-primary"
                   onClick={handleCreate}
                   disabled={creating}
-                  aria-label="Submit delegation"
+                  aria-label={t('delegations.form.submitAriaLabel')}
                 >
                   {creating ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
-                  ) : 'Create'}
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.saving')}</>
+                  ) : t('delegations.create')}
                 </button>
               </div>
             </div>
@@ -326,24 +328,24 @@ const Delegations: React.FC = () => {
           tabIndex={-1}
           role="dialog"
           aria-modal="true"
-          aria-label={`Revoke delegation ${revokeTarget.id}`}
+          aria-label={t('delegations.revokeAriaLabel', { id: revokeTarget.id })}
         >
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Revoke Delegation #{revokeTarget.id}</h5>
-                <button type="button" className="btn-close" aria-label="Close" onClick={() => setRevokeTarget(null)}></button>
+                <h5 className="modal-title">{t('delegations.revokeTitle', { id: revokeTarget.id })}</h5>
+                <button type="button" className="btn-close" aria-label={t('common.close')} onClick={() => setRevokeTarget(null)}></button>
               </div>
               <div className="modal-body">
                 {revokeError && (
                   <div className="alert alert-danger py-2 small" role="alert">{revokeError}</div>
                 )}
                 <p className="small text-muted mb-3">
-                  This will immediately deactivate the delegation. The action is recorded in the audit log.
+                  {t('delegations.revokeWarning')}
                 </p>
                 <div>
                   <label htmlFor="revokeNote" className="form-label">
-                    Justification <span className="text-muted small">(optional)</span>
+                    {t('delegations.form.justification')} <span className="text-muted small">{t('delegations.form.optional')}</span>
                   </label>
                   <textarea
                     id="revokeNote"
@@ -351,22 +353,22 @@ const Delegations: React.FC = () => {
                     rows={3}
                     value={revokeNote}
                     onChange={(e) => setRevokeNote(e.target.value)}
-                    placeholder="Reason for revocation"
+                    placeholder={t('delegations.revokeReasonPlaceholder')}
                   />
                 </div>
               </div>
               <div className="modal-footer">
-                <button type="button" className="btn btn-secondary" onClick={() => setRevokeTarget(null)}>Cancel</button>
+                <button type="button" className="btn btn-secondary" onClick={() => setRevokeTarget(null)}>{t('common.cancel')}</button>
                 <button
                   type="button"
                   className="btn btn-danger"
                   onClick={handleRevoke}
                   disabled={revoking}
-                  aria-label="Confirm revoke"
+                  aria-label={t('delegations.confirmRevokeAriaLabel')}
                 >
                   {revoking ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Revoking…</>
-                  ) : 'Revoke'}
+                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.revoking')}</>
+                  ) : t('delegations.revoke')}
                 </button>
               </div>
             </div>
