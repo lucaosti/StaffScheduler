@@ -1052,16 +1052,109 @@ directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` o
   both platforms (`mobile/ios/App/App/Assets.xcassets`,
   `mobile/android/app/src/main/res/**`); no custom branded assets have been designed yet.
 - Auth flow (mobile-client token-in-body mode, see §5 "Mobile client:
-  token-based variant") and push notifications (native device tokens
-  delivered through FCM/APNs, see §7c) are implemented. Calendar views and
-  store publishing are **not** — each is tracked as its own follow-up issue
-  and builds on this scaffold.
+  token-based variant"), responsive schedule/calendar views (phone-width
+  agenda layouts on the pages a field user needs on shift), and push
+  notifications (native device tokens delivered through FCM/APNs, see §7c)
+  are all implemented. The release *process* below (versioning, signing,
+  store metadata) is documented and scaffolded, but no actual store
+  submission has occurred or can occur from this environment — that step
+  needs a human with real Apple Developer / Google Play Console accounts.
 
 **CI**: `mobile/` is covered by the root `npm install`/`npm ci` step (it is a workspace
-member like `backend`, `frontend`, and `packages/*`), but has no dedicated lint/test/build
-CI job — there is no application logic here yet to verify beyond the frontend's own
-build, which the frontend CI job already covers. The `backend` and `frontend` CI jobs stay
-scoped to their own `working-directory` and never touch `mobile/`.
+member like `backend`, `frontend`, and `packages/*`), but has no lint/test CI job — there
+is no application logic here yet to verify beyond the frontend's own build, which the
+frontend CI job already covers. The `backend` and `frontend` CI jobs stay scoped to their
+own `working-directory` and never touch `mobile/`. A separate, manually-triggered
+`mobile-android-build` workflow (`.github/workflows/mobile-android-build.yml`) exists to
+build an unsigned Android debug APK on demand — see **Release process** below.
+
+### Release process
+
+**Version numbers**: `mobile/package.json`'s `version` field is the single source of
+truth, matching the convention `backend/package.json` and `frontend/package.json` already
+follow. The two native projects each need that same value copied in, plus their own
+monotonically-increasing build number:
+
+| Platform | User-visible version | Build number (must strictly increase per store upload) |
+|---|---|---|
+| iOS | `MARKETING_VERSION` in `ios/App/App.xcodeproj/project.pbxproj` | `CURRENT_PROJECT_VERSION` in the same file |
+| Android | `versionName` in `android/app/build.gradle` | `versionCode` in the same file |
+
+`capacitor.config.ts` has no version field of its own (only `appId`/`appName`/`webDir`),
+so it is not a sync target.
+
+Keeping these in sync by hand is error-prone (four values across two generated project
+files), so `mobile/scripts/version-bump.mjs` does it in one step:
+
+```bash
+npm run version:bump --workspace=mobile              # sync build numbers only,
+                                                       # using the current package.json
+                                                       # version
+npm run version:bump --workspace=mobile -- 1.2.0      # also set the marketing version
+                                                       # everywhere (package.json +
+                                                       # both native projects)
+```
+
+It always increments both native build numbers by 1 (both stores reject a re-upload of
+an unchanged build number even when the marketing version is identical), edits the three
+files in place, and prints the resulting values. It does not commit, tag, or build
+anything — review the diff (`project.pbxproj` and `build.gradle`) before committing a
+release, same as any other generated-file change.
+
+**Build → sync → archive sequence** (extends the `build`/`sync`/`open:ios`/`open:android`
+scripts already documented above):
+
+1. Bump the version (`npm run version:bump --workspace=mobile -- <version>`), commit the
+   result as its own commit.
+2. `npm run build --workspace=mobile` — builds the frontend, copies it into `mobile/www`,
+   runs `cap sync` for both platforms.
+3. **iOS**: `npm run open:ios --workspace=mobile` opens the Xcode project. From there, a
+   human with the Apple Developer account:
+   - selects the "Any iOS Device" build destination,
+   - `Product → Archive`,
+   - once the archive succeeds, uses **Xcode Organizer** (`Window → Organizer`) to
+     `Distribute App → App Store Connect → Upload`,
+   - completes the submission's metadata and release notes in **App Store Connect**
+     directly (App Store Connect, not this repository, is authoritative for release notes,
+     screenshots, and the actual "Submit for Review" action).
+4. **Android**: `npm run open:android --workspace=mobile` opens the Gradle project in
+   Android Studio. From there, a human with the Google Play Console account:
+   - `Build → Generate Signed Bundle / APK`, choosing **Android App Bundle**,
+   - selects (or creates) the release keystore — see **Signing configuration** below,
+   - the signed `.aab` is produced under `android/app/release/`,
+   - uploads it to a release track (internal testing → closed → production) in the
+     **Play Console**, where the store listing, screenshots, and rollout percentage are
+     managed directly.
+
+**Signing configuration** — never committed, same pattern as `backend/.env`:
+
+- **Android**: `mobile/android/app/build.gradle` reads `storeFile`, `storePassword`,
+  `keyAlias`, `keyPassword` from `mobile/android/keystore.properties` if that file exists,
+  and falls back to Android's built-in debug signing config otherwise, so local builds and
+  CI never need a real keystore. `mobile/android/keystore.properties.example` documents
+  the expected keys and how to generate a release keystore with `keytool`.
+  `keystore.properties`, `*.jks`, and `*.keystore` are all gitignored
+  (`mobile/android/.gitignore`). A store-upload build requires the real
+  `keystore.properties` (and the keystore file it points to) to exist locally, held only
+  by whoever owns the release signing key — losing that keystore means never being able to
+  publish an update to an app already live under it.
+- **iOS**: Xcode manages signing through its own UI, not a plaintext file, so there is no
+  equivalent committed-vs-gitignored file pair — it would be actively wrong to try to
+  represent Apple signing state as a repository file. A human opening
+  `mobile/ios/App/App.xcodeproj` in Xcode needs to configure, once, under
+  **Signing & Capabilities**:
+  - **Team**: their Apple Developer Team ID,
+  - **Bundle Identifier**: already set from the scaffold to `com.staffscheduler.app` — must
+    match the App ID registered in the Apple Developer portal,
+  - **Provisioning Profile**: Xcode's "Automatically manage signing" generates and
+    refreshes this from the selected Team; manual profile management is only needed for
+    push-notification or other capability-gated profiles, neither of which this app uses
+    yet.
+
+**App store metadata**: draft listing copy, category suggestions, and a screenshot
+checklist live in `mobile/store-listing/README.md` — plain text/documentation, not
+generated binary assets, ready to paste into App Store Connect / Play Console once a real
+submission is prepared.
 
 ---
 
