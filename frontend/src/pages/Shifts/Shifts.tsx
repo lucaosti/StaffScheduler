@@ -17,7 +17,8 @@ import { ApiError } from '../../services/apiUtils';
 import ShiftTable from '../Shifts/ShiftTable';
 import TemplateModal from '../Shifts/TemplateModal';
 import ConfirmModal from '../../components/ConfirmModal';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import { useShiftsPageData, useDeleteShift, useSaveShift } from '../../hooks/useShifts';
 import { useAuth } from '../../contexts/AuthContext';
 import ShiftAssignmentPanel from '../Assignments/ShiftAssignmentPanel';
@@ -69,15 +70,7 @@ const Shifts: React.FC = () => {
   const shifts = useMemo(() => shiftsQuery.data?.shifts ?? [], [shiftsQuery.data]);
   const schedules = shiftsQuery.data?.schedules ?? [];
   const departments = useMemo(() => shiftsQuery.data?.departments ?? [], [shiftsQuery.data]);
-  const loading = shiftsQuery.isLoading;
   const submitting = saveShift.isPending;
-  // A load error comes from the query; action errors are set locally below.
-  const loadError = shiftsQuery.isError
-    ? shiftsQuery.error instanceof ApiError
-      ? shiftsQuery.error.message
-      : t('shifts.loadFailed')
-    : null;
-  const displayError = error ?? loadError;
 
   const departmentNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -164,14 +157,6 @@ const Shifts: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container-fluid py-4">
-        <LoadingSpinner message={t('shifts.loading')} />
-      </div>
-    );
-  }
-
   return (
     <div className="container-fluid py-4">
       <div className="row mb-4">
@@ -247,12 +232,7 @@ const Shifts: React.FC = () => {
         </div>
       </div>
 
-      {displayError && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-          {displayError}
-        </div>
-      )}
+      {error && <ErrorAlert message={error} />}
       {info && (
         <div className="alert alert-success" role="alert">
           <i className="bi bi-check-circle me-2" aria-hidden="true"></i>
@@ -260,24 +240,32 @@ const Shifts: React.FC = () => {
         </div>
       )}
 
-      <ShiftTable
-        shifts={filteredShifts}
-        departmentNameById={departmentNameById}
-        searchTerm={searchTerm}
-        onEdit={(shift) => {
-          setFormError(null);
-          setEditingShift(shift);
-          setShowAddModal(true);
-        }}
-        onManageStaff={canAssign ? (shift) => setStaffingShift(shift) : undefined}
-        onDelete={handleDeleteShift}
-        onAddNew={() => {
-          setFormError(null);
-          setEditingShift(null);
-          setShowAddModal(true);
-        }}
-        hasSchedules={schedules.length > 0}
-      />
+      <QueryState
+        isLoading={shiftsQuery.isLoading}
+        isError={shiftsQuery.isError}
+        error={shiftsQuery.error instanceof ApiError ? shiftsQuery.error.message : shiftsQuery.error}
+        onRetry={() => shiftsQuery.refetch()}
+        loadingMessage={t('shifts.loading')}
+      >
+        <ShiftTable
+          shifts={filteredShifts}
+          departmentNameById={departmentNameById}
+          searchTerm={searchTerm}
+          onEdit={(shift) => {
+            setFormError(null);
+            setEditingShift(shift);
+            setShowAddModal(true);
+          }}
+          onManageStaff={canAssign ? (shift) => setStaffingShift(shift) : undefined}
+          onDelete={handleDeleteShift}
+          onAddNew={() => {
+            setFormError(null);
+            setEditingShift(null);
+            setShowAddModal(true);
+          }}
+          hasSchedules={schedules.length > 0}
+        />
+      </QueryState>
 
       <TemplateModal
         show={showAddModal || !!editingShift}

@@ -23,6 +23,8 @@ import * as employeeService from '../../services/employeeService';
 import ConfirmModal from '../../components/ConfirmModal';
 import { useDebouncedValue } from '../../hooks/useDebouncedValue';
 import ExportCsvLink from '../../components/ExportCsvLink';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 import {
   useEmployeesQuery,
   useDepartmentsQuery,
@@ -67,13 +69,6 @@ const Employees: React.FC = () => {
 
   const employees = useMemo(() => employeesQuery.data ?? [], [employeesQuery.data]);
   const allDepartments = departmentsQuery.data ?? [];
-  // Show the full-page loader only on the very first load (no cached data yet);
-  // filter changes keep the previous list visible via placeholderData.
-  const loading = employeesQuery.isLoading;
-  const error = employeesQuery.isError
-    ? t('employees.loadFailed')
-    : actionError;
-  const setError = setActionError;
 
   const handleDeleteEmployee = (id: number | string) => {
     setConfirmDelete({ open: true, employeeId: id });
@@ -105,19 +100,6 @@ const Employees: React.FC = () => {
     () => Array.from(new Set(employees.map(emp => emp.department).filter(Boolean))),
     [employees]
   );
-
-  if (loading) {
-    return (
-      <div className="container-fluid py-4">
-        <div className="text-center">
-          <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">{t('common.loading')}</span>
-          </div>
-          <p className="mt-2">{t('employees.loading')}</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="container-fluid py-4">
@@ -190,22 +172,18 @@ const Employees: React.FC = () => {
         </div>
       </div>
 
-      {/* Error Alert */}
-      {error && (
-        <div className="alert alert-warning alert-dismissible fade show" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-          {t('employees.errorWithSampleData', { error })}
-          <button
-            type="button"
-            className="btn-close"
-            onClick={() => setError(null)}
-          ></button>
-        </div>
-      )}
+      {actionError && <ErrorAlert message={actionError} />}
 
       {/* Employees Table */}
       <div className="card border-0 shadow-sm">
         <div className="card-body p-0">
+          <QueryState
+            isLoading={employeesQuery.isLoading}
+            isError={employeesQuery.isError}
+            error={employeesQuery.error}
+            onRetry={() => employeesQuery.refetch()}
+            loadingMessage={t('employees.loading')}
+          >
           <div className="table-responsive">
             <table className="table table-hover mb-0">
               <thead>
@@ -295,6 +273,7 @@ const Employees: React.FC = () => {
               )}
             </div>
           )}
+          </QueryState>
         </div>
       </div>
 
@@ -350,7 +329,7 @@ const Employees: React.FC = () => {
                   try {
                     if (editingEmployee && !editingEmployee.id) {
                       // Guard: leave modal open so the user can see the error message.
-                      setError(t('employees.missingIdError'));
+                      setActionError(t('employees.missingIdError'));
                       return;
                     }
                     await saveEmployee.mutateAsync({
@@ -360,7 +339,7 @@ const Employees: React.FC = () => {
                     setShowAddModal(false);
                     setEditingEmployee(null);
                   } catch (_err) {
-                    setError(t('employees.saveFailed'));
+                    setActionError(t('employees.saveFailed'));
                   }
                 }}>
                   <div className="row">
