@@ -14,6 +14,7 @@ import {
   CreateWorkflowBody,
 } from '../../services/approvalWorkflowService';
 import { SCOPE_LABEL_KEYS } from './WorkflowTable';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 const SCOPE_KEYS = Object.keys(SCOPE_LABEL_KEYS) as ApproverScope[];
 
@@ -272,7 +273,7 @@ const WorkflowModal: React.FC<Props> = ({ show, mode, editing, saving, onClose, 
               aria-label={mode === 'create' ? t('admin.approvalWorkflows.modal.createSaveAriaLabel') : t('admin.approvalWorkflows.modal.editSaveAriaLabel')}
             >
               {saving ? (
-                <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('admin.approvalWorkflows.modal.saving')}</>
+                <><ButtonSpinner />{t('admin.approvalWorkflows.modal.saving')}</>
               ) : (
                 mode === 'create' ? t('admin.approvalWorkflows.modal.create') : t('admin.approvalWorkflows.modal.save')
               )}

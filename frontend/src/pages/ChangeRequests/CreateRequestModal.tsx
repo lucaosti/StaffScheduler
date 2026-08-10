@@ -7,6 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreateChangeRequestInput } from '../../services/changeRequestService';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 const EMPTY_FORM: Omit<CreateChangeRequestInput, 'proposedPayload'> & { payloadText: string } = {
   changeType: '',
@@ -143,7 +144,7 @@ const CreateRequestModal: React.FC<Props> = ({ show, creating, onClose, onSubmit
               aria-label={t('changeRequests.form.submitAriaLabel')}
             >
               {creating ? (
-                <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('changeRequests.submitting')}</>
+                <><ButtonSpinner />{t('changeRequests.submitting')}</>
               ) : t('changeRequests.submit')}
             </button>
           </div>

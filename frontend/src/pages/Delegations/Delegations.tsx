@@ -14,6 +14,7 @@ import { Delegation, CreateDelegationBody } from '../../services/delegationServi
 import { useDelegationsQuery, useDelegationMutations } from '../../hooks/useDelegations';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 const EMPTY_FORM: CreateDelegationBody & { permissionInput: string } = {
   delegateeId: 0,
@@ -293,7 +294,7 @@ const Delegations: React.FC = () => {
                   aria-label={t('delegations.form.submitAriaLabel')}
                 >
                   {create.isPending ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.saving')}</>
+                    <><ButtonSpinner />{t('delegations.saving')}</>
                   ) : t('delegations.create')}
                 </button>
               </div>
@@ -349,7 +350,7 @@ const Delegations: React.FC = () => {
                   aria-label={t('delegations.confirmRevokeAriaLabel')}
                 >
                   {revoke.isPending ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>{t('delegations.revoking')}</>
+                    <><ButtonSpinner />{t('delegations.revoking')}</>
                   ) : t('delegations.revoke')}
                 </button>
               </div>

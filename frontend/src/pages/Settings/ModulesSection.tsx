@@ -15,6 +15,7 @@ import { listModulesForOrg } from '../../services/moduleService';
 import { useModulesQuery, useModuleMutations } from '../../hooks/useModules';
 import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 import { ModuleWithOrgOverride } from '../../types';
+import ButtonSpinner from '../../components/ButtonSpinner';
 
 interface PendingToggle {
   code: string;
@@ -207,7 +208,7 @@ const ModulesSection: React.FC = () => {
                   disabled={!orgName.trim() || orgLoading}
                 >
                   {orgLoading ? (
-                    <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Loading…</>
+                    <><ButtonSpinner />Loading…</>
                   ) : (
                     <><i className="bi bi-search me-1" aria-hidden="true"></i>Load</>
                   )}
@@ -348,7 +349,7 @@ const ModulesSection: React.FC = () => {
                     disabled={saving}
                   >
                     {saving ? (
-                      <><span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Saving…</>
+                      <><ButtonSpinner />Saving…</>
                     ) : (
                       pendingToggle.targetEnabled ? 'Enable' : 'Disable'
                     )}
