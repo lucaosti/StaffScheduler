@@ -182,6 +182,7 @@ const Login: React.FC = () => {
                       onChange={handleChange}
                       required
                       autoFocus
+                      autoComplete="username"
                       disabled={Boolean(availableMethods)}
                     />
                   </div>
@@ -198,6 +199,7 @@ const Login: React.FC = () => {
                       value={credentials.password}
                       onChange={handleChange}
                       required
+                      autoComplete="current-password"
                       disabled={Boolean(availableMethods)}
                     />
                   </div>

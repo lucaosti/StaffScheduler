@@ -331,10 +331,10 @@ describe('dashboardService', () => {
     );
   });
 
-  it('getRecentActivity returns items from body.data.items', async () => {
+  it('getRecentActivity GETs /audit-logs with the given limit', async () => {
     const items = [{ id: 1, action: 'login' }];
     global.fetch = jest.fn().mockResolvedValue(
-      new Response(JSON.stringify({ success: true, data: { items } }), {
+      new Response(JSON.stringify({ success: true, data: items }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
