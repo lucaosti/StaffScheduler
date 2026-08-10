@@ -13,6 +13,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ShiftAssignment, Shift } from '../../types';
 import * as scheduleService from '../../services/scheduleService';
 import { useSchedulePageData } from '../../hooks/useSchedulePage';
@@ -35,7 +36,21 @@ interface OptimizationOutcome {
   degradedReason?: string;
 }
 
+// Keyed on Sun–Sat rather than transliterated because the month grid's
+// header order is fixed (the grid always starts the week on Sunday), so the
+// key just needs to line up positionally — the visible label comes from `t()`.
+const WEEKDAY_KEYS = [
+  'schedule.weekdays.sun',
+  'schedule.weekdays.mon',
+  'schedule.weekdays.tue',
+  'schedule.weekdays.wed',
+  'schedule.weekdays.thu',
+  'schedule.weekdays.fri',
+  'schedule.weekdays.sat',
+];
+
 const Schedule: React.FC = () => {
+  const { t } = useTranslation();
   // Server state (the four page lists + first-schedule assignments) is owned by
   // one TanStack Query hook; `reload` invalidates it after a mutation. Only
   // genuinely local UI state lives in this component.
@@ -62,7 +77,7 @@ const Schedule: React.FC = () => {
   const error = pageQuery.isError
     ? pageQuery.error instanceof ApiError
       ? pageQuery.error.message
-      : (pageQuery.error as Error)?.message ?? 'Failed to load schedule data'
+      : (pageQuery.error as Error)?.message ?? t('schedule.loadFailed')
     : localError;
 
 
@@ -92,6 +107,15 @@ const Schedule: React.FC = () => {
 
   const formatDate = (date: Date) =>
     date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+
+  // Defined outside the JSX tree (like `formatDate` above) rather than
+  // called inline with its options object literal in the JSX expression:
+  // the i18next-literal-string lint rule walks every descendant of a JSX
+  // element, including nested call arguments, so an options object placed
+  // directly in the markup gets flagged as untranslated prose even though
+  // 'long'/'numeric' are `Intl` format tokens, not user-facing copy.
+  const formatMonthHeading = (date: Date) =>
+    date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
 
   const departmentNameById = useMemo(() => {
     const map = new Map<number, string>();
@@ -214,13 +238,13 @@ const Schedule: React.FC = () => {
       });
       if (response.success) {
         setShowCreateModal(false);
-        setInfo(`Schedule "${values.name}" created.`);
+        setInfo(t('schedule.createdMessage', { name: values.name }));
         await loadData();
       } else {
-        setCreateError(response.error?.message || 'Failed to create schedule.');
+        setCreateError(response.error?.message || t('schedule.createFailed'));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to create schedule.';
+      const message = err instanceof ApiError ? err.message : t('schedule.createFailed');
       setCreateError(message);
     } finally {
       setIsCreating(false);
@@ -243,11 +267,11 @@ const Schedule: React.FC = () => {
       const state = status.data?.state;
       if (state === 'completed') return status.data?.result;
       if (state === 'failed') {
-        throw new Error(status.data?.failedReason || 'Optimization failed.');
+        throw new Error(status.data?.failedReason || t('schedule.optimizationFailedDefault'));
       }
       // 'waiting' / 'active' / 'unknown' → keep polling.
     }
-    throw new Error('Optimization timed out.');
+    throw new Error(t('schedule.optimizationTimedOut'));
   };
 
   // A completion message that makes the engine unmistakable: the optimal run is
@@ -258,13 +282,13 @@ const Schedule: React.FC = () => {
       const reason = outcome.degradedReason ? ` (${outcome.degradedReason})` : '';
       return {
         degraded: true,
-        message: `Schedule generated as a DRAFT using the greedy fallback — the optimal OR-Tools engine was unavailable${reason}. Re-run once it is available for an optimal schedule.`,
+        message: t('schedule.draftOutcome', { reason }),
       };
     }
     if (outcome?.engine === 'greedy') {
-      return { degraded: false, message: 'Schedule generated with the greedy draft engine.' };
+      return { degraded: false, message: t('schedule.greedyOutcome') };
     }
-    return { degraded: false, message: 'Schedule generation completed with the optimal engine.' };
+    return { degraded: false, message: t('schedule.optimalOutcome') };
   };
 
   const handleGenerateSchedule = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -272,7 +296,7 @@ const Schedule: React.FC = () => {
     setGenerateError(null);
 
     if (!selectedScheduleId) {
-      setGenerateError('Select a schedule to generate.');
+      setGenerateError(t('schedule.selectScheduleRequired'));
       return;
     }
 
@@ -280,7 +304,7 @@ const Schedule: React.FC = () => {
     try {
       const response = await scheduleService.generateSchedule(selectedScheduleId);
       if (!response.success) {
-        setGenerateError(response.error?.message || 'Failed to generate schedule.');
+        setGenerateError(response.error?.message || t('schedule.generateFailed'));
         return;
       }
 
@@ -305,7 +329,7 @@ const Schedule: React.FC = () => {
       }
       await loadData();
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to generate schedule.';
+      const message = err instanceof ApiError ? err.message : t('schedule.generateFailed');
       setGenerateError(message);
     } finally {
       setIsGenerating(false);
@@ -318,13 +342,13 @@ const Schedule: React.FC = () => {
     try {
       const response = await scheduleService.publishSchedule(id);
       if (response.success) {
-        setInfo('Schedule published.');
+        setInfo(t('schedule.publishSuccess'));
         await loadData();
       } else {
-        setError(response.error?.message || 'Failed to publish schedule.');
+        setError(response.error?.message || t('schedule.publishFailed'));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to publish schedule.';
+      const message = err instanceof ApiError ? err.message : t('schedule.publishFailed');
       setError(message);
     }
   };
@@ -335,13 +359,13 @@ const Schedule: React.FC = () => {
     try {
       const response = await scheduleService.archiveSchedule(id);
       if (response.success) {
-        setInfo('Schedule archived.');
+        setInfo(t('schedule.archiveSuccess'));
         await loadData();
       } else {
-        setError(response.error?.message || 'Failed to archive schedule.');
+        setError(response.error?.message || t('schedule.archiveFailed'));
       }
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Failed to archive schedule.';
+      const message = err instanceof ApiError ? err.message : t('schedule.archiveFailed');
       setError(message);
     }
   };
@@ -349,7 +373,7 @@ const Schedule: React.FC = () => {
   if (loading) {
     return (
       <div className="container-fluid py-4">
-        <LoadingSpinner message="Loading schedule data..." />
+        <LoadingSpinner message={t('schedule.loadingData')} />
       </div>
     );
   }
@@ -360,10 +384,8 @@ const Schedule: React.FC = () => {
         <div className="col">
           <div className="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
             <div>
-              <h1 className="h3 mb-0">Schedule Management</h1>
-              <p className="text-muted mb-0">
-                Create and manage work schedules and run optimization on demand.
-              </p>
+              <h1 className="h3 mb-0">{t('schedule.title')}</h1>
+              <p className="text-muted mb-0">{t('schedule.subtitle')}</p>
             </div>
             <div className="d-flex flex-wrap gap-2">
               <button
@@ -376,7 +398,7 @@ const Schedule: React.FC = () => {
                 data-testid="open-create-schedule"
               >
                 <i className="bi bi-plus-lg me-2" aria-hidden="true"></i>
-                New Schedule
+                {t('schedule.newSchedule')}
               </button>
               <button
                 className="btn btn-success"
@@ -389,24 +411,24 @@ const Schedule: React.FC = () => {
                 }}
               >
                 <i className="bi bi-magic me-2" aria-hidden="true"></i>
-                Generate
+                {t('schedule.generate')}
               </button>
               <div className="btn-group" role="group">
                 <button
                   type="button"
                   className={`btn ${viewMode === 'week' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  aria-label="Week view"
+                  aria-label={t('schedule.weekViewAriaLabel')}
                   onClick={() => setViewMode('week')}
                 >
-                  Week
+                  {t('schedule.week')}
                 </button>
                 <button
                   type="button"
                   className={`btn ${viewMode === 'month' ? 'btn-primary' : 'btn-outline-primary'}`}
-                  aria-label="Month view"
+                  aria-label={t('schedule.monthViewAriaLabel')}
                   onClick={() => setViewMode('month')}
                 >
-                  Month
+                  {t('schedule.month')}
                 </button>
               </div>
             </div>
@@ -426,11 +448,8 @@ const Schedule: React.FC = () => {
             </button>
             <h5 className="mb-0">
               {viewMode === 'week'
-                ? `Week of ${weekDates[0].toLocaleDateString(undefined)}`
-                : selectedWeek.toLocaleDateString(undefined, {
-                    month: 'long',
-                    year: 'numeric',
-                  })}
+                ? t('schedule.weekOf', { date: weekDates[0].toLocaleDateString(undefined) })
+                : formatMonthHeading(selectedWeek)}
             </h5>
             <button
               className="btn btn-outline-secondary"
@@ -447,7 +466,7 @@ const Schedule: React.FC = () => {
             value={selectedDepartment}
             onChange={(e) => setSelectedDepartment(e.target.value)}
           >
-            <option value="">All Departments</option>
+            <option value="">{t('schedule.allDepartments')}</option>
             {departments.map((d) => (
               <option key={d.id} value={String(d.id)}>
                 {d.name}
@@ -478,7 +497,7 @@ const Schedule: React.FC = () => {
           {filteredShifts.length === 0 ? (
             <div className="card">
               <div className="card-body text-center text-muted py-4">
-                No shifts to display. Create shifts and a schedule to get started.
+                {t('schedule.noShiftsToDisplay')}
               </div>
             </div>
           ) : (
@@ -507,7 +526,9 @@ const Schedule: React.FC = () => {
                               const employee = getEmployeeById(assignment.userId);
                               return (
                                 <span key={assignment.id} className="badge bg-success">
-                                  {employee ? `${employee.firstName} ${employee.lastName}` : 'Unknown'}
+                                  {employee
+                                    ? `${employee.firstName} ${employee.lastName}`
+                                    : t('schedule.unknownEmployee')}
                                 </span>
                               );
                             })}
@@ -515,11 +536,13 @@ const Schedule: React.FC = () => {
                         ) : (
                           <div className="text-muted mt-2">
                             <i className="bi bi-plus-circle" aria-hidden="true"></i>{' '}
-                            <small>Assign Staff</small>
+                            <small>{t('schedule.assignStaff')}</small>
                           </div>
                         )}
                         {shortBy > 0 && (
-                          <div className="small text-danger mt-1">Need {shortBy} more</div>
+                          <div className="small text-danger mt-1">
+                            {t('schedule.needMore', { count: shortBy })}
+                          </div>
                         )}
                       </li>
                     );
@@ -538,7 +561,7 @@ const Schedule: React.FC = () => {
               <table className="table table-bordered mb-0">
                 <thead>
                   <tr>
-                    <th scope="col" style={{ width: '200px' }}>Shift</th>
+                    <th scope="col" style={{ width: '200px' }}>{t('schedule.shiftColumnHeader')}</th>
                     {weekDates.map((date) => (
                       <th scope="col" key={date.toISOString()} className="text-center">
                         {formatDate(date)}
@@ -550,7 +573,7 @@ const Schedule: React.FC = () => {
                   {filteredShifts.length === 0 ? (
                     <tr>
                       <td colSpan={weekDates.length + 1} className="text-center text-muted py-4">
-                        No shifts to display. Create shifts and a schedule to get started.
+                        {t('schedule.noShiftsToDisplay')}
                       </td>
                     </tr>
                   ) : (
@@ -600,17 +623,16 @@ const Schedule: React.FC = () => {
                                         >
                                           {employee
                                             ? `${employee.firstName} ${employee.lastName}`
-                                            : 'Unknown'}
+                                            : t('schedule.unknownEmployee')}
                                         </div>
                                       );
                                     })}
                                     {dayAssignments.length <
                                       (shift.minStaff ?? 0) && (
                                       <small className="text-danger">
-                                        Need{' '}
-                                        {(shift.minStaff ?? 0) -
-                                          dayAssignments.length}{' '}
-                                        more
+                                        {t('schedule.needMore', {
+                                          count: (shift.minStaff ?? 0) - dayAssignments.length,
+                                        })}
                                       </small>
                                     )}
                                   </div>
@@ -618,7 +640,7 @@ const Schedule: React.FC = () => {
                                   <div className="text-muted">
                                     <i className="bi bi-plus-circle"></i>
                                     <br />
-                                    <small>Assign Staff</small>
+                                    <small>{t('schedule.assignStaff')}</small>
                                   </div>
                                 )}
                               </td>
@@ -640,8 +662,8 @@ const Schedule: React.FC = () => {
           <div className="card-body">
             {monthLoading && (
               <div className="d-flex align-items-center justify-content-center py-2 mb-2 border-bottom small text-muted">
-                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading month"></span>
-                Loading…
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label={t('schedule.loadingMonthAriaLabel')}></span>
+                {t('common.loading')}
               </div>
             )}
             <div className="d-flex flex-column gap-2">
@@ -655,27 +677,24 @@ const Schedule: React.FC = () => {
                     <div className={`card ${isToday ? 'border-primary' : ''}`} key={dateKey}>
                       <div className="card-body py-2">
                         <div className="d-flex justify-content-between align-items-center mb-1">
-                          <span className="fw-semibold">
-                            {date.toLocaleDateString(undefined, {
-                              weekday: 'short',
-                              day: 'numeric',
-                              month: 'short',
-                            })}
-                          </span>
+                          <span className="fw-semibold">{formatDate(date)}</span>
                           {dayShifts.length > 0 && (
-                            <span className="badge bg-secondary" aria-label={`${dayShifts.length} shifts`}>
+                            <span
+                              className="badge bg-secondary"
+                              aria-label={t('schedule.shiftsCountAriaLabel', { count: dayShifts.length })}
+                            >
                               {dayShifts.length}
                             </span>
                           )}
                         </div>
                         {dayShifts.length === 0 ? (
-                          <div className="text-muted small">No shifts</div>
+                          <div className="text-muted small">{t('schedule.noShifts')}</div>
                         ) : (
                           <div className="d-flex flex-column gap-1">
                             {dayShifts.map((shift) => (
                               <div key={shift.id} className="small">
                                 <span className="badge bg-primary-subtle text-primary-emphasis">
-                                  {shift.startTime}–{shift.endTime}
+                                  {t('common.timeRange', { start: shift.startTime, end: shift.endTime })}
                                 </span>{' '}
                                 {shift.departmentName ?? ''}
                               </div>
@@ -696,17 +715,17 @@ const Schedule: React.FC = () => {
           <div className="card-body p-0">
             {monthLoading && (
               <div className="d-flex align-items-center justify-content-center py-2 border-bottom small text-muted">
-                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label="Loading month"></span>
-                Loading…
+                <span className="spinner-border spinner-border-sm me-2" role="status" aria-label={t('schedule.loadingMonthAriaLabel')}></span>
+                {t('common.loading')}
               </div>
             )}
             <div className="table-responsive">
-              <table className="table table-bordered mb-0" role="table" aria-label="Monthly shift calendar">
+              <table className="table table-bordered mb-0" role="table" aria-label={t('schedule.monthlyCalendarAriaLabel')}>
                 <thead>
                   <tr>
-                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((label) => (
-                      <th key={label} className="text-center small text-muted" scope="col">
-                        {label}
+                    {WEEKDAY_KEYS.map((key) => (
+                      <th key={key} className="text-center small text-muted" scope="col">
+                        {t(key)}
                       </th>
                     ))}
                   </tr>
@@ -733,7 +752,10 @@ const Schedule: React.FC = () => {
                                 {date.getDate()}
                               </span>
                               {dayShifts.length > 0 && (
-                                <span className="badge bg-secondary" aria-label={`${dayShifts.length} shifts`}>
+                                <span
+                                  className="badge bg-secondary"
+                                  aria-label={t('schedule.shiftsCountAriaLabel', { count: dayShifts.length })}
+                                >
                                   {dayShifts.length}
                                 </span>
                               )}
@@ -743,13 +765,25 @@ const Schedule: React.FC = () => {
                                 <span
                                   key={shift.id}
                                   className="badge bg-primary-subtle text-primary-emphasis text-truncate d-block text-start"
-                                  title={`${shift.startTime}–${shift.endTime}${shift.departmentName ? ` · ${shift.departmentName}` : ''}`}
+                                  title={
+                                    shift.departmentName
+                                      ? t('schedule.monthDayTitle', {
+                                          time: t('common.timeRange', {
+                                            start: shift.startTime,
+                                            end: shift.endTime,
+                                          }),
+                                          department: shift.departmentName,
+                                        })
+                                      : t('common.timeRange', { start: shift.startTime, end: shift.endTime })
+                                  }
                                 >
                                   {shift.startTime} {shift.departmentName ?? ''}
                                 </span>
                               ))}
                               {dayShifts.length > 3 && (
-                                <span className="small text-muted">+{dayShifts.length - 3} more</span>
+                                <span className="small text-muted">
+                                  {t('schedule.moreCount', { count: dayShifts.length - 3 })}
+                                </span>
                               )}
                             </div>
                           </td>
@@ -766,7 +800,7 @@ const Schedule: React.FC = () => {
 
       <div className="row mt-4">
         <div className="col-12">
-          <h5 className="mb-3">Recent Schedules</h5>
+          <h5 className="mb-3">{t('schedule.recentSchedules')}</h5>
           <ScheduleList
             schedules={schedules}
             onGenerate={(schedule) => {
@@ -805,12 +839,12 @@ const Schedule: React.FC = () => {
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title" id="generate-schedule-title">
-                  Generate Schedule
+                  {t('schedule.generateModalTitle')}
                 </h5>
                 <button
                   type="button"
                   className="btn-close"
-                  aria-label="Close"
+                  aria-label={t('common.close')}
                   disabled={isGenerating}
                   onClick={() => setShowGenerateModal(false)}
                 ></button>
@@ -824,7 +858,7 @@ const Schedule: React.FC = () => {
                   )}
                   <div className="mb-3">
                     <label htmlFor="generate-schedule-id" className="form-label">
-                      Schedule *
+                      {t('schedule.scheduleLabel')}
                     </label>
                     <select
                       id="generate-schedule-id"
@@ -836,21 +870,21 @@ const Schedule: React.FC = () => {
                     >
                       <option value="" disabled>
                         {schedules.length === 0
-                          ? 'No schedules available'
-                          : 'Select a schedule'}
+                          ? t('schedule.noSchedulesAvailable')
+                          : t('schedule.selectSchedule')}
                       </option>
                       {schedules.map((s) => (
                         <option key={s.id} value={String(s.id)}>
-                          {s.name} ({String(s.startDate).slice(0, 10)} →{' '}
-                          {String(s.endDate).slice(0, 10)})
+                          {t('schedule.optionRange', {
+                            name: s.name,
+                            start: String(s.startDate).slice(0, 10),
+                            end: String(s.endDate).slice(0, 10),
+                          })}
                         </option>
                       ))}
                     </select>
                   </div>
-                  <p className="text-muted small mb-0">
-                    Optimization runs against the existing shifts inside the schedule's date
-                    range and respects active policies.
-                  </p>
+                  <p className="text-muted small mb-0">{t('schedule.generateHint')}</p>
                 </div>
                 <div className="modal-footer">
                   <button
@@ -859,7 +893,7 @@ const Schedule: React.FC = () => {
                     onClick={() => setShowGenerateModal(false)}
                     disabled={isGenerating}
                   >
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                   <button
                     type="submit"
@@ -872,11 +906,11 @@ const Schedule: React.FC = () => {
                           className="spinner-border spinner-border-sm me-2"
                           role="status"
                         ></span>
-                        Generating...
+                        {t('schedule.generating')}
                       </>
                     ) : (
                       <>
-                        <i className="bi bi-magic me-2"></i>Generate
+                        <i className="bi bi-magic me-2"></i>{t('schedule.generate')}
                       </>
                     )}
                   </button>
