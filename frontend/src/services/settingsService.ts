@@ -20,7 +20,7 @@ import { ApiResponse } from '../types';
 import type { paths } from '../api/schema';
 import { apiClient } from '../api/client';
 
-interface SystemSetting {
+export interface SystemSetting {
   category: string;
   key: string;
   value: string;

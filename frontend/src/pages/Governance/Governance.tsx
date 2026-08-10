@@ -163,7 +163,7 @@ const Governance: React.FC = () => {
   // in two steps (set the target, then read it back in the same event
   // handler) would read the PRE-update state, since a setState call does not
   // apply before the handler that queued it returns.
-  const handleApproveCr = (id: number) => act(approveCr.mutateAsync(id));
+  const handleApproveCr = (id: number) => act(approveCr.mutateAsync({ id }));
   const handleApplyCr = (id: number) => act(applyCr.mutateAsync(id));
 
   // Reject needs a reason, collected in the modal opened by setting
