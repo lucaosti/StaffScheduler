@@ -28,6 +28,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
 import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
+import QueryState from '../../components/QueryState';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -44,8 +45,6 @@ const Dashboard: React.FC = () => {
   const dashboardQuery = useDashboardData();
   const stats = dashboardQuery.data?.stats ?? null;
   const recentActivity = dashboardQuery.data?.recentActivity ?? [];
-  const loading = dashboardQuery.isLoading;
-  const error = dashboardQuery.isError ? t('dashboard.errorBody') : null;
 
   // Kept off the main loading/error gate above: a slow or failed attention-items
   // fetch should not block the stat cards, which is what one combined query would do.
@@ -53,33 +52,6 @@ const Dashboard: React.FC = () => {
   const attention = attentionQuery.data ?? null;
 
   const formatPct = (value: number) => fmtPct(value / 100);
-
-  if (loading) {
-    return (
-      <div className="container-fluid py-4">
-        <div className="text-center">
-          <div className="spinner-border text-primary" role="status">
-            <span className="visually-hidden">{t('common.loading')}</span>
-          </div>
-          <p className="mt-2">{t('dashboard.loading')}</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="container-fluid py-4">
-        <div className="alert alert-danger" role="alert">
-          <h4 className="alert-heading">{t('dashboard.errorTitle')}</h4>
-          <p>{error}</p>
-          <button className="btn btn-outline-danger" onClick={() => dashboardQuery.refetch()}>
-            {t('common.tryAgain')}
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="container-fluid py-4">
@@ -97,6 +69,13 @@ const Dashboard: React.FC = () => {
         </div>
       )}
 
+      <QueryState
+        isLoading={dashboardQuery.isLoading}
+        isError={dashboardQuery.isError}
+        error={dashboardQuery.isError ? t('dashboard.errorBody') : null}
+        onRetry={() => dashboardQuery.refetch()}
+        loadingMessage={t('dashboard.loading')}
+      >
       {/* Header */}
       <div className="row mb-4">
         <div className="col">
@@ -403,6 +382,7 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       </div>
+      </QueryState>
     </div>
   );
 };

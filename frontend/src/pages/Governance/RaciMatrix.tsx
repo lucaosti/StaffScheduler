@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import type { MatrixEntry } from '../../services/responsibilityService';
 import { ResponsibilitySubjectType } from '../../services/responsibilityService';
 import { useResponsibilityMatrixQuery } from '../../hooks/useGovernance';
+import QueryState from '../../components/QueryState';
 
 interface MatrixCol {
   key: string;
@@ -37,10 +38,6 @@ const RaciMatrix: React.FC = () => {
 
   const matrixQuery = useResponsibilityMatrixQuery();
   const entries = matrixQuery.data ?? [];
-  const loading = matrixQuery.isLoading;
-  const error = matrixQuery.isError
-    ? (matrixQuery.error as Error).message ?? t('governance.raci.loadFailed')
-    : null;
 
   // Derive unique permission codes (rows) and subject columns
   const filteredEntries = search.trim()
@@ -100,27 +97,28 @@ const RaciMatrix: React.FC = () => {
         />
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
-
       <div className="card">
         <div className="card-body p-0">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label={t('governance.raci.loadingAriaLabel')}></span>
-              <span>{t('governance.raci.loading')}</span>
-            </div>
-          ) : permCodes.length === 0 ? (
-            <div className="text-center text-muted py-5">
-              <i className="bi bi-grid-3x3 fs-3 d-block mb-2" aria-hidden="true"></i>
-              {entries.length === 0
-                ? t('governance.raci.noneDefined')
-                : t('governance.raci.noneMatchFilter')}
-            </div>
-          ) : (
+          <QueryState
+            isLoading={matrixQuery.isLoading}
+            isError={matrixQuery.isError}
+            error={matrixQuery.error}
+            onRetry={() => matrixQuery.refetch()}
+            loadingMessage={t('governance.raci.loading')}
+            isEmpty={entries.length === 0}
+            empty={
+              <div className="text-center text-muted py-5">
+                <i className="bi bi-grid-3x3 fs-3 d-block mb-2" aria-hidden="true"></i>
+                {t('governance.raci.noneDefined')}
+              </div>
+            }
+          >
+            {permCodes.length === 0 ? (
+              <div className="text-center text-muted py-5">
+                <i className="bi bi-grid-3x3 fs-3 d-block mb-2" aria-hidden="true"></i>
+                {t('governance.raci.noneMatchFilter')}
+              </div>
+            ) : (
             <div style={{ overflowX: 'auto' }}>
               <table className="table table-bordered table-sm mb-0 align-middle">
                 <thead className="table-light">
@@ -180,7 +178,8 @@ const RaciMatrix: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+            )}
+          </QueryState>
         </div>
         {permCodes.length > 0 && (
           <div className="card-footer text-muted small">
