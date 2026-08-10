@@ -21,7 +21,8 @@ import { policiesKey, usePoliciesPageData } from '../../hooks/usePolicies';
 import PolicyList from '../Policies/PolicyList';
 import ExceptionList from '../Policies/ExceptionList';
 import ConfirmModal from '../../components/ConfirmModal';
-import LoadingSpinner from '../../components/LoadingSpinner';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 
 type Tab = 'policies' | 'exceptions' | 'matrix';
 
@@ -94,7 +95,6 @@ const Policies: React.FC = () => {
   const matrix = pageQuery.data?.matrix ?? [];
   const roles = pageQuery.data?.roles ?? [];
   const presets = pageQuery.data?.presets ?? [];
-  const loading = pageQuery.isLoading;
   const refresh = () => queryClient.invalidateQueries({ queryKey: policiesKey });
 
   const [selectedPreset, setSelectedPreset] = useState('');
@@ -284,30 +284,19 @@ const Policies: React.FC = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container-fluid py-3">
-        <LoadingSpinner message={t('policies.loading')} />
-      </div>
-    );
-  }
-
   return (
     <div className="container-fluid py-3">
       <h1 className="h3 mb-3">{t('policies.title')}</h1>
 
-      {error && (
-        <div className="alert alert-danger alert-dismissible" role="alert">
-          {error}
-          <button
-            type="button"
-            className="btn-close"
-            aria-label={t('common.close')}
-            onClick={() => setError(null)}
-          />
-        </div>
-      )}
+      {error && <ErrorAlert message={error} />}
 
+      <QueryState
+        isLoading={pageQuery.isLoading}
+        isError={pageQuery.isError}
+        error={pageQuery.error}
+        onRetry={() => pageQuery.refetch()}
+        loadingMessage={t('policies.loading')}
+      >
       <ul className="nav nav-tabs mb-3">
         <li className="nav-item">
           <button
@@ -489,6 +478,7 @@ const Policies: React.FC = () => {
           </div>
         </div>
       )}
+      </QueryState>
 
       <ConfirmModal
         show={confirm.show}

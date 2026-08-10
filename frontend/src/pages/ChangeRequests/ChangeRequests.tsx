@@ -17,6 +17,8 @@ import {
 } from '../../services/changeRequestService';
 import { useChangeRequestsQuery, useChangeRequestMutations } from '../../hooks/useGovernance';
 import { useAuth } from '../../contexts/AuthContext';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 
 const STATUS_BADGE: Record<ChangeRequestStatus, string> = {
   pending: 'bg-warning text-dark',
@@ -80,11 +82,7 @@ const ChangeRequests: React.FC = () => {
   const crQuery = useChangeRequestsQuery(true, statusFilter, proposerUserId);
   const items = crQuery.data?.items ?? [];
   const total = crQuery.data?.total ?? 0;
-  const loading = crQuery.isLoading;
   const [actionError, setError] = useState<string | null>(null);
-  const error = crQuery.isError
-    ? (crQuery.error as Error).message ?? t('changeRequests.loadFailed')
-    : actionError;
   const { create, approve, reject, cancel } = useChangeRequestMutations();
   const creating = create.isPending;
   const reviewing = approve.isPending || reject.isPending;
@@ -212,24 +210,21 @@ const ChangeRequests: React.FC = () => {
         </select>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
+      {actionError && <ErrorAlert message={actionError} />}
 
       <div className="card">
         <div className="card-header d-flex align-items-center justify-content-between">
-          <small className="text-muted">{loading ? t('common.loading') : t('changeRequests.count', { count: total })}</small>
+          <small className="text-muted">{crQuery.isLoading ? t('common.loading') : t('changeRequests.count', { count: total })}</small>
         </div>
         <div className="card-body p-0">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label={t('common.loading')}></span>
-            </div>
-          ) : items.length === 0 ? (
-            <div className="text-center text-muted py-5">{t('changeRequests.empty')}</div>
-          ) : (
+          <QueryState
+            isLoading={crQuery.isLoading}
+            isError={crQuery.isError}
+            error={crQuery.error}
+            onRetry={() => crQuery.refetch()}
+            isEmpty={items.length === 0}
+            empty={<div className="text-center text-muted py-5">{t('changeRequests.empty')}</div>}
+          >
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
@@ -328,7 +323,7 @@ const ChangeRequests: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       </div>
 

@@ -19,6 +19,8 @@ import {
   CreateWorkflowBody,
 } from '../../services/approvalWorkflowService';
 import { useApprovalWorkflowsQuery, useApprovalWorkflowMutations } from '../../hooks/useApprovalWorkflows';
+import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
 
 const SCOPE_LABEL_KEYS: Record<ApproverScope, string> = {
   policy_owner: 'admin.approvalWorkflows.scopes.policyOwner',
@@ -63,13 +65,9 @@ const ApprovalWorkflows: React.FC = () => {
 
   const workflowsQuery = useApprovalWorkflowsQuery();
   const workflows = workflowsQuery.data ?? [];
-  const loading = workflowsQuery.isLoading;
   const { create, update, remove } = useApprovalWorkflowMutations();
   const saving = create.isPending || update.isPending;
   const deleting = remove.isPending;
-  const error = workflowsQuery.isError
-    ? (workflowsQuery.error as Error).message ?? t('admin.approvalWorkflows.errors.loadFailed')
-    : actionError;
 
   // ---------- Modal helpers ----------
 
@@ -185,24 +183,18 @@ const ApprovalWorkflows: React.FC = () => {
         </div>
       </div>
 
-      {error && (
-        <div className="alert alert-danger" role="alert">
-          <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>{error}
-        </div>
-      )}
+      {actionError && <ErrorAlert message={actionError} />}
 
       <div className="card">
         <div className="card-body p-0">
-          {loading ? (
-            <div className="d-flex align-items-center justify-content-center py-5">
-              <span className="spinner-border me-2" role="status" aria-label={t('admin.approvalWorkflows.loadingAriaLabel')}></span>
-              <span>{t('common.loading')}</span>
-            </div>
-          ) : workflows.length === 0 ? (
-            <div className="text-center text-muted py-5">
-              {t('admin.approvalWorkflows.empty')}
-            </div>
-          ) : (
+          <QueryState
+            isLoading={workflowsQuery.isLoading}
+            isError={workflowsQuery.isError}
+            error={workflowsQuery.error}
+            onRetry={() => workflowsQuery.refetch()}
+            isEmpty={workflows.length === 0}
+            empty={<div className="text-center text-muted py-5">{t('admin.approvalWorkflows.empty')}</div>}
+          >
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead className="table-light">
@@ -290,7 +282,7 @@ const ApprovalWorkflows: React.FC = () => {
                 </tbody>
               </table>
             </div>
-          )}
+          </QueryState>
         </div>
       </div>
 
