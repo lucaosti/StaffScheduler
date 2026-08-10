@@ -8,8 +8,9 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState } from 'react';
+import React from 'react';
 import WebPushToggle from './WebPushToggle';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 interface PersonalSettings {
   theme: 'light' | 'dark' | 'auto';
@@ -29,23 +30,11 @@ interface Props {
 }
 
 const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { success, error, saving, run } = useSettingsSectionSave();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setSuccess(null);
-    setError(null);
-    try {
-      await onSave();
-      setSuccess('Personal preferences saved successfully.');
-    } catch (err) {
-      setError((err as Error).message || 'Failed to save preferences.');
-    } finally {
-      setSaving(false);
-    }
+    await run(onSave, 'Personal preferences saved successfully.', 'Failed to save preferences.');
   };
 
   return (

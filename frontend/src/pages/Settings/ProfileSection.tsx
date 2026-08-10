@@ -11,6 +11,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 
 export interface WorkSettings {
   maxHoursPerWeek: number;
@@ -30,9 +31,7 @@ interface Props {
 }
 
 const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
-  const [saving, setSaving] = useState(false);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { success, error, saving, run } = useSettingsSectionSave();
 
   // Raw draft string for the one editable numeric field, mirroring the
   // Draft-string pattern in FieldPolicySection: binding the input directly to
@@ -49,17 +48,7 @@ const ProfileSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
-    setSuccess(null);
-    setError(null);
-    try {
-      await onSave();
-      setSuccess('Work preferences saved successfully.');
-    } catch (err) {
-      setError((err as Error).message || 'Failed to save work preferences.');
-    } finally {
-      setSaving(false);
-    }
+    await run(onSave, 'Work preferences saved successfully.', 'Failed to save work preferences.');
   };
 
   const toggleShift = (shift: string, checked: boolean) => {

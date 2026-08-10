@@ -17,6 +17,7 @@ import { useDepartmentsQuery } from '../../hooks/useDepartments';
 import { useGeofencesQuery, useGeofenceMutations } from '../../hooks/useGeofences';
 import ConfirmModal from '../../components/ConfirmModal';
 import QueryState from '../../components/QueryState';
+import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
 import type { Geofence, GeoPoint } from '../../types';
 
 interface DraftPoint {
@@ -57,7 +58,10 @@ const GeofenceSection: React.FC = () => {
   const { create, update, remove } = useGeofenceMutations(departmentId);
 
   const [editing, setEditing] = useState<{ id: number | null; draft: Draft } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // No success banner here — the list re-rendering with the new/changed row
+  // is the confirmation; `run`'s success path is unused, only its error
+  // handling is (see handleSave / handleDelete below).
+  const { error, setError, run } = useSettingsSectionSave();
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
 
   const departments = departmentsQuery.data ?? [];
@@ -103,27 +107,21 @@ const GeofenceSection: React.FC = () => {
       return;
     }
 
-    try {
-      if (editing.id === null) {
-        await create.mutateAsync({ name: editing.draft.name, polygon, isActive: editing.draft.isActive });
-      } else {
-        await update.mutateAsync({ id: editing.id, data: { name: editing.draft.name, polygon, isActive: editing.draft.isActive } });
-      }
-      setEditing(null);
-    } catch (err) {
-      setError((err as Error).message || 'Failed to save geofence.');
-    }
+    const ok = await run(
+      () =>
+        editing.id === null
+          ? create.mutateAsync({ name: editing.draft.name, polygon, isActive: editing.draft.isActive })
+          : update.mutateAsync({ id: editing.id, data: { name: editing.draft.name, polygon, isActive: editing.draft.isActive } }),
+      '',
+      'Failed to save geofence.'
+    );
+    if (ok) setEditing(null);
   };
 
   const handleDelete = async () => {
     if (confirmDeleteId === null) return;
-    try {
-      await remove.mutateAsync(confirmDeleteId);
-    } catch (err) {
-      setError((err as Error).message || 'Failed to delete geofence.');
-    } finally {
-      setConfirmDeleteId(null);
-    }
+    await run(() => remove.mutateAsync(confirmDeleteId), '', 'Failed to delete geofence.');
+    setConfirmDeleteId(null);
   };
 
   return (
