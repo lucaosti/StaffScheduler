@@ -15,10 +15,7 @@
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
-import * as responsibilitySvc from '../../services/responsibilityService';
-import * as changeRequestSvc from '../../services/changeRequestService';
 import type {
   ResponsibilityRule,
   CreateResponsibilityRuleInput,
@@ -29,10 +26,12 @@ import type {
   CreateChangeRequestInput,
 } from '../../services/changeRequestService';
 import {
-  governanceKeys,
   useResponsibilityRulesQuery,
   useChangeRequestsQuery,
+  useResponsibilityRuleMutations,
+  useChangeRequestMutations,
 } from '../../hooks/useGovernance';
+import { useActionFeedback } from '../../hooks/useActionFeedback';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 type Tab = 'matrix' | 'changeRequests';
@@ -74,9 +73,7 @@ const Governance: React.FC = () => {
 
   const defaultTab: Tab = canReadMatrix ? 'matrix' : 'changeRequests';
   const [activeTab, setActiveTab] = useState<Tab>(defaultTab);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const queryClient = useQueryClient();
+  const { message, setMessage, run: act } = useActionFeedback();
 
   // ── Responsibility Matrix state ──────────────────────────────────────────
 
@@ -88,56 +85,30 @@ const Governance: React.FC = () => {
   });
 
   // Rules load only when the matrix tab is open (and the user can read it);
-  // mutation handlers call loadRules() which now invalidates the cached query.
+  // the mutations below invalidate the cached query on success, so the list
+  // refreshes itself.
   const rulesQuery = useResponsibilityRulesQuery(canReadMatrix && activeTab === 'matrix');
   const rules = rulesQuery.data ?? [];
   const matrixLoading = rulesQuery.isLoading;
-  const loadRules = () => queryClient.invalidateQueries({ queryKey: governanceKeys.rules });
+  const { create: createRule, update: updateRule, remove: removeRule } = useResponsibilityRuleMutations();
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ruleForm.permissionCode || !ruleForm.responsibleOrgUnitId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await responsibilitySvc.createResponsibilityRule(ruleForm);
-      if (res.success) {
+    await act(
+      createRule.mutateAsync(ruleForm).then(() => {
         setShowRuleForm(false);
         setRuleForm({ subjectType: 'department', permissionCode: '', responsibleOrgUnitId: 0 });
-        await loadRules();
-      } else {
-        setError((res as { error?: { message?: string } }).error?.message ?? t('governance.matrix.createFailed'));
-      }
-    } catch {
-      setError(t('governance.matrix.createFailed'));
-    } finally {
-      setBusy(false);
-    }
+      })
+    );
   };
 
-  const handleToggleRule = async (rule: ResponsibilityRule) => {
-    setBusy(true);
-    try {
-      await responsibilitySvc.updateResponsibilityRule(rule.id, { isActive: !rule.isActive });
-      await loadRules();
-    } catch {
-      setError(t('governance.matrix.updateFailed'));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const handleToggleRule = (rule: ResponsibilityRule) =>
+    act(updateRule.mutateAsync({ id: rule.id, isActive: !rule.isActive }));
 
-  const handleDeleteRule = async (id: number) => {
+  const handleDeleteRule = (id: number) => {
     if (!window.confirm(t('governance.matrix.confirmDelete'))) return;
-    setBusy(true);
-    try {
-      await responsibilitySvc.deleteResponsibilityRule(id);
-      await loadRules();
-    } catch {
-      setError(t('governance.matrix.deleteFailed'));
-    } finally {
-      setBusy(false);
-    }
+    return act(removeRule.mutateAsync(id));
   };
 
   // ── Change Requests state ────────────────────────────────────────────────
@@ -153,77 +124,79 @@ const Governance: React.FC = () => {
   });
   const [crPayloadText, setCrPayloadText] = useState('{}');
   const [rejectReason, setRejectReason] = useState('');
-  const [actionTargetId, setActionTargetId] = useState<number | null>(null);
-  const [crAction, setCrAction] = useState<'approve' | 'reject' | 'apply' | null>(null);
+  // The request the reject modal is open for; null means the modal is closed.
+  // Approve/apply need no such staging — they act immediately, see below.
+  const [rejectTargetId, setRejectTargetId] = useState<number | null>(null);
 
   // Change requests load only on their tab; the query key includes the status
-  // and my-only filters, so changing a filter refetches. Mutation handlers call
-  // loadChangeRequests() which invalidates the whole change-request family.
+  // and my-only filters, so changing a filter refetches. The mutations below
+  // invalidate the whole change-request family on success, so every filtered
+  // view (including a reviewer's queue and a proposer's own list) refreshes.
   const crProposerId = myOnly && user?.id ? Number(user.id) : undefined;
   const crQuery = useChangeRequestsQuery(activeTab === 'changeRequests', crFilter, crProposerId);
   const changeRequests = crQuery.data?.items ?? [];
   const crTotal = crQuery.data?.total ?? 0;
   const crLoading = crQuery.isLoading;
-  const loadChangeRequests = () =>
-    queryClient.invalidateQueries({ queryKey: ['change-requests'] });
+  const {
+    create: createCr,
+    approve: approveCr,
+    reject: rejectCr,
+    apply: applyCr,
+    cancel: cancelCr,
+  } = useChangeRequestMutations();
 
   const handleCreateCr = async (e: React.FormEvent) => {
     e.preventDefault();
     let payload: Record<string, unknown> = {};
-    try { payload = JSON.parse(crPayloadText); } catch { setError(t('governance.changeRequests.invalidJson')); return; }
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await changeRequestSvc.createChangeRequest({ ...crForm, proposedPayload: payload });
-      if (res.success) {
+    try { payload = JSON.parse(crPayloadText); } catch { setMessage(t('governance.changeRequests.invalidJson')); return; }
+    await act(
+      createCr.mutateAsync({ ...crForm, proposedPayload: payload }).then(() => {
         setShowCrForm(false);
         setCrForm({ changeType: '', targetEntityType: '', proposedPayload: {}, justification: '' });
         setCrPayloadText('{}');
-        await loadChangeRequests();
-      } else {
-        setError((res as { error?: { message?: string } }).error?.message ?? t('governance.changeRequests.submitFailed'));
-      }
-    } catch {
-      setError(t('governance.changeRequests.submitFailed'));
-    } finally {
-      setBusy(false);
-    }
+      })
+    );
   };
 
-  const handleCrAction = async () => {
-    if (actionTargetId === null || crAction === null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      if (crAction === 'approve') await changeRequestSvc.approveChangeRequest(actionTargetId);
-      else if (crAction === 'apply') await changeRequestSvc.applyChangeRequest(actionTargetId);
-      else if (crAction === 'reject') {
-        if (!rejectReason.trim()) { setError(t('governance.changeRequests.rejectionReasonRequired')); setBusy(false); return; }
-        await changeRequestSvc.rejectChangeRequest(actionTargetId, rejectReason);
-      }
-      setActionTargetId(null);
-      setCrAction(null);
-      setRejectReason('');
-      await loadChangeRequests();
-    } catch {
-      setError(t('governance.changeRequests.actionFailed', { action: crAction }));
-    } finally {
-      setBusy(false);
+  // Approve/apply need no confirmation step, so they call the mutation
+  // directly rather than routing through state + a handler below: doing it
+  // in two steps (set the target, then read it back in the same event
+  // handler) would read the PRE-update state, since a setState call does not
+  // apply before the handler that queued it returns.
+  const handleApproveCr = (id: number) => act(approveCr.mutateAsync(id));
+  const handleApplyCr = (id: number) => act(applyCr.mutateAsync(id));
+
+  // Reject needs a reason, collected in the modal opened by setting
+  // `rejectTargetId`; this reads it back once the modal's own confirm
+  // button is clicked, in a LATER render where the state has settled.
+  const handleRejectCr = async () => {
+    if (rejectTargetId === null) return;
+    if (!rejectReason.trim()) {
+      setMessage(t('governance.changeRequests.rejectionReasonRequired'));
+      return;
     }
+    await act(
+      rejectCr.mutateAsync({ id: rejectTargetId, reason: rejectReason }).then(() => {
+        setRejectTargetId(null);
+        setRejectReason('');
+      })
+    );
   };
 
-  const handleCancelCr = async (id: number) => {
+  const handleCancelCr = (id: number) => {
     if (!window.confirm(t('governance.changeRequests.confirmCancel'))) return;
-    setBusy(true);
-    try {
-      await changeRequestSvc.cancelChangeRequest(id);
-      await loadChangeRequests();
-    } catch {
-      setError(t('governance.changeRequests.cancelFailed'));
-    } finally {
-      setBusy(false);
-    }
+    return act(cancelCr.mutateAsync(id));
   };
+
+  const busy =
+    createRule.isPending ||
+    updateRule.isPending ||
+    removeRule.isPending ||
+    createCr.isPending ||
+    approveCr.isPending ||
+    rejectCr.isPending ||
+    applyCr.isPending ||
+    cancelCr.isPending;
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -234,10 +207,10 @@ const Governance: React.FC = () => {
         <p className="text-muted">{t('governance.subtitle')}</p>
       </div>
 
-      {error && (
+      {message && (
         <div className="alert alert-danger alert-dismissible">
-          {error}
-          <button className="btn-close" onClick={() => setError(null)} />
+          {message}
+          <button className="btn-close" onClick={() => setMessage(null)} />
         </div>
       )}
 
@@ -519,7 +492,7 @@ const Governance: React.FC = () => {
                     <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
                       {busy ? t('governance.changeRequests.submitting') : t('governance.changeRequests.submitRequest')}
                     </button>
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setShowCrForm(false); setError(null); }}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setShowCrForm(false); setMessage(null); }}>
                       {t('common.cancel')}
                     </button>
                   </div>
@@ -529,13 +502,13 @@ const Governance: React.FC = () => {
           )}
 
           {/* Reject modal */}
-          {crAction === 'reject' && actionTargetId !== null && (
+          {rejectTargetId !== null && (
             <div className="modal d-block" style={{ background: 'rgba(0,0,0,0.4)' }}>
               <div className="modal-dialog">
                 <div className="modal-content">
                   <div className="modal-header">
-                    <h5 className="modal-title">{t('governance.changeRequests.rejectModalTitle', { id: actionTargetId })}</h5>
-                    <button className="btn-close" onClick={() => { setCrAction(null); setActionTargetId(null); }} />
+                    <h5 className="modal-title">{t('governance.changeRequests.rejectModalTitle', { id: rejectTargetId })}</h5>
+                    <button className="btn-close" onClick={() => setRejectTargetId(null)} />
                   </div>
                   <div className="modal-body">
                     <label className="form-label">{t('governance.changeRequests.rejectionReason')} <span className="text-danger">*</span></label>
@@ -548,8 +521,8 @@ const Governance: React.FC = () => {
                     />
                   </div>
                   <div className="modal-footer">
-                    <button className="btn btn-secondary" onClick={() => { setCrAction(null); setActionTargetId(null); setRejectReason(''); }}>{t('common.cancel')}</button>
-                    <button className="btn btn-danger" onClick={handleCrAction} disabled={busy || !rejectReason.trim()}>
+                    <button className="btn btn-secondary" onClick={() => { setRejectTargetId(null); setRejectReason(''); }}>{t('common.cancel')}</button>
+                    <button className="btn btn-danger" onClick={handleRejectCr} disabled={busy || !rejectReason.trim()}>
                       {busy ? t('governance.changeRequests.rejecting') : t('governance.changeRequests.reject')}
                     </button>
                   </div>
@@ -607,7 +580,7 @@ const Governance: React.FC = () => {
                             <>
                               <button
                                 className="btn btn-sm btn-outline-success me-1"
-                                onClick={() => { setActionTargetId(cr.id); setCrAction('approve'); handleCrAction(); }}
+                                onClick={() => handleApproveCr(cr.id)}
                                 disabled={busy}
                                 title={t('governance.changeRequests.approve')}
                               >
@@ -615,7 +588,7 @@ const Governance: React.FC = () => {
                               </button>
                               <button
                                 className="btn btn-sm btn-outline-danger me-1"
-                                onClick={() => { setActionTargetId(cr.id); setCrAction('reject'); }}
+                                onClick={() => setRejectTargetId(cr.id)}
                                 disabled={busy}
                                 title={t('governance.changeRequests.reject')}
                               >
@@ -626,7 +599,7 @@ const Governance: React.FC = () => {
                           {canReview && cr.status === 'approved' && (
                             <button
                               className="btn btn-sm btn-outline-primary me-1"
-                              onClick={() => { setActionTargetId(cr.id); setCrAction('apply'); handleCrAction(); }}
+                              onClick={() => handleApplyCr(cr.id)}
                               disabled={busy}
                               title={t('governance.changeRequests.apply')}
                             >
