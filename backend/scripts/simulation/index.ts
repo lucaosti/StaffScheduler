@@ -503,13 +503,38 @@ async function main(): Promise<void> {
     process.exitCode = failCount === 0 ? 0 : 1;
   } finally {
     if (httpServer) {
+      // `server.close()` alone stops accepting new connections but waits for
+      // every open one to close on its own before its callback fires — and
+      // Node's built-in `fetch` (HttpClient's transport) pools HTTP/1.1
+      // keep-alive sockets that sit idle rather than closing immediately
+      // after the last request. Without `closeAllConnections()`, a
+      // mixed/http-transport run's process never exited: it had already
+      // logged its full PASS/FAIL summary, but `close()`'s promise never
+      // resolved, so campaign.ts's `runChild` (which only resolves on the
+      // child's `close` event) waited on it until its own 3-hour timeout.
+      httpServer.closeAllConnections();
       await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
     }
-    await pool.end();
+    // Bounded, not awaited unconditionally: a run with thousands of actors
+    // racing on the pool can leave a handful of connections mysql2 does not
+    // consider idle even after every query has actually finished (observed:
+    // `pool.end()` hanging indefinitely with 1-2 connections still
+    // ESTABLISHED, long after the process had already logged its full
+    // PASS/FAIL summary and had zero CPU activity). Graceful shutdown is
+    // still given a real chance first; a script whose job is done must not
+    // hang forever on infrastructure below the layer it's testing —
+    // campaign.ts's runChild only resolves on the child process's `close`
+    // event, so a stuck simulation here stalls the whole campaign until its
+    // own 3-hour per-run timeout.
+    await Promise.race([pool.end(), new Promise((resolve) => setTimeout(resolve, 10_000))]);
   }
 }
 
-main().catch((err) => {
-  console.error('Simulation crashed:', err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error('Simulation crashed:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    process.exit(process.exitCode ?? 0);
+  });
