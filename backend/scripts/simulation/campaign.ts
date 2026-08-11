@@ -31,9 +31,9 @@
  * (which creates stored functions).
  *
  * Usage:
- *   DB_ROOT_PASSWORD=... npx ts-node scripts/simulation/campaign.ts \
+ *   NODE_ENV=test DB_ROOT_PASSWORD=... npx ts-node scripts/simulation/campaign.ts \
  *     [--runs=40] [--baseSeed=20260712] [--lanes=4] [--concurrency=24] \
- *     [--minEmployees=2000] [--minRequests=50] [--only=1,3,4]
+ *     [--minEmployees=2000] [--minRequests=50] [--only=1,3,4] [--transport=mixed]
  *
  * `--minEmployees`/`--minRequests` exist for quick smoke tests of the
  * campaign machinery itself (e.g. --runs=2 --minEmployees=60 --minRequests=8);
@@ -41,6 +41,14 @@
  * listed run numbers — their configs derive from (baseSeed, index) exactly
  * as in the full campaign, so a partial re-run reproduces the same
  * structures and seeds.
+ *
+ * `--transport` is forwarded to index.ts (service|http|mixed) and defaults
+ * to `mixed` here — unlike index.ts's own default of `service` — because a
+ * campaign run's whole point is whole-system verification: real HTTP +
+ * auth + RBAC middleware coverage, not just the service layer. `mixed`
+ * requires `NODE_ENV=test` in the environment this script itself runs in
+ * (it is inherited by every spawned child, same requirement index.ts
+ * documents for direct use).
  *
  * @author Luca Ostinelli
  */
@@ -145,6 +153,7 @@ function parseArgs(): {
   lanes: number;
   concurrency: number;
   only: number[] | null;
+  transport: 'service' | 'http' | 'mixed';
   spec: CampaignSpec;
 } {
   const args = process.argv.slice(2);
@@ -163,12 +172,24 @@ function parseArgs(): {
         .map((s) => Number(s))
         .filter((n) => Number.isInteger(n) && n >= 1)
     : null;
+  // Forwarded to index.ts as-is. Defaults to 'mixed' (not index.ts's own
+  // 'service' default): a campaign run is the whole-system verification —
+  // real HTTP + auth + RBAC middleware coverage is the point, not an
+  // opt-in. `mixed` requires NODE_ENV=test, which runChild's spawned
+  // env does not set by itself — set it in the campaign's own environment
+  // before running (same requirement index.ts documents for direct use).
+  const transportArg = args.find((a) => a.startsWith('--transport='));
+  const transport = (transportArg ? transportArg.split('=')[1] : 'mixed') as 'service' | 'http' | 'mixed';
+  if (transport !== 'service' && transport !== 'http' && transport !== 'mixed') {
+    throw new Error(`Bad --transport="${transport}" — must be one of: service, http, mixed.`);
+  }
   return {
     runs: get('runs', 40),
     baseSeed: get('baseSeed', 20260712),
     lanes: get('lanes', 4),
     concurrency: get('concurrency', 24),
     only,
+    transport,
     spec: {
       minEmployees: get('minEmployees', 2000),
       minRequests: get('minRequests', 50),
@@ -293,7 +314,12 @@ function runChild(
   timeoutMs: number
 ): Promise<number> {
   const root = rootCredentials();
-  const tsNodeBin = path.join(BACKEND_DIR, 'node_modules', 'ts-node', 'dist', 'bin.js');
+  // Resolved via require.resolve rather than a hardcoded
+  // BACKEND_DIR/node_modules/ts-node path: this is an npm workspaces
+  // monorepo, so ts-node is hoisted to the repo root's node_modules, not
+  // backend's own — the hardcoded path never resolved and every campaign
+  // run crashed at the first db-migrate step before this fix.
+  const tsNodeBin = require.resolve('ts-node/dist/bin.js');
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [tsNodeBin, ...scriptArgs], {
       cwd: BACKEND_DIR,
@@ -342,6 +368,7 @@ async function executeRun(
   dbName: string,
   campaignDir: string,
   concurrency: number,
+  transport: 'service' | 'http' | 'mixed',
   attempt = 1
 ): Promise<RunResult> {
   const runLabel = String(config.runIndex + 1).padStart(2, '0');
@@ -376,6 +403,7 @@ async function executeRun(
       `--periodDays=${config.periodDays}`,
       `--requestsMin=${config.requestsMin}`,
       `--requestsMax=${config.requestsMax}`,
+      `--transport=${transport}`,
     ];
     const simCode = await runChild(simArgs, dbName, logStream, 3 * 60 * 60_000);
     // Wait for the stream to flush before reading the file back — end()
@@ -421,7 +449,7 @@ function summaryLine(r: RunResult): string {
 }
 
 async function main(): Promise<void> {
-  const { runs, baseSeed, lanes, concurrency, only, spec } = parseArgs();
+  const { runs, baseSeed, lanes, concurrency, only, transport, spec } = parseArgs();
   rootCredentials(); // fail fast if credentials are missing
 
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -439,7 +467,7 @@ async function main(): Promise<void> {
     .map((n) => n - 1);
   log(
     `CAMPAIGN: ${runIndexes.length} runs (${only ? `--only=${only.join(',')}` : `1..${runs}`}), baseSeed=${baseSeed}, ` +
-      `${lanes} parallel lanes, sim concurrency=${concurrency}/lane, ` +
+      `${lanes} parallel lanes, sim concurrency=${concurrency}/lane, transport=${transport}, ` +
       `>=${spec.minEmployees} employees and >=${spec.minRequests} requests/employee per run`
   );
   log(`Output: ${campaignDir}`);
@@ -455,10 +483,10 @@ async function main(): Promise<void> {
       const dbName = `staff_scheduler_simlane${lane + 1}`;
       for (let pos = lane; pos < runIndexes.length; pos += lanes) {
         const config = buildRunConfig(baseSeed, runIndexes[pos], spec);
-        let result = await executeRun(config, dbName, campaignDir, concurrency);
+        let result = await executeRun(config, dbName, campaignDir, concurrency, transport);
         if (result.outcome === 'CRASH' || result.outcome === 'TIMEOUT') {
           log(`${summaryLine(result)}  [retrying once]`);
-          result = await executeRun(config, dbName, campaignDir, concurrency, 2);
+          result = await executeRun(config, dbName, campaignDir, concurrency, transport, 2);
         }
         results.push(result);
         log(summaryLine(result));
@@ -480,7 +508,16 @@ async function main(): Promise<void> {
   process.exitCode = failed.length === 0 ? 0 : 1;
 }
 
-main().catch((err) => {
-  console.error('Campaign crashed:', err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error('Campaign crashed:', err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // Explicit exit rather than letting the event loop drain naturally: see
+    // the identical fix (and its rationale) in index.ts — a child process
+    // that logs its full summary and then never actually exits is worse
+    // than a defensive force-exit here once every run this process is
+    // responsible for has genuinely finished.
+    process.exit(process.exitCode ?? 0);
+  });
