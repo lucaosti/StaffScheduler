@@ -32,7 +32,7 @@
  *
  * Usage:
  *   NODE_ENV=test DB_ROOT_PASSWORD=... npx ts-node scripts/simulation/campaign.ts \
- *     [--runs=40] [--baseSeed=20260712] [--lanes=4] [--concurrency=24] \
+ *     [--runs=40] [--baseSeed=20260712] [--lanes=4] [--concurrency=<hardware-derived>] \
  *     [--minEmployees=2000] [--minRequests=50] [--only=1,3,4] [--transport=mixed]
  *
  * `--minEmployees`/`--minRequests` exist for quick smoke tests of the
@@ -59,6 +59,7 @@ import { spawn } from 'child_process';
 import { createConnection } from 'mysql2/promise';
 import dotenv from 'dotenv';
 import { Rng } from './prng';
+import { defaultSimulationConcurrency } from '../../src/config/hardware';
 
 dotenv.config();
 
@@ -187,7 +188,10 @@ function parseArgs(): {
     runs: get('runs', 40),
     baseSeed: get('baseSeed', 20260712),
     lanes: get('lanes', 4),
-    concurrency: get('concurrency', 24),
+    // Falls back to a hardware-derived default (see src/config/hardware.ts)
+    // rather than a fixed 24, so the same command self-tunes from a small
+    // box to a large one instead of over/under-committing actors per lane.
+    concurrency: get('concurrency', defaultSimulationConcurrency()),
     only,
     transport,
     spec: {
