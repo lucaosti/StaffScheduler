@@ -17,6 +17,7 @@
  */
 
 import dotenv from 'dotenv';
+import { defaultDbPoolLimit, defaultDbQueueLimit } from './hardware';
 
 dotenv.config();
 
@@ -85,8 +86,12 @@ export const config = {
     database: process.env.DB_NAME || 'staff_scheduler',
     user: process.env.DB_USER || 'scheduler_user',
     password: requireProductionSecret('DB_PASSWORD', 'scheduler_password'),
-    connectionLimit: parseInt(process.env.DB_POOL_LIMIT || '30'),
-    queueLimit:      parseInt(process.env.DB_QUEUE_LIMIT || '100'),
+    // Falls back to a hardware-derived default (see config/hardware.ts) when
+    // unset, so the same image self-tunes from a Raspberry Pi to a datacenter
+    // Xeon instead of carrying one fixed number for every deployment; an
+    // explicit env var always wins.
+    connectionLimit: parseInt(process.env.DB_POOL_LIMIT || String(defaultDbPoolLimit())),
+    queueLimit:      parseInt(process.env.DB_QUEUE_LIMIT || String(defaultDbQueueLimit())),
     connectTimeout:  10_000,
     // Optional read replica for analytical SELECTs (reports, calendar feeds,
     // audit log listing/export — see config/database.ts's createReadPool).
@@ -100,7 +105,7 @@ export const config = {
     replicaDatabase: process.env.DB_REPLICA_NAME || process.env.DB_NAME || 'staff_scheduler',
     replicaUser: process.env.DB_REPLICA_USER || process.env.DB_USER || 'scheduler_user',
     replicaPassword: process.env.DB_REPLICA_PASSWORD || requireProductionSecret('DB_PASSWORD', 'scheduler_password'),
-    replicaConnectionLimit: parseInt(process.env.DB_REPLICA_POOL_LIMIT || process.env.DB_POOL_LIMIT || '30'),
+    replicaConnectionLimit: parseInt(process.env.DB_REPLICA_POOL_LIMIT || process.env.DB_POOL_LIMIT || String(defaultDbPoolLimit())),
   },
   jwt: {
     secret: requireSecret('JWT_SECRET', 'JWT_SECRET'),

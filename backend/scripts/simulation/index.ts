@@ -34,7 +34,7 @@
  *
  * Usage:
  *   npx ts-node scripts/simulation/index.ts \
- *     [--employees=2000] [--seed=42] [--concurrency=24] [--rounds=4] [--periodDays=14] \
+ *     [--employees=2000] [--seed=42] [--concurrency=<hardware-derived>] [--rounds=4] [--periodDays=14] \
  *     [--department=Operations | --departments="Emergency:800,Surgery:700,Nursing:500"] \
  *     [--requestsMin=5] [--requestsMax=8] [--transport=service|http|mixed]
  *
@@ -78,6 +78,7 @@ import { verifyComplianceForSchedule } from './complianceReport';
 import { runWithConcurrency } from './concurrency';
 import { HttpClient } from './httpClient';
 import { establishSession } from './httpAuth';
+import { defaultSimulationConcurrency } from '../../src/config/hardware';
 
 dotenv.config();
 
@@ -138,7 +139,10 @@ function parseArgs(): {
   return {
     departments,
     seed: get('seed', 424242),
-    concurrency: get('concurrency', 24),
+    // Falls back to a hardware-derived default (see src/config/hardware.ts)
+    // rather than a fixed 24 when run standalone (campaign.ts always passes
+    // --concurrency explicitly, itself hardware-derived — see its parseArgs).
+    concurrency: get('concurrency', defaultSimulationConcurrency()),
     rounds: get('rounds', 4),
     periodDays: get('periodDays', 14),
     transport: transport as 'service' | 'http' | 'mixed',

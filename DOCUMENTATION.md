@@ -1457,6 +1457,28 @@ override:
   forced. Both the backend driver (`mysql2`) and the migration runner
   (`dbmate`/go-sql-driver) authenticate with it over the internal network.
 
+### Hardware-aware defaults
+
+`DB_POOL_LIMIT`, `DB_QUEUE_LIMIT`, `DB_REPLICA_POOL_LIMIT`, and the simulation
+harness's actor `--concurrency` were previously fixed constants — the same
+numbers on a Raspberry Pi as on a datacenter Xeon, under-using large hardware
+and over-committing small hardware. `backend/src/config/hardware.ts` derives
+each from `os.availableParallelism()` (not `os.cpus().length`, which reports a
+container's host core count rather than its cgroup quota) instead, bounded to
+a floor/ceiling band so a tiny box still gets a workable minimum and a huge one
+doesn't turn the pool/actor count itself into the next bottleneck:
+
+| Setting | Derivation | Band |
+|---|---|---|
+| `DB_POOL_LIMIT` | 4 × detected cores | [5, 60] |
+| `DB_QUEUE_LIMIT` | `DB_POOL_LIMIT` × 100/30 | — |
+| `DB_REPLICA_POOL_LIMIT` | same as `DB_POOL_LIMIT` unless set separately | [5, 60] |
+| simulation `--concurrency` | 3 × detected cores | [4, 48] |
+
+An explicit env var (or CLI flag, for the simulation harness) always wins —
+these are defaults for whoever has not tuned their own deployment, not a
+ceiling on what can be configured.
+
 ### Replicas and zero-downtime rolling deploys
 
 Externalising all shared state to Redis (JTI blacklist, auth-context cache,

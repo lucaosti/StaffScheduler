@@ -20,6 +20,13 @@
 
 jest.mock('dotenv', () => ({ config: jest.fn() }));
 
+// The bare-environment DB pool/queue defaults are hardware-derived (see
+// config/hardware.ts), not fixed constants — hardware.test.ts already pins
+// the derivation itself, so here it's enough to compute the expectation the
+// same way the module under test does, against whatever this machine's own
+// os.availableParallelism() reports.
+import { defaultDbPoolLimit, defaultDbQueueLimit } from '../config/hardware';
+
 const ENV_KEYS = [
   'PORT', 'NODE_ENV', 'TRUST_PROXY_HOPS',
   'DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASSWORD', 'DB_POOL_LIMIT', 'DB_QUEUE_LIMIT',
@@ -70,11 +77,13 @@ describe('defaults (bare environment)', () => {
     expect(config.server.trustProxyHops).toBe(0);
     expect(config.database).toMatchObject({
       host: 'localhost', port: 3306, database: 'staff_scheduler', user: 'scheduler_user',
-      password: 'scheduler_password', connectionLimit: 30, queueLimit: 100,
+      password: 'scheduler_password',
+      connectionLimit: defaultDbPoolLimit(), queueLimit: defaultDbQueueLimit(),
       // #323: unset by default, and everything else falls back to the
       // primary's own values — so createReadPool(pool) returns `pool` itself.
       replicaHost: null, replicaPort: 3306, replicaDatabase: 'staff_scheduler',
-      replicaUser: 'scheduler_user', replicaPassword: 'scheduler_password', replicaConnectionLimit: 30,
+      replicaUser: 'scheduler_user', replicaPassword: 'scheduler_password',
+      replicaConnectionLimit: defaultDbPoolLimit(),
     });
     expect(config.jwt.secret).toBe('fallback-jwt_secret');
     expect(config.jwt.expiresIn).toBe('15m');
