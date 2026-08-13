@@ -14,6 +14,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { ApprovalWorkflowService } from './ApprovalWorkflowService';
@@ -260,43 +261,41 @@ export class ShiftSwapOfferService {
       }
     }
 
-    const conn = await this.pool.getConnection();
-    let created: ShiftSwapRequest;
-    try {
-      await conn.beginTransaction();
+    const created = await usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
 
-      // Re-lock and re-check under the transaction: two people racing to
-      // claim the same open offer must not both succeed.
-      const [offerRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT status FROM shift_swap_offers WHERE id = ? FOR UPDATE`,
-        [offerId]
-      );
-      if (offerRows.length === 0) throw new NotFoundError('Open shift offer not found');
-      if (offerRows[0].status !== 'open') {
-        throw new ConflictError(`Cannot claim offer in status '${offerRows[0].status}'`);
+        // Re-lock and re-check under the transaction: two people racing to
+        // claim the same open offer must not both succeed.
+        const [offerRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT status FROM shift_swap_offers WHERE id = ? FOR UPDATE`,
+          [offerId]
+        );
+        if (offerRows.length === 0) throw new NotFoundError('Open shift offer not found');
+        if (offerRows[0].status !== 'open') {
+          throw new ConflictError(`Cannot claim offer in status '${offerRows[0].status}'`);
+        }
+
+        const [insert] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO shift_swap_requests
+              (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, notes, status)
+           VALUES (?, ?, ?, ?, ?, 'pending')`,
+          [offer.userId, offer.assignmentId, claimerUserId, claimerAssignmentId, notes ?? null]
+        );
+        await conn.execute(
+          `UPDATE shift_swap_offers SET status = 'claimed', claimed_by_swap_request_id = ? WHERE id = ?`,
+          [insert.insertId, offerId]
+        );
+
+        await conn.commit();
+        const row = await this.swaps.getById(insert.insertId);
+        if (!row) throw new Error('Failed to retrieve created swap request');
+        return row;
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-
-      const [insert] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO shift_swap_requests
-            (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, notes, status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`,
-        [offer.userId, offer.assignmentId, claimerUserId, claimerAssignmentId, notes ?? null]
-      );
-      await conn.execute(
-        `UPDATE shift_swap_offers SET status = 'claimed', claimed_by_swap_request_id = ? WHERE id = ?`,
-        [insert.insertId, offerId]
-      );
-
-      await conn.commit();
-      const row = await this.swaps.getById(insert.insertId);
-      if (!row) throw new Error('Failed to retrieve created swap request');
-      created = row;
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
 
     if (workflow && workflow.steps.length > 0) {
       const pa = await this.decisions.createPendingApprovalForStep(

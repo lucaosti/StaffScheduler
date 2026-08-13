@@ -26,6 +26,7 @@
  */
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
@@ -119,53 +120,51 @@ export class ShiftSwapService {
       }
     }
 
-    const conn = await this.pool.getConnection();
-    let created: ShiftSwapRequest;
-    try {
-      await conn.beginTransaction();
+    const created = await usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
 
-      const [reqRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
-        [input.requesterAssignmentId]
-      );
-      if (reqRows.length === 0) throw new NotFoundError('Requester assignment not found');
-      if (reqRows[0].user_id !== input.requesterUserId) {
-        throw new ConflictError('Requester does not own the requester assignment');
-      }
+        const [reqRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
+          [input.requesterAssignmentId]
+        );
+        if (reqRows.length === 0) throw new NotFoundError('Requester assignment not found');
+        if (reqRows[0].user_id !== input.requesterUserId) {
+          throw new ConflictError('Requester does not own the requester assignment');
+        }
 
-      const [tgtRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
-        [input.targetAssignmentId]
-      );
-      if (tgtRows.length === 0) throw new NotFoundError('Target assignment not found');
-      const targetUserId = tgtRows[0].user_id as number;
-      if (targetUserId === input.requesterUserId) {
-        throw new ConflictError('Target assignment must belong to a different user');
-      }
+        const [tgtRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT id, user_id FROM shift_assignments WHERE id = ? LIMIT 1`,
+          [input.targetAssignmentId]
+        );
+        if (tgtRows.length === 0) throw new NotFoundError('Target assignment not found');
+        const targetUserId = tgtRows[0].user_id as number;
+        if (targetUserId === input.requesterUserId) {
+          throw new ConflictError('Target assignment must belong to a different user');
+        }
 
-      const [insert] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO shift_swap_requests
+        const [insert] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO shift_swap_requests
             (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, notes, status)
          VALUES (?, ?, ?, ?, ?, 'pending_target')`,
-        [
-          input.requesterUserId,
-          input.requesterAssignmentId,
-          targetUserId,
-          input.targetAssignmentId,
-          input.notes ?? null,
-        ]
-      );
-      await conn.commit();
+          [
+            input.requesterUserId,
+            input.requesterAssignmentId,
+            targetUserId,
+            input.targetAssignmentId,
+            input.notes ?? null,
+          ]
+        );
+        await conn.commit();
 
-      const row = await this.getById(insert.insertId);
-      if (!row) throw new Error('Failed to retrieve created swap request');
-      created = row;
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+        const row = await this.getById(insert.insertId);
+        if (!row) throw new Error('Failed to retrieve created swap request');
+        return row;
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      }
+    });
 
     logger.info(`Shift swap created: id=${created.id} requester=${input.requesterUserId} target=${created.targetUserId}`);
     await this.audit.write({

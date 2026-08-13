@@ -26,6 +26,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest, SqlParam } from '../types';
@@ -40,68 +41,67 @@ export class UserService {
   }
 
   async createUser(userData: CreateUserRequest, actorId?: number | null): Promise<User> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [existingUsers] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM users WHERE email = ? LIMIT 1',
-        [userData.email]
-      );
-      if (existingUsers.length > 0) {
-        throw new ConflictError('Email already exists');
-      }
-      const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
-      const [result] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO users (email, password_hash, first_name, last_name, phone, employee_id, position, hourly_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [userData.email, passwordHash, userData.firstName, userData.lastName, userData.phone || null, userData.employeeId || null, userData.position || null, userData.hourlyRate ?? null]
-      );
-      const userId = result.insertId;
-      if (userData.roleIds && userData.roleIds.length > 0) {
-        const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
-        await connection.execute(
-          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
-          userData.roleIds.flatMap(roleId => [userId, roleId])
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [existingUsers] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM users WHERE email = ? LIMIT 1',
+          [userData.email]
         );
-      }
-      if (userData.departmentIds && userData.departmentIds.length > 0) {
-        const ph = userData.departmentIds.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
-          userData.departmentIds.flatMap(deptId => [userId, deptId])
+        if (existingUsers.length > 0) {
+          throw new ConflictError('Email already exists');
+        }
+        const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
+        const [result] = await connection.execute<ResultSetHeader>(
+          'INSERT INTO users (email, password_hash, first_name, last_name, phone, employee_id, position, hourly_rate) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [userData.email, passwordHash, userData.firstName, userData.lastName, userData.phone || null, userData.employeeId || null, userData.position || null, userData.hourlyRate ?? null]
         );
+        const userId = result.insertId;
+        if (userData.roleIds && userData.roleIds.length > 0) {
+          const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
+          await connection.execute(
+            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
+            userData.roleIds.flatMap(roleId => [userId, roleId])
+          );
+        }
+        if (userData.departmentIds && userData.departmentIds.length > 0) {
+          const ph = userData.departmentIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
+            userData.departmentIds.flatMap(deptId => [userId, deptId])
+          );
+        }
+        if (userData.skillIds && userData.skillIds.length > 0) {
+          const ph = userData.skillIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
+            userData.skillIds.flatMap(skillId => [userId, skillId])
+          );
+        }
+        await connection.commit();
+        logger.info('User created: ' + userId);
+        const newUser = await this.getUserById(userId);
+        if (!newUser) throw new Error('Failed to retrieve created user');
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'user.create',
+          entityType: 'user',
+          entityId: userId,
+          description: `User created: ${userData.email}`,
+          after: { email: userData.email, firstName: userData.firstName, lastName: userData.lastName },
+        });
+        return newUser;
+      } catch (error) {
+        await connection.rollback();
+        // Unique-key races (email, employee_id) surface as ER_DUP_ENTRY from the
+        // driver; translate them into the domain conflict the caller expects.
+        if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+          throw new ConflictError('Email or employee ID already exists');
+        }
+        logger.error('Failed to create user:', error);
+        throw error;
       }
-      if (userData.skillIds && userData.skillIds.length > 0) {
-        const ph = userData.skillIds.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
-          userData.skillIds.flatMap(skillId => [userId, skillId])
-        );
-      }
-      await connection.commit();
-      logger.info('User created: ' + userId);
-      const newUser = await this.getUserById(userId);
-      if (!newUser) throw new Error('Failed to retrieve created user');
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'user.create',
-        entityType: 'user',
-        entityId: userId,
-        description: `User created: ${userData.email}`,
-        after: { email: userData.email, firstName: userData.firstName, lastName: userData.lastName },
-      });
-      return newUser;
-    } catch (error) {
-      await connection.rollback();
-      // Unique-key races (email, employee_id) surface as ER_DUP_ENTRY from the
-      // driver; translate them into the domain conflict the caller expects.
-      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-        throw new ConflictError('Email or employee ID already exists');
-      }
-      logger.error('Failed to create user:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async getUserById(id: number): Promise<User | null> {
@@ -295,172 +295,168 @@ export class UserService {
   }
 
   async updateUser(id: number, userData: UpdateUserRequest, actorId?: number | null): Promise<User> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      // Every fragment pushed below is a hardcoded string literal, never derived from
-      // user-controlled input.  The UPDATE template is therefore not susceptible to
-      // SQL injection through column-name interpolation.
-      const updates: string[] = [];
-      const values: SqlParam[] = [];
-      if (userData.email !== undefined) {
-        const [existing] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [userData.email, id]);
-        if (existing.length > 0) throw new ConflictError('Email already exists');
-        updates.push('email = ?');
-        values.push(userData.email);
-      }
-      if (userData.password !== undefined) {
-        const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
-        updates.push('password_hash = ?');
-        values.push(passwordHash);
-      }
-      if (userData.firstName !== undefined) {
-        updates.push('first_name = ?');
-        values.push(userData.firstName);
-      }
-      if (userData.lastName !== undefined) {
-        updates.push('last_name = ?');
-        values.push(userData.lastName);
-      }
-      if (userData.employeeId !== undefined) {
-        updates.push('employee_id = ?');
-        values.push(userData.employeeId);
-      }
-      if (userData.phone !== undefined) {
-        updates.push('phone = ?');
-        values.push(userData.phone);
-      }
-      if (userData.position !== undefined) {
-        updates.push('position = ?');
-        values.push(userData.position || null);
-      }
-      if (userData.hourlyRate !== undefined) {
-        updates.push('hourly_rate = ?');
-        values.push(userData.hourlyRate);
-      }
-      if (userData.isActive !== undefined) {
-        updates.push('is_active = ?');
-        values.push(userData.isActive ? 1 : 0);
-      }
-      if (Object.prototype.hasOwnProperty.call(userData, 'organizationName')) {
-        updates.push('organization_name = ?');
-        values.push(userData.organizationName ?? null);
-      }
-      if (updates.length > 0) {
-        values.push(id);
-        await connection.execute(`UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, values);
-      }
-      // Replace unscoped role grants when roleIds is provided.
-      if (userData.roleIds !== undefined) {
-        await connection.execute(
-          'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
-          [id]
-        );
-        if (userData.roleIds.length > 0) {
-          const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
-          await connection.execute(
-            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
-            userData.roleIds.flatMap(roleId => [id, roleId])
-          );
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        // Every fragment pushed below is a hardcoded string literal, never derived from
+        // user-controlled input.  The UPDATE template is therefore not susceptible to
+        // SQL injection through column-name interpolation.
+        const updates: string[] = [];
+        const values: SqlParam[] = [];
+        if (userData.email !== undefined) {
+          const [existing] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE email = ? AND id != ? LIMIT 1', [userData.email, id]);
+          if (existing.length > 0) throw new ConflictError('Email already exists');
+          updates.push('email = ?');
+          values.push(userData.email);
         }
+        if (userData.password !== undefined) {
+          const passwordHash = await bcrypt.hash(userData.password, config.security.bcryptRounds);
+          updates.push('password_hash = ?');
+          values.push(passwordHash);
+        }
+        if (userData.firstName !== undefined) {
+          updates.push('first_name = ?');
+          values.push(userData.firstName);
+        }
+        if (userData.lastName !== undefined) {
+          updates.push('last_name = ?');
+          values.push(userData.lastName);
+        }
+        if (userData.employeeId !== undefined) {
+          updates.push('employee_id = ?');
+          values.push(userData.employeeId);
+        }
+        if (userData.phone !== undefined) {
+          updates.push('phone = ?');
+          values.push(userData.phone);
+        }
+        if (userData.position !== undefined) {
+          updates.push('position = ?');
+          values.push(userData.position || null);
+        }
+        if (userData.hourlyRate !== undefined) {
+          updates.push('hourly_rate = ?');
+          values.push(userData.hourlyRate);
+        }
+        if (userData.isActive !== undefined) {
+          updates.push('is_active = ?');
+          values.push(userData.isActive ? 1 : 0);
+        }
+        if (Object.prototype.hasOwnProperty.call(userData, 'organizationName')) {
+          updates.push('organization_name = ?');
+          values.push(userData.organizationName ?? null);
+        }
+        if (updates.length > 0) {
+          values.push(id);
+          await connection.execute(`UPDATE users SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, values);
+        }
+        // Replace unscoped role grants when roleIds is provided.
+        if (userData.roleIds !== undefined) {
+          await connection.execute(
+            'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
+            [id]
+          );
+          if (userData.roleIds.length > 0) {
+            const ph = userData.roleIds.map(() => '(?, ?, NULL)').join(', ');
+            await connection.execute(
+              `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${ph}`,
+              userData.roleIds.flatMap(roleId => [id, roleId])
+            );
+          }
+        }
+        await connection.commit();
+        logger.info('User updated: ' + id);
+        const updatedUser = await this.getUserById(id);
+        if (!updatedUser) throw new NotFoundError('User not found after update');
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'user.update',
+          entityType: 'user',
+          entityId: id,
+          description: `User updated: ${updatedUser.email}`,
+          after: { email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName, isActive: updatedUser.isActive },
+        });
+        return updatedUser;
+      } catch (error) {
+        await connection.rollback();
+        if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+          throw new ConflictError('Email or employee ID already exists');
+        }
+        logger.error('Failed to update user:', error);
+        throw error;
       }
-      await connection.commit();
-      logger.info('User updated: ' + id);
-      const updatedUser = await this.getUserById(id);
-      if (!updatedUser) throw new NotFoundError('User not found after update');
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'user.update',
-        entityType: 'user',
-        entityId: id,
-        description: `User updated: ${updatedUser.email}`,
-        after: { email: updatedUser.email, firstName: updatedUser.firstName, lastName: updatedUser.lastName, isActive: updatedUser.isActive },
-      });
-      return updatedUser;
-    } catch (error) {
-      await connection.rollback();
-      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-        throw new ConflictError('Email or employee ID already exists');
-      }
-      logger.error('Failed to update user:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async deleteUser(id: number, actorId?: number | null): Promise<boolean> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [exists] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
-      if ((exists as RowDataPacket[]).length === 0) throw new NotFoundError('User not found');
-      await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
-      await connection.commit();
-      logger.info('User deleted: ' + id);
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'user.delete',
-        entityType: 'user',
-        entityId: id,
-        description: `User deactivated: ${id}`,
-      });
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to delete user:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [exists] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
+        if ((exists as RowDataPacket[]).length === 0) throw new NotFoundError('User not found');
+        await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+        await connection.commit();
+        logger.info('User deleted: ' + id);
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'user.delete',
+          entityType: 'user',
+          entityId: id,
+          description: `User deactivated: ${id}`,
+        });
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to delete user:', error);
+        throw error;
+      }
+    });
   }
 
   async updateUserDepartments(userId: number, departmentIds: number[]): Promise<boolean> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute('DELETE FROM user_departments WHERE user_id = ?', [userId]);
-      if (departmentIds.length > 0) {
-        const ph = departmentIds.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
-          departmentIds.flatMap(d => [userId, d])
-        );
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        await connection.execute('DELETE FROM user_departments WHERE user_id = ?', [userId]);
+        if (departmentIds.length > 0) {
+          const ph = departmentIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO user_departments (user_id, department_id) VALUES ${ph}`,
+            departmentIds.flatMap(d => [userId, d])
+          );
+        }
+        await connection.commit();
+        logger.info('User departments updated: ' + userId);
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to update user departments:', error);
+        throw error;
       }
-      await connection.commit();
-      logger.info('User departments updated: ' + userId);
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to update user departments:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async updateUserSkills(userId: number, skillIds: number[]): Promise<boolean> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute('DELETE FROM user_skills WHERE user_id = ?', [userId]);
-      if (skillIds.length > 0) {
-        const ph = skillIds.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
-          skillIds.flatMap(s => [userId, s])
-        );
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        await connection.execute('DELETE FROM user_skills WHERE user_id = ?', [userId]);
+        if (skillIds.length > 0) {
+          const ph = skillIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO user_skills (user_id, skill_id) VALUES ${ph}`,
+            skillIds.flatMap(s => [userId, s])
+          );
+        }
+        await connection.commit();
+        logger.info('User skills updated: ' + userId);
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to update user skills:', error);
+        throw error;
       }
-      await connection.commit();
-      logger.info('User skills updated: ' + userId);
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to update user skills:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   private async getUserPasswordHash(userId: number): Promise<string | null> {

@@ -22,6 +22,7 @@
  */
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
@@ -281,59 +282,58 @@ export class TimeOffService {
     // time-off request itself stays "pending" forever if the duplicate
     // check then failed (see managerActor.ts's handling of exactly this
     // failure mode for the analogous ShiftSwapService bug).
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const [rows] = await conn.execute<RowDataPacket[]>(
-        `SELECT * FROM time_off_requests WHERE id = ? FOR UPDATE`,
-        [id]
-      );
-      if (rows.length === 0) throw new NotFoundError('Time-off request not found');
-      const current = mapRow(rows[0]);
-      if (current.status !== 'pending') {
-        throw new ConflictError(`Cannot approve request in status '${current.status}'`);
+    await usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        const [rows] = await conn.execute<RowDataPacket[]>(
+          `SELECT * FROM time_off_requests WHERE id = ? FOR UPDATE`,
+          [id]
+        );
+        if (rows.length === 0) throw new NotFoundError('Time-off request not found');
+        const current = mapRow(rows[0]);
+        if (current.status !== 'pending') {
+          throw new ConflictError(`Cannot approve request in status '${current.status}'`);
+        }
+        await this.checkNoDuplicateUnavailability(conn, current.userId, current.startDate, current.endDate);
+
+        const [unavailRes] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO user_unavailability (user_id, start_date, end_date, reason)
+           VALUES (?, ?, ?, ?)`,
+          [
+            current.userId,
+            current.startDate,
+            current.endDate,
+            `[time-off-request:${id}] ${current.reason ?? current.type}`,
+          ]
+        );
+
+        await this.decisions.decidePendingApproval(
+          pendingApprovalId,
+          reviewerId,
+          'approved',
+          notes,
+          async () => ({ actorUserId: reviewerId }),
+          organizationName
+        );
+
+        await conn.execute(
+          `UPDATE time_off_requests
+              SET status = 'approved',
+                  reviewer_id = ?,
+                  reviewed_at = CURRENT_TIMESTAMP,
+                  review_notes = ?,
+                  unavailability_id = ?
+            WHERE id = ?`,
+          [reviewerId, notes, unavailRes.insertId, id]
+        );
+
+        await conn.commit();
+        logger.info(`Time-off request approved: id=${id} reviewer=${reviewerId}`);
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      await this.checkNoDuplicateUnavailability(conn, current.userId, current.startDate, current.endDate);
-
-      const [unavailRes] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO user_unavailability (user_id, start_date, end_date, reason)
-         VALUES (?, ?, ?, ?)`,
-        [
-          current.userId,
-          current.startDate,
-          current.endDate,
-          `[time-off-request:${id}] ${current.reason ?? current.type}`,
-        ]
-      );
-
-      await this.decisions.decidePendingApproval(
-        pendingApprovalId,
-        reviewerId,
-        'approved',
-        notes,
-        async () => ({ actorUserId: reviewerId }),
-        organizationName
-      );
-
-      await conn.execute(
-        `UPDATE time_off_requests
-            SET status = 'approved',
-                reviewer_id = ?,
-                reviewed_at = CURRENT_TIMESTAMP,
-                review_notes = ?,
-                unavailability_id = ?
-          WHERE id = ?`,
-        [reviewerId, notes, unavailRes.insertId, id]
-      );
-
-      await conn.commit();
-      logger.info(`Time-off request approved: id=${id} reviewer=${reviewerId}`);
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
     const refreshed = await this.getById(id);
     if (!refreshed) throw new Error('Failed to retrieve approved request');
     await this.audit.write({

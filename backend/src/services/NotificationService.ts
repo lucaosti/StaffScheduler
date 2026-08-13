@@ -11,6 +11,7 @@
  */
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { withTransaction } from '../utils/transaction';
 import { logger } from '../config/logger';
 import { isEmailConfigured } from './MailerService';
 import { isPushConfigured } from './PushService';
@@ -146,18 +147,10 @@ export class NotificationService {
    * The email is delivered later by the outbox worker with retries.
    */
   async notify(input: CreateNotificationInput): Promise<Notification> {
-    const conn = await this.pool.getConnection();
-    let insertId: number;
-    try {
-      await conn.beginTransaction();
-      insertId = await this.notifyWithin(conn, input);
-      await conn.commit();
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    // The in-app row and its email_outbox sibling are written together or not
+    // at all; everything below happens after that commit, deliberately outside
+    // it, so a read-back failure cannot roll back a notification that was sent.
+    const insertId = await withTransaction(this.pool, (conn) => this.notifyWithin(conn, input));
 
     const created = await this.getById(insertId);
     if (!created) throw new Error('Failed to retrieve created notification');

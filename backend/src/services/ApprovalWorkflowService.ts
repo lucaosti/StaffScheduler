@@ -12,6 +12,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import { ApprovalWorkflow, ApprovalStep, ApproverScope, CreateApprovalWorkflowRequest } from '../types';
 
@@ -80,89 +81,87 @@ export class ApprovalWorkflowService {
   }
 
   async createWorkflow(input: CreateApprovalWorkflowRequest): Promise<ApprovalWorkflow> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [res] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO approval_workflows (change_type, require_all, description) VALUES (?, ?, ?)`,
-        [input.changeType, input.requireAll ?? false, input.description ?? null]
-      );
-      const workflowId = res.insertId;
-      for (const s of input.steps) {
-        await connection.execute(
-          `INSERT INTO approval_steps
-             (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-              approver_permission_code, auto_approve_for_owner, escalate_after_hours)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            workflowId,
-            s.stepOrder,
-            s.approverScope,
-            s.approverRoleId ?? null,
-            s.approverUserId ?? null,
-            s.approverPermissionCode ?? null,
-            s.autoApproveForOwner ?? true,
-            s.escalateAfterHours ?? null,
-          ]
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [res] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO approval_workflows (change_type, require_all, description) VALUES (?, ?, ?)`,
+          [input.changeType, input.requireAll ?? false, input.description ?? null]
         );
+        const workflowId = res.insertId;
+        for (const s of input.steps) {
+          await connection.execute(
+            `INSERT INTO approval_steps
+               (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
+                approver_permission_code, auto_approve_for_owner, escalate_after_hours)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              workflowId,
+              s.stepOrder,
+              s.approverScope,
+              s.approverRoleId ?? null,
+              s.approverUserId ?? null,
+              s.approverPermissionCode ?? null,
+              s.autoApproveForOwner ?? true,
+              s.escalateAfterHours ?? null,
+            ]
+          );
+        }
+        await connection.commit();
+        const workflow = await this.getWorkflowById(workflowId);
+        if (!workflow) throw new Error('Failed to retrieve created workflow');
+        return workflow;
+      } catch (error) {
+        await connection.rollback();
+        // change_type is unique: a duplicate INSERT surfaces as ER_DUP_ENTRY.
+        if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+          throw new ConflictError('Workflow for this change type already exists');
+        }
+        throw error;
       }
-      await connection.commit();
-      const workflow = await this.getWorkflowById(workflowId);
-      if (!workflow) throw new Error('Failed to retrieve created workflow');
-      return workflow;
-    } catch (error) {
-      await connection.rollback();
-      // change_type is unique: a duplicate INSERT surfaces as ER_DUP_ENTRY.
-      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
-        throw new ConflictError('Workflow for this change type already exists');
-      }
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async updateWorkflow(
     id: number,
     patch: { requireAll?: boolean; description?: string; steps?: CreateApprovalWorkflowRequest['steps'] }
   ): Promise<ApprovalWorkflow> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const updates: string[] = [];
-      const vals: any[] = [];
-      if (patch.requireAll !== undefined) { updates.push('require_all = ?'); vals.push(patch.requireAll); }
-      if (patch.description !== undefined) { updates.push('description = ?'); vals.push(patch.description); }
-      if (updates.length > 0) {
-        vals.push(id);
-        await connection.execute(
-          `UPDATE approval_workflows SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          vals
-        );
-      }
-      if (patch.steps !== undefined) {
-        await connection.execute('DELETE FROM approval_steps WHERE workflow_id = ?', [id]);
-        for (const s of patch.steps) {
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const updates: string[] = [];
+        const vals: any[] = [];
+        if (patch.requireAll !== undefined) { updates.push('require_all = ?'); vals.push(patch.requireAll); }
+        if (patch.description !== undefined) { updates.push('description = ?'); vals.push(patch.description); }
+        if (updates.length > 0) {
+          vals.push(id);
           await connection.execute(
-            `INSERT INTO approval_steps
-               (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
-                approver_permission_code, auto_approve_for_owner, escalate_after_hours)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, s.stepOrder, s.approverScope, s.approverRoleId ?? null, s.approverUserId ?? null,
-             s.approverPermissionCode ?? null, s.autoApproveForOwner ?? true, s.escalateAfterHours ?? null]
+            `UPDATE approval_workflows SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            vals
           );
         }
+        if (patch.steps !== undefined) {
+          await connection.execute('DELETE FROM approval_steps WHERE workflow_id = ?', [id]);
+          for (const s of patch.steps) {
+            await connection.execute(
+              `INSERT INTO approval_steps
+                 (workflow_id, step_order, approver_scope, approver_role_id, approver_user_id,
+                  approver_permission_code, auto_approve_for_owner, escalate_after_hours)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [id, s.stepOrder, s.approverScope, s.approverRoleId ?? null, s.approverUserId ?? null,
+               s.approverPermissionCode ?? null, s.autoApproveForOwner ?? true, s.escalateAfterHours ?? null]
+            );
+          }
+        }
+        await connection.commit();
+        const workflow = await this.getWorkflowById(id);
+        if (!workflow) throw new NotFoundError('Workflow not found');
+        return workflow;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
       }
-      await connection.commit();
-      const workflow = await this.getWorkflowById(id);
-      if (!workflow) throw new NotFoundError('Workflow not found');
-      return workflow;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async deleteWorkflow(id: number): Promise<void> {

@@ -25,6 +25,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { NotFoundError } from '../errors';
 import { Schedule } from '../types';
 import { logger } from '../config/logger';
@@ -209,77 +210,76 @@ export class ScheduleOptimizationOrchestrator {
   }
 
   async cloneSchedule(sourceScheduleId: number, newName: string, newStartDate: string, newEndDate: string): Promise<Schedule> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      const [sourceRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT * FROM schedules WHERE id = ? LIMIT 1',
-        [sourceScheduleId]
-      );
-      if (sourceRows.length === 0) throw new NotFoundError('Source schedule not found');
-
-      const source = sourceRows[0];
-      const [scheduleResult] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`,
-        [newName, null, source.department_id, newStartDate, newEndDate, source.created_by, `Cloned from ${source.name}`]
-      );
-
-      const newScheduleId = scheduleResult.insertId;
-      const dayOffset = Math.floor(
-        (new Date(newStartDate).getTime() - new Date(source.start_date).getTime()) / 86400000
-      );
-
-      const [shifts] = await connection.execute<RowDataPacket[]>(
-        'SELECT * FROM shifts WHERE schedule_id = ?',
-        [sourceScheduleId]
-      );
-
-      // Build old->new shift ID map and insert all shifts.
-      const oldToNewShiftId = new Map<number, number>();
-      for (const shift of shifts) {
-        const shiftDate = new Date(shift.date);
-        shiftDate.setDate(shiftDate.getDate() + dayOffset);
-        const [shiftResult] = await connection.execute<ResultSetHeader>(
-          `INSERT INTO shifts (schedule_id, department_id, template_id, date, start_time, end_time, min_staff, max_staff, notes, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
-          [newScheduleId, shift.department_id, shift.template_id, shiftDate.toISOString().split('T')[0], shift.start_time, shift.end_time, shift.min_staff, shift.max_staff, shift.notes]
+        const [sourceRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT * FROM schedules WHERE id = ? LIMIT 1',
+          [sourceScheduleId]
         );
-        oldToNewShiftId.set(shift.id as number, shiftResult.insertId);
-      }
+        if (sourceRows.length === 0) throw new NotFoundError('Source schedule not found');
 
-      // Bulk-fetch all skills for the original shifts, then bulk-insert for the clones.
-      if (oldToNewShiftId.size > 0) {
-        const oldIds = [...oldToNewShiftId.keys()];
-        const placeholders = oldIds.map(() => '?').join(', ');
-        const [allSkills] = await connection.execute<RowDataPacket[]>(
-          `SELECT shift_id, skill_id FROM shift_skills WHERE shift_id IN (${placeholders})`,
-          oldIds
+        const source = sourceRows[0];
+        const [scheduleResult] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes)
+          VALUES (?, ?, ?, ?, ?, 'draft', ?, ?)`,
+          [newName, null, source.department_id, newStartDate, newEndDate, source.created_by, `Cloned from ${source.name}`]
         );
-        if (allSkills.length > 0) {
-          const skillValues = allSkills.map((s) => [oldToNewShiftId.get(s.shift_id as number), s.skill_id]);
-          const skillPlaceholders = skillValues.map(() => '(?, ?)').join(', ');
-          await connection.execute(
-            `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${skillPlaceholders}`,
-            skillValues.flat()
+
+        const newScheduleId = scheduleResult.insertId;
+        const dayOffset = Math.floor(
+          (new Date(newStartDate).getTime() - new Date(source.start_date).getTime()) / 86400000
+        );
+
+        const [shifts] = await connection.execute<RowDataPacket[]>(
+          'SELECT * FROM shifts WHERE schedule_id = ?',
+          [sourceScheduleId]
+        );
+
+        // Build old->new shift ID map and insert all shifts.
+        const oldToNewShiftId = new Map<number, number>();
+        for (const shift of shifts) {
+          const shiftDate = new Date(shift.date);
+          shiftDate.setDate(shiftDate.getDate() + dayOffset);
+          const [shiftResult] = await connection.execute<ResultSetHeader>(
+            `INSERT INTO shifts (schedule_id, department_id, template_id, date, start_time, end_time, min_staff, max_staff, notes, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
+            [newScheduleId, shift.department_id, shift.template_id, shiftDate.toISOString().split('T')[0], shift.start_time, shift.end_time, shift.min_staff, shift.max_staff, shift.notes]
           );
+          oldToNewShiftId.set(shift.id as number, shiftResult.insertId);
         }
+
+        // Bulk-fetch all skills for the original shifts, then bulk-insert for the clones.
+        if (oldToNewShiftId.size > 0) {
+          const oldIds = [...oldToNewShiftId.keys()];
+          const placeholders = oldIds.map(() => '?').join(', ');
+          const [allSkills] = await connection.execute<RowDataPacket[]>(
+            `SELECT shift_id, skill_id FROM shift_skills WHERE shift_id IN (${placeholders})`,
+            oldIds
+          );
+          if (allSkills.length > 0) {
+            const skillValues = allSkills.map((s) => [oldToNewShiftId.get(s.shift_id as number), s.skill_id]);
+            const skillPlaceholders = skillValues.map(() => '(?, ?)').join(', ');
+            await connection.execute(
+              `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${skillPlaceholders}`,
+              skillValues.flat()
+            );
+          }
+        }
+
+        await connection.commit();
+        logger.info(`Schedule cloned: ${sourceScheduleId} -> ${newScheduleId}`);
+
+        const cloned = await this.fetchScheduleById(newScheduleId);
+        if (!cloned) throw new Error('Failed to retrieve cloned schedule');
+        return cloned;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to clone schedule:', error);
+        throw error;
       }
-
-      await connection.commit();
-      logger.info(`Schedule cloned: ${sourceScheduleId} -> ${newScheduleId}`);
-
-      const cloned = await this.fetchScheduleById(newScheduleId);
-      if (!cloned) throw new Error('Failed to retrieve cloned schedule');
-      return cloned;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to clone schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async duplicateSchedule(scheduleId: number, newName: string, newStartDate: string, newEndDate: string): Promise<Schedule> {

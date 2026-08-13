@@ -16,6 +16,7 @@
  */
 
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { logger } from '../config/logger';
 
 /**
@@ -58,31 +59,30 @@ export async function runPollingBatch<Row extends RowDataPacket, Result = void>(
   pool: Pool,
   config: PollingBatchConfig<Row, Result>
 ): Promise<number> {
-  const conn: PoolConnection = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const rows = await config.claim(conn);
+  return usingConnection(pool, async (conn) => {
+    try {
+      await conn.beginTransaction();
+      const rows = await config.claim(conn);
 
-    for (const row of rows) {
-      try {
-        const result = await config.deliver(row);
-        await config.outcome.onSent(conn, row, result);
-      } catch (err) {
-        const attempts = config.attemptsOf(row) + 1;
-        const message = err instanceof Error ? err.message : String(err);
-        await config.outcome.onFailure(conn, row, attempts, message, err);
+      for (const row of rows) {
+        try {
+          const result = await config.deliver(row);
+          await config.outcome.onSent(conn, row, result);
+        } catch (err) {
+          const attempts = config.attemptsOf(row) + 1;
+          const message = err instanceof Error ? err.message : String(err);
+          await config.outcome.onFailure(conn, row, attempts, message, err);
+        }
       }
-    }
 
-    await conn.commit();
-    return rows.length;
-  } catch (err) {
-    await conn.rollback();
-    logger.error(`${config.label} poll failed`, { error: err instanceof Error ? err.message : err });
-    return 0;
-  } finally {
-    conn.release();
-  }
+      await conn.commit();
+      return rows.length;
+    } catch (err) {
+      await conn.rollback();
+      logger.error(`${config.label} poll failed`, { error: err instanceof Error ? err.message : err });
+      return 0;
+    }
+  });
 }
 
 export interface PollingWorkerController {

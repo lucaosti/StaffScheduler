@@ -17,6 +17,7 @@
 
 import mysql from 'mysql2/promise';
 import { config } from '../config';
+import { usingConnection, withTransaction } from '../utils/transaction';
 
 /**
  * Database Class
@@ -79,12 +80,7 @@ class Database {
    * @throws {Error} When database connection fails
    */
   async testConnection(): Promise<void> {
-    const connection = await this.getConnection();
-    try {
-      await connection.ping();
-    } finally {
-      connection.release();
-    }
+    await usingConnection(this.pool, (connection) => connection.ping());
   }
 
   /**
@@ -101,13 +97,10 @@ class Database {
    * const users = await database.query<User>('SELECT * FROM users WHERE active = ?', [true]);
    */
   async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    const connection = await this.getConnection();
-    try {
+    return usingConnection(this.pool, async (connection) => {
       const [rows] = await connection.execute(sql, params);
       return rows as T[];
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -133,10 +126,14 @@ class Database {
    * 
    * Executes multiple database operations within a transaction.
    * Automatically handles commit/rollback based on success/failure.
-   * 
+   *
+   * Delegates to `withTransaction`, which is what application services (holding
+   * an injected pool rather than this singleton) use. One definition, so the
+   * two cannot drift apart.
+   *
    * @param callback - Function containing transaction operations
    * @returns Promise<T> - Result from callback function
-   * 
+   *
    * @example
    * await database.transaction(async (connection) => {
    *   await connection.execute('INSERT INTO users ...', [data]);
@@ -144,18 +141,7 @@ class Database {
    * });
    */
   async transaction<T>(callback: (connection: mysql.PoolConnection) => Promise<T>): Promise<T> {
-    const connection = await this.getConnection();
-    try {
-      await connection.beginTransaction();
-      const result = await callback(connection);
-      await connection.commit();
-      return result;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return withTransaction(this.pool, callback);
   }
 
   /**

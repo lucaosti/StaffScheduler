@@ -23,6 +23,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { 
   Department, 
@@ -55,62 +56,61 @@ export class DepartmentService {
    * @throws Error if department name already exists or creation fails
    */
   async createDepartment(deptData: CreateDepartmentRequest): Promise<Department> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [existing] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM departments WHERE name = ? LIMIT 1',
-        [deptData.name]
-      );
-
-      if (existing.length > 0) {
-        throw new ConflictError('Department name already exists');
-      }
-
-      if (deptData.managerId) {
-        const [managerRows] = await connection.execute<RowDataPacket[]>(
-          'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
-          [deptData.managerId]
+        const [existing] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM departments WHERE name = ? LIMIT 1',
+          [deptData.name]
         );
 
-        if (managerRows.length === 0) {
-          throw new ValidationError('Invalid manager ID');
+        if (existing.length > 0) {
+          throw new ConflictError('Department name already exists');
         }
+
+        if (deptData.managerId) {
+          const [managerRows] = await connection.execute<RowDataPacket[]>(
+            'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+            [deptData.managerId]
+          );
+
+          if (managerRows.length === 0) {
+            throw new ValidationError('Invalid manager ID');
+          }
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO departments (name, description, manager_id, org_unit_id, is_active)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            deptData.name,
+            deptData.description || null,
+            deptData.managerId || null,
+            deptData.orgUnitId || null,
+            true
+          ]
+        );
+
+        const departmentId = result.insertId;
+
+        await connection.commit();
+
+        logger.info(`Department created successfully: ${deptData.name}`, { departmentId });
+
+        const newDepartment = await this.getDepartmentById(departmentId);
+        if (!newDepartment) {
+          throw new Error('Failed to retrieve created department');
+        }
+
+        return newDepartment;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to create department:', error);
+        throw error;
       }
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO departments (name, description, manager_id, org_unit_id, is_active)
-         VALUES (?, ?, ?, ?, ?)`,
-        [
-          deptData.name,
-          deptData.description || null,
-          deptData.managerId || null,
-          deptData.orgUnitId || null,
-          true
-        ]
-      );
-
-      const departmentId = result.insertId;
-
-      await connection.commit();
-
-      logger.info(`Department created successfully: ${deptData.name}`, { departmentId });
-
-      const newDepartment = await this.getDepartmentById(departmentId);
-      if (!newDepartment) {
-        throw new Error('Failed to retrieve created department');
-      }
-
-      return newDepartment;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to create department:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -247,80 +247,79 @@ export class DepartmentService {
    * @throws Error if department not found or update fails
    */
   async updateDepartment(id: number, deptData: UpdateDepartmentRequest): Promise<Department> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const updates: string[] = [];
-      const values: SqlParam[] = [];
+        const updates: string[] = [];
+        const values: SqlParam[] = [];
 
-      if (deptData.name !== undefined) {
-        const [existing] = await connection.execute<RowDataPacket[]>(
-          'SELECT id FROM departments WHERE name = ? AND id != ? LIMIT 1',
-          [deptData.name, id]
-        );
-        if (existing.length > 0) {
-          throw new ConflictError('Department name already in use');
-        }
-        updates.push('name = ?');
-        values.push(deptData.name);
-      }
-
-      if (deptData.description !== undefined) {
-        updates.push('description = ?');
-        values.push(deptData.description);
-      }
-
-      if (deptData.managerId !== undefined) {
-        if (deptData.managerId !== null) {
-          const [managerRows] = await connection.execute<RowDataPacket[]>(
-            'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
-            [deptData.managerId]
+        if (deptData.name !== undefined) {
+          const [existing] = await connection.execute<RowDataPacket[]>(
+            'SELECT id FROM departments WHERE name = ? AND id != ? LIMIT 1',
+            [deptData.name, id]
           );
-          if (managerRows.length === 0) {
-            throw new ValidationError('Invalid manager ID');
+          if (existing.length > 0) {
+            throw new ConflictError('Department name already in use');
           }
+          updates.push('name = ?');
+          values.push(deptData.name);
         }
-        updates.push('manager_id = ?');
-        values.push(deptData.managerId);
+
+        if (deptData.description !== undefined) {
+          updates.push('description = ?');
+          values.push(deptData.description);
+        }
+
+        if (deptData.managerId !== undefined) {
+          if (deptData.managerId !== null) {
+            const [managerRows] = await connection.execute<RowDataPacket[]>(
+              'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+              [deptData.managerId]
+            );
+            if (managerRows.length === 0) {
+              throw new ValidationError('Invalid manager ID');
+            }
+          }
+          updates.push('manager_id = ?');
+          values.push(deptData.managerId);
+        }
+
+        if (deptData.orgUnitId !== undefined) {
+          updates.push('org_unit_id = ?');
+          values.push(deptData.orgUnitId);
+        }
+
+        if (deptData.isActive !== undefined) {
+          updates.push('is_active = ?');
+          values.push(deptData.isActive ? 1 : 0);
+        }
+
+        if (updates.length > 0) {
+          values.push(id);
+          await connection.execute(
+            `UPDATE departments SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            values
+          );
+        }
+
+        await connection.commit();
+
+        logger.info(`Department updated successfully: ${id}`);
+
+        const updatedDepartment = await this.getDepartmentById(id);
+        if (!updatedDepartment) {
+          throw new NotFoundError('Department not found after update');
+        }
+
+        return updatedDepartment;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to update department:', error);
+        throw error;
       }
-
-      if (deptData.orgUnitId !== undefined) {
-        updates.push('org_unit_id = ?');
-        values.push(deptData.orgUnitId);
-      }
-
-      if (deptData.isActive !== undefined) {
-        updates.push('is_active = ?');
-        values.push(deptData.isActive ? 1 : 0);
-      }
-
-      if (updates.length > 0) {
-        values.push(id);
-        await connection.execute(
-          `UPDATE departments SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          values
-        );
-      }
-
-      await connection.commit();
-
-      logger.info(`Department updated successfully: ${id}`);
-
-      const updatedDepartment = await this.getDepartmentById(id);
-      if (!updatedDepartment) {
-        throw new NotFoundError('Department not found after update');
-      }
-
-      return updatedDepartment;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to update department:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -331,40 +330,39 @@ export class DepartmentService {
    * @throws Error if department has active employees
    */
   async deleteDepartment(id: number): Promise<boolean> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [employeeRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT COUNT(*) as count FROM user_departments WHERE department_id = ?',
-        [id]
-      );
+        const [employeeRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT COUNT(*) as count FROM user_departments WHERE department_id = ?',
+          [id]
+        );
 
-      if (employeeRows[0].count > 0) {
-        throw new ConflictError('Cannot delete department with assigned employees');
+        if (employeeRows[0].count > 0) {
+          throw new ConflictError('Cannot delete department with assigned employees');
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          'UPDATE departments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          [id]
+        );
+
+        if (result.affectedRows === 0) {
+          throw new NotFoundError('Department not found');
+        }
+
+        await connection.commit();
+
+        logger.info(`Department deleted successfully: ${id}`);
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to delete department:', error);
+        throw error;
       }
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        'UPDATE departments SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [id]
-      );
-
-      if (result.affectedRows === 0) {
-        throw new NotFoundError('Department not found');
-      }
-
-      await connection.commit();
-
-      logger.info(`Department deleted successfully: ${id}`);
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to delete department:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -411,54 +409,53 @@ export class DepartmentService {
    * @returns Promise resolving when complete
    */
   async assignEmployeesToDepartment(departmentId: number, userIds: number[]): Promise<void> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [deptRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
-        [departmentId]
-      );
-
-      if (deptRows.length === 0) {
-        throw new NotFoundError('Department not found');
-      }
-
-      if (userIds.length === 0) {
-        await connection.commit();
-        return;
-      }
-
-      // Verify all users exist and are active in one query
-      const placeholders = userIds.map(() => '?').join(', ');
-      const [validUserRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
-        userIds
-      );
-      const validIds = new Set((validUserRows as RowDataPacket[]).map(r => r.id as number));
-      const skipped = userIds.filter(id => !validIds.has(id));
-      if (skipped.length > 0) logger.warn(`Skipping invalid users: ${skipped.join(', ')}`);
-
-      const toAssign = userIds.filter(id => validIds.has(id));
-      if (toAssign.length > 0) {
-        // INSERT IGNORE handles already-assigned rows without a pre-check query
-        const valPlaceholders = toAssign.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT IGNORE INTO user_departments (user_id, department_id) VALUES ${valPlaceholders}`,
-          toAssign.flatMap(userId => [userId, departmentId])
+        const [deptRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
+          [departmentId]
         );
-      }
 
-      await connection.commit();
-      logger.info(`Employees assigned to department: ${departmentId}`, { userIds });
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to assign employees to department:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+        if (deptRows.length === 0) {
+          throw new NotFoundError('Department not found');
+        }
+
+        if (userIds.length === 0) {
+          await connection.commit();
+          return;
+        }
+
+        // Verify all users exist and are active in one query
+        const placeholders = userIds.map(() => '?').join(', ');
+        const [validUserRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM users WHERE id IN (${placeholders}) AND is_active = 1`,
+          userIds
+        );
+        const validIds = new Set((validUserRows as RowDataPacket[]).map(r => r.id as number));
+        const skipped = userIds.filter(id => !validIds.has(id));
+        if (skipped.length > 0) logger.warn(`Skipping invalid users: ${skipped.join(', ')}`);
+
+        const toAssign = userIds.filter(id => validIds.has(id));
+        if (toAssign.length > 0) {
+          // INSERT IGNORE handles already-assigned rows without a pre-check query
+          const valPlaceholders = toAssign.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT IGNORE INTO user_departments (user_id, department_id) VALUES ${valPlaceholders}`,
+            toAssign.flatMap(userId => [userId, departmentId])
+          );
+        }
+
+        await connection.commit();
+        logger.info(`Employees assigned to department: ${departmentId}`, { userIds });
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to assign employees to department:', error);
+        throw error;
+      }
+    });
   }
 
   /**

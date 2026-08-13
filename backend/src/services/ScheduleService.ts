@@ -20,6 +20,7 @@
  */
 
 import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   Schedule,
@@ -62,75 +63,74 @@ export class ScheduleService {
   }
 
   async createSchedule(scheduleData: CreateScheduleRequest): Promise<Schedule> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      if (!scheduleData.createdBy) throw new ConflictError('createdBy is required');
+        if (!scheduleData.createdBy) throw new ConflictError('createdBy is required');
 
-      const startDate = new Date(scheduleData.startDate);
-      const endDate = new Date(scheduleData.endDate);
-      if (startDate >= endDate) throw new ConflictError('End date must be after start date');
+        const startDate = new Date(scheduleData.startDate);
+        const endDate = new Date(scheduleData.endDate);
+        if (startDate >= endDate) throw new ConflictError('End date must be after start date');
 
-      const [deptRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
-        [scheduleData.departmentId]
-      );
-      if (deptRows.length === 0) throw new NotFoundError('Department not found');
+        const [deptRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
+          [scheduleData.departmentId]
+        );
+        if (deptRows.length === 0) throw new NotFoundError('Department not found');
 
-      // FOR UPDATE acquires gap locks under InnoDB REPEATABLE READ, preventing
-      // concurrent INSERTs in the same date window from racing past this check.
-      const [overlapRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT id FROM schedules
-        WHERE department_id = ?
-        AND status IN ('draft', 'published')
-        AND start_date <= ? AND end_date >= ?
-        LIMIT 1
-        FOR UPDATE`,
-        [scheduleData.departmentId, scheduleData.endDate, scheduleData.startDate]
-      );
-      if (overlapRows.length > 0) {
-        throw new ConflictError('A schedule already exists for this department in the specified date range');
+        // FOR UPDATE acquires gap locks under InnoDB REPEATABLE READ, preventing
+        // concurrent INSERTs in the same date window from racing past this check.
+        const [overlapRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id FROM schedules
+          WHERE department_id = ?
+          AND status IN ('draft', 'published')
+          AND start_date <= ? AND end_date >= ?
+          LIMIT 1
+          FOR UPDATE`,
+          [scheduleData.departmentId, scheduleData.endDate, scheduleData.startDate]
+        );
+        if (overlapRows.length > 0) {
+          throw new ConflictError('A schedule already exists for this department in the specified date range');
+        }
+
+        if (scheduleData.previousScheduleId) {
+          await this.assertUsablePredecessor(connection, {
+            predecessorId: scheduleData.previousScheduleId,
+            departmentId: scheduleData.departmentId,
+            startDate: scheduleData.startDate,
+          });
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes, previous_schedule_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            scheduleData.name,
+            null,
+            scheduleData.departmentId,
+            scheduleData.startDate,
+            scheduleData.endDate,
+            'draft',
+            scheduleData.createdBy,
+            scheduleData.notes || null,
+            scheduleData.previousScheduleId ?? null
+          ]
+        );
+
+        const scheduleId = result.insertId;
+        await connection.commit();
+        logger.info(`Schedule created successfully: ${scheduleId}`);
+
+        const newSchedule = await this.getScheduleById(scheduleId);
+        if (!newSchedule) throw new Error('Failed to retrieve created schedule');
+        return newSchedule;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to create schedule:', error);
+        throw error;
       }
-
-      if (scheduleData.previousScheduleId) {
-        await this.assertUsablePredecessor(connection, {
-          predecessorId: scheduleData.previousScheduleId,
-          departmentId: scheduleData.departmentId,
-          startDate: scheduleData.startDate,
-        });
-      }
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO schedules (name, description, department_id, start_date, end_date, status, created_by, notes, previous_schedule_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          scheduleData.name,
-          null,
-          scheduleData.departmentId,
-          scheduleData.startDate,
-          scheduleData.endDate,
-          'draft',
-          scheduleData.createdBy,
-          scheduleData.notes || null,
-          scheduleData.previousScheduleId ?? null
-        ]
-      );
-
-      const scheduleId = result.insertId;
-      await connection.commit();
-      logger.info(`Schedule created successfully: ${scheduleId}`);
-
-      const newSchedule = await this.getScheduleById(scheduleId);
-      if (!newSchedule) throw new Error('Failed to retrieve created schedule');
-      return newSchedule;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to create schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async getScheduleById(id: number): Promise<Schedule | null> {
@@ -279,122 +279,120 @@ export class ScheduleService {
   }
 
   async updateSchedule(id: number, scheduleData: UpdateScheduleRequest): Promise<Schedule> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      const [existingRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT status FROM schedules WHERE id = ? LIMIT 1',
-        [id]
-      );
-      if (existingRows.length === 0) throw new NotFoundError('Schedule not found');
-
-      const currentStatus = existingRows[0].status;
-      if (currentStatus === 'archived' && scheduleData.status !== 'archived') {
-        throw new ConflictError('Cannot modify archived schedule');
-      }
-
-      const updates: string[] = [];
-      const values: SqlParam[] = [];
-
-      if (scheduleData.name !== undefined) { updates.push('name = ?'); values.push(scheduleData.name); }
-      if (scheduleData.startDate !== undefined) { updates.push('start_date = ?'); values.push(scheduleData.startDate); }
-      if (scheduleData.endDate !== undefined) { updates.push('end_date = ?'); values.push(scheduleData.endDate); }
-      if (scheduleData.status !== undefined) {
-        updates.push('status = ?');
-        values.push(scheduleData.status);
-        if (scheduleData.status === 'published') updates.push('published_at = CURRENT_TIMESTAMP');
-      }
-      if (scheduleData.notes !== undefined) { updates.push('notes = ?'); values.push(scheduleData.notes); }
-      if (scheduleData.previousScheduleId !== undefined) {
-        // Explicit null is meaningful: it restores the default resolution
-        // rather than saying there is no predecessor, so it must be told apart
-        // from the field being absent.
-        if (scheduleData.previousScheduleId !== null) {
-          const [self] = await connection.execute<RowDataPacket[]>(
-            'SELECT department_id, start_date FROM schedules WHERE id = ? LIMIT 1',
-            [id]
-          );
-          await this.assertUsablePredecessor(connection, {
-            predecessorId: scheduleData.previousScheduleId,
-            departmentId: self[0].department_id as number,
-            startDate: DateUtils.toDateString(self[0].start_date),
-            selfId: id,
-          });
-        }
-        updates.push('previous_schedule_id = ?');
-        values.push(scheduleData.previousScheduleId);
-      }
-
-      if (updates.length > 0) {
-        values.push(id);
-        await connection.execute(
-          `UPDATE schedules SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          values
+        const [existingRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT status FROM schedules WHERE id = ? LIMIT 1',
+          [id]
         );
+        if (existingRows.length === 0) throw new NotFoundError('Schedule not found');
+
+        const currentStatus = existingRows[0].status;
+        if (currentStatus === 'archived' && scheduleData.status !== 'archived') {
+          throw new ConflictError('Cannot modify archived schedule');
+        }
+
+        const updates: string[] = [];
+        const values: SqlParam[] = [];
+
+        if (scheduleData.name !== undefined) { updates.push('name = ?'); values.push(scheduleData.name); }
+        if (scheduleData.startDate !== undefined) { updates.push('start_date = ?'); values.push(scheduleData.startDate); }
+        if (scheduleData.endDate !== undefined) { updates.push('end_date = ?'); values.push(scheduleData.endDate); }
+        if (scheduleData.status !== undefined) {
+          updates.push('status = ?');
+          values.push(scheduleData.status);
+          if (scheduleData.status === 'published') updates.push('published_at = CURRENT_TIMESTAMP');
+        }
+        if (scheduleData.notes !== undefined) { updates.push('notes = ?'); values.push(scheduleData.notes); }
+        if (scheduleData.previousScheduleId !== undefined) {
+          // Explicit null is meaningful: it restores the default resolution
+          // rather than saying there is no predecessor, so it must be told apart
+          // from the field being absent.
+          if (scheduleData.previousScheduleId !== null) {
+            const [self] = await connection.execute<RowDataPacket[]>(
+              'SELECT department_id, start_date FROM schedules WHERE id = ? LIMIT 1',
+              [id]
+            );
+            await this.assertUsablePredecessor(connection, {
+              predecessorId: scheduleData.previousScheduleId,
+              departmentId: self[0].department_id as number,
+              startDate: DateUtils.toDateString(self[0].start_date),
+              selfId: id,
+            });
+          }
+          updates.push('previous_schedule_id = ?');
+          values.push(scheduleData.previousScheduleId);
+        }
+
+        if (updates.length > 0) {
+          values.push(id);
+          await connection.execute(
+            `UPDATE schedules SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            values
+          );
+        }
+
+        await connection.commit();
+        logger.info(`Schedule updated successfully: ${id}`);
+
+        const updatedSchedule = await this.getScheduleById(id);
+        if (!updatedSchedule) throw new NotFoundError('Schedule not found after update');
+        return updatedSchedule;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to update schedule:', error);
+        throw error;
       }
-
-      await connection.commit();
-      logger.info(`Schedule updated successfully: ${id}`);
-
-      const updatedSchedule = await this.getScheduleById(id);
-      if (!updatedSchedule) throw new NotFoundError('Schedule not found after update');
-      return updatedSchedule;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to update schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async deleteSchedule(id: number): Promise<boolean> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      const [scheduleRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT status FROM schedules WHERE id = ? LIMIT 1',
-        [id]
-      );
-      if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
+        const [scheduleRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT status FROM schedules WHERE id = ? LIMIT 1',
+          [id]
+        );
+        if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
 
-      const status = scheduleRows[0].status;
-      if (status !== 'draft') {
-        throw new ConflictError('Only draft schedules can be deleted. Archive published schedules instead.');
+        const status = scheduleRows[0].status;
+        if (status !== 'draft') {
+          throw new ConflictError('Only draft schedules can be deleted. Archive published schedules instead.');
+        }
+
+        await connection.execute(
+          `DELETE sa FROM shift_assignments sa
+          JOIN shifts sh ON sa.shift_id = sh.id
+          WHERE sh.schedule_id = ?`,
+          [id]
+        );
+        await connection.execute(
+          `DELETE ss FROM shift_skills ss
+          JOIN shifts sh ON ss.shift_id = sh.id
+          WHERE sh.schedule_id = ?`,
+          [id]
+        );
+        await connection.execute('DELETE FROM shifts WHERE schedule_id = ?', [id]);
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          'DELETE FROM schedules WHERE id = ?',
+          [id]
+        );
+        if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
+
+        await connection.commit();
+        logger.info(`Schedule deleted successfully: ${id}`);
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to delete schedule:', error);
+        throw error;
       }
-
-      await connection.execute(
-        `DELETE sa FROM shift_assignments sa
-        JOIN shifts sh ON sa.shift_id = sh.id
-        WHERE sh.schedule_id = ?`,
-        [id]
-      );
-      await connection.execute(
-        `DELETE ss FROM shift_skills ss
-        JOIN shifts sh ON ss.shift_id = sh.id
-        WHERE sh.schedule_id = ?`,
-        [id]
-      );
-      await connection.execute('DELETE FROM shifts WHERE schedule_id = ?', [id]);
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        'DELETE FROM schedules WHERE id = ?',
-        [id]
-      );
-      if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
-
-      await connection.commit();
-      logger.info(`Schedule deleted successfully: ${id}`);
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to delete schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -486,174 +484,172 @@ export class ScheduleService {
   }
 
   async publishSchedule(id: number, actorId?: number | null, reason?: string): Promise<Schedule> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      const [shiftRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT COUNT(*) as shift_count FROM shifts WHERE schedule_id = ?',
-        [id]
-      );
-      if (shiftRows[0].shift_count === 0) throw new ConflictError('Cannot publish schedule with no shifts');
+        const [shiftRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT COUNT(*) as shift_count FROM shifts WHERE schedule_id = ?',
+          [id]
+        );
+        if (shiftRows[0].shift_count === 0) throw new ConflictError('Cannot publish schedule with no shifts');
 
-      await connection.execute(
-        `UPDATE schedules
-        SET status = 'published', published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'draft'`,
-        [id]
-      );
+        await connection.execute(
+          `UPDATE schedules
+          SET status = 'published', published_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'draft'`,
+          [id]
+        );
 
-      // Publishing is what turns an assignment into a COMMITMENT: it is the
-      // moment people are told, and from here a re-solve must plan around it
-      // rather than reconsider it.
-      //
-      // This is the write the pin column was added for and never got — the
-      // migration backfilled schedules that were already published, so the
-      // machinery worked exactly once, for rows that existed before it. Every
-      // schedule published afterwards handed the optimizer an empty pinned set,
-      // leaving the disruption objective nothing to charge and the re-solve
-      // diff permanently empty.
-      //
-      // In the same transaction as the status change, because "published" and
-      // "committed" are one fact; a crash between them would leave a live
-      // schedule the optimizer is free to reshuffle.
-      //
-      // Only `pending` and `confirmed`: a declined or cancelled assignment is
-      // not something anyone is relying on, and pinning it would ask the
-      // optimizer to preserve work nobody is doing.
-      await connection.execute(
-        `UPDATE shift_assignments sa
-           JOIN shifts s ON s.id = sa.shift_id
-            SET sa.is_pinned = TRUE
-          WHERE s.schedule_id = ?
-            AND sa.status IN ('pending', 'confirmed')`,
-        [id]
-      );
+        // Publishing is what turns an assignment into a COMMITMENT: it is the
+        // moment people are told, and from here a re-solve must plan around it
+        // rather than reconsider it.
+        //
+        // This is the write the pin column was added for and never got — the
+        // migration backfilled schedules that were already published, so the
+        // machinery worked exactly once, for rows that existed before it. Every
+        // schedule published afterwards handed the optimizer an empty pinned set,
+        // leaving the disruption objective nothing to charge and the re-solve
+        // diff permanently empty.
+        //
+        // In the same transaction as the status change, because "published" and
+        // "committed" are one fact; a crash between them would leave a live
+        // schedule the optimizer is free to reshuffle.
+        //
+        // Only `pending` and `confirmed`: a declined or cancelled assignment is
+        // not something anyone is relying on, and pinning it would ask the
+        // optimizer to preserve work nobody is doing.
+        await connection.execute(
+          `UPDATE shift_assignments sa
+             JOIN shifts s ON s.id = sa.shift_id
+              SET sa.is_pinned = TRUE
+            WHERE s.schedule_id = ?
+              AND sa.status IN ('pending', 'confirmed')`,
+          [id]
+        );
 
-      await connection.commit();
-      logger.info(`Schedule published successfully: ${id}`);
+        await connection.commit();
+        logger.info(`Schedule published successfully: ${id}`);
 
-      const publishedSchedule = await this.getScheduleById(id);
-      if (!publishedSchedule) throw new NotFoundError('Schedule not found after publishing');
+        const publishedSchedule = await this.getScheduleById(id);
+        if (!publishedSchedule) throw new NotFoundError('Schedule not found after publishing');
 
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'schedule.publish',
-        entityType: 'schedule',
-        entityId: id,
-        description: `Schedule published: ${publishedSchedule.name}`,
-        justification: reason ?? null,
-        after: { id, status: 'published' },
-      });
-
-      // One notification per employee actually on the roster — this is the
-      // signal that "the schedule is available", not just an audit entry.
-      // In the simulation harness this same event is what an employee
-      // thread waits on before checking its own assignments for errors.
-      const [assignedRows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT DISTINCT sa.user_id
-           FROM shift_assignments sa
-           JOIN shifts s ON s.id = sa.shift_id
-          WHERE s.schedule_id = ?`,
-        [id]
-      );
-      for (const row of assignedRows) {
-        this.notifications.notifyAsync({
-          userId: row.user_id as number,
-          type: 'schedule.published',
-          title: 'Schedule published',
-          body: `"${publishedSchedule.name}" is now available — check your assigned shifts.`,
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'schedule.publish',
+          entityType: 'schedule',
+          entityId: id,
+          description: `Schedule published: ${publishedSchedule.name}`,
+          justification: reason ?? null,
+          after: { id, status: 'published' },
         });
-      }
 
-      // Best-effort, same as the notification loop above: a webhook
-      // subscriber (if the acting organization has any) hears about the
-      // publish as one event, not once per assigned employee.
-      const organizationName = await this.resolveOrganization(actorId);
-      if (organizationName) {
-        this.webhooks
-          .dispatch(organizationName, 'schedule.published', {
-            scheduleId: id,
-            name: publishedSchedule.name,
-            publishedAt: publishedSchedule.publishedAt,
-          })
-          .catch((err) => logger.error('Webhook dispatch failed for schedule.published', { error: err }));
-      }
+        // One notification per employee actually on the roster — this is the
+        // signal that "the schedule is available", not just an audit entry.
+        // In the simulation harness this same event is what an employee
+        // thread waits on before checking its own assignments for errors.
+        const [assignedRows] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT DISTINCT sa.user_id
+             FROM shift_assignments sa
+             JOIN shifts s ON s.id = sa.shift_id
+            WHERE s.schedule_id = ?`,
+          [id]
+        );
+        for (const row of assignedRows) {
+          this.notifications.notifyAsync({
+            userId: row.user_id as number,
+            type: 'schedule.published',
+            title: 'Schedule published',
+            body: `"${publishedSchedule.name}" is now available — check your assigned shifts.`,
+          });
+        }
 
-      return publishedSchedule;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to publish schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+        // Best-effort, same as the notification loop above: a webhook
+        // subscriber (if the acting organization has any) hears about the
+        // publish as one event, not once per assigned employee.
+        const organizationName = await this.resolveOrganization(actorId);
+        if (organizationName) {
+          this.webhooks
+            .dispatch(organizationName, 'schedule.published', {
+              scheduleId: id,
+              name: publishedSchedule.name,
+              publishedAt: publishedSchedule.publishedAt,
+            })
+            .catch((err) => logger.error('Webhook dispatch failed for schedule.published', { error: err }));
+        }
+
+        return publishedSchedule;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to publish schedule:', error);
+        throw error;
+      }
+    });
   }
 
   async archiveSchedule(id: number, actorId?: number | null): Promise<Schedule> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
 
-      const [scheduleRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT status FROM schedules WHERE id = ? LIMIT 1 FOR UPDATE',
-        [id]
-      );
-      if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
-      const previousStatus = scheduleRows[0].status as string;
-      if (previousStatus !== 'draft' && previousStatus !== 'published') {
-        throw new ConflictError(`Cannot archive schedule in '${previousStatus}' status`);
-      }
-
-      // Archiving abandons any shift invite that hasn't been answered yet —
-      // block until those are resolved (confirmed/completed/cancelled) rather
-      // than silently orphaning them.
-      const [pendingRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS pending_count
-           FROM shift_assignments sa
-           JOIN shifts sh ON sa.shift_id = sh.id
-          WHERE sh.schedule_id = ? AND sa.status = 'pending'`,
-        [id]
-      );
-      const pendingCount = pendingRows[0].pending_count as number;
-      if (pendingCount > 0) {
-        throw new ConflictError(
-          `Cannot archive schedule with ${pendingCount} pending shift assignment(s); resolve or cancel them first`
+        const [scheduleRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT status FROM schedules WHERE id = ? LIMIT 1 FOR UPDATE',
+          [id]
         );
+        if (scheduleRows.length === 0) throw new NotFoundError('Schedule not found');
+        const previousStatus = scheduleRows[0].status as string;
+        if (previousStatus !== 'draft' && previousStatus !== 'published') {
+          throw new ConflictError(`Cannot archive schedule in '${previousStatus}' status`);
+        }
+
+        // Archiving abandons any shift invite that hasn't been answered yet —
+        // block until those are resolved (confirmed/completed/cancelled) rather
+        // than silently orphaning them.
+        const [pendingRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT COUNT(*) AS pending_count
+             FROM shift_assignments sa
+             JOIN shifts sh ON sa.shift_id = sh.id
+            WHERE sh.schedule_id = ? AND sa.status = 'pending'`,
+          [id]
+        );
+        const pendingCount = pendingRows[0].pending_count as number;
+        if (pendingCount > 0) {
+          throw new ConflictError(
+            `Cannot archive schedule with ${pendingCount} pending shift assignment(s); resolve or cancel them first`
+          );
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          `UPDATE schedules
+          SET status = 'archived', updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = ?`,
+          [id, previousStatus]
+        );
+        if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
+
+        await connection.commit();
+        logger.info(`Schedule archived successfully: ${id}`);
+
+        const archivedSchedule = await this.getScheduleById(id);
+        if (!archivedSchedule) throw new NotFoundError('Schedule not found after archiving');
+
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'schedule.archive',
+          entityType: 'schedule',
+          entityId: id,
+          description: `Schedule archived: ${archivedSchedule.name}`,
+          before: { id, status: previousStatus },
+          after: { id, status: 'archived' },
+        });
+
+        return archivedSchedule;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to archive schedule:', error);
+        throw error;
       }
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        `UPDATE schedules
-        SET status = 'archived', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = ?`,
-        [id, previousStatus]
-      );
-      if (result.affectedRows === 0) throw new NotFoundError('Schedule not found');
-
-      await connection.commit();
-      logger.info(`Schedule archived successfully: ${id}`);
-
-      const archivedSchedule = await this.getScheduleById(id);
-      if (!archivedSchedule) throw new NotFoundError('Schedule not found after archiving');
-
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'schedule.archive',
-        entityType: 'schedule',
-        entityId: id,
-        description: `Schedule archived: ${archivedSchedule.name}`,
-        before: { id, status: previousStatus },
-        after: { id, status: 'archived' },
-      });
-
-      return archivedSchedule;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to archive schedule:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   // ── Thin delegates — real logic lives in ScheduleOptimizationOrchestrator ──
