@@ -348,20 +348,6 @@ export const departmentListQuery = z.object({
   orgUnitId: positiveInt.optional(),
 });
 
-/**
- * Size of the dashboard's recent-activity feed.
- *
- * The spec published a `limit` parameter for this endpoint through a reusable
- * `$ref` while the handler took `_req` and hardcoded `LIMIT 10`, so the
- * documented knob did nothing. Declaring it here is the honest fix: the widget
- * is a fixed-height panel whose useful size depends on the caller, and a
- * bounded, validated integer is cheaper than a second endpoint. The ceiling is
- * deliberately low — this is a preview of `audit_logs`, not a way to page
- * through it; `GET /audit-logs` is the endpoint for that.
- */
-export const dashboardActivitiesQuery = z.object({
-  limit: z.coerce.number().int().positive().max(50).optional(),
-});
 
 export const scheduleListQuery = z.object({
   departmentId: positiveInt.optional(),

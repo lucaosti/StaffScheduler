@@ -117,9 +117,6 @@ const mounts: Mount[] = [
     router: () => createDashboardRouter(fakePool as never),
     paths: [
       { method: 'get', url: '/stats' },
-      { method: 'get', url: '/activities' },
-      { method: 'get', url: '/upcoming-shifts' },
-      { method: 'get', url: '/departments' },
     ],
   },
 ];
