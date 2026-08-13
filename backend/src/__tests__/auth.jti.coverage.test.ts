@@ -87,12 +87,23 @@ describe('addToBlacklist', () => {
     RbacService.prototype.getEffectiveDelegationScopes = jest.fn().mockResolvedValue([]);
 
     const jti = `expiring-jti-${Date.now()}`;
-    // Revoke for a very short window (the store's minimum TTL), then let it
-    // lapse: an expired revocation must no longer reject the token. Awaited so
-    // the entry is committed before the request; the wait exceeds the TTL by a
-    // wide margin so this stays deterministic, not timing-flaky.
+    // Revoke briefly, then MOVE THE CLOCK past the entry's expiry rather than
+    // sleeping through it (#717).
+    //
+    // This used to revoke for 10 ms and sleep 60 ms, calling the 50 ms margin
+    // "deterministic, not timing-flaky". It was neither: the store compares
+    // against `Date.now()`, so the assertion holds only if this process is
+    // scheduled within that margin, and under a full parallel run it sometimes
+    // is not — the suite then failed here while passing every time on its own.
+    //
+    // Advancing the clock proves the same property with no margin to lose and
+    // no wait at all. Fake timers were rejected for this one: the request below
+    // goes over a real socket through supertest, which needs the real event
+    // loop. `jsonwebtoken` reads the same mocked clock for both sign and
+    // verify, so the token stays consistently valid.
     await addToBlacklist(jti, Date.now() + 10);
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    const beforeExpiry = Date.now();
+    jest.spyOn(Date, 'now').mockReturnValue(beforeExpiry + 60_000);
 
     const token = jwt.sign({ userId: 1, email: 'user@x', jti }, config.jwt.secret, {
       expiresIn: '1h',
