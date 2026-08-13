@@ -9,6 +9,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 
@@ -35,12 +36,8 @@ interface UpsertPreferencesInput {
 const parseJsonArray = (value: unknown): number[] => {
   if (Array.isArray(value)) return value as number[];
   if (typeof value === 'string' && value.length > 0) {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? (parsed as number[]) : [];
-    } catch {
-      return [];
-    }
+    const parsed = ValidationUtils.parseJsonColumn<unknown>(value, [], 'user_preferences JSON array');
+    return Array.isArray(parsed) ? (parsed as number[]) : [];
   }
   return [];
 };

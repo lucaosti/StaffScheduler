@@ -28,6 +28,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { ConflictError, ValidationError } from '../errors';
 
 /**
@@ -94,9 +95,19 @@ export const isGovernableField = (fieldKey: string): boolean => {
   return (GOVERNABLE_CORE_FIELDS as readonly string[]).includes(fieldKey);
 };
 
+/**
+ * The allow-list a field is restricted to, or null for "not restricted".
+ *
+ * A corrupted value reads as null — the field simply carries no allow-list —
+ * rather than throwing a bare SyntaxError out of the row mapper and failing
+ * the entire policy list over one row (#723).
+ */
 const parseAllowedValues = (raw: unknown): string[] | null => {
-  if (raw === null || raw === undefined) return null;
-  const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
+  const value = ValidationUtils.parseJsonColumn<unknown>(
+    raw,
+    null,
+    'employee_field_policies.allowed_values'
+  );
   return Array.isArray(value) ? value.map(String) : null;
 };
 

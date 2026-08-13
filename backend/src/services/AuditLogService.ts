@@ -16,6 +16,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { logger } from '../config/logger';
 import { ValidationError } from '../errors';
 import { getRequestId, getRequestIp, getRequestUserAgent } from '../middleware/requestContext';
@@ -85,14 +86,9 @@ interface AuditLogPage {
   items: AuditLogEntry[];
 }
 
-const parseJson = (raw: unknown): Record<string, unknown> | null => {
-  if (!raw) return null;
-  try {
-    return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
-  } catch {
-    return null;
-  }
-};
+/** Null on absence or corruption: an unreadable snapshot is not a snapshot. */
+const parseJson = (raw: unknown): Record<string, unknown> | null =>
+  ValidationUtils.parseJsonColumn<Record<string, unknown> | null>(raw, null, 'audit_logs snapshot');
 
 const mapRow = (row: RowDataPacket): AuditLogEntry => ({
   id: row.id as number,

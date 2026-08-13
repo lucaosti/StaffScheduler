@@ -67,6 +67,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { OrgUnitService } from './OrgUnitService';
 
 export interface PersonHistoryRole {
@@ -97,14 +98,10 @@ interface AuditEventRow extends RowDataPacket {
   created_at: string | Date;
 }
 
-const parseJson = (raw: unknown): Record<string, unknown> | null => {
-  if (!raw) return null;
-  try {
-    return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
-  } catch {
-    return null;
-  }
-};
+/** Null on absence or corruption; the byte-identical twin of the helper that
+ *  used to sit in AuditLogService, now one definition for both. */
+const parseJson = (raw: unknown): Record<string, unknown> | null =>
+  ValidationUtils.parseJsonColumn<Record<string, unknown> | null>(raw, null, 'person history snapshot');
 
 export class PersonHistoryService {
   private readonly units: OrgUnitService;

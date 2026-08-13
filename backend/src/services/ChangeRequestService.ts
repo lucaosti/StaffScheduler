@@ -14,6 +14,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   ChangeRequest,
@@ -34,9 +35,11 @@ const mapRow = (row: RowDataPacket): ChangeRequest => ({
   proposerUserId: row.proposer_user_id as number,
   targetEntityType: row.target_entity_type as string,
   targetEntityId: (row.target_entity_id as number | null) ?? null,
-  proposedPayload: (() => {
-    try { return typeof row.proposed_payload === 'string' ? JSON.parse(row.proposed_payload) : row.proposed_payload; } catch { return {}; }
-  })(),
+  proposedPayload: ValidationUtils.parseJsonColumn<Record<string, unknown>>(
+    row.proposed_payload,
+    {},
+    'change_requests.proposed_payload'
+  ),
   justification: (row.justification as string | null) ?? null,
   status: row.status as ChangeRequestStatus,
   approverUserId: (row.approver_user_id as number | null) ?? null,

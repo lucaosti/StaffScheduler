@@ -36,6 +36,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 
 /** The two audited actions, and the one this service derives. */
 export type RoleTimelineAction = 'granted' | 'revoked' | 'expired';
@@ -101,11 +102,7 @@ interface AuditRow extends RowDataPacket {
 const snapshot = (value: unknown): Record<string, unknown> => {
   if (!value) return {};
   if (typeof value === 'string') {
-    try {
-      return JSON.parse(value) as Record<string, unknown>;
-    } catch {
-      return {};
-    }
+    return ValidationUtils.parseJsonColumn<Record<string, unknown>>(value, {}, 'role timeline snapshot');
   }
   return value as Record<string, unknown>;
 };
