@@ -194,22 +194,41 @@ describe('incrementCounter', () => {
     expect(ms).toBeLessThanOrEqual(60_000);
   });
 
-  it('keeps the ORIGINAL reset time as the window is spent', async () => {
-    // A fixed window whose expiry moved on every hit would never reset under
-    // sustained traffic — the caller would be locked out permanently.
-    const k = key();
-    const first = await incrementCounter(k, 60_000);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const second = await incrementCounter(k, 60_000);
+  /**
+   * WHY THESE TWO USE FAKE TIMERS (#717).
+   *
+   * They used to sleep on the real clock and assert against a TTL measured in
+   * tens of milliseconds — a 10 ms window with a 25 ms wait, so a 15 ms margin.
+   * The store reads `Date.now()`, so the assertion holds only if the process is
+   * actually scheduled within that margin, and under a full parallel test run
+   * it sometimes is not: the test then reads a window it believes expired and
+   * fails, in a suite that passes every time on its own.
+   *
+   * Jest's modern fake timers mock `Date.now()` as well as `setTimeout`, so
+   * advancing time proves exactly the same property — deterministically, and
+   * without waiting at all.
+   */
+  describe('window expiry', () => {
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
 
-    expect(second.resetTime.getTime()).toBe(first.resetTime.getTime());
-  });
+    it('keeps the ORIGINAL reset time as the window is spent', async () => {
+      // A fixed window whose expiry moved on every hit would never reset under
+      // sustained traffic — the caller would be locked out permanently.
+      const k = key();
+      const first = await incrementCounter(k, 60_000);
+      await jest.advanceTimersByTimeAsync(20);
+      const second = await incrementCounter(k, 60_000);
 
-  it('starts a fresh window once the old one has passed', async () => {
-    const k = key();
-    await incrementCounter(k, 10);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    expect((await incrementCounter(k, 10)).count).toBe(1);
+      expect(second.resetTime.getTime()).toBe(first.resetTime.getTime());
+    });
+
+    it('starts a fresh window once the old one has passed', async () => {
+      const k = key();
+      await incrementCounter(k, 10);
+      await jest.advanceTimersByTimeAsync(25);
+      expect((await incrementCounter(k, 10)).count).toBe(1);
+    });
   });
 
   it('is cleared by resetCounter', async () => {
