@@ -16,6 +16,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { NotFoundError } from '../errors';
 import { isPointInAnyPolygon, GeoPoint } from '../utils/geo';
 
@@ -33,7 +34,9 @@ const rowToGeofence = (row: RowDataPacket): Geofence => ({
   id: row.id,
   departmentId: row.department_id,
   name: row.name,
-  polygon: typeof row.polygon === 'string' ? JSON.parse(row.polygon) : row.polygon,
+  // An empty polygon contains no point, so a corrupted one fences nothing in
+  // rather than failing the whole list — see `parseJsonColumn`.
+  polygon: ValidationUtils.parseJsonColumn<GeoPoint[]>(row.polygon, [], 'geofences.polygon'),
   isActive: Boolean(row.is_active),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -145,8 +148,15 @@ export class GeofenceService {
       return { required: true, allowed: false };
     }
 
-    const polygons: GeoPoint[][] = rows.map((row) =>
-      typeof row.polygon === 'string' ? JSON.parse(row.polygon) : row.polygon
+    // A corrupted polygon falls back to an empty one, which contains no point
+    // — so this fence stops matching while the caller's OTHER fences still do.
+    // Failing CLOSED is the deliberate direction: a geofence is a restriction,
+    // and treating an unreadable one as "allow from anywhere" would turn a
+    // data problem into a silent hole in the control. The previous behaviour
+    // was worse than either — a bare SyntaxError became a 500, so one bad row
+    // stopped clock-in for everyone sharing that department (#723).
+    const polygons = rows.map((row) =>
+      ValidationUtils.parseJsonColumn<GeoPoint[]>(row.polygon, [], 'geofences.polygon')
     );
     return { required: true, allowed: isPointInAnyPolygon(point, polygons) };
   }

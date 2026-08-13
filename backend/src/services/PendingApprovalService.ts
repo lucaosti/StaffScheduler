@@ -12,6 +12,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { PendingApprovalWithContext, PendingApprovalEntityType } from '../types';
 
 const mapRow = (r: any): PendingApprovalWithContext => {
@@ -45,12 +46,11 @@ const mapRow = (r: any): PendingApprovalWithContext => {
 
   let proposedPayload: Record<string, unknown>;
   if (targetEntityType === 'change_request') {
-    try {
-      proposedPayload =
-        typeof r.cr_proposed_payload === 'string' ? JSON.parse(r.cr_proposed_payload) : (r.cr_proposed_payload ?? {});
-    } catch {
-      proposedPayload = {};
-    }
+    proposedPayload = ValidationUtils.parseJsonColumn<Record<string, unknown>>(
+      r.cr_proposed_payload,
+      {},
+      'change_requests.proposed_payload'
+    );
   } else if (targetEntityType === 'time_off_request') {
     proposedPayload = { startDate: r.tor_start_date, endDate: r.tor_end_date, type: r.tor_type };
   } else if (targetEntityType === 'employee_loan') {

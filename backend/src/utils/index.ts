@@ -16,6 +16,8 @@
  * @author Luca Ostinelli
  */
 
+import { logger } from '../config/logger';
+
 export class DateUtils {
   /**
    * Convert Date to MySQL datetime format
@@ -160,20 +162,62 @@ export class DateUtils {
 
 export class ValidationUtils {
   /**
+   * Reads a JSON column, whichever of its two shapes the driver hands back.
+   *
+   * WHY BOTH SHAPES. mysql2 parses a `JSON` column into an object already,
+   * while an older driver — and any column kept as `TEXT` — returns the raw
+   * string. Both appear in the wild, so every reader has to accept either.
+   *
+   * WHY IT NEVER THROWS. A malformed value in ONE row would otherwise raise a
+   * bare `SyntaxError` out of a row mapper. That is not an `AppError`, so
+   * `errorHandler` renders it as a 500 — and since these mappers run inside
+   * list endpoints, one corrupted row made the WHOLE list unreadable rather
+   * than just itself. Five call sites had no guard at all before this existed,
+   * one of them on the attendance clock-in path, where a single malformed
+   * geofence polygon would have stopped attendance for an entire department
+   * (#723).
+   *
+   * WHY IT LOGS. Falling back silently trades an outage for data that is
+   * quietly wrong, which is the worse failure of the two to diagnose. The row
+   * still renders — with the caller's fallback — and the corruption is
+   * recorded where an operator can find it. `context` names the column so the
+   * log line identifies what to go and fix.
+   *
+   * The caller supplies the fallback because only the caller knows what an
+   * absent value means for its own shape: `{}` for a payload, `[]` for a
+   * list, `null` for "not configured".
+   */
+  static parseJsonColumn<T>(raw: unknown, fallback: T, context: string): T {
+    if (raw === null || raw === undefined) return fallback;
+    if (typeof raw !== 'string') return raw as T;
+    if (raw.length === 0) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch (error) {
+      logger.error(`Malformed JSON in ${context}; falling back`, {
+        error: (error as Error).message,
+        // Bounded: a corrupted column can be arbitrarily large, and the point
+        // is to identify the row, not to reproduce it in the log.
+        value: raw.slice(0, 200),
+      });
+      return fallback;
+    }
+  }
+
+  /**
    * Parses a DB-stored JSON string expected to contain an array of strings.
    * Returns [] on malformed JSON or a non-array value instead of throwing,
    * so one corrupted row can never take down a whole request (the RBAC
    * delegation path runs on every authenticated request).
+   *
+   * Kept distinct from `parseJsonColumn` rather than folded into it: this one
+   * also FILTERS, dropping non-string members of an otherwise valid array, so
+   * a caller reading permission codes cannot receive a number among them.
    */
   static parseStringArray(raw: unknown): string[] {
     if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === 'string');
-    if (typeof raw !== 'string' || raw.length === 0) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-    } catch {
-      return [];
-    }
+    const parsed = ValidationUtils.parseJsonColumn<unknown>(raw, [], 'a string-array column');
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
   }
 
   /**

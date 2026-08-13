@@ -42,6 +42,7 @@
  */
 
 import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
@@ -82,10 +83,15 @@ const mapProposal = (row: RowDataPacket): ReplanProposal => ({
   proposedBy: (row.proposed_by as number | null) ?? null,
   status: row.status as ReplanStatus,
   engine: row.engine as string,
-  // mysql2 parses a JSON column into an object already; older drivers and a
-  // TEXT fallback hand back a string. Both shapes appear in the wild, so this
-  // accepts either rather than assuming the one the local server does.
-  payload: typeof row.payload === 'string' ? JSON.parse(row.payload) : (row.payload as ReplanPayload),
+  // Both driver shapes accepted, and a corrupted payload renders as an empty
+  // plan rather than failing the whole proposal list — a proposal whose
+  // payload cannot be read proposes nothing, which is the honest reading and
+  // the safe one: `apply` has nothing to write.
+  payload: ValidationUtils.parseJsonColumn<ReplanPayload>(
+    row.payload,
+    { assignments: [], brokenCommitments: [], keptCommitments: 0, totalShifts: 0 },
+    'schedule_replan_proposals.payload'
+  ),
   decidedBy: (row.decided_by as number | null) ?? null,
   decisionReason: (row.decision_reason as string | null) ?? null,
   createdAt: String(row.created_at),

@@ -9,6 +9,7 @@ import {
   DateUtils,
   ValidationUtils,
 } from '../utils';
+import { logger } from '../config/logger';
 
 describe('DateUtils', () => {
   const sample = new Date('2026-04-26T13:14:15.000Z');
@@ -92,3 +93,63 @@ describe('ValidationUtils', () => {
   });
 });
 
+
+/**
+ * `parseJsonColumn` is the guard five row mappers were missing (#723): a
+ * malformed JSON column used to raise a bare `SyntaxError` out of the mapper,
+ * which `errorHandler` renders as a 500 — so ONE corrupted row made an entire
+ * list unreadable, and on the geofence path stopped clock-in for a department.
+ */
+describe('ValidationUtils.parseJsonColumn', () => {
+  it('accepts a value the driver already parsed', () => {
+    // mysql2 hands back a JSON column as an object; only a TEXT column or an
+    // older driver gives the string. Both shapes have to work.
+    expect(ValidationUtils.parseJsonColumn({ a: 1 }, {}, 'ctx')).toEqual({ a: 1 });
+    expect(ValidationUtils.parseJsonColumn([1, 2], [], 'ctx')).toEqual([1, 2]);
+  });
+
+  it('parses the string shape', () => {
+    expect(ValidationUtils.parseJsonColumn('{"a":1}', {}, 'ctx')).toEqual({ a: 1 });
+  });
+
+  it('returns the fallback for null, undefined and empty', () => {
+    for (const raw of [null, undefined, '']) {
+      expect(ValidationUtils.parseJsonColumn(raw, 'fallback', 'ctx')).toBe('fallback');
+    }
+  });
+
+  it('returns the fallback instead of throwing on malformed JSON', () => {
+    // The whole point: the row still renders, the request still succeeds.
+    expect(() => ValidationUtils.parseJsonColumn('{not json', {}, 'ctx')).not.toThrow();
+    expect(ValidationUtils.parseJsonColumn('{not json', { safe: true }, 'ctx')).toEqual({
+      safe: true,
+    });
+  });
+
+  it('logs the corruption rather than swallowing it', () => {
+    // Falling back silently trades an outage for data that is quietly wrong,
+    // which is harder to diagnose than either. The context names the column.
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    ValidationUtils.parseJsonColumn('{bad', {}, 'geofences.polygon');
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining('geofences.polygon'),
+      expect.objectContaining({ value: '{bad' })
+    );
+    error.mockRestore();
+  });
+
+  it('bounds the logged value so a large corrupted column cannot flood the log', () => {
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    ValidationUtils.parseJsonColumn('{'.repeat(5000), {}, 'ctx');
+    const logged = (error.mock.calls[0] as unknown as [string, { value: string }])[1].value;
+    expect(logged.length).toBe(200);
+    error.mockRestore();
+  });
+
+  it('keeps parseStringArray filtering non-strings out of a valid array', () => {
+    // The sibling helper does more than parse, which is why it stayed distinct.
+    expect(ValidationUtils.parseStringArray('["a",1,"b"]')).toEqual(['a', 'b']);
+    expect(ValidationUtils.parseStringArray('{bad')).toEqual([]);
+    expect(ValidationUtils.parseStringArray('{"not":"an array"}')).toEqual([]);
+  });
+});

@@ -13,6 +13,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { ValidationUtils } from '../utils';
 import { NotFoundError } from '../errors';
 
 export interface TranslationOverride {
@@ -34,8 +35,13 @@ const mapRow = (row: RowDataPacket): TranslationOverride => ({
   id: row.id as number,
   organizationName: (row.organization_name as string | null) ?? null,
   locale: row.locale as string,
-  overrides:
-    typeof row.overrides === 'string' ? JSON.parse(row.overrides) : (row.overrides as Record<string, string>),
+  // A corrupted override set falls back to none, so the UI shows the shipped
+  // translations for that locale instead of failing the whole list.
+  overrides: ValidationUtils.parseJsonColumn<Record<string, string>>(
+    row.overrides,
+    {},
+    'translation_overrides.overrides'
+  ),
   createdAt: row.created_at as string,
   updatedAt: row.updated_at as string,
 });
