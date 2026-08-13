@@ -105,6 +105,8 @@ backend/src/
 │   ├── AssignmentValidator.ts # Validation logic extracted from AssignmentService
 │   ├── AssignmentOrchestrator.ts  # Orchestration logic extracted from AssignmentService
 │   ├── ScheduleOptimizationOrchestrator.ts  # Optimization orchestration from ScheduleService
+│   ├── AutoScheduleInputLoader.ts   # Every read an auto-schedule run performs
+│   ├── autoScheduleProblem.ts       # Pure OptimizationProblem builder (no I/O)
 │   └── (other per-domain services)
 └── optimization/
     ├── ScheduleOptimizerORTools.ts  # Spawns backend/optimization-scripts/schedule_optimizer.py
