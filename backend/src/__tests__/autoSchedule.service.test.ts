@@ -272,6 +272,70 @@ describe('AutoScheduleService.generate', () => {
     expect(problem.employees.map((e: any) => e.id)).toEqual(expect.arrayContaining(['1', '42']));
   });
 
+  /**
+   * REGRESSION (#716). `schedules.start_date` is a DATE column and the pool is
+   * built without `dateStrings`, so mysql2 hands the value over as a
+   * JavaScript `Date` — never a string. The period was converted for the two
+   * lookups that need `YYYY-MM-DD` with `String(value).slice(0, 10)`, which on
+   * a Date yields `'Fri May 01'`: not a date, and unparseable by MySQL.
+   *
+   * The consequence was silent and total. `listLoanedInUserIds` matched no
+   * loan, so approving one never made anyone schedulable; `resolveLimitsForPeriod`
+   * matched no contract, so every employee fell back to the `user_preferences`
+   * defaults that contracts exist to replace. Both features appeared to work
+   * and produced a plausible schedule built on the wrong limits.
+   *
+   * Every pre-existing fixture states these columns as STRINGS, which is the
+   * one shape where the old conversion happened to be right — which is exactly
+   * why 933 lines of tests never saw it. These feed the driver's real shape.
+   */
+  describe('schedule period conversion (mysql2 hands DATE columns over as Date)', () => {
+    // Local midnight, matching how mysql2 materialises a DATE, so the
+    // assertion does not depend on the machine's timezone.
+    const dateSchedule = [
+      {
+        ...SCHEDULE_ROW,
+        start_date: new Date(2026, 4, 1),
+        end_date: new Date(2026, 4, 31),
+      },
+    ];
+
+    it('passes YYYY-MM-DD to the loan lookup, not a stringified Date', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { schedule: dateSchedule, deptOrgUnit: [{ org_unit_id: 55 }] });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // listLoanedInUserIds binds [orgUnitId, endDate, startDate].
+      expect(queryFor(execute, 'loanedIn')[1]).toEqual([55, '2026-05-31', '2026-05-01']);
+    });
+
+    it('passes YYYY-MM-DD to the contract-limit lookup, not a stringified Date', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { schedule: dateSchedule });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      // resolveLimitsForPeriod binds [endDate, startDate].
+      expect(queryFor(execute, 'contracts')[1]).toEqual(['2026-05-31', '2026-05-01']);
+    });
+
+    it('still handles a period that arrives as a string', async () => {
+      // Seeds, JSON payloads and fixtures deliver the same columns as strings;
+      // the conversion has to accept both shapes rather than trade one for the
+      // other.
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, { deptOrgUnit: [{ org_unit_id: 55 }] });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(queryFor(execute, 'loanedIn')[1]).toEqual([55, '2026-05-31', '2026-05-01']);
+    });
+  });
+
   it('skips the loan lookup entirely when the department has no org-unit bridge', async () => {
     const { pool, conn, execute } = makePool();
     primeQueries(execute, { deptOrgUnit: [] });

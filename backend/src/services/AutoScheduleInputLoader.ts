@@ -284,8 +284,8 @@ export class AutoScheduleInputLoader {
       schedule.department_id,
     ]);
     const deptOrgUnitId = deptRows.length > 0 ? (deptRows[0].org_unit_id as number | null) : null;
-    const startDate = String(schedule.start_date).slice(0, 10);
-    const endDate = String(schedule.end_date).slice(0, 10);
+    const startDate = DateUtils.toDateString(schedule.start_date);
+    const endDate = DateUtils.toDateString(schedule.end_date);
     const loanedInUserIds = deptOrgUnitId
       ? await new EmployeeLoanService(this.pool).listLoanedInUserIds(
           deptOrgUnitId,
