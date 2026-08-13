@@ -12,6 +12,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
@@ -232,60 +233,59 @@ export class OnCallService {
     assignedBy: number,
     notes: string | null = null
   ): Promise<OnCallAssignment> {
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
 
-      const [periodRows] = await conn.execute<RowDataPacket[]>(
-        `SELECT id, max_staff,
-                (SELECT COUNT(*) FROM on_call_assignments
-                  WHERE period_id = on_call_periods.id
-                    AND status IN ('pending', 'confirmed')) AS assigned_count
-           FROM on_call_periods WHERE id = ? FOR UPDATE`,
-        [periodId]
-      );
-      if (periodRows.length === 0) throw new NotFoundError('On-call period not found');
-      const period = periodRows[0];
-      if ((period.assigned_count as number) >= (period.max_staff as number)) {
-        throw new ConflictError('On-call period is already at max capacity');
+        const [periodRows] = await conn.execute<RowDataPacket[]>(
+          `SELECT id, max_staff,
+                  (SELECT COUNT(*) FROM on_call_assignments
+                    WHERE period_id = on_call_periods.id
+                      AND status IN ('pending', 'confirmed')) AS assigned_count
+             FROM on_call_periods WHERE id = ? FOR UPDATE`,
+          [periodId]
+        );
+        if (periodRows.length === 0) throw new NotFoundError('On-call period not found');
+        const period = periodRows[0];
+        if ((period.assigned_count as number) >= (period.max_staff as number)) {
+          throw new ConflictError('On-call period is already at max capacity');
+        }
+
+        const [insRes] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO on_call_assignments (period_id, user_id, status, assigned_by, notes)
+           VALUES (?, ?, 'pending', ?, ?)
+           ON DUPLICATE KEY UPDATE status = VALUES(status), notes = VALUES(notes)`,
+          [periodId, userId, assignedBy, notes]
+        );
+
+        // Promote period status to 'assigned' once we hit min_staff confirmed
+        await conn.execute(
+          `UPDATE on_call_periods
+              SET status = CASE
+                WHEN (SELECT COUNT(*) FROM on_call_assignments
+                       WHERE period_id = on_call_periods.id
+                         AND status IN ('pending','confirmed')) >= min_staff
+                THEN 'assigned'
+                ELSE status
+              END
+            WHERE id = ?`,
+          [periodId]
+        );
+
+        await conn.commit();
+
+        const [out] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT * FROM on_call_assignments WHERE id = ? OR (period_id = ? AND user_id = ?)
+            ORDER BY id DESC LIMIT 1`,
+          [insRes.insertId, periodId, userId]
+        );
+        logger.info(`On-call assignment: period=${periodId} user=${userId}`);
+        return mapAssignment(out[0]);
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-
-      const [insRes] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO on_call_assignments (period_id, user_id, status, assigned_by, notes)
-         VALUES (?, ?, 'pending', ?, ?)
-         ON DUPLICATE KEY UPDATE status = VALUES(status), notes = VALUES(notes)`,
-        [periodId, userId, assignedBy, notes]
-      );
-
-      // Promote period status to 'assigned' once we hit min_staff confirmed
-      await conn.execute(
-        `UPDATE on_call_periods
-            SET status = CASE
-              WHEN (SELECT COUNT(*) FROM on_call_assignments
-                     WHERE period_id = on_call_periods.id
-                       AND status IN ('pending','confirmed')) >= min_staff
-              THEN 'assigned'
-              ELSE status
-            END
-          WHERE id = ?`,
-        [periodId]
-      );
-
-      await conn.commit();
-
-      const [out] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT * FROM on_call_assignments WHERE id = ? OR (period_id = ? AND user_id = ?)
-          ORDER BY id DESC LIMIT 1`,
-        [insRes.insertId, periodId, userId]
-      );
-      logger.info(`On-call assignment: period=${periodId} user=${userId}`);
-      return mapAssignment(out[0]);
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 
   async unassign(periodId: number, userId: number): Promise<boolean> {

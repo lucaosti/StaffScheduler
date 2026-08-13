@@ -24,6 +24,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { NotFoundError } from '../errors';
 import {
   Shift,
@@ -58,75 +59,74 @@ export class ShiftService {
    * @returns Promise resolving to the created shift
    */
   async createShift(shiftData: CreateShiftRequest): Promise<Shift> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [scheduleRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM schedules WHERE id = ? LIMIT 1',
-        [shiftData.scheduleId]
-      );
-
-      if (scheduleRows.length === 0) {
-        throw new NotFoundError('Schedule not found');
-      }
-
-      const [deptRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
-        [shiftData.departmentId]
-      );
-
-      if (deptRows.length === 0) {
-        throw new NotFoundError('Department not found');
-      }
-
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO shifts (
-          schedule_id, department_id, template_id, date, start_time, end_time,
-          min_staff, max_staff, notes, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          shiftData.scheduleId,
-          shiftData.departmentId,
-          shiftData.templateId || null,
-          shiftData.date,
-          shiftData.startTime,
-          shiftData.endTime,
-          shiftData.minStaff,
-          shiftData.maxStaff,
-          shiftData.notes || null,
-          'open'
-        ]
-      );
-
-      const shiftId = result.insertId;
-
-      if (shiftData.requiredSkillIds && shiftData.requiredSkillIds.length > 0) {
-        const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
-        await connection.execute(
-          `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
-          shiftData.requiredSkillIds.flatMap(skillId => [shiftId, skillId])
+        const [scheduleRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM schedules WHERE id = ? LIMIT 1',
+          [shiftData.scheduleId]
         );
+
+        if (scheduleRows.length === 0) {
+          throw new NotFoundError('Schedule not found');
+        }
+
+        const [deptRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM departments WHERE id = ? AND is_active = 1 LIMIT 1',
+          [shiftData.departmentId]
+        );
+
+        if (deptRows.length === 0) {
+          throw new NotFoundError('Department not found');
+        }
+
+        const [result] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO shifts (
+            schedule_id, department_id, template_id, date, start_time, end_time,
+            min_staff, max_staff, notes, status
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            shiftData.scheduleId,
+            shiftData.departmentId,
+            shiftData.templateId || null,
+            shiftData.date,
+            shiftData.startTime,
+            shiftData.endTime,
+            shiftData.minStaff,
+            shiftData.maxStaff,
+            shiftData.notes || null,
+            'open'
+          ]
+        );
+
+        const shiftId = result.insertId;
+
+        if (shiftData.requiredSkillIds && shiftData.requiredSkillIds.length > 0) {
+          const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
+          await connection.execute(
+            `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
+            shiftData.requiredSkillIds.flatMap(skillId => [shiftId, skillId])
+          );
+        }
+
+        await connection.commit();
+
+        logger.info(`Shift created successfully: ${shiftId}`);
+
+        const newShift = await this.getShiftById(shiftId);
+        if (!newShift) {
+          throw new Error('Failed to retrieve created shift');
+        }
+
+        return newShift;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to create shift:', error);
+        throw error;
       }
-
-      await connection.commit();
-
-      logger.info(`Shift created successfully: ${shiftId}`);
-
-      const newShift = await this.getShiftById(shiftId);
-      if (!newShift) {
-        throw new Error('Failed to retrieve created shift');
-      }
-
-      return newShift;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to create shift:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -374,88 +374,87 @@ export class ShiftService {
    * @returns Promise resolving to updated shift
    */
   async updateShift(id: number, shiftData: UpdateShiftRequest): Promise<Shift> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      // Every fragment pushed below is a hardcoded string literal, never derived from
-      // user-controlled input.  The UPDATE template is therefore not susceptible to
-      // SQL injection through column-name interpolation.
-      const updates: string[] = [];
-      const values: SqlParam[] = [];
+        // Every fragment pushed below is a hardcoded string literal, never derived from
+        // user-controlled input.  The UPDATE template is therefore not susceptible to
+        // SQL injection through column-name interpolation.
+        const updates: string[] = [];
+        const values: SqlParam[] = [];
 
-      if (shiftData.date !== undefined) {
-        updates.push('date = ?');
-        values.push(shiftData.date);
-      }
+        if (shiftData.date !== undefined) {
+          updates.push('date = ?');
+          values.push(shiftData.date);
+        }
 
-      if (shiftData.startTime !== undefined) {
-        updates.push('start_time = ?');
-        values.push(shiftData.startTime);
-      }
+        if (shiftData.startTime !== undefined) {
+          updates.push('start_time = ?');
+          values.push(shiftData.startTime);
+        }
 
-      if (shiftData.endTime !== undefined) {
-        updates.push('end_time = ?');
-        values.push(shiftData.endTime);
-      }
+        if (shiftData.endTime !== undefined) {
+          updates.push('end_time = ?');
+          values.push(shiftData.endTime);
+        }
 
-      if (shiftData.minStaff !== undefined) {
-        updates.push('min_staff = ?');
-        values.push(shiftData.minStaff);
-      }
+        if (shiftData.minStaff !== undefined) {
+          updates.push('min_staff = ?');
+          values.push(shiftData.minStaff);
+        }
 
-      if (shiftData.maxStaff !== undefined) {
-        updates.push('max_staff = ?');
-        values.push(shiftData.maxStaff);
-      }
+        if (shiftData.maxStaff !== undefined) {
+          updates.push('max_staff = ?');
+          values.push(shiftData.maxStaff);
+        }
 
-      if (shiftData.status !== undefined) {
-        updates.push('status = ?');
-        values.push(shiftData.status);
-      }
+        if (shiftData.status !== undefined) {
+          updates.push('status = ?');
+          values.push(shiftData.status);
+        }
 
-      if (shiftData.notes !== undefined) {
-        updates.push('notes = ?');
-        values.push(shiftData.notes);
-      }
+        if (shiftData.notes !== undefined) {
+          updates.push('notes = ?');
+          values.push(shiftData.notes);
+        }
 
-      if (updates.length > 0) {
-        values.push(id);
-        await connection.execute(
-          `UPDATE shifts SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          values
-        );
-      }
-
-      if (shiftData.requiredSkillIds !== undefined) {
-        await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
-        if (shiftData.requiredSkillIds.length > 0) {
-          const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
+        if (updates.length > 0) {
+          values.push(id);
           await connection.execute(
-            `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
-            shiftData.requiredSkillIds.flatMap(skillId => [id, skillId])
+            `UPDATE shifts SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            values
           );
         }
+
+        if (shiftData.requiredSkillIds !== undefined) {
+          await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
+          if (shiftData.requiredSkillIds.length > 0) {
+            const ph = shiftData.requiredSkillIds.map(() => '(?, ?)').join(', ');
+            await connection.execute(
+              `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${ph}`,
+              shiftData.requiredSkillIds.flatMap(skillId => [id, skillId])
+            );
+          }
+        }
+
+        await connection.commit();
+
+        logger.info(`Shift updated successfully: ${id}`);
+
+        const updatedShift = await this.getShiftById(id);
+        if (!updatedShift) {
+          throw new NotFoundError('Shift not found after update');
+        }
+
+        return updatedShift;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to update shift:', error);
+        throw error;
       }
-
-      await connection.commit();
-
-      logger.info(`Shift updated successfully: ${id}`);
-
-      const updatedShift = await this.getShiftById(id);
-      if (!updatedShift) {
-        throw new NotFoundError('Shift not found after update');
-      }
-
-      return updatedShift;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to update shift:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -465,38 +464,37 @@ export class ShiftService {
    * @returns Promise resolving to true if successful
    */
   async deleteShift(id: number): Promise<boolean> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      // Both tables' shift_id are already ON DELETE CASCADE against shifts(id)
-      // (see the initial-schema migration), so these two deletes are redundant
-      // in practice — kept explicit so this method's behavior does not depend
-      // on the schema's cascade rules staying as they are.
-      await connection.execute('DELETE FROM shift_assignments WHERE shift_id = ?', [id]);
-      await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
+        // Both tables' shift_id are already ON DELETE CASCADE against shifts(id)
+        // (see the initial-schema migration), so these two deletes are redundant
+        // in practice — kept explicit so this method's behavior does not depend
+        // on the schema's cascade rules staying as they are.
+        await connection.execute('DELETE FROM shift_assignments WHERE shift_id = ?', [id]);
+        await connection.execute('DELETE FROM shift_skills WHERE shift_id = ?', [id]);
 
-      const [result] = await connection.execute<ResultSetHeader>(
-        'DELETE FROM shifts WHERE id = ?',
-        [id]
-      );
+        const [result] = await connection.execute<ResultSetHeader>(
+          'DELETE FROM shifts WHERE id = ?',
+          [id]
+        );
 
-      if (result.affectedRows === 0) {
-        throw new NotFoundError('Shift not found');
+        if (result.affectedRows === 0) {
+          throw new NotFoundError('Shift not found');
+        }
+
+        await connection.commit();
+
+        logger.info(`Shift deleted successfully: ${id}`);
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to delete shift:', error);
+        throw error;
       }
-
-      await connection.commit();
-
-      logger.info(`Shift deleted successfully: ${id}`);
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to delete shift:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**
@@ -516,82 +514,81 @@ export class ShiftService {
     endDate: Date,
     daysOfWeek: number[]
   ): Promise<number[]> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [templateRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT * FROM shift_templates WHERE id = ? AND is_active = 1 LIMIT 1`,
-        [templateId]
-      );
+        const [templateRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT * FROM shift_templates WHERE id = ? AND is_active = 1 LIMIT 1`,
+          [templateId]
+        );
 
-      if (templateRows.length === 0) {
-        throw new NotFoundError('Shift template not found');
-      }
-
-      const template = templateRows[0];
-
-      const [skillRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT skill_id FROM shift_template_skills WHERE template_id = ?',
-        [templateId]
-      );
-
-      const skillIds = skillRows.map((row: any) => row.skill_id);
-
-      const createdShiftIds: number[] = [];
-      const currentDate = new Date(startDate);
-
-      while (currentDate <= endDate) {
-        const dayOfWeek = currentDate.getDay();
-
-        if (daysOfWeek.includes(dayOfWeek)) {
-          const [result] = await connection.execute<ResultSetHeader>(
-            `INSERT INTO shifts (
-              schedule_id, department_id, template_id, date, start_time, end_time,
-              min_staff, max_staff, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              scheduleId,
-              template.department_id,
-              templateId,
-              currentDate.toISOString().split('T')[0],
-              template.start_time,
-              template.end_time,
-              template.min_staff,
-              template.max_staff,
-              'open'
-            ]
-          );
-
-          const shiftId = result.insertId;
-          createdShiftIds.push(shiftId);
-
-          // Add required skills in one multi-row INSERT per shift.
-          if (skillIds.length > 0) {
-            const placeholders = skillIds.map(() => '(?, ?)').join(', ');
-            await connection.execute(
-              `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${placeholders}`,
-              skillIds.flatMap((skillId) => [shiftId, skillId])
-            );
-          }
+        if (templateRows.length === 0) {
+          throw new NotFoundError('Shift template not found');
         }
 
-        currentDate.setDate(currentDate.getDate() + 1);
+        const template = templateRows[0];
+
+        const [skillRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT skill_id FROM shift_template_skills WHERE template_id = ?',
+          [templateId]
+        );
+
+        const skillIds = skillRows.map((row: any) => row.skill_id);
+
+        const createdShiftIds: number[] = [];
+        const currentDate = new Date(startDate);
+
+        while (currentDate <= endDate) {
+          const dayOfWeek = currentDate.getDay();
+
+          if (daysOfWeek.includes(dayOfWeek)) {
+            const [result] = await connection.execute<ResultSetHeader>(
+              `INSERT INTO shifts (
+                schedule_id, department_id, template_id, date, start_time, end_time,
+                min_staff, max_staff, status
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                scheduleId,
+                template.department_id,
+                templateId,
+                currentDate.toISOString().split('T')[0],
+                template.start_time,
+                template.end_time,
+                template.min_staff,
+                template.max_staff,
+                'open'
+              ]
+            );
+
+            const shiftId = result.insertId;
+            createdShiftIds.push(shiftId);
+
+            // Add required skills in one multi-row INSERT per shift.
+            if (skillIds.length > 0) {
+              const placeholders = skillIds.map(() => '(?, ?)').join(', ');
+              await connection.execute(
+                `INSERT INTO shift_skills (shift_id, skill_id) VALUES ${placeholders}`,
+                skillIds.flatMap((skillId) => [shiftId, skillId])
+              );
+            }
+          }
+
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        await connection.commit();
+
+        logger.info(`Created ${createdShiftIds.length} shifts from template ${templateId}`);
+
+        return createdShiftIds;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to create shifts from template:', error);
+        throw error;
       }
-
-      await connection.commit();
-
-      logger.info(`Created ${createdShiftIds.length} shifts from template ${templateId}`);
-
-      return createdShiftIds;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to create shifts from template:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   /**

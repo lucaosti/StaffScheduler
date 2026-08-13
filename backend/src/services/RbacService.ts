@@ -16,6 +16,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   Permission,
@@ -187,69 +188,67 @@ export class RbacService {
   }
 
   async createRole(input: CreateRoleRequest): Promise<Role> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [existing] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM roles WHERE name = ? LIMIT 1',
-        [input.name]
-      );
-      if (existing.length > 0) throw new ConflictError('Role name already exists');
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [existing] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM roles WHERE name = ? LIMIT 1',
+          [input.name]
+        );
+        if (existing.length > 0) throw new ConflictError('Role name already exists');
 
-      const [res] = await connection.execute<ResultSetHeader>(
-        'INSERT INTO roles (name, description, is_system) VALUES (?, ?, FALSE)',
-        [input.name, input.description || null]
-      );
-      const roleId = res.insertId;
-      await this.replacePermissionsTx(connection, roleId, input.permissionCodes || []);
-      await connection.commit();
-      logger.info(`Role created: ${roleId} (${input.name})`);
-      const role = await this.getRoleById(roleId);
-      if (!role) throw new Error('Failed to retrieve created role');
-      return role;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+        const [res] = await connection.execute<ResultSetHeader>(
+          'INSERT INTO roles (name, description, is_system) VALUES (?, ?, FALSE)',
+          [input.name, input.description || null]
+        );
+        const roleId = res.insertId;
+        await this.replacePermissionsTx(connection, roleId, input.permissionCodes || []);
+        await connection.commit();
+        logger.info(`Role created: ${roleId} (${input.name})`);
+        const role = await this.getRoleById(roleId);
+        if (!role) throw new Error('Failed to retrieve created role');
+        return role;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    });
   }
 
   async updateRole(id: number, input: UpdateRoleRequest): Promise<Role> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const updates: string[] = [];
-      const values: SqlParam[] = [];
-      if (input.name !== undefined) {
-        updates.push('name = ?');
-        values.push(input.name);
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const updates: string[] = [];
+        const values: SqlParam[] = [];
+        if (input.name !== undefined) {
+          updates.push('name = ?');
+          values.push(input.name);
+        }
+        if (input.description !== undefined) {
+          updates.push('description = ?');
+          values.push(input.description);
+        }
+        if (updates.length > 0) {
+          values.push(id);
+          await connection.execute(
+            `UPDATE roles SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+            values
+          );
+        }
+        if (input.permissionCodes !== undefined) {
+          await this.replacePermissionsTx(connection, id, input.permissionCodes);
+        }
+        await connection.commit();
+        logger.info(`Role updated: ${id}`);
+        const role = await this.getRoleById(id);
+        if (!role) throw new NotFoundError('Role not found');
+        return role;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
       }
-      if (input.description !== undefined) {
-        updates.push('description = ?');
-        values.push(input.description);
-      }
-      if (updates.length > 0) {
-        values.push(id);
-        await connection.execute(
-          `UPDATE roles SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-          values
-        );
-      }
-      if (input.permissionCodes !== undefined) {
-        await this.replacePermissionsTx(connection, id, input.permissionCodes);
-      }
-      await connection.commit();
-      logger.info(`Role updated: ${id}`);
-      const role = await this.getRoleById(id);
-      if (!role) throw new NotFoundError('Role not found');
-      return role;
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async deleteRole(id: number): Promise<void> {
@@ -266,27 +265,26 @@ export class RbacService {
 
   /** Replaces the user's unscoped role grants with the provided role ids. */
   async setUserRoles(userId: number, roleIds: number[]): Promise<void> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      await connection.execute(
-        'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
-        [userId]
-      );
-      if (roleIds.length > 0) {
-        const placeholders = roleIds.map(() => '(?, ?, NULL)').join(', ');
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
         await connection.execute(
-          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${placeholders}`,
-          roleIds.flatMap(roleId => [userId, roleId])
+          'DELETE FROM user_roles WHERE user_id = ? AND scope_org_unit_id IS NULL',
+          [userId]
         );
+        if (roleIds.length > 0) {
+          const placeholders = roleIds.map(() => '(?, ?, NULL)').join(', ');
+          await connection.execute(
+            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES ${placeholders}`,
+            roleIds.flatMap(roleId => [userId, roleId])
+          );
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
       }
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 
   async assignRole(
@@ -324,24 +322,23 @@ export class RbacService {
   ): Promise<{ assigned: number }> {
     if (userIds.length === 0) return { assigned: 0 };
 
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      for (const userId of userIds) {
-        await connection.execute(
-          `INSERT INTO user_roles (user_id, role_id, scope_org_unit_id, expires_at)
-           VALUES (?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)`,
-          [userId, roleId, scopeOrgUnitId, expiresAt]
-        );
+    await usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        for (const userId of userIds) {
+          await connection.execute(
+            `INSERT INTO user_roles (user_id, role_id, scope_org_unit_id, expires_at)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE expires_at = VALUES(expires_at)`,
+            [userId, roleId, scopeOrgUnitId, expiresAt]
+          );
+        }
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
       }
-      await connection.commit();
-    } catch (error) {
-      await connection.rollback();
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
 
     // Audit writes are append-only; run after commit so a write failure
     // does not roll back the role grants.

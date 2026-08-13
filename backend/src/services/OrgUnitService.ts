@@ -9,6 +9,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
@@ -384,28 +385,27 @@ export class OrgUnitService {
     isPrimary = false,
     actorId?: number
   ): Promise<UserOrgUnit> {
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      if (isPrimary) {
+    await usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        if (isPrimary) {
+          await conn.execute(
+            `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
+            [userId]
+          );
+        }
         await conn.execute(
-          `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
-          [userId]
+          `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
+           VALUES (?, ?, ?)
+           ON DUPLICATE KEY UPDATE is_primary = VALUES(is_primary)`,
+          [userId, orgUnitId, isPrimary ? 1 : 0]
         );
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      await conn.execute(
-        `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
-         VALUES (?, ?, ?)
-         ON DUPLICATE KEY UPDATE is_primary = VALUES(is_primary)`,
-        [userId, orgUnitId, isPrimary ? 1 : 0]
-      );
-      await conn.commit();
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
       [userId, orgUnitId]
@@ -424,26 +424,25 @@ export class OrgUnitService {
   }
 
   async setPrimary(userId: number, orgUnitId: number, actorId?: number): Promise<void> {
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      await conn.execute(
-        `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
-        [userId]
-      );
-      const [res] = await conn.execute<ResultSetHeader>(
-        `UPDATE user_org_units SET is_primary = 1
-          WHERE user_id = ? AND org_unit_id = ?`,
-        [userId, orgUnitId]
-      );
-      if (res.affectedRows === 0) throw new NotFoundError('Membership not found');
-      await conn.commit();
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    await usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        await conn.execute(
+          `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
+          [userId]
+        );
+        const [res] = await conn.execute<ResultSetHeader>(
+          `UPDATE user_org_units SET is_primary = 1
+            WHERE user_id = ? AND org_unit_id = ?`,
+          [userId, orgUnitId]
+        );
+        if (res.affectedRows === 0) throw new NotFoundError('Membership not found');
+        await conn.commit();
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      }
+    });
     await this.audit.write({
       actorId: actorId ?? null,
       action: 'org_unit.primary_set',

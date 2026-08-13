@@ -22,6 +22,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   ResponsibilityRule,
@@ -388,46 +389,45 @@ export class ResponsibilityRuleService {
       throw new ConflictError('Bulk create limited to 500 rules per request');
     }
 
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const insertIds: number[] = [];
-      for (const subjectId of effectiveSubjectIds) {
-        for (const permCode of input.permissionCodes) {
-          const [res] = await conn.execute<ResultSetHeader>(
-            `INSERT INTO responsibility_rules
-               (subject_type, subject_id, permission_code, responsible_org_unit_id,
-                delegated_to_role_id, description, is_active, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)`,
-            [
-              input.subjectType,
-              subjectId,
-              permCode,
-              input.responsibleOrgUnitId,
-              input.delegatedToRoleId ?? null,
-              input.description ?? null,
-              actorId,
-            ]
-          );
-          insertIds.push(res.insertId);
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        const insertIds: number[] = [];
+        for (const subjectId of effectiveSubjectIds) {
+          for (const permCode of input.permissionCodes) {
+            const [res] = await conn.execute<ResultSetHeader>(
+              `INSERT INTO responsibility_rules
+                 (subject_type, subject_id, permission_code, responsible_org_unit_id,
+                  delegated_to_role_id, description, is_active, created_by)
+               VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)`,
+              [
+                input.subjectType,
+                subjectId,
+                permCode,
+                input.responsibleOrgUnitId,
+                input.delegatedToRoleId ?? null,
+                input.description ?? null,
+                actorId,
+              ]
+            );
+            insertIds.push(res.insertId);
+          }
         }
-      }
-      await conn.commit();
+        await conn.commit();
 
-      if (insertIds.length === 0) return [];
-      const placeholders = insertIds.map(() => '?').join(',');
-      const [rows] = await this.pool.execute<RowDataPacket[]>(
-        `SELECT * FROM responsibility_rules WHERE id IN (${placeholders}) ORDER BY id ASC`,
-        insertIds
-      );
-      logger.info(`Bulk responsibility rules created: count=${insertIds.length} by=${actorId}`);
-      return (rows as any[]).map(mapRule);
-    } catch (error) {
-      await conn.rollback();
-      throw error;
-    } finally {
-      conn.release();
-    }
+        if (insertIds.length === 0) return [];
+        const placeholders = insertIds.map(() => '?').join(',');
+        const [rows] = await this.pool.execute<RowDataPacket[]>(
+          `SELECT * FROM responsibility_rules WHERE id IN (${placeholders}) ORDER BY id ASC`,
+          insertIds
+        );
+        logger.info(`Bulk responsibility rules created: count=${insertIds.length} by=${actorId}`);
+        return (rows as any[]).map(mapRule);
+      } catch (error) {
+        await conn.rollback();
+        throw error;
+      }
+    });
   }
 
   /**

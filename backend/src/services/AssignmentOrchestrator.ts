@@ -28,6 +28,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ShiftAssignment } from '../types';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
@@ -78,53 +79,51 @@ export class AssignmentOrchestrator {
   }
 
   async confirmAssignment(id: number): Promise<ShiftAssignment> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>(
-        `UPDATE shift_assignments
-        SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'pending'`,
-        [id]
-      );
-      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already confirmed');
-      await connection.commit();
-      logger.info(`Assignment confirmed successfully: ${id}`);
-      const confirmed = await this.fetchById(id);
-      if (!confirmed) throw new NotFoundError('Assignment not found after confirmation');
-      return confirmed;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to confirm assignment:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [result] = await connection.execute<ResultSetHeader>(
+          `UPDATE shift_assignments
+          SET status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND status = 'pending'`,
+          [id]
+        );
+        if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already confirmed');
+        await connection.commit();
+        logger.info(`Assignment confirmed successfully: ${id}`);
+        const confirmed = await this.fetchById(id);
+        if (!confirmed) throw new NotFoundError('Assignment not found after confirmation');
+        return confirmed;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to confirm assignment:', error);
+        throw error;
+      }
+    });
   }
 
   async cancelAssignment(id: number): Promise<ShiftAssignment> {
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>(
-        `UPDATE shift_assignments
-        SET status = 'cancelled'
-        WHERE id = ? AND status IN ('pending', 'confirmed')`,
-        [id]
-      );
-      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already cancelled');
-      await connection.commit();
-      logger.info(`Assignment cancelled successfully: ${id}`);
-      const cancelled = await this.fetchById(id);
-      if (!cancelled) throw new NotFoundError('Assignment not found after cancellation');
-      return cancelled;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to cancel assignment:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [result] = await connection.execute<ResultSetHeader>(
+          `UPDATE shift_assignments
+          SET status = 'cancelled'
+          WHERE id = ? AND status IN ('pending', 'confirmed')`,
+          [id]
+        );
+        if (result.affectedRows === 0) throw new NotFoundError('Assignment not found or already cancelled');
+        await connection.commit();
+        logger.info(`Assignment cancelled successfully: ${id}`);
+        const cancelled = await this.fetchById(id);
+        if (!cancelled) throw new NotFoundError('Assignment not found after cancellation');
+        return cancelled;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to cancel assignment:', error);
+        throw error;
+      }
+    });
   }
 
   async declineAssignment(id: number): Promise<ShiftAssignment> {
@@ -132,26 +131,25 @@ export class AssignmentOrchestrator {
   }
 
   async completeAssignment(id: number): Promise<ShiftAssignment> {
-    const connection = await this.pool.getConnection();
-    try {
-      const existing = await this.fetchById(id);
-      if (!existing) throw new NotFoundError('Assignment not found');
-      if (existing.status === 'completed') return existing;
-      if (existing.status !== 'confirmed') throw new ConflictError('Only confirmed assignments can be marked as completed');
-      await connection.execute(
-        'UPDATE shift_assignments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        ['completed', id]
-      );
-      const updated = await this.fetchById(id);
-      if (!updated) throw new Error('Failed to retrieve completed assignment');
-      logger.info(`Assignment ${id} marked as completed`);
-      return updated;
-    } catch (error) {
-      logger.error('Error completing assignment:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        const existing = await this.fetchById(id);
+        if (!existing) throw new NotFoundError('Assignment not found');
+        if (existing.status === 'completed') return existing;
+        if (existing.status !== 'confirmed') throw new ConflictError('Only confirmed assignments can be marked as completed');
+        await connection.execute(
+          'UPDATE shift_assignments SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+          ['completed', id]
+        );
+        const updated = await this.fetchById(id);
+        if (!updated) throw new Error('Failed to retrieve completed assignment');
+        logger.info(`Assignment ${id} marked as completed`);
+        return updated;
+      } catch (error) {
+        logger.error('Error completing assignment:', error);
+        throw error;
+      }
+    });
   }
 
   async getAssignmentStatistics(scheduleId: number): Promise<{
@@ -218,57 +216,56 @@ export class AssignmentOrchestrator {
   }
 
   async getAvailableEmployeesForShift(shiftId: number): Promise<Array<{ userId: number; firstName: string; lastName: string; email: string }>> {
-    const connection = await this.pool.getConnection();
-    try {
-      const [shiftRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT s.id, s.date, s.start_time, s.end_time, s.department_id, d.org_unit_id
-           FROM shifts s
-           JOIN departments d ON d.id = s.department_id
-          WHERE s.id = ?`,
-        [shiftId]
-      );
-      if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
-      const shift = shiftRows[0];
-      const shiftDate = DateUtils.toDateString(shift.date as string | Date);
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        const [shiftRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT s.id, s.date, s.start_time, s.end_time, s.department_id, d.org_unit_id
+             FROM shifts s
+             JOIN departments d ON d.id = s.department_id
+            WHERE s.id = ?`,
+          [shiftId]
+        );
+        if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
+        const shift = shiftRows[0];
+        const shiftDate = DateUtils.toDateString(shift.date as string | Date);
 
-      // Department members, PLUS anyone on an approved loan into the
-      // department's org unit for this shift's date — see EmployeeLoanService.
-      // A department with no `org_unit_id` bridge has no loan pool to add.
-      const orgUnitId = shift.org_unit_id as number | null;
-      const loanedInUserIds = orgUnitId
-        ? await this.loans.listLoanedInUserIds(orgUnitId, shiftDate, shiftDate)
-        : [];
-      const loanedInCondition =
-        loanedInUserIds.length > 0
-          ? `(ud.department_id IS NOT NULL OR u.id IN (${inClause(loanedInUserIds)}))`
-          : `ud.department_id IS NOT NULL`;
+        // Department members, PLUS anyone on an approved loan into the
+        // department's org unit for this shift's date — see EmployeeLoanService.
+        // A department with no `org_unit_id` bridge has no loan pool to add.
+        const orgUnitId = shift.org_unit_id as number | null;
+        const loanedInUserIds = orgUnitId
+          ? await this.loans.listLoanedInUserIds(orgUnitId, shiftDate, shiftDate)
+          : [];
+        const loanedInCondition =
+          loanedInUserIds.length > 0
+            ? `(ud.department_id IS NOT NULL OR u.id IN (${inClause(loanedInUserIds)}))`
+            : `ud.department_id IS NOT NULL`;
 
-      const [userRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT DISTINCT u.id AS userId, u.first_name AS firstName, u.last_name AS lastName, u.email
-        FROM users u
-        LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
-        WHERE u.is_active = 1
-        AND ${loanedInCondition}
-        AND NOT EXISTS (
-          SELECT 1 FROM shift_assignments sa
-          INNER JOIN shifts s ON sa.shift_id = s.id
-          WHERE sa.user_id = u.id
-          AND sa.status IN ('pending', 'confirmed')
-          AND s.date = ?
-          AND (
-            (s.start_time < ? AND s.end_time > ?) OR
-            (s.start_time >= ? AND s.start_time < ?)
+        const [userRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT DISTINCT u.id AS userId, u.first_name AS firstName, u.last_name AS lastName, u.email
+          FROM users u
+          LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
+          WHERE u.is_active = 1
+          AND ${loanedInCondition}
+          AND NOT EXISTS (
+            SELECT 1 FROM shift_assignments sa
+            INNER JOIN shifts s ON sa.shift_id = s.id
+            WHERE sa.user_id = u.id
+            AND sa.status IN ('pending', 'confirmed')
+            AND s.date = ?
+            AND (
+              (s.start_time < ? AND s.end_time > ?) OR
+              (s.start_time >= ? AND s.start_time < ?)
+            )
           )
-        )
-        ORDER BY u.last_name, u.first_name`,
-        [shift.department_id, shift.date, shift.end_time, shift.start_time, shift.start_time, shift.end_time]
-      );
-      return userRows as Array<{ userId: number; firstName: string; lastName: string; email: string }>;
-    } catch (error) {
-      logger.error('Error getting available employees for shift:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+          ORDER BY u.last_name, u.first_name`,
+          [shift.department_id, shift.date, shift.end_time, shift.start_time, shift.start_time, shift.end_time]
+        );
+        return userRows as Array<{ userId: number; firstName: string; lastName: string; email: string }>;
+      } catch (error) {
+        logger.error('Error getting available employees for shift:', error);
+        throw error;
+      }
+    });
   }
 }

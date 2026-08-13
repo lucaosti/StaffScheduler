@@ -42,6 +42,7 @@
  */
 
 import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { NotificationService } from './NotificationService';
@@ -113,39 +114,38 @@ export class ReplanProposalService {
     engine: string;
     payload: ReplanPayload;
   }): Promise<ReplanProposal> {
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const [superseded] = await conn.execute<ResultSetHeader>(
-        `UPDATE schedule_replan_proposals
-            SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
-          WHERE schedule_id = ? AND status = 'pending'`,
-        [input.scheduleId]
-      );
-      const [res] = await conn.execute<ResultSetHeader>(
-        `INSERT INTO schedule_replan_proposals (schedule_id, proposed_by, engine, payload)
-         VALUES (?, ?, ?, ?)`,
-        [input.scheduleId, input.proposedBy, input.engine, JSON.stringify(input.payload)]
-      );
-      await conn.commit();
-      if (superseded.affectedRows > 0) {
-        logger.info(
-          `Replan proposal for schedule=${input.scheduleId} superseded ` +
-            `${superseded.affectedRows} pending proposal(s)`
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        const [superseded] = await conn.execute<ResultSetHeader>(
+          `UPDATE schedule_replan_proposals
+              SET status = 'superseded', updated_at = CURRENT_TIMESTAMP
+            WHERE schedule_id = ? AND status = 'pending'`,
+          [input.scheduleId]
         );
+        const [res] = await conn.execute<ResultSetHeader>(
+          `INSERT INTO schedule_replan_proposals (schedule_id, proposed_by, engine, payload)
+           VALUES (?, ?, ?, ?)`,
+          [input.scheduleId, input.proposedBy, input.engine, JSON.stringify(input.payload)]
+        );
+        await conn.commit();
+        if (superseded.affectedRows > 0) {
+          logger.info(
+            `Replan proposal for schedule=${input.scheduleId} superseded ` +
+              `${superseded.affectedRows} pending proposal(s)`
+          );
+        }
+        logger.info(
+          `Replan proposal ${res.insertId} recorded for schedule=${input.scheduleId}: ` +
+            `${input.payload.assignments.length} assignment(s), ` +
+            `${input.payload.brokenCommitments.length} commitment(s) at risk`
+        );
+        return this.getById(res.insertId);
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      logger.info(
-        `Replan proposal ${res.insertId} recorded for schedule=${input.scheduleId}: ` +
-          `${input.payload.assignments.length} assignment(s), ` +
-          `${input.payload.brokenCommitments.length} commitment(s) at risk`
-      );
-      return this.getById(res.insertId);
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 
   async getById(id: number): Promise<ReplanProposal> {
@@ -199,85 +199,84 @@ export class ReplanProposalService {
       );
     }
 
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
 
-      // Claim the proposal first. The status guard is the concurrency
-      // backstop: two approvers clicking at once would otherwise both pass the
-      // read above and apply the same plan twice — the second one deleting
-      // assignments the first had just written.
-      const [claimed] = await conn.execute<ResultSetHeader>(
-        `UPDATE schedule_replan_proposals
-            SET status = 'applied', decided_by = ?, decided_at = CURRENT_TIMESTAMP,
-                decision_reason = ?, updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND status = 'pending'`,
-        [decidedBy, reason ?? null, id]
-      );
-      if (claimed.affectedRows === 0) {
+        // Claim the proposal first. The status guard is the concurrency
+        // backstop: two approvers clicking at once would otherwise both pass the
+        // read above and apply the same plan twice — the second one deleting
+        // assignments the first had just written.
+        const [claimed] = await conn.execute<ResultSetHeader>(
+          `UPDATE schedule_replan_proposals
+              SET status = 'applied', decided_by = ?, decided_at = CURRENT_TIMESTAMP,
+                  decision_reason = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND status = 'pending'`,
+          [decidedBy, reason ?? null, id]
+        );
+        if (claimed.affectedRows === 0) {
+          await conn.rollback();
+          await this.explainUndecidable(id);
+        }
+
+        await this.assertStillApplicable(conn, proposal);
+
+        const keep = new Set(proposal.payload.assignments.map((a) => `${a.shiftId}:${a.userId}`));
+
+        // Remove what the approved plan leaves out. Scoped to this schedule's
+        // shifts and to live assignments: a declined or cancelled row is not
+        // something the plan is replacing.
+        const [existing] = await conn.execute<RowDataPacket[]>(
+          `SELECT sa.id, sa.shift_id, sa.user_id, sa.is_pinned,
+                  s.date, s.start_time, s.end_time
+             FROM shift_assignments sa
+             JOIN shifts s ON s.id = sa.shift_id
+            WHERE s.schedule_id = ?
+              AND sa.status IN ('pending', 'confirmed')`,
+          [proposal.scheduleId]
+        );
+        const losses = existing.filter((r) => !keep.has(`${r.shift_id}:${r.user_id}`));
+        const doomed = losses.map((r) => r.id as number);
+
+        let removed = 0;
+        if (doomed.length > 0) {
+          // Ids are interpolated because an IN list cannot be one bound
+          // parameter; they come from a SELECT this method just issued, so they
+          // are integers by construction rather than by validation.
+          const [del] = await conn.execute<ResultSetHeader>(
+            `DELETE FROM shift_assignments WHERE id IN (${inClause(doomed)})`
+          );
+          removed = del.affectedRows;
+        }
+
+        // Insert what is new. Pinned on arrival: the schedule is published, so
+        // an assignment in the approved plan is a commitment the moment it
+        // exists — the same rule publishing itself applies.
+        const CHUNK = 500;
+        let inserted = 0;
+        for (let i = 0; i < proposal.payload.assignments.length; i += CHUNK) {
+          const chunk = proposal.payload.assignments.slice(i, i + CHUNK);
+          const [ins] = await conn.execute<ResultSetHeader>(
+            `INSERT IGNORE INTO shift_assignments (shift_id, user_id, status, assigned_by, is_pinned)
+             VALUES ${chunk.map(() => '(?, ?, ?, ?, TRUE)').join(', ')}`,
+            chunk.flatMap((a) => [a.shiftId, a.userId, 'pending', decidedBy])
+          );
+          inserted += ins.affectedRows;
+        }
+
+        await this.announceLosses(conn, proposal, losses, decidedBy);
+
+        await conn.commit();
+        logger.info(
+          `Replan proposal ${id} applied by user=${decidedBy}: ` +
+            `+${inserted} assignment(s), -${removed}`
+        );
+        return { proposal: await this.getById(id), inserted, removed };
+      } catch (err) {
         await conn.rollback();
-        await this.explainUndecidable(id);
+        throw err;
       }
-
-      await this.assertStillApplicable(conn, proposal);
-
-      const keep = new Set(proposal.payload.assignments.map((a) => `${a.shiftId}:${a.userId}`));
-
-      // Remove what the approved plan leaves out. Scoped to this schedule's
-      // shifts and to live assignments: a declined or cancelled row is not
-      // something the plan is replacing.
-      const [existing] = await conn.execute<RowDataPacket[]>(
-        `SELECT sa.id, sa.shift_id, sa.user_id, sa.is_pinned,
-                s.date, s.start_time, s.end_time
-           FROM shift_assignments sa
-           JOIN shifts s ON s.id = sa.shift_id
-          WHERE s.schedule_id = ?
-            AND sa.status IN ('pending', 'confirmed')`,
-        [proposal.scheduleId]
-      );
-      const losses = existing.filter((r) => !keep.has(`${r.shift_id}:${r.user_id}`));
-      const doomed = losses.map((r) => r.id as number);
-
-      let removed = 0;
-      if (doomed.length > 0) {
-        // Ids are interpolated because an IN list cannot be one bound
-        // parameter; they come from a SELECT this method just issued, so they
-        // are integers by construction rather than by validation.
-        const [del] = await conn.execute<ResultSetHeader>(
-          `DELETE FROM shift_assignments WHERE id IN (${inClause(doomed)})`
-        );
-        removed = del.affectedRows;
-      }
-
-      // Insert what is new. Pinned on arrival: the schedule is published, so
-      // an assignment in the approved plan is a commitment the moment it
-      // exists — the same rule publishing itself applies.
-      const CHUNK = 500;
-      let inserted = 0;
-      for (let i = 0; i < proposal.payload.assignments.length; i += CHUNK) {
-        const chunk = proposal.payload.assignments.slice(i, i + CHUNK);
-        const [ins] = await conn.execute<ResultSetHeader>(
-          `INSERT IGNORE INTO shift_assignments (shift_id, user_id, status, assigned_by, is_pinned)
-           VALUES ${chunk.map(() => '(?, ?, ?, ?, TRUE)').join(', ')}`,
-          chunk.flatMap((a) => [a.shiftId, a.userId, 'pending', decidedBy])
-        );
-        inserted += ins.affectedRows;
-      }
-
-      await this.announceLosses(conn, proposal, losses, decidedBy);
-
-      await conn.commit();
-      logger.info(
-        `Replan proposal ${id} applied by user=${decidedBy}: ` +
-          `+${inserted} assignment(s), -${removed}`
-      );
-      return { proposal: await this.getById(id), inserted, removed };
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 
   /**

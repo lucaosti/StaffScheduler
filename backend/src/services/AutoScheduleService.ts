@@ -37,6 +37,7 @@
  */
 
 import { Pool, ResultSetHeader } from 'mysql2/promise';
+import { withTransaction } from '../utils/transaction';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem, ScheduleAssignment } from '../optimization/types';
 import { logger } from '../config/logger';
@@ -283,10 +284,8 @@ export class AutoScheduleService {
     assignments: ScheduleAssignment[],
     createdBy: number
   ): Promise<number> {
-    const conn = await this.pool.getConnection();
-    let inserted = 0;
-    try {
-      await conn.beginTransaction();
+    return withTransaction(this.pool, async (conn) => {
+      let inserted = 0;
       for (let i = 0; i < assignments.length; i += INSERT_CHUNK_SIZE) {
         const chunk = assignments.slice(i, i + INSERT_CHUNK_SIZE);
         const [result] = await conn.execute<ResultSetHeader>(
@@ -296,13 +295,7 @@ export class AutoScheduleService {
         );
         inserted += result.affectedRows;
       }
-      await conn.commit();
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
-    return inserted;
+      return inserted;
+    });
   }
 }

@@ -17,6 +17,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
 
@@ -209,64 +210,63 @@ export class BulkImportService {
     const { rows, errors } = mapEmployeeRows(parsed);
     if (errors.length > 0) return { inserted: 0, errors };
 
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
-      let inserted = 0;
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        const [existing] = await conn.execute<RowDataPacket[]>(
-          `SELECT id FROM users WHERE email = ? LIMIT 1`,
-          [r.email]
-        );
-        if (existing.length > 0) {
-          await conn.rollback();
-          return {
-            inserted: 0,
-            errors: [{ row: i + 2, message: `Email already exists: ${r.email}` }],
-          };
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        const passwordHash = await bcrypt.hash(defaultPassword, config.security.bcryptRounds);
+        let inserted = 0;
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          const [existing] = await conn.execute<RowDataPacket[]>(
+            `SELECT id FROM users WHERE email = ? LIMIT 1`,
+            [r.email]
+          );
+          if (existing.length > 0) {
+            await conn.rollback();
+            return {
+              inserted: 0,
+              errors: [{ row: i + 2, message: `Email already exists: ${r.email}` }],
+            };
+          }
+          const [roleRows] = await conn.execute<RowDataPacket[]>(
+            `SELECT id FROM roles WHERE name = ? LIMIT 1`,
+            [r.roleName]
+          );
+          if (roleRows.length === 0) {
+            await conn.rollback();
+            return {
+              inserted: 0,
+              errors: [{ row: i + 2, message: `Unknown role: ${r.roleName}` }],
+            };
+          }
+          const roleId = (roleRows[0] as any).id as number;
+          const [userRes] = await conn.execute<ResultSetHeader>(
+            `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, phone, position, hourly_rate, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+            [
+              r.email,
+              passwordHash,
+              r.firstName,
+              r.lastName,
+              r.employeeId ?? null,
+              r.phone ?? null,
+              r.position ?? null,
+              r.hourlyRate ?? null,
+            ]
+          );
+          await conn.execute(
+            `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)`,
+            [userRes.insertId, roleId]
+          );
+          inserted++;
         }
-        const [roleRows] = await conn.execute<RowDataPacket[]>(
-          `SELECT id FROM roles WHERE name = ? LIMIT 1`,
-          [r.roleName]
-        );
-        if (roleRows.length === 0) {
-          await conn.rollback();
-          return {
-            inserted: 0,
-            errors: [{ row: i + 2, message: `Unknown role: ${r.roleName}` }],
-          };
-        }
-        const roleId = (roleRows[0] as any).id as number;
-        const [userRes] = await conn.execute<ResultSetHeader>(
-          `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, phone, position, hourly_rate, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-          [
-            r.email,
-            passwordHash,
-            r.firstName,
-            r.lastName,
-            r.employeeId ?? null,
-            r.phone ?? null,
-            r.position ?? null,
-            r.hourlyRate ?? null,
-          ]
-        );
-        await conn.execute(
-          `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)`,
-          [userRes.insertId, roleId]
-        );
-        inserted++;
+        await conn.commit();
+        return { inserted, errors: [] };
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      await conn.commit();
-      return { inserted, errors: [] };
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 
   async importShifts(csv: string): Promise<ImportResult> {
@@ -274,25 +274,24 @@ export class BulkImportService {
     const { rows, errors } = mapShiftRows(parsed);
     if (errors.length > 0) return { inserted: 0, errors };
 
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      let inserted = 0;
-      for (const r of rows) {
-        await conn.execute<ResultSetHeader>(
-          `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
-          [r.scheduleId, r.departmentId, r.date, r.startTime, r.endTime, r.minStaff, r.maxStaff]
-        );
-        inserted++;
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        let inserted = 0;
+        for (const r of rows) {
+          await conn.execute<ResultSetHeader>(
+            `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'open')`,
+            [r.scheduleId, r.departmentId, r.date, r.startTime, r.endTime, r.minStaff, r.maxStaff]
+          );
+          inserted++;
+        }
+        await conn.commit();
+        return { inserted, errors: [] };
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      await conn.commit();
-      return { inserted, errors: [] };
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 }

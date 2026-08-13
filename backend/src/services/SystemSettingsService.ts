@@ -19,6 +19,7 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ForbiddenError, NotFoundError } from '../errors';
 import { SystemSetting } from '../types';
 import { logger } from '../config/logger';
@@ -137,58 +138,57 @@ export class SystemSettingsService {
    * @returns Promise resolving to the updated setting
    */
   async updateSetting(category: string, key: string, value: string): Promise<SystemSetting> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [existingRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id, is_editable AS isEditable FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
-        [category, key]
-      );
+        const [existingRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id, is_editable AS isEditable FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
+          [category, key]
+        );
 
-      if (existingRows.length === 0) {
-        throw new NotFoundError(`Setting not found: ${category}.${key}`);
-      }
+        if (existingRows.length === 0) {
+          throw new NotFoundError(`Setting not found: ${category}.${key}`);
+        }
 
-      if (!existingRows[0].isEditable) {
-        throw new ForbiddenError(`Setting ${category}.${key} is not editable`);
-      }
+        if (!existingRows[0].isEditable) {
+          throw new ForbiddenError(`Setting ${category}.${key} is not editable`);
+        }
 
-      await connection.execute(
-        'UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE category = ? AND `key` = ?',
-        [value, category, key]
-      );
+        await connection.execute(
+          'UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE category = ? AND `key` = ?',
+          [value, category, key]
+        );
 
-      const [updatedRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT 
-          id,
-          category,
-          \`key\`,
-          value,
-          type,
-          default_value AS defaultValue,
-          description,
-          is_editable AS isEditable,
-          created_at AS createdAt,
-          updated_at AS updatedAt
-        FROM system_settings
-        WHERE category = ? AND \`key\` = ?
-        LIMIT 1`,
-        [category, key]
-      );
+        const [updatedRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT 
+            id,
+            category,
+            \`key\`,
+            value,
+            type,
+            default_value AS defaultValue,
+            description,
+            is_editable AS isEditable,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+          FROM system_settings
+          WHERE category = ? AND \`key\` = ?
+          LIMIT 1`,
+          [category, key]
+        );
 
-      await connection.commit();
+        await connection.commit();
       
-      logger.info(`Setting ${category}.${key} updated`);
-      return updatedRows[0] as SystemSetting;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Error updating setting:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+        logger.info(`Setting ${category}.${key} updated`);
+        return updatedRows[0] as SystemSetting;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Error updating setting:', error);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -199,56 +199,55 @@ export class SystemSettingsService {
    * @returns Promise resolving to the reset setting
    */
   async resetSetting(category: string, key: string): Promise<SystemSetting> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const [rows] = await connection.execute<RowDataPacket[]>(
-        'SELECT default_value AS defaultValue FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
-        [category, key]
-      );
+        const [rows] = await connection.execute<RowDataPacket[]>(
+          'SELECT default_value AS defaultValue FROM system_settings WHERE category = ? AND `key` = ? LIMIT 1',
+          [category, key]
+        );
 
-      if (rows.length === 0) {
-        throw new NotFoundError(`Setting not found: ${category}.${key}`);
-      }
+        if (rows.length === 0) {
+          throw new NotFoundError(`Setting not found: ${category}.${key}`);
+        }
 
-      const defaultValue = rows[0].defaultValue;
+        const defaultValue = rows[0].defaultValue;
 
-      await connection.execute(
-        'UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE category = ? AND `key` = ?',
-        [defaultValue, category, key]
-      );
+        await connection.execute(
+          'UPDATE system_settings SET value = ?, updated_at = CURRENT_TIMESTAMP WHERE category = ? AND `key` = ?',
+          [defaultValue, category, key]
+        );
 
-      const [updatedRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT 
-          id,
-          category,
-          \`key\`,
-          value,
-          type,
-          default_value AS defaultValue,
-          description,
-          is_editable AS isEditable,
-          created_at AS createdAt,
-          updated_at AS updatedAt
-        FROM system_settings
-        WHERE category = ? AND \`key\` = ?
-        LIMIT 1`,
-        [category, key]
-      );
+        const [updatedRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT 
+            id,
+            category,
+            \`key\`,
+            value,
+            type,
+            default_value AS defaultValue,
+            description,
+            is_editable AS isEditable,
+            created_at AS createdAt,
+            updated_at AS updatedAt
+          FROM system_settings
+          WHERE category = ? AND \`key\` = ?
+          LIMIT 1`,
+          [category, key]
+        );
 
-      await connection.commit();
+        await connection.commit();
       
-      logger.info(`Setting ${category}.${key} reset to default`);
-      return updatedRows[0] as SystemSetting;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Error resetting setting:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+        logger.info(`Setting ${category}.${key} reset to default`);
+        return updatedRows[0] as SystemSetting;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Error resetting setting:', error);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -318,76 +317,75 @@ export class SystemSettingsService {
    * @returns Promise resolving when complete
    */
   async initializeDefaults(): Promise<void> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
     
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      const defaultSettings = [
-        {
-          category: 'general',
-          key: 'currency',
-          value: 'EUR',
-          type: 'string',
-          default_value: 'EUR',
-          description: 'Default currency for the application (EUR or USD)',
-          is_editable: true
-        },
-        {
-          category: 'general',
-          key: 'time_period',
-          value: 'monthly',
-          type: 'string',
-          default_value: 'monthly',
-          description: 'Default time period for scheduling (monthly, weekly, daily)',
-          is_editable: true
-        },
-        {
-          category: 'scheduling',
-          key: 'max_shifts_per_week',
-          value: '5',
-          type: 'number',
-          default_value: '5',
-          description: 'Maximum number of shifts an employee can work per week',
-          is_editable: true
-        },
-        {
-          category: 'scheduling',
-          key: 'min_hours_between_shifts',
-          value: '8',
-          type: 'number',
-          default_value: '8',
-          description: 'Minimum hours required between shifts for the same employee',
-          is_editable: true
+        const defaultSettings = [
+          {
+            category: 'general',
+            key: 'currency',
+            value: 'EUR',
+            type: 'string',
+            default_value: 'EUR',
+            description: 'Default currency for the application (EUR or USD)',
+            is_editable: true
+          },
+          {
+            category: 'general',
+            key: 'time_period',
+            value: 'monthly',
+            type: 'string',
+            default_value: 'monthly',
+            description: 'Default time period for scheduling (monthly, weekly, daily)',
+            is_editable: true
+          },
+          {
+            category: 'scheduling',
+            key: 'max_shifts_per_week',
+            value: '5',
+            type: 'number',
+            default_value: '5',
+            description: 'Maximum number of shifts an employee can work per week',
+            is_editable: true
+          },
+          {
+            category: 'scheduling',
+            key: 'min_hours_between_shifts',
+            value: '8',
+            type: 'number',
+            default_value: '8',
+            description: 'Minimum hours required between shifts for the same employee',
+            is_editable: true
+          }
+        ];
+
+        for (const setting of defaultSettings) {
+          await connection.execute(
+            `INSERT INTO system_settings 
+            (category, \`key\`, value, type, default_value, description, is_editable)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE category = category`,
+            [
+              setting.category,
+              setting.key,
+              setting.value,
+              setting.type,
+              setting.default_value,
+              setting.description,
+              setting.is_editable
+            ]
+          );
         }
-      ];
 
-      for (const setting of defaultSettings) {
-        await connection.execute(
-          `INSERT INTO system_settings 
-          (category, \`key\`, value, type, default_value, description, is_editable)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          ON DUPLICATE KEY UPDATE category = category`,
-          [
-            setting.category,
-            setting.key,
-            setting.value,
-            setting.type,
-            setting.default_value,
-            setting.description,
-            setting.is_editable
-          ]
-        );
+        await connection.commit();
+        logger.info('Default system settings initialized');
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Error initializing default settings:', error);
+        throw error;
       }
-
-      await connection.commit();
-      logger.info('Default system settings initialized');
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Error initializing default settings:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    });
   }
 }

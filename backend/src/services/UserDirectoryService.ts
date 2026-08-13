@@ -11,6 +11,7 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { buildVcfFile, parseVcf, VCard } from '../utils/vcard';
@@ -84,30 +85,29 @@ export class UserDirectoryService {
     fields: Array<{ key: string; value: string; isPublic?: boolean }>
   ): Promise<void> {
     if (fields.length === 0) return;
-    const conn = await this.pool.getConnection();
-    try {
-      await conn.beginTransaction();
-      for (const f of fields) {
-        if (!/^[A-Za-z0-9_-]{1,64}$/.test(f.key)) {
-          throw new ValidationError(`Invalid field key '${f.key}'`);
+    return usingConnection(this.pool, async (conn) => {
+      try {
+        await conn.beginTransaction();
+        for (const f of fields) {
+          if (!/^[A-Za-z0-9_-]{1,64}$/.test(f.key)) {
+            throw new ValidationError(`Invalid field key '${f.key}'`);
+          }
+          await conn.execute<ResultSetHeader>(
+            `INSERT INTO user_custom_fields (user_id, field_key, field_value, is_public)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+               field_value = VALUES(field_value),
+               is_public = VALUES(is_public)`,
+            [userId, f.key, f.value, f.isPublic ?? true ? 1 : 0]
+          );
         }
-        await conn.execute<ResultSetHeader>(
-          `INSERT INTO user_custom_fields (user_id, field_key, field_value, is_public)
-           VALUES (?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE
-             field_value = VALUES(field_value),
-             is_public = VALUES(is_public)`,
-          [userId, f.key, f.value, f.isPublic ?? true ? 1 : 0]
-        );
+        await conn.commit();
+        logger.info(`Custom fields upserted for user ${userId}: ${fields.length} keys`);
+      } catch (err) {
+        await conn.rollback();
+        throw err;
       }
-      await conn.commit();
-      logger.info(`Custom fields upserted for user ${userId}: ${fields.length} keys`);
-    } catch (err) {
-      await conn.rollback();
-      throw err;
-    } finally {
-      conn.release();
-    }
+    });
   }
 
   async removeField(userId: number, key: string): Promise<boolean> {

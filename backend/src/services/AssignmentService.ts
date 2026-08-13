@@ -39,6 +39,7 @@
  */
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
+import { usingConnection } from '../utils/transaction';
 import { ShiftAssignment, CreateAssignmentRequest, SqlParam } from '../types';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
@@ -118,164 +119,163 @@ export class AssignmentService {
   }
 
   async createAssignment(assignmentData: CreateAssignmentRequest): Promise<ShiftAssignment> {
-    const connection = await this.pool.getConnection();
+    return usingConnection(this.pool, async (connection) => {
 
-    try {
-      await connection.beginTransaction();
+      try {
+        await connection.beginTransaction();
 
-      // Lock the shift row for the duration of the transaction so two
-      // concurrent assignment requests for the same shift serialize on the
-      // capacity check instead of both reading the same pre-insert count.
-      const [shiftRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT * FROM shifts WHERE id = ? FOR UPDATE',
-        [assignmentData.shiftId]
-      );
-
-      if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
-
-      const shift = shiftRows[0];
-
-      const [countRows] = await connection.execute<RowDataPacket[]>(
-        `SELECT COUNT(*) AS current_assignments
-           FROM shift_assignments
-          WHERE shift_id = ? AND status IN ('pending', 'confirmed')`,
-        [assignmentData.shiftId]
-      );
-      const currentAssignments = Number((countRows[0] as any).current_assignments);
-
-      if (currentAssignments >= shift.max_staff) throw new ConflictError('Shift is already at maximum capacity');
-
-      const [userRows] = await connection.execute<RowDataPacket[]>(
-        'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
-        [assignmentData.userId]
-      );
-
-      if (userRows.length === 0) throw new NotFoundError('User not found or inactive');
-
-      const conflicts = await this.validator.checkConflicts(
-        assignmentData.userId,
-        shift.date,
-        shift.start_time,
-        shift.end_time,
-        connection
-      );
-
-      if (conflicts.length > 0) {
-        throw new ConflictError(`User has conflicting assignment: ${conflicts[0].shiftDate} ${conflicts[0].startTime}-${conflicts[0].endTime}`);
-      }
-
-      const isAvailable = await this.validator.checkUserAvailability(
-        assignmentData.userId,
-        shift.date,
-        connection
-      );
-
-      if (!isAvailable) throw new ConflictError('User is not available during this time');
-
-      const [requiredSkills] = await connection.execute<RowDataPacket[]>(
-        'SELECT skill_id FROM shift_skills WHERE shift_id = ?',
-        [assignmentData.shiftId]
-      );
-
-      // If the shift requires skills, verify the user holds all of them.
-      // execute() uses prepared statements that do not expand arrays, so
-      // placeholders are built manually. When skillIds is empty the check
-      // is skipped entirely — no skills required means no restriction.
-      const skillIds = requiredSkills.map((rs: any) => rs.skill_id);
-      if (skillIds.length > 0) {
-        const placeholders = skillIds.map(() => '?').join(', ');
-        const [userSkills] = await connection.execute<RowDataPacket[]>(
-          `SELECT skill_id FROM user_skills WHERE user_id = ? AND skill_id IN (${placeholders})`,
-          [assignmentData.userId, ...skillIds]
+        // Lock the shift row for the duration of the transaction so two
+        // concurrent assignment requests for the same shift serialize on the
+        // capacity check instead of both reading the same pre-insert count.
+        const [shiftRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT * FROM shifts WHERE id = ? FOR UPDATE',
+          [assignmentData.shiftId]
         );
-        if ((userSkills as RowDataPacket[]).length < requiredSkills.length) {
-          throw new ConflictError('User does not have all required skills for this shift');
-        }
-      }
 
-      // Block the assignment if it would exceed configured compliance limits.
-      const compliance = await evaluateAssignmentCompliance(this.pool, assignmentData.userId, {
-        date:
-          typeof shift.date === 'string' ? shift.date : DateUtils.fromMySQLDate(shift.date),
-        startTime: shift.start_time,
-        endTime: shift.end_time,
-      });
-      if (!compliance.ok) {
-        const head = compliance.violations[0];
-        const err = new Error(`Compliance violation: ${head.message}`) as Error & {
-          code?: string;
-          violations?: typeof compliance.violations;
-        };
-        err.code = `COMPLIANCE_${head.code}`;
-        err.violations = compliance.violations;
-        throw err;
-      }
+        if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
 
-      const policyValidation = await this.policyValidator.validateAssignment({
-        userId: assignmentData.userId,
-        shiftId: assignmentData.shiftId,
-      });
-      if (!policyValidation.ok) {
-        const blocking = policyValidation.violations.filter((v) => !v.hasApprovedException);
-        const head = blocking[0];
-        const err = new Error(`Policy violation: ${head?.message ?? 'Blocked by policy'}`) as Error & {
-          code?: string;
-          violations?: typeof policyValidation.violations;
-        };
-        err.code = `POLICY_${head?.policyKey ?? 'VIOLATION'}`.toUpperCase();
-        err.violations = policyValidation.violations;
-        throw err;
-      }
+        const shift = shiftRows[0];
 
-      // Pinned when, and only when, the schedule is already published.
-      //
-      // `is_pinned` means "someone has been told about this", and adding a
-      // person to a live schedule is telling them. Leaving it false would let
-      // the next re-solve move them freely, which is the same hole publishing
-      // itself had — the column existed and nothing ever wrote it.
-      //
-      // Derived in the INSERT rather than read first and passed in: an extra
-      // round-trip inside an open transaction buys nothing, and a schedule
-      // published between the read and the write would produce an unpinned
-      // commitment. `shifts.schedule_id` is NOT NULL, so the join always
-      // matches and the row is always inserted.
-      const [result] = await connection.execute<ResultSetHeader>(
-        `INSERT INTO shift_assignments (shift_id, user_id, status, notes, is_pinned)
-         SELECT ?, ?, 'pending', ?, sc.status = 'published'
-           FROM shifts s
-           JOIN schedules sc ON sc.id = s.schedule_id
-          WHERE s.id = ?`,
-        [
-          assignmentData.shiftId,
+        const [countRows] = await connection.execute<RowDataPacket[]>(
+          `SELECT COUNT(*) AS current_assignments
+             FROM shift_assignments
+            WHERE shift_id = ? AND status IN ('pending', 'confirmed')`,
+          [assignmentData.shiftId]
+        );
+        const currentAssignments = Number((countRows[0] as any).current_assignments);
+
+        if (currentAssignments >= shift.max_staff) throw new ConflictError('Shift is already at maximum capacity');
+
+        const [userRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
+          [assignmentData.userId]
+        );
+
+        if (userRows.length === 0) throw new NotFoundError('User not found or inactive');
+
+        const conflicts = await this.validator.checkConflicts(
           assignmentData.userId,
-          assignmentData.notes || null,
-          assignmentData.shiftId,
-        ]
-      );
+          shift.date,
+          shift.start_time,
+          shift.end_time,
+          connection
+        );
 
-      const assignmentId = result.insertId;
-      await connection.commit();
-      logger.info(`Assignment created successfully: ${assignmentId}`);
+        if (conflicts.length > 0) {
+          throw new ConflictError(`User has conflicting assignment: ${conflicts[0].shiftDate} ${conflicts[0].startTime}-${conflicts[0].endTime}`);
+        }
 
-      const newAssignment = await this.getAssignmentById(assignmentId);
-      if (!newAssignment) throw new Error('Failed to retrieve created assignment');
-      await this.audit.write({
-        actorId: assignmentData.actorId ?? null,
-        action: 'assignment.create',
-        entityType: 'shift_assignment',
-        entityId: assignmentId,
-        description: `Assignment created: user ${assignmentData.userId} on shift ${assignmentData.shiftId}`,
-        justification: assignmentData.reason ?? null,
-        after: { shiftId: assignmentData.shiftId, userId: assignmentData.userId, status: 'pending' },
-      });
-      return newAssignment;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to create assignment:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+        const isAvailable = await this.validator.checkUserAvailability(
+          assignmentData.userId,
+          shift.date,
+          connection
+        );
+
+        if (!isAvailable) throw new ConflictError('User is not available during this time');
+
+        const [requiredSkills] = await connection.execute<RowDataPacket[]>(
+          'SELECT skill_id FROM shift_skills WHERE shift_id = ?',
+          [assignmentData.shiftId]
+        );
+
+        // If the shift requires skills, verify the user holds all of them.
+        // execute() uses prepared statements that do not expand arrays, so
+        // placeholders are built manually. When skillIds is empty the check
+        // is skipped entirely — no skills required means no restriction.
+        const skillIds = requiredSkills.map((rs: any) => rs.skill_id);
+        if (skillIds.length > 0) {
+          const placeholders = skillIds.map(() => '?').join(', ');
+          const [userSkills] = await connection.execute<RowDataPacket[]>(
+            `SELECT skill_id FROM user_skills WHERE user_id = ? AND skill_id IN (${placeholders})`,
+            [assignmentData.userId, ...skillIds]
+          );
+          if ((userSkills as RowDataPacket[]).length < requiredSkills.length) {
+            throw new ConflictError('User does not have all required skills for this shift');
+          }
+        }
+
+        // Block the assignment if it would exceed configured compliance limits.
+        const compliance = await evaluateAssignmentCompliance(this.pool, assignmentData.userId, {
+          date:
+            typeof shift.date === 'string' ? shift.date : DateUtils.fromMySQLDate(shift.date),
+          startTime: shift.start_time,
+          endTime: shift.end_time,
+        });
+        if (!compliance.ok) {
+          const head = compliance.violations[0];
+          const err = new Error(`Compliance violation: ${head.message}`) as Error & {
+            code?: string;
+            violations?: typeof compliance.violations;
+          };
+          err.code = `COMPLIANCE_${head.code}`;
+          err.violations = compliance.violations;
+          throw err;
+        }
+
+        const policyValidation = await this.policyValidator.validateAssignment({
+          userId: assignmentData.userId,
+          shiftId: assignmentData.shiftId,
+        });
+        if (!policyValidation.ok) {
+          const blocking = policyValidation.violations.filter((v) => !v.hasApprovedException);
+          const head = blocking[0];
+          const err = new Error(`Policy violation: ${head?.message ?? 'Blocked by policy'}`) as Error & {
+            code?: string;
+            violations?: typeof policyValidation.violations;
+          };
+          err.code = `POLICY_${head?.policyKey ?? 'VIOLATION'}`.toUpperCase();
+          err.violations = policyValidation.violations;
+          throw err;
+        }
+
+        // Pinned when, and only when, the schedule is already published.
+        //
+        // `is_pinned` means "someone has been told about this", and adding a
+        // person to a live schedule is telling them. Leaving it false would let
+        // the next re-solve move them freely, which is the same hole publishing
+        // itself had — the column existed and nothing ever wrote it.
+        //
+        // Derived in the INSERT rather than read first and passed in: an extra
+        // round-trip inside an open transaction buys nothing, and a schedule
+        // published between the read and the write would produce an unpinned
+        // commitment. `shifts.schedule_id` is NOT NULL, so the join always
+        // matches and the row is always inserted.
+        const [result] = await connection.execute<ResultSetHeader>(
+          `INSERT INTO shift_assignments (shift_id, user_id, status, notes, is_pinned)
+           SELECT ?, ?, 'pending', ?, sc.status = 'published'
+             FROM shifts s
+             JOIN schedules sc ON sc.id = s.schedule_id
+            WHERE s.id = ?`,
+          [
+            assignmentData.shiftId,
+            assignmentData.userId,
+            assignmentData.notes || null,
+            assignmentData.shiftId,
+          ]
+        );
+
+        const assignmentId = result.insertId;
+        await connection.commit();
+        logger.info(`Assignment created successfully: ${assignmentId}`);
+
+        const newAssignment = await this.getAssignmentById(assignmentId);
+        if (!newAssignment) throw new Error('Failed to retrieve created assignment');
+        await this.audit.write({
+          actorId: assignmentData.actorId ?? null,
+          action: 'assignment.create',
+          entityType: 'shift_assignment',
+          entityId: assignmentId,
+          description: `Assignment created: user ${assignmentData.userId} on shift ${assignmentData.shiftId}`,
+          justification: assignmentData.reason ?? null,
+          after: { shiftId: assignmentData.shiftId, userId: assignmentData.userId, status: 'pending' },
+        });
+        return newAssignment;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to create assignment:', error);
+        throw error;
+      }
+    });
   }
 
   async getAssignmentById(id: number): Promise<ShiftAssignment | null> {
@@ -416,33 +416,32 @@ export class AssignmentService {
 
   async deleteAssignment(id: number, actorId?: number, reason?: string): Promise<boolean> {
     const snapshot = await this.getAssignmentById(id);
-    const connection = await this.pool.getConnection();
-    try {
-      await connection.beginTransaction();
-      const [result] = await connection.execute<ResultSetHeader>(
-        'DELETE FROM shift_assignments WHERE id = ?',
-        [id]
-      );
-      if (result.affectedRows === 0) throw new NotFoundError('Assignment not found');
-      await connection.commit();
-      logger.info(`Assignment deleted successfully: ${id}`);
-      await this.audit.write({
-        actorId: actorId ?? null,
-        action: 'assignment.delete',
-        entityType: 'shift_assignment',
-        entityId: id,
-        description: `Assignment deleted`,
-        justification: reason ?? null,
-        before: snapshot ? { shiftId: snapshot.shiftId, userId: snapshot.userId, status: snapshot.status } : null,
-      });
-      return true;
-    } catch (error) {
-      await connection.rollback();
-      logger.error('Failed to delete assignment:', error);
-      throw error;
-    } finally {
-      connection.release();
-    }
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        const [result] = await connection.execute<ResultSetHeader>(
+          'DELETE FROM shift_assignments WHERE id = ?',
+          [id]
+        );
+        if (result.affectedRows === 0) throw new NotFoundError('Assignment not found');
+        await connection.commit();
+        logger.info(`Assignment deleted successfully: ${id}`);
+        await this.audit.write({
+          actorId: actorId ?? null,
+          action: 'assignment.delete',
+          entityType: 'shift_assignment',
+          entityId: id,
+          description: `Assignment deleted`,
+          justification: reason ?? null,
+          before: snapshot ? { shiftId: snapshot.shiftId, userId: snapshot.userId, status: snapshot.status } : null,
+        });
+        return true;
+      } catch (error) {
+        await connection.rollback();
+        logger.error('Failed to delete assignment:', error);
+        throw error;
+      }
+    });
   }
 
   async updateAssignment(id: number, updateData: { status?: string; notes?: string; actorId?: number; reason?: string }): Promise<ShiftAssignment> {
