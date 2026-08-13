@@ -1,455 +1,59 @@
 /**
  * Dashboard Routes
  *
- * Provides dashboard data and analytics endpoints for the application.
- * Includes statistics, metrics, and real-time information display.
+ * Two endpoints, both backed by `DashboardService`: the summary counters and
+ * the attention shortlist. This file used to own 380 lines of SQL — the only
+ * router in the codebase that did — alongside three further endpoints that
+ * nothing called (#719).
  *
  * Authorization model:
  * - Aggregate counters are visible to every authenticated user.
- * - Monthly labor cost is only computed for holders of `report.read`;
- *   other users receive `monthlyCost: null`. `monthlyCostPlan` — the sum of
- *   every admin-set cost plan target whose period overlaps the current month
- *   — carries the exact same gate and the exact same null-when-absent
- *   behavior, since it is the other half of the same comparison. Setting a
- *   target itself is a separate, stronger permission (`report.manage`, see
- *   `routes/costPlans.ts`); this route only reads the sum.
- * - The recent-activities feed reads from `audit_logs` and is therefore
- *   guarded exactly like /api/audit-logs: `audit` module + `audit.read`.
- *   Its `limit` was documented in the spec but never parsed (the handler took
- *   `_req` and hardcoded the value); it is now a validated query parameter,
- *   bounded low because this is a preview of the trail and `/api/audit-logs`
- *   is the endpoint for reading through it.
+ * - Monthly labor cost is only computed for holders of `report.read`; other
+ *   users receive `monthlyCost: null`. `monthlyCostPlan` — the sum of every
+ *   admin-set cost plan target whose period overlaps the current month —
+ *   carries the exact same gate and the exact same null-when-absent behavior,
+ *   since it is the other half of the same comparison. Setting a target is a
+ *   separate, stronger permission (`report.manage`, see `routes/costPlans.ts`);
+ *   this route only reads the sum.
+ * - Attention items follow the same rule: `report.read` lifts the org-unit
+ *   bound, and without it a caller sees only the units they belong to — the
+ *   membership-bound scope `resolveVisibleOrgUnits` computes elsewhere.
  *
  * @author Luca Ostinelli
  */
 
 import { Router, Request, Response } from 'express';
-import { Pool, RowDataPacket } from 'mysql2/promise';
-import {
-  authenticate,
-  requirePermission,
-  requireModuleForUser,
-  userHasPermission,
-} from '../middleware/auth';
-import { validateQuery } from '../middleware/validation';
-import { SHIFT_HOURS_SQL, inClause } from '../utils/sql';
-import { dashboardActivitiesQuery } from '../schemas';
+import { Pool } from 'mysql2/promise';
+import { authenticate, userHasPermission } from '../middleware/auth';
 import { RbacService } from '../services/RbacService';
-import { PendingApprovalService } from '../services/PendingApprovalService';
-import { DateUtils } from '../utils';
-
-/** Feed size when the caller does not ask for one. Unchanged from the hardcoded value. */
-const DEFAULT_ACTIVITY_LIMIT = 10;
-
-// Sargable month window: [first day of current month, first day of next month).
-// Keeps idx_date usable, unlike MONTH(...)/YEAR(...) predicates.
-const MONTH_WINDOW = `s.date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
-        AND s.date < DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')`;
-
-// How far ahead an understaffed shift is worth flagging — long enough to act
-// on (swap it, post it to the open board, escalate it) before it happens,
-// short enough that the list stays a short, actionable read.
-const ATTENTION_WINDOW_DAYS = 14;
-
-// Caps on the item lists inside /attention-items — this is a glance, not a
-// report; /api/reports and /api/shifts are where the full picture lives.
-const MAX_ATTENTION_ITEMS = 20;
-
-const AGE_BUCKET_HOURS = { day: 24, twoDays: 48, week: 24 * 7 } as const;
+import { DashboardService } from '../services/DashboardService';
 
 export const createDashboardRouter = (pool: Pool) => {
   const router = Router();
-
-  const queryOne = async <T>(sql: string): Promise<T | null> => {
-    const [rows] = await pool.execute<RowDataPacket[]>(sql);
-    return rows.length > 0 ? (rows[0] as T) : null;
-  };
-
-  const queryAll = async <T>(sql: string): Promise<T[]> => {
-    const [rows] = await pool.execute<RowDataPacket[]>(sql);
-    return rows as T[];
-  };
+  const dashboard = new DashboardService(pool);
 
   /**
-   * Get Dashboard Statistics Endpoint
-   *
-   * Retrieves key performance indicators and statistics for the dashboard.
-   * `monthlyCost` requires `report.read` and is null otherwise. `monthlyCostPlan`
-   * — the admin-set target for the current month, summed across departments —
-   * carries the same gate and the same null-when-absent behavior.
-   *
    * @route GET /api/dashboard/stats
-   * @returns {Object} Dashboard statistics and KPIs
+   * @returns Dashboard statistics and KPIs
    */
   router.get('/stats', authenticate, async (req: Request, res: Response) => {
-      // Every active user is schedulable staff, so the headcount is the count
-      // of active users.
-      const totalEmployeesQuery =
-        'SELECT COUNT(*) as count FROM users WHERE is_active = TRUE';
-
-      const activeSchedulesQuery = 'SELECT COUNT(*) as count FROM schedules WHERE status = "published"';
-
-      const todayShiftsQuery = `
-        SELECT COUNT(*) as count
-        FROM shifts
-        WHERE date = CURDATE() AND status IN ('open', 'assigned', 'confirmed')
-      `;
-
-      const pendingApprovalsQuery = `
-        SELECT COUNT(*) as count
-        FROM shift_assignments
-        WHERE status = 'pending'
-      `;
-
-      const monthlyHoursQuery = `
-        SELECT COALESCE(SUM(${SHIFT_HOURS_SQL}), 0) as total_hours
-        FROM shift_assignments sa
-        JOIN shifts s ON sa.shift_id = s.id
-        WHERE ${MONTH_WINDOW}
-          AND sa.status = 'confirmed'
-      `;
-
-      // Labor cost derives from hourly rates: restricted to report readers.
-      const canSeeCost = userHasPermission(req.user, 'report.read');
-      const monthlyCostQuery = `
-        SELECT COALESCE(SUM(${SHIFT_HOURS_SQL} * u.hourly_rate), 0) as total_cost
-        FROM shift_assignments sa
-        JOIN shifts s ON sa.shift_id = s.id
-        JOIN users u ON sa.user_id = u.id
-        WHERE ${MONTH_WINDOW}
-          AND sa.status = 'confirmed'
-      `;
-
-      // The other half of the cost comparison: every admin-set target whose
-      // period overlaps the current month, summed across departments. Same
-      // overlap test a plan's own period would use to answer "does this
-      // apply to now" — LAST_DAY/DATE_FORMAT mirror MONTH_WINDOW's own
-      // sargable month bounds above rather than introducing a second style.
-      const monthlyCostPlanQuery = `
-        SELECT COALESCE(SUM(target_amount), 0) as total_target
-        FROM cost_plans
-        WHERE start_date <= LAST_DAY(CURDATE())
-          AND end_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
-      `;
-
-      const coverageQuery = `
-        SELECT
-          COUNT(DISTINCT s.id) as total_shifts,
-          COUNT(DISTINCT CASE WHEN sa.id IS NOT NULL THEN s.id END) as covered_shifts
-        FROM shifts s
-        LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status = 'confirmed'
-        WHERE ${MONTH_WINDOW}
-      `;
-
-      // Preference-match satisfaction: ratio of this month's assignments where the
-      // assigned shift appears in the employee's preferred_shifts list.
-      const satisfactionQuery = `
-        SELECT
-          COUNT(*) AS total_assignments,
-          SUM(
-            CASE
-              WHEN up.preferred_shifts IS NOT NULL
-                AND JSON_LENGTH(up.preferred_shifts) > 0
-                AND JSON_CONTAINS(up.preferred_shifts, CAST(sa.shift_id AS JSON))
-              THEN 1 ELSE 0
-            END
-          ) AS preferred_assignments
-        FROM shift_assignments sa
-        JOIN shifts s ON sa.shift_id = s.id
-        LEFT JOIN user_preferences up ON up.user_id = sa.user_id
-        WHERE ${MONTH_WINDOW}
-          AND sa.status IN ('confirmed', 'completed')
-      `;
-
-      // The aggregates are independent, so run them concurrently.
-      const [
-        totalEmployees,
-        activeSchedules,
-        todayShifts,
-        pendingApprovals,
-        monthlyHoursResult,
-        monthlyCostResult,
-        monthlyCostPlanResult,
-        coverageResult,
-        satisfactionResult,
-      ] = await Promise.all([
-        queryOne<{ count: number }>(totalEmployeesQuery),
-        queryOne<{ count: number }>(activeSchedulesQuery),
-        queryOne<{ count: number }>(todayShiftsQuery),
-        queryOne<{ count: number }>(pendingApprovalsQuery),
-        queryOne<{ total_hours: number }>(monthlyHoursQuery),
-        canSeeCost ? queryOne<{ total_cost: number }>(monthlyCostQuery) : Promise.resolve(null),
-        canSeeCost
-          ? queryOne<{ total_target: number }>(monthlyCostPlanQuery)
-          : Promise.resolve(null),
-        queryOne<{ total_shifts: number; covered_shifts: number }>(coverageQuery),
-        queryOne<{ total_assignments: number; preferred_assignments: number }>(satisfactionQuery),
-      ]);
-
-      const monthlyHours = monthlyHoursResult?.total_hours || 0;
-      const monthlyCost = canSeeCost ? monthlyCostResult?.total_cost || 0 : null;
-      const monthlyCostPlan = canSeeCost ? monthlyCostPlanResult?.total_target || 0 : null;
-      const coverageRate = coverageResult && coverageResult.total_shifts > 0
-        ? (coverageResult.covered_shifts / coverageResult.total_shifts) * 100
-        : 0;
-      const employeeSatisfaction =
-        satisfactionResult && satisfactionResult.total_assignments > 0
-          ? (satisfactionResult.preferred_assignments / satisfactionResult.total_assignments) * 100
-          : 0;
-
-      const stats = {
-        totalEmployees: totalEmployees?.count || 0,
-        activeSchedules: activeSchedules?.count || 0,
-        todayShifts: todayShifts?.count || 0,
-        pendingApprovals: pendingApprovals?.count || 0,
-        monthlyHours: Math.round(monthlyHours),
-        monthlyCost: monthlyCost === null ? null : Math.round(monthlyCost * 100) / 100,
-        monthlyCostPlan: monthlyCostPlan === null ? null : Math.round(monthlyCostPlan * 100) / 100,
-        coverageRate: Math.round(coverageRate * 10) / 10,
-        employeeSatisfaction: Math.round(employeeSatisfaction * 10) / 10,
-      };
-
-      res.json({
-        success: true,
-        data: stats
-      });
-  });
-
-  // Get recent activities. Reads audit_logs, so it carries the same guards as
-  // /api/audit-logs: audit module enabled for the caller's org + audit.read.
-  router.get(
-    '/activities',
-    authenticate,
-    requireModuleForUser('audit'),
-    requirePermission('audit.read'),
-    validateQuery(dashboardActivitiesQuery),
-    async (_req: Request, res: Response) => {
-      // The schema has already clamped this to a positive integer <= 50, and
-      // it is inlined rather than bound: MySQL's binary prepared-statement
-      // protocol rejects placeholders in LIMIT with ER_WRONG_ARGUMENTS, which
-      // is what made the audit-log, change-request and notification lists
-      // return 500 in every deployment until it was found.
-      const limit = (res.locals.query.limit as number | undefined) ?? DEFAULT_ACTIVITY_LIMIT;
-      const activitiesQuery = `
-        SELECT
-          al.id,
-          al.action as type,
-          al.description as message,
-          al.created_at as timestamp,
-          CONCAT(u.first_name, ' ', u.last_name) as user
-        FROM audit_logs al
-        LEFT JOIN users u ON al.user_id = u.id
-        ORDER BY al.created_at DESC
-        LIMIT ${limit}
-      `;
-
-      const activities = await queryAll<{
-        id: number;
-        type: string;
-        message: string;
-        timestamp: Date;
-        user: string | null;
-      }>(activitiesQuery);
-
-      // Format activities for response
-      const formattedActivities = activities.map(activity => ({
-        id: activity.id.toString(),
-        type: activity.type,
-        message: activity.message,
-        timestamp: activity.timestamp.toISOString(),
-        user: activity.user || 'System'
-      }));
-
-      res.json({
-        success: true,
-        data: formattedActivities
-      });
-  });
-
-  // Get upcoming shifts
-  router.get('/upcoming-shifts', authenticate, async (_req: Request, res: Response) => {
-      // Query upcoming shifts with assignment information (using correct schema)
-      const query = `
-        SELECT
-          s.id,
-          CONCAT(d.name, ' - ', DATE_FORMAT(s.date, '%Y-%m-%d')) as name,
-          d.name as department,
-          s.start_time,
-          s.end_time,
-          s.min_staff as required_employees,
-          COUNT(sa.id) as assigned_employees
-        FROM shifts s
-        JOIN departments d ON s.department_id = d.id
-        LEFT JOIN shift_assignments sa ON s.id = sa.shift_id AND sa.status IN ('pending', 'confirmed')
-        WHERE s.date >= CURDATE() AND s.date <= DATE_ADD(CURDATE(), INTERVAL 3 DAY)
-          AND s.status IN ('open', 'assigned', 'confirmed')
-        GROUP BY s.id, d.name, s.date, s.start_time, s.end_time, s.min_staff
-        ORDER BY s.date, s.start_time
-        LIMIT 10
-      `;
-
-      const rows = await queryAll<{
-        id: number;
-        name: string;
-        department: string;
-        start_time: string;
-        end_time: string;
-        required_employees: number;
-        assigned_employees: number;
-      }>(query);
-
-      const upcomingShifts = rows.map(row => ({
-        id: row.id.toString(),
-        name: row.name,
-        department: row.department,
-        startTime: row.start_time,
-        endTime: row.end_time,
-        assignedEmployees: row.assigned_employees || 0,
-        requiredEmployees: row.required_employees,
-        status: row.assigned_employees < row.required_employees ? 'understaffed' :
-                row.assigned_employees > row.required_employees ? 'overstaffed' : 'adequate'
-      }));
-
-      res.json({
-        success: true,
-        data: upcomingShifts
-      });
-  });
-
-  // Get department overview
-  router.get('/departments', authenticate, async (_req: Request, res: Response) => {
-      // Query department statistics using correct schema (departments + users + user_departments)
-      const query = `
-        SELECT
-          d.name as department,
-          COUNT(DISTINCT u.id) as total_employees,
-          COUNT(DISTINCT CASE WHEN u.is_active = TRUE THEN u.id END) as active_employees,
-          COUNT(DISTINCT CASE WHEN NOT EXISTS (
-            SELECT 1 FROM user_roles ur
-              JOIN role_permissions rp ON rp.role_id = ur.role_id
-              JOIN permissions p ON p.id = rp.permission_id
-             WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
-               AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-          ) THEN u.id END) as employee_count,
-          COUNT(DISTINCT CASE WHEN EXISTS (
-            SELECT 1 FROM user_roles ur
-              JOIN role_permissions rp ON rp.role_id = ur.role_id
-              JOIN permissions p ON p.id = rp.permission_id
-             WHERE ur.user_id = u.id AND p.code = 'schedule.manage'
-               AND (ur.expires_at IS NULL OR ur.expires_at > NOW())
-          ) THEN u.id END) as manager_count
-        FROM departments d
-        LEFT JOIN user_departments ud ON d.id = ud.department_id
-        LEFT JOIN users u ON ud.user_id = u.id
-        WHERE d.is_active = TRUE
-        GROUP BY d.id, d.name
-        ORDER BY total_employees DESC
-      `;
-
-      const departments = await queryAll<{
-        department: string;
-        total_employees: number;
-        active_employees: number;
-        employee_count: number;
-        manager_count: number;
-      }>(query);
-
-      res.json({
-        success: true,
-        data: departments
-      });
+    const stats = await dashboard.getStats(userHasPermission(req.user, 'report.read'));
+    res.json({ success: true, data: stats });
   });
 
   /**
-   * Attention items: understaffed shifts coming up, and this caller's own
-   * pending approvals sorted by how long they have been waiting. Both are a
-   * *shortlist*, not a report — capped, and pointing at the endpoint that
-   * has the whole picture rather than trying to be it.
-   *
-   * Visibility mirrors the rest of the app: someone without `report.read`
-   * sees only the org units they belong to (their own subtree), the same
-   * membership-bound scope `resolveVisibleOrgUnits` computes elsewhere;
-   * `report.read` lifts that bound the same way it already does for
-   * `monthlyCost` above. Pending-approval aging needs no separate scoping —
-   * `PendingApprovalService.listForUser` already answers "assigned to this
-   * person, or their structure", which is exactly the right set here.
+   * @route GET /api/dashboard/attention-items
+   * @returns Understaffed shifts and aging pending approvals for this caller
    */
   router.get('/attention-items', authenticate, async (req: Request, res: Response) => {
-    const canSeeAll = userHasPermission(req.user, 'report.read');
-    const orgUnitIds = canSeeAll
+    // Null means "no org-unit bound": `report.read` lifts the scope the way it
+    // already does for the cost figures above.
+    const visibleOrgUnitIds = userHasPermission(req.user, 'report.read')
       ? null
       : await new RbacService(pool).getUserOrgUnitSubtreeIds(req.user!.id);
 
-    // An empty (non-null) scope means the caller belongs to no org unit at
-    // all — visible to nobody, not "unfiltered" — so the shift query is
-    // skipped rather than asked to match `IN ()`, which is invalid SQL.
-    const understaffedRows =
-      orgUnitIds !== null && orgUnitIds.length === 0
-        ? []
-        : await queryAll<{
-            id: number;
-            date: string;
-            start_time: string;
-            end_time: string;
-            min_staff: number;
-            assigned_staff: number;
-            department_name: string;
-          }>(`
-            SELECT s.id, s.date, s.start_time, s.end_time, s.min_staff,
-                   d.name AS department_name,
-                   COUNT(DISTINCT sa.id) AS assigned_staff
-              FROM shifts s
-              JOIN departments d ON d.id = s.department_id
-              LEFT JOIN shift_assignments sa
-                ON sa.shift_id = s.id AND sa.status IN ('pending', 'confirmed')
-             WHERE s.date >= CURDATE()
-               AND s.date <= DATE_ADD(CURDATE(), INTERVAL ${ATTENTION_WINDOW_DAYS} DAY)
-               AND s.status IN ('open', 'assigned', 'confirmed')
-               ${orgUnitIds !== null ? `AND d.org_unit_id IN (${inClause(orgUnitIds)})` : ''}
-             GROUP BY s.id, s.date, s.start_time, s.end_time, s.min_staff, d.name
-            HAVING assigned_staff < s.min_staff
-             ORDER BY s.date ASC, s.start_time ASC
-             LIMIT ${MAX_ATTENTION_ITEMS + 1}
-          `);
-
-    const understaffedTruncated = understaffedRows.length > MAX_ATTENTION_ITEMS;
-    const understaffedShifts = {
-      count: understaffedRows.length,
-      truncated: understaffedTruncated,
-      items: understaffedRows.slice(0, MAX_ATTENTION_ITEMS).map((row) => ({
-        id: row.id,
-        date: DateUtils.toDateString(row.date),
-        startTime: row.start_time,
-        endTime: row.end_time,
-        departmentName: row.department_name,
-        assignedStaff: row.assigned_staff,
-        minStaff: row.min_staff,
-      })),
-    };
-
-    const pending = await new PendingApprovalService(pool).listForUser(req.user!.id, 'pending');
-    const now = Date.now();
-    const ageHours = (createdAt: string) => (now - new Date(createdAt).getTime()) / (1000 * 60 * 60);
-    const sortedByAge = [...pending].sort(
-      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
-    const pendingApprovalsAging = {
-      count: pending.length,
-      overDay: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.day).length,
-      overTwoDays: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.twoDays).length,
-      overWeek: pending.filter((p) => ageHours(p.createdAt) >= AGE_BUCKET_HOURS.week).length,
-      items: sortedByAge.slice(0, MAX_ATTENTION_ITEMS).map((p) => ({
-        id: p.id,
-        changeType: p.changeType,
-        createdAt: p.createdAt,
-        ageHours: Math.round(ageHours(p.createdAt)),
-      })),
-    };
-
-    res.json({
-      success: true,
-      data: { understaffedShifts, pendingApprovalsAging },
-    });
+    const data = await dashboard.getAttentionItems(req.user!.id, visibleOrgUnitIds);
+    res.json({ success: true, data });
   });
 
   return router;

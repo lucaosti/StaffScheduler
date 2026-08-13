@@ -321,15 +321,7 @@ describe('every fixture-free GET runs against the real schema', () => {
     '/audit-logs',
     '/audit-logs/export',
     '/change-requests',
-    '/dashboard/activities',
-    // Swept with the parameter too: the caller-supplied limit is interpolated
-    // into the statement rather than bound (MySQL rejects a placeholder in
-    // LIMIT), so the parameterised form is a DIFFERENT statement from the
-    // default one and only this case proves MySQL accepts it.
-    '/dashboard/activities?limit=3',
-    '/dashboard/departments',
     '/dashboard/stats',
-    '/dashboard/upcoming-shifts',
     '/delegations',
     '/departments',
     '/directory/me',

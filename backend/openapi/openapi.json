@@ -4004,56 +4004,6 @@
         }
       }
     },
-    "/dashboard/activities": {
-      "get": {
-        "tags": [
-          "Dashboard"
-        ],
-        "summary": "Recent activity feed",
-        "responses": {
-          "200": {
-            "description": "Activity list."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "description": "Audit module disabled."
-          }
-        },
-        "description": "Last audit-log entries. Guarded exactly like /audit-logs: requires the `audit` module enabled for the caller's organization and the `audit.read` permission.",
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer",
-              "exclusiveMinimum": 0,
-              "maximum": 50
-            }
-          }
-        ]
-      }
-    },
-    "/dashboard/departments": {
-      "get": {
-        "tags": [
-          "Dashboard"
-        ],
-        "summary": "Department summaries for the dashboard",
-        "responses": {
-          "200": {
-            "description": "OK."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
     "/dashboard/attention-items": {
       "get": {
         "tags": [
@@ -4086,22 +4036,6 @@
           }
         },
         "description": "Aggregate counters for the landing dashboard. `monthlyCost` (labor cost derived from hourly rates) is only computed for callers holding `report.read`; for other users it is `null`."
-      }
-    },
-    "/dashboard/upcoming-shifts": {
-      "get": {
-        "tags": [
-          "Dashboard"
-        ],
-        "summary": "Caller's upcoming shifts",
-        "responses": {
-          "200": {
-            "description": "Shifts list."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
       }
     },
     "/delegations": {
