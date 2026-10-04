@@ -1,6 +1,7 @@
 import { screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
+import { toLocalDateString } from '../../utils/format';
 
 const mockGetSchedules = jest.fn();
 const mockGetScheduleWithShifts = jest.fn();
@@ -54,7 +55,11 @@ describe('<Schedule />', () => {
 
   beforeEach(() => {
     const today = new Date();
-    const todayIso = today.toISOString().slice(0, 10);
+    // The LOCAL calendar day, which is what the page keys its cells on. The
+    // UTC day (`toISOString()`) differs from it for the offset's worth of
+    // hours every day, and for those hours this suite failed on a fixture the
+    // page correctly refused to place in today's cell.
+    const todayIso = toLocalDateString(today);
     mockGetDepartments.mockResolvedValue(ok([{ id: 10, name: 'Emergency Medicine' }]));
     mockGetEmployees.mockResolvedValue(
       ok([

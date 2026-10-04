@@ -184,7 +184,7 @@ describe('ShiftService.createShiftsFromTemplate', () => {
     conn.execute.mockResolvedValueOnce([[], null]);
     const svc = new ShiftService(pool);
     await expect(
-      svc.createShiftsFromTemplate(99, 1, new Date('2026-05-01'), new Date('2026-05-01'), [4])
+      svc.createShiftsFromTemplate(99, 1, '2026-05-01', '2026-05-01', [4])
     ).rejects.toThrow(/template not found/);
   });
 
@@ -200,11 +200,30 @@ describe('ShiftService.createShiftsFromTemplate', () => {
     const ids = await svc.createShiftsFromTemplate(
       1,
       1,
-      new Date('2026-05-01'),
-      new Date('2026-05-01'),
+      '2026-05-01',
+      '2026-05-01',
       [5]
     );
     expect(ids).toEqual([11]);
+    // The stored day is the calendar day that was asked for. The weekday
+    // filter and the INSERT used to read two different calendars (local and
+    // UTC), so one of the two was a day off on any server not in UTC.
+    expect(conn.execute.mock.calls[2][1][3]).toBe('2026-05-01');
+  });
+
+  it('walks the whole range inclusively, one shift per matching weekday', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[templateRow], null]) // template
+      .mockResolvedValueOnce([[], null]) // no template skills
+      .mockResolvedValue([{ insertId: 1 }, null]); // every INSERT shift
+    const svc = new ShiftService(pool);
+    // 2026-03-23 .. 2026-04-05 spans the European daylight-saving change
+    // (29 March), where a local-time walk has a 23-hour day. Mondays (1) in
+    // range: 23 and 30 March.
+    await svc.createShiftsFromTemplate(1, 1, '2026-03-23', '2026-04-05', [1]);
+    const insertedDays = conn.execute.mock.calls.slice(2).map((call) => call[1][3]);
+    expect(insertedDays).toEqual(['2026-03-23', '2026-03-30']);
   });
 
   it('returns empty when no days match', async () => {
@@ -216,8 +235,8 @@ describe('ShiftService.createShiftsFromTemplate', () => {
     const ids = await svc.createShiftsFromTemplate(
       1,
       1,
-      new Date('2026-05-01'),
-      new Date('2026-05-01'),
+      '2026-05-01',
+      '2026-05-01',
       [0] // Sunday only
     );
     expect(ids).toEqual([]);

@@ -115,6 +115,19 @@ jobs:
           REQUIRE_ORTOOLS: '1'
         run: npm run test:coverage -- --ci --reporters=default --reporters=github-actions --runInBand --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
 
+      - name: Timezone independence (suite must pass off UTC)
+        # The runner is in UTC, where a DATE read at local midnight and one
+        # read at UTC midnight are the same instant — so a date handled on the
+        # wrong calendar is invisible here. It was: schedule duplication moved
+        # every shift a day early on any non-UTC server, and six suites failed
+        # for anyone west of UTC, both while this job was green. One zone on
+        # each side of UTC, because the two directions fail differently.
+        env:
+          REQUIRE_ORTOOLS: '1'
+        run: |
+          TZ=America/Los_Angeles npx jest --ci --runInBand --silent
+          TZ=Pacific/Auckland npx jest --ci --runInBand --silent
+
       - name: Publish coverage summary to job summary
         if: always()
         run: |
@@ -192,6 +205,14 @@ jobs:
 
       - name: Unit tests with coverage
         run: npm test -- --watchAll=false --ci --coverage --coverageReporters=text-summary --coverageReporters=html --coverageReporters=lcov --coverageReporters=json-summary
+
+      - name: Timezone independence (suite must pass off UTC)
+        # Same reason as the backend job: "today" and a rendered calendar day
+        # differ between the local and the UTC calendar for the offset's worth
+        # of hours every day, and a UTC runner never sees those hours.
+        run: |
+          TZ=America/Los_Angeles npx jest --ci --silent
+          TZ=Pacific/Auckland npx jest --ci --silent
 
       - name: Publish coverage summary to job summary
         if: always()

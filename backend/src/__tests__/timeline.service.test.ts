@@ -12,6 +12,7 @@
 
 import { TimelineService, TIMELINE_SOURCE_KEYS } from '../services/TimelineService';
 import { ValidationError } from '../errors';
+import { driverDate } from './helpers/driverDate';
 
 export {};
 
@@ -65,7 +66,7 @@ describe('building a timeline', () => {
   it('formats a date the driver hands back as a Date', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[shiftRow({ date: new Date('2033-04-01T00:00:00Z') })], []])
+      .mockResolvedValueOnce([[shiftRow({ date: driverDate('2033-04-01') })], []])
       .mockResolvedValueOnce([[], []]);
 
     const out = await new TimelineService(pool).build({ ...range, orgUnitIds: null });

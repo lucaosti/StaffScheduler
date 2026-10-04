@@ -12,6 +12,7 @@
 
 import { EmploymentContractService } from '../services/EmploymentContractService';
 import { NotFoundError, ValidationError } from '../errors';
+import { driverDate } from './helpers/driverDate';
 
 export {};
 
@@ -379,7 +380,7 @@ describe('contract CRUD', () => {
           user_id: 7,
           contract_id: 1,
           contract_name: 'Full time',
-          effective_from: new Date('2033-01-01T00:00:00Z'),
+          effective_from: driverDate('2033-01-01'),
           effective_to: null,
         },
       ],

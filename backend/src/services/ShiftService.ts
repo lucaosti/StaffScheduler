@@ -33,6 +33,7 @@ import {
   SqlParam,
 } from '../types';
 import { logger } from '../config/logger';
+import { DAY_MS, dateToMs } from '../optimization/shiftTime';
 
 /**
  * ShiftService Class
@@ -502,16 +503,23 @@ export class ShiftService {
    * 
    * @param templateId - Shift template ID
    * @param scheduleId - Schedule ID
-   * @param startDate - Start date
-   * @param endDate - End date
+   * @param startDate - First calendar day, "YYYY-MM-DD"
+   * @param endDate - Last calendar day (inclusive), "YYYY-MM-DD"
    * @param daysOfWeek - Days of week to create shifts (0=Sunday, 6=Saturday)
    * @returns Promise resolving to array of created shift IDs
+   *
+   * The range is taken as calendar-day strings and walked in UTC, never as
+   * `Date` objects. The earlier signature took two Dates, read the weekday with
+   * the LOCAL `getDay()` and wrote the day with the UTC `toISOString()` — two
+   * calendars for one value, so the weekday filter and the stored date disagreed
+   * by a day on every server not running in UTC, in a direction that depended
+   * on which side of UTC it was.
    */
   async createShiftsFromTemplate(
     templateId: number,
     scheduleId: number,
-    startDate: Date,
-    endDate: Date,
+    startDate: string,
+    endDate: string,
     daysOfWeek: number[]
   ): Promise<number[]> {
     return usingConnection(this.pool, async (connection) => {
@@ -538,10 +546,11 @@ export class ShiftService {
         const skillIds = skillRows.map((row: any) => row.skill_id);
 
         const createdShiftIds: number[] = [];
-        const currentDate = new Date(startDate);
+        const lastDayMs = dateToMs(endDate);
 
-        while (currentDate <= endDate) {
-          const dayOfWeek = currentDate.getDay();
+        for (let dayMs = dateToMs(startDate); dayMs <= lastDayMs; dayMs += DAY_MS) {
+          const day = new Date(dayMs);
+          const dayOfWeek = day.getUTCDay();
 
           if (daysOfWeek.includes(dayOfWeek)) {
             const [result] = await connection.execute<ResultSetHeader>(
@@ -553,7 +562,7 @@ export class ShiftService {
                 scheduleId,
                 template.department_id,
                 templateId,
-                currentDate.toISOString().split('T')[0],
+                day.toISOString().slice(0, 10),
                 template.start_time,
                 template.end_time,
                 template.min_staff,
@@ -574,8 +583,6 @@ export class ShiftService {
               );
             }
           }
-
-          currentDate.setDate(currentDate.getDate() + 1);
         }
 
         await connection.commit();
