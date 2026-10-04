@@ -12,6 +12,7 @@ import { EmployeeService } from '../services/EmployeeService';
 import { OnCallService } from '../services/OnCallService';
 import { ShiftSwapService } from '../services/ShiftSwapService';
 import { NotificationService } from '../services/NotificationService';
+import { driverDate } from './helpers/driverDate';
 
 const noopNotifications = { notifyAsync: () => {} } as unknown as NotificationService;
 
@@ -605,14 +606,14 @@ describe('ShiftSwapService', () => {
       {
         assignment_id: 10,
         user_id: 1,
-        date: new Date('2026-05-10'),
+        date: driverDate('2026-05-10'),
         start_time: '08',
         end_time: '16',
       },
       {
         assignment_id: 20,
         user_id: 2,
-        date: new Date('2026-05-11'),
+        date: driverDate('2026-05-11'),
         start_time: '08',
         end_time: '16',
       },

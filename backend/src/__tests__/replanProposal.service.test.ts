@@ -15,6 +15,7 @@ import { ReplanProposalService } from '../services/ReplanProposalService';
 import { NotificationService } from '../services/NotificationService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ConflictError, NotFoundError } from '../errors';
+import { driverDate } from './helpers/driverDate';
 
 jest.mock('../services/NotificationService');
 jest.mock('../services/AuditLogService');
@@ -390,7 +391,7 @@ describe('notifying broken commitments', () => {
   });
 
   it('formats a date the driver hands back as a Date', async () => {
-    await applyWith([lost({ date: new Date('2033-04-01T00:00:00Z') })]);
+    await applyWith([lost({ date: driverDate('2033-04-01') })]);
     // `String(dateCol).slice(0, 10)` would put "Fri Apr 01" in a message sent
     // to a person.
     expect(notifyWithin.mock.calls[0][1].body).toContain('2033-04-01');

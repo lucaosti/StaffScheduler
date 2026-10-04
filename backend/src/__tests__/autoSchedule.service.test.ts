@@ -21,6 +21,7 @@ import { AutoScheduleService } from '../services/AutoScheduleService';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { config } from '../config';
 import { logger } from '../config/logger';
+import { driverDate } from './helpers/driverDate';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
 
@@ -741,8 +742,8 @@ describe('AutoScheduleService.generate', () => {
       unavailability: [
         {
           user_id: 7,
-          start_date: new Date('2026-05-01T00:00:00Z'),
-          end_date: new Date('2026-05-03T00:00:00Z'),
+          start_date: driverDate('2026-05-01'),
+          end_date: driverDate('2026-05-03'),
         },
       ],
     });

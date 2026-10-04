@@ -11,6 +11,7 @@
  */
 
 import { TimeOffService } from '../services/TimeOffService';
+import { driverDate } from './helpers/driverDate';
 
 type Tuple = [unknown, unknown];
 
@@ -97,7 +98,7 @@ describe('TimeOffService.getById', () => {
     execute
       .mockResolvedValueOnce([[], null] as Tuple)
       .mockResolvedValueOnce([
-        [buildRow({ start_date: new Date('2026-05-10'), end_date: new Date('2026-05-15') })],
+        [buildRow({ start_date: driverDate('2026-05-10'), end_date: driverDate('2026-05-15') })],
         null,
       ] as Tuple);
     const svc = new TimeOffService(pool);

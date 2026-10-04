@@ -3,6 +3,7 @@
  */
 
 import { ScheduleService } from '../services/ScheduleService';
+import { driverDate } from './helpers/driverDate';
 
 const buildScheduleRow = (overrides: Record<string, unknown> = {}) => ({
   id: 1,
@@ -317,14 +318,14 @@ describe('ScheduleService predecessor', () => {
 
 describe('ScheduleService.getPredecessorCandidates', () => {
   const candidateRows = [
-    { id: 7, name: 'April (abandoned)', start_date: new Date('2026-04-01T00:00:00Z'), end_date: new Date('2026-04-30T00:00:00Z'), status: 'archived' },
-    { id: 6, name: 'April', start_date: new Date('2026-04-01T00:00:00Z'), end_date: new Date('2026-04-30T00:00:00Z'), status: 'published' },
+    { id: 7, name: 'April (abandoned)', start_date: driverDate('2026-04-01'), end_date: driverDate('2026-04-30'), status: 'archived' },
+    { id: 6, name: 'April', start_date: driverDate('2026-04-01'), end_date: driverDate('2026-04-30'), status: 'published' },
   ];
 
   it('flags the default and the recorded choice', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[{ department_id: 3, start_date: new Date('2026-05-01T00:00:00Z'), previous_schedule_id: null }], null])
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: driverDate('2026-05-01'), previous_schedule_id: null }], null])
       .mockResolvedValueOnce([candidateRows, null]);
 
     const out = await new ScheduleService(pool).getPredecessorCandidates(9);
@@ -340,7 +341,7 @@ describe('ScheduleService.getPredecessorCandidates', () => {
   it('marks nothing as default once a choice has been recorded', async () => {
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[{ department_id: 3, start_date: new Date('2026-05-01T00:00:00Z'), previous_schedule_id: 7 }], null])
+      .mockResolvedValueOnce([[{ department_id: 3, start_date: driverDate('2026-05-01'), previous_schedule_id: 7 }], null])
       .mockResolvedValueOnce([candidateRows, null]);
 
     const out = await new ScheduleService(pool).getPredecessorCandidates(9);
