@@ -37,12 +37,12 @@ export function useUserAccountMutations() {
 
   return {
     create: useMutation({
-      mutationFn: (body: Record<string, unknown>) => createUserAccount(body as never),
+      mutationFn: (body: Parameters<typeof createUserAccount>[0]) => createUserAccount(body),
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, ...body }: { id: number } & Record<string, unknown>) =>
-        updateUserAccount(id, body as never),
+      mutationFn: ({ id, ...body }: { id: number } & Parameters<typeof updateUserAccount>[1]) =>
+        updateUserAccount(id, body),
       onSuccess: invalidate,
     }),
     deactivate: useMutation({

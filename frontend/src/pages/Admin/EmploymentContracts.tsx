@@ -28,11 +28,19 @@ import { useAuth } from '../../contexts/AuthContext';
 import QueryState from '../../components/QueryState';
 import { useContractsQuery, useUserContractsQuery, useContractMutations } from '../../hooks/useEmploymentContracts';
 import { useEmployeesQuery } from '../../hooks/useEmployees';
-import type { EmploymentContract } from '../../services/employmentContractService';
 import { useActionFeedback } from '../../hooks/useActionFeedback';
 import { todayIso } from '../../utils/format';
 
-const LIMIT_KEYS: Array<{ key: keyof EmploymentContract; labelKey: string }> = [
+type LimitKey =
+  | 'maxHoursPerWeek'
+  | 'minHoursPerWeek'
+  | 'maxHoursPerDay'
+  | 'maxConsecutiveDays'
+  | 'minHoursBetweenShifts'
+  | 'minConsecutiveDaysOff'
+  | 'minDaysOffPerPeriod';
+
+const LIMIT_KEYS: Array<{ key: LimitKey; labelKey: string }> = [
   { key: 'maxHoursPerWeek', labelKey: 'admin.employmentContracts.limits.maxHoursPerWeek' },
   { key: 'minHoursPerWeek', labelKey: 'admin.employmentContracts.limits.minHoursPerWeek' },
   { key: 'maxHoursPerDay', labelKey: 'admin.employmentContracts.limits.maxHoursPerDay' },
@@ -68,10 +76,10 @@ const EmploymentContracts: React.FC = () => {
     e.preventDefault();
     // An empty field means "this contract does not constrain it", so it is
     // omitted rather than sent as 0 — which would cap someone at nothing.
-    const body: Record<string, unknown> = { name };
+    const body: Parameters<typeof create.mutateAsync>[0] = { name };
     for (const { key } of LIMITS) {
       const raw = limits[key as string];
-      if (raw !== undefined && raw !== '') body[key as string] = Number(raw);
+      if (raw !== undefined && raw !== '') body[key] = Number(raw);
     }
     await act(
       create.mutateAsync(body).then(() => {

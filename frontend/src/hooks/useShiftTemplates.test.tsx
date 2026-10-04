@@ -48,7 +48,14 @@ describe('useShiftTemplateMutations', () => {
     const spy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useShiftTemplateMutations(), { wrapper: makeWrapper(client) });
 
-    result.current.create.mutate({ name: 'Morning' });
+    result.current.create.mutate({
+      name: 'Morning',
+      departmentId: 1,
+      startTime: '08:00',
+      endTime: '16:00',
+      minStaff: 1,
+      maxStaff: 3,
+    });
     await waitFor(() => expect(result.current.create.isSuccess).toBe(true));
 
     result.current.update.mutate({ id: 1, name: 'Renamed' });

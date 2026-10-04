@@ -906,6 +906,7 @@
   "admin.userAccounts.form.email": "Email",
   "admin.userAccounts.form.firstName": "Nome",
   "admin.userAccounts.form.lastName": "Cognome",
+  "admin.userAccounts.form.initialPassword": "Password iniziale",
   "admin.userAccounts.form.role": "Ruolo",
   "admin.userAccounts.form.noRole": "Nessun ruolo",
   "admin.userAccounts.form.createAccount": "Crea account",

@@ -51,7 +51,12 @@ describe('useUserAccountMutations', () => {
     const spy = jest.spyOn(client, 'invalidateQueries');
     const { result } = renderHook(() => useUserAccountMutations(), { wrapper: makeWrapper(client) });
 
-    result.current.create.mutate({ email: 'a@x.com' });
+    result.current.create.mutate({
+      email: 'a@x.com',
+      password: 'initial-secret',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+    });
     await waitFor(() => expect(result.current.create.isSuccess).toBe(true));
 
     result.current.update.mutate({ id: 1, firstName: 'Changed' });

@@ -42,6 +42,7 @@ const UserAccounts: React.FC = () => {
   const [email, setEmail] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
+  const [password, setPassword] = useState('');
   const [roleId, setRoleId] = useState('');
 
   const accounts = useUserAccountsQuery(search ? { search } : {}, canRead);
@@ -57,15 +58,23 @@ const UserAccounts: React.FC = () => {
           email,
           firstName,
           lastName,
-          // No password field: an account is created and its holder sets their
-          // own credential through the reset flow. Typing someone else's
-          // password into a form is how a shared secret stops being theirs.
+          // `POST /users` validates against the shared createUserBody, which
+          // requires a password of at least 8 characters. This form used to
+          // send none, on the premise that the holder would set their own
+          // through a reset flow — but no such flow exists, so every creation
+          // from this page was rejected with a 400. The mutation hook cast its
+          // body to `never`, which is why the compiler never said so. Until
+          // there is an invitation or reset flow, an initial password is the
+          // only way an account created here can sign in at all — the same
+          // conclusion the employee form reached for the same schema.
+          password,
           ...(roleId ? { roleIds: [Number(roleId)] } : {}),
         })
         .then(() => {
           setEmail('');
           setFirstName('');
           setLastName('');
+          setPassword('');
         })
     );
   };
@@ -122,6 +131,19 @@ const UserAccounts: React.FC = () => {
               className="form-control"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
+              required
+            />
+          </div>
+          <div className="col-md-2">
+            <label className="form-label" htmlFor="account-password">{t('admin.userAccounts.form.initialPassword')}</label>
+            <input
+              id="account-password"
+              type="password"
+              className="form-control"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              minLength={8}
+              autoComplete="new-password"
               required
             />
           </div>
