@@ -37,20 +37,26 @@
     "high-severity DoS advisories above. Keyed on 'minimatch@3.1.5' (an exact",
     "version selector, not a path) rather than on brace-expansion directly:",
     "every minimatch@3.1.5 anywhere in the tree wants brace-expansion ^1.1.7,",
-    "so 1.1.18 satisfies it with no major-version jump, while minimatch's 5.x",
+    "so 1.1.21 satisfies it with no major-version jump, while minimatch's 5.x",
     "and later lines — which depend on the incompatible 2.x line of",
     "brace-expansion and appear elsewhere in this same tree — are untouched",
     "because their version does not match the selector. A path-shaped override",
     "was tried first and rejected: hoisting placed the real brace-expansion",
     "node somewhere the declared nesting didn't reach, so npm installed it",
-    "unmodified and flagged it invalid instead of applying the override."
+    "unmodified and flagged it invalid instead of applying the override.",
+    "",
+    "The pin is an exact version on purpose, and that has a cost: it does not",
+    "move when a newer fix is published. 1.1.18 was the fixed release when this",
+    "was written; three further advisories landed on the 1.x line afterwards",
+    "and the pin itself became what the audit gate reported. It is 1.1.21 now.",
+    "When the gate fails on brace-expansion again, look here first."
   ],
   "overrides": {
     "gcp-metadata": {
       "gaxios": "^7.3.0"
     },
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.18"
+      "brace-expansion": "1.1.21"
     }
   }
 }
