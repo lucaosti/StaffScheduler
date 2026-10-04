@@ -118,9 +118,13 @@ services:
     ports:
       - "${BACKEND_PORT:-3001}:3001"
     volumes:
-      - backend_logs:/app/logs
-      - backend_reports:/app/reports
-      - backend_uploads:/app/uploads
+      # Under /app/backend, not /app: the image's WORKDIR is /app/backend and
+      # LOG_FILE defaults to the relative ./logs/app.log, so the process writes
+      # to /app/backend/logs. Mounted at /app/logs the volume stayed empty and
+      # Promtail, which reads this same volume, shipped nothing to Loki.
+      - backend_logs:/app/backend/logs
+      - backend_reports:/app/backend/reports
+      - backend_uploads:/app/backend/uploads
     networks:
       - staff_scheduler_network
     mem_limit: 1g
