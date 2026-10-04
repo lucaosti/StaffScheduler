@@ -13,6 +13,7 @@
  */
 
 import { ScheduleService } from '../services/ScheduleService';
+import { driverDate } from './helpers/driverDate';
 
 type Tuple = [unknown, unknown];
 
@@ -296,6 +297,70 @@ describe('ScheduleService.cloneSchedule + duplicateSchedule', () => {
     const svc = new ScheduleService(pool);
     const out = await svc.duplicateSchedule(1, 'New', '2026-06-01', '2026-06-30');
     expect(out.id).toBe(99);
+  });
+
+  // The happy-path test above only checks the returned id, and its fixture
+  // hands DATE columns back as strings — a shape mysql2 never produces. Both
+  // together hid a shift landing one day early on every server not running in
+  // UTC: the offset was a difference between a UTC-midnight instant and a
+  // local-midnight one, and the result was rendered with `toISOString()`.
+  describe('date shifting', () => {
+    const cloneWith = async (
+      sourceStart: string,
+      shiftDay: string,
+      newStart: string
+    ): Promise<unknown> => {
+      const { pool, conn, execute } = makePool();
+      conn.execute
+        .mockResolvedValueOnce([
+          [{ id: 1, name: 'Old', department_id: 3, created_by: 1, start_date: driverDate(sourceStart) }],
+          null,
+        ])
+        .mockResolvedValueOnce([{ insertId: 99 }, null])
+        .mockResolvedValueOnce([
+          [
+            {
+              id: 5,
+              department_id: 3,
+              template_id: null,
+              date: driverDate(shiftDay),
+              start_time: '08:00',
+              end_time: '16:00',
+              min_staff: 1,
+              max_staff: 4,
+              notes: null,
+            },
+          ],
+          null,
+        ])
+        .mockResolvedValueOnce([{ insertId: 100 }, null])
+        .mockResolvedValueOnce([[], null]);
+      execute.mockResolvedValueOnce([[buildScheduleRow({ id: 99 })], null] as Tuple);
+      await new ScheduleService(pool).cloneSchedule(1, 'New', newStart, '2026-12-31');
+      // 4th statement on the connection is the shift INSERT; its 4th bound
+      // value is the shifted date.
+      return conn.execute.mock.calls[3][1][3];
+    };
+
+    it('keeps a shift the same number of days after the new start', async () => {
+      // Third day of May becomes the third day of June.
+      expect(await cloneWith('2026-05-01', '2026-05-03', '2026-06-01')).toBe('2026-06-03');
+    });
+
+    it('leaves the date untouched when the period does not move', async () => {
+      expect(await cloneWith('2026-05-01', '2026-05-01', '2026-05-01')).toBe('2026-05-01');
+    });
+
+    it('shifts backwards when the copy starts earlier than the source', async () => {
+      expect(await cloneWith('2026-05-10', '2026-05-12', '2026-05-03')).toBe('2026-05-05');
+    });
+
+    it('counts calendar days across a daylight-saving change', async () => {
+      // Both the European (29 March) and the North American (8 March) spring
+      // transitions fall inside this span, so one day in it is 23 hours long
+      // wherever the suite runs. Whole days must still be whole days.
+      expect(await cloneWith('2026-03-01', '2026-03-30', '2026-04-01')).toBe('2026-04-30');
+    });
   });
 
   it('throws when post-clone lookup fails', async () => {

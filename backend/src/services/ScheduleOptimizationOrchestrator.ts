@@ -29,6 +29,8 @@ import { usingConnection } from '../utils/transaction';
 import { NotFoundError } from '../errors';
 import { Schedule } from '../types';
 import { logger } from '../config/logger';
+import { DateUtils } from '../utils';
+import { DAY_MS, dateToMs } from '../optimization/shiftTime';
 
 export class ScheduleOptimizationOrchestrator {
   constructor(private pool: Pool) {}
@@ -228,8 +230,15 @@ export class ScheduleOptimizationOrchestrator {
         );
 
         const newScheduleId = scheduleResult.insertId;
-        const dayOffset = Math.floor(
-          (new Date(newStartDate).getTime() - new Date(source.start_date).getTime()) / 86400000
+        // Whole calendar days between the two period starts, computed on
+        // "YYYY-MM-DD" strings anchored to UTC. The previous arithmetic
+        // subtracted the driver's LOCAL-midnight Date from a UTC-midnight one
+        // and rendered the result with `toISOString()`: west of UTC the
+        // offset floored one day short, east of UTC the rendering rolled back
+        // a day, so every cloned shift landed a day early on any server not
+        // running in UTC — and a 23-hour DST day could do the same on its own.
+        const dayOffset = Math.round(
+          (dateToMs(newStartDate) - dateToMs(DateUtils.toDateString(source.start_date))) / DAY_MS
         );
 
         const [shifts] = await connection.execute<RowDataPacket[]>(
@@ -240,12 +249,15 @@ export class ScheduleOptimizationOrchestrator {
         // Build old->new shift ID map and insert all shifts.
         const oldToNewShiftId = new Map<number, number>();
         for (const shift of shifts) {
-          const shiftDate = new Date(shift.date);
-          shiftDate.setDate(shiftDate.getDate() + dayOffset);
+          const shiftDate = new Date(
+            dateToMs(DateUtils.toDateString(shift.date)) + dayOffset * DAY_MS
+          )
+            .toISOString()
+            .slice(0, 10);
           const [shiftResult] = await connection.execute<ResultSetHeader>(
             `INSERT INTO shifts (schedule_id, department_id, template_id, date, start_time, end_time, min_staff, max_staff, notes, status)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')`,
-            [newScheduleId, shift.department_id, shift.template_id, shiftDate.toISOString().split('T')[0], shift.start_time, shift.end_time, shift.min_staff, shift.max_staff, shift.notes]
+            [newScheduleId, shift.department_id, shift.template_id, shiftDate, shift.start_time, shift.end_time, shift.min_staff, shift.max_staff, shift.notes]
           );
           oldToNewShiftId.set(shift.id as number, shiftResult.insertId);
         }
