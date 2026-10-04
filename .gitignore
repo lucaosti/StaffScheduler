@@ -26,6 +26,10 @@ coverage
 **/test-results/
 **/playwright-report/
 
+# Python virtual environment for the CP-SAT optimizer (OR-Tools)
+.venv/
+__pycache__/
+
 # nyc test coverage
 .nyc_output
 

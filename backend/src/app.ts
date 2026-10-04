@@ -208,9 +208,9 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Mount all routers under both the legacy /api prefix and the canonical /api/v1 prefix.
-  // During the transition period both prefixes are active. A future PR will drop /api/* and
-  // install 308 redirects once all clients have migrated to /api/v1/*.
+  // Routers are mounted once, under the canonical /api/v1 prefix. The legacy
+  // /api prefix is not a second mount: the middleware further down answers it
+  // with a 308 to the /api/v1 equivalent.
   const rbacRouters = createRbacRouter(pool);
   const mountRoutes = (prefix: string) => {
     app.use(`${prefix}/health`, healthRoutes);
