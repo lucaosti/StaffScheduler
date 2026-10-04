@@ -3,6 +3,7 @@
  */
 
 import { ReportsService } from '../services/ReportsService';
+import { driverDate } from './helpers/driverDate';
 
 const makePool = () => {
   const execute = jest.fn();
@@ -139,7 +140,7 @@ describe('ReportsService.complianceViolationsTrend', () => {
   it('normalises a Date object in the date column to YYYY-MM-DD', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([
-      [{ date: new Date('2026-05-01T00:00:00Z'), code: 'MAX_WEEKLY_HOURS', count: 1 }],
+      [{ date: driverDate('2026-05-01'), code: 'MAX_WEEKLY_HOURS', count: 1 }],
       null,
     ]);
     const service = new ReportsService(pool);
