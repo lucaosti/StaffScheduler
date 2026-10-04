@@ -11,6 +11,7 @@
 
 import { CostPlanService } from '../services/CostPlanService';
 import { ConflictError, NotFoundError } from '../errors';
+import { driverDate } from './helpers/driverDate';
 
 export {};
 
@@ -68,7 +69,7 @@ describe('CostPlanService.getById', () => {
   it('maps Date-typed start/end columns (as returned by a real driver) to ISO date strings', async () => {
     const { pool, query } = makePool();
     query.mockResolvedValueOnce([
-      [planRow({ start_date: new Date('2026-08-01T00:00:00Z'), end_date: new Date('2026-08-31T00:00:00Z') })],
+      [planRow({ start_date: driverDate('2026-08-01'), end_date: driverDate('2026-08-31') })],
       undefined,
     ]);
     const plan = await new CostPlanService(pool).getById(1);

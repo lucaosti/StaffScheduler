@@ -17,6 +17,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { SHIFT_HOURS_SQL } from '../utils/sql';
+import { DateUtils } from '../utils';
 
 export interface HoursWorkedRow {
   userId: number;
@@ -173,7 +174,9 @@ export class ReportsService {
       [rangeStart, rangeEnd]
     );
     return rows.map((r: any) => ({
-      date: typeof r.date === 'string' ? r.date : new Date(r.date).toISOString().slice(0, 10),
+      // `DATE(...)` comes back as a Date at LOCAL midnight; `toISOString()`
+      // would shift every bucket to the previous day east of UTC.
+      date: DateUtils.toDateString(r.date as string | Date),
       code: r.code,
       count: Number(r.count) || 0,
     }));

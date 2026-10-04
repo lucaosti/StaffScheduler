@@ -22,6 +22,7 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { NotFoundError, ConflictError } from '../errors';
+import { DateUtils } from '../utils';
 
 export interface CostPlan {
   id: number;
@@ -45,12 +46,12 @@ export interface CostPlanInput {
 const mapRow = (row: RowDataPacket): CostPlan => ({
   id: row.id as number,
   departmentId: row.department_id as number,
-  startDate: (row.start_date instanceof Date
-    ? row.start_date.toISOString().slice(0, 10)
-    : row.start_date) as string,
-  endDate: (row.end_date instanceof Date
-    ? row.end_date.toISOString().slice(0, 10)
-    : row.end_date) as string,
+  // DATE columns go through the shared reader, never `toISOString()`: mysql2
+  // hands a DATE back at LOCAL midnight, so the UTC rendering is the previous
+  // day on any server running east of UTC — a plan for August would have been
+  // reported as starting on 31 July.
+  startDate: DateUtils.toDateString(row.start_date as string | Date),
+  endDate: DateUtils.toDateString(row.end_date as string | Date),
   targetAmount: Number(row.target_amount),
   setByUserId: row.set_by_user_id as number,
   createdAt: (row.created_at as Date).toISOString(),
