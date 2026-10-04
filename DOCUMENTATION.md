@@ -1,29 +1,40 @@
 # Staff Scheduler — Technical Documentation
 
-This document is the single reference for architecture, domain model, database schema, API, security/RBAC, scheduling engine, module system, development guidelines, and architectural decisions. For the quick-start and command reference, see [`README.md`](./README.md).
+This document is the reference for architecture, domain model, database schema, API, security/RBAC, scheduling engine, module system, operations and architectural decisions. The quick start and command reference are in [`README.md`](./README.md); the contribution process, the gate every change must pass and the testing strategy are in [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md).
 
 ---
 
 ## Table of contents
 
-1. [Architecture overview](#1-architecture-overview)
-2. [Domain model](#2-domain-model)
-3. [Database schema](#3-database-schema)
-4. [API reference](#4-api-reference)
-5. [Security and RBAC](#5-security-and-rbac)
-6. [Scheduling engine](#6-scheduling-engine)
-7. [Module system](#7-module-system)
-7g. [Mobile app (Capacitor)](#7g-mobile-app-capacitor)
-8. [Delegation framework](#8-delegation-framework)
-9. [Approval workflows](#9-approval-workflows)
-10. [Audit trail](#10-audit-trail)
-10a. [Observability and operations](#10a-observability-and-operations)
-11. [Extension points](#11-extension-points)
-12. [Development guidelines](#12-development-guidelines)
-13. [Architectural decisions](#13-architectural-decisions)
-14. [Contribution and review process](#14-contribution-and-review-process)
-15. [Security policy](#15-security-policy)
-16. [End-to-end tests](#16-end-to-end-tests)
+- [1. Architecture overview](#1-architecture-overview)
+- [2. Domain model](#2-domain-model)
+- [3. Database schema](#3-database-schema)
+- [4. API reference](#4-api-reference)
+- [5. Security and RBAC](#5-security-and-rbac)
+- [6. Scheduling engine](#6-scheduling-engine)
+- [7. Module system](#7-module-system)
+  - [7a. Attendance tracking](#7a-attendance-tracking)
+  - [7b. Business policies](#7b-business-policies)
+  - [7c. Notifications](#7c-notifications)
+  - [7d. Outbound webhooks](#7d-outbound-webhooks)
+  - [7e. Payroll export](#7e-payroll-export)
+  - [7f. Frontend internationalization (i18n) and RTL](#7f-frontend-internationalization-i18n-and-rtl)
+  - [7g. Mobile app (Capacitor)](#7g-mobile-app-capacitor)
+  - [7h. Calendar feeds](#7h-calendar-feeds)
+- [8. Delegation framework](#8-delegation-framework)
+- [9. Approval workflows](#9-approval-workflows)
+  - [9a. Responsibility matrix](#9a-responsibility-matrix)
+  - [9b. Change requests](#9b-change-requests)
+  - [9c. Structure-vs-person decision delegation](#9c-structure-vs-person-decision-delegation)
+  - [9d. Shift swaps](#9d-shift-swaps)
+- [10. Audit trail](#10-audit-trail)
+  - [10a. Observability and operations](#10a-observability-and-operations)
+- [11. Extension points](#11-extension-points)
+- [12. Development guidelines](#12-development-guidelines)
+- [13. Architectural decisions](#13-architectural-decisions)
+- [14. Contribution and review process](#14-contribution-and-review-process)
+- [15. Security policy](#15-security-policy)
+- [16. Testing and verification](#16-testing-and-verification)
 
 ---
 
@@ -31,7 +42,7 @@ This document is the single reference for architecture, domain model, database s
 
 Three-tier separation of concerns:
 
-```
+```text
 ┌─────────────────────┐    HTTPS    ┌─────────────────────┐    SQL    ┌──────────────────┐
 │  Frontend (React)   │ ──────────► │  Backend (Express)  │ ───────► │  MySQL 8         │
 │  TypeScript SPA     │ ◄────────── │  TypeScript REST    │ ◄─────── │  pooled access   │
@@ -42,7 +53,7 @@ The frontend is a React SPA. The backend is an Express REST API. Durable state l
 
 ### Backend structure
 
-```
+```text
 backend/src/
 ├── config/           # env vars, database pool factory, Redis client, Winston logger
 ├── errors/           # AppError hierarchy (NotFound/Conflict/Forbidden/Validation/Unauthorized)
@@ -50,7 +61,7 @@ backend/src/
 │                     #   errorHandler, requestContext
 ├── observability/    # Prometheus metrics + OpenTelemetry tracing bootstrap
 ├── schemas/          # re-exports the canonical Zod schemas from @staff-scheduler/shared
-├── routes/           # 30+ router factories; each is createXRouter(pool)
+├── routes/           # one router factory per resource; each is createXRouter(pool)
 ├── services/         # one class per domain; receives pool in constructor
 ├── optimization/     # Python OR-Tools bridge + the canonical constraint validator
 └── types/index.ts    # canonical TypeScript interfaces (single source of truth)
@@ -60,7 +71,7 @@ backend/src/
 
 ### Split service architecture
 
-Two god-classes were broken up to keep service files under 500 lines:
+Two god-classes were broken up along their natural seams:
 
 - `AssignmentService` → `AssignmentValidator` (validation and constraint checks) + `AssignmentOrchestrator` (creation, update, cancellation orchestration). `AssignmentService` remains as a thin facade used by legacy callers.
 - `ScheduleService` → `ScheduleOptimizationOrchestrator` (optimization request lifecycle, Python bridge, fallback). `ScheduleService` retains CRUD; the orchestrator handles the heavy optimization path.
@@ -79,7 +90,7 @@ as `request.id`, so logs, the response header and traces all correlate.
 
 ### Frontend structure
 
-```
+```text
 frontend/src/
 ├── contexts/AuthContext.tsx    # JWT state (login / logout / token refresh)
 ├── api/                        # generated OpenAPI types + typed fetch client
@@ -185,7 +196,7 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 
 ### Authentication
 
-```
+```text
 POST /api/auth/login             { email, password, code?, methodType? } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
 POST /api/auth/login/challenge   { email, password, methodType } → pre-session challenge request (email code delivery, WebAuthn assertion options)
 GET  /api/auth/verify            (cookie) → { user }
@@ -199,7 +210,7 @@ response body, alongside the cookies above rather than instead of them; and
 `/refresh` also accepts `{ refreshToken }` in the body as a fallback when the
 cookie is absent. Neither behavior is present without that header.
 
-JWT payload: `{ userId, email, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via an in-memory blacklist with TTL-based expiry. The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
+JWT payload: `{ userId, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via a blacklist with TTL-based expiry, held in the shared cache store (Redis when reachable, in-process otherwise). The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
 
 **Two-factor authentication**: when an account has ANY method enabled (`POST /api/auth/2fa/setup` + `/enable`, with an optional `methodType` — see the method registry below), login additionally requires `code` (and, when the enrolled method isn't TOTP, `methodType`) — that method's code/assertion, or an unused recovery code. A password-valid login without `code` answers 401 `TWO_FACTOR_REQUIRED`, whose response carries `data.methods` (the account's enabled method types, so the client knows what to offer); a wrong code answers 401 `TWO_FACTOR_INVALID`. Disabling one method (`POST /api/auth/2fa/disable`) likewise requires a valid code for that method, or a recovery code. Accepted codes are single-use: TOTP's matched time-step counter and email/WebAuthn's challenge are cleared via a compare-and-set update on verification, so an intercepted code/challenge cannot be replayed; recovery-code consumption uses the same compare-and-set pattern.
 
@@ -320,14 +331,14 @@ or request a page.
 | Prefix | Description | Permission guard |
 |---|---|---|
 | `/api/users` | User CRUD, role assignment | `user.manage` / `user.read` |
-| `/api/employees` | Staff roster (scoped by org unit) | authenticated |
+| `/api/employees` | Staff roster (scoped by org unit) | `employee.read` / `employee.manage` |
 | `/api/departments` | Department CRUD | `department.manage` |
 | `/api/schedules` | Schedule lifecycle (create → publish → archive) | `schedule.manage` |
 | `/api/shifts` | Shift CRUD, templates | `shift.manage` |
 | `/api/assignments` | Shift assignment CRUD | `assignment.manage` |
 | `/api/roles` | Role CRUD + permission assignment | `role.manage` |
 | `/api/permissions` | Permission catalog (read-only) | `role.manage` |
-| `/api/delegations` | Temp authority delegation | authenticated |
+| `/api/delegations` | Temp authority delegation | authenticated; creating needs `delegation.manage` or `delegation.self` |
 | `/api/approval-workflows` | Multi-step workflow configuration | `approval.manage` |
 | `/api/modules` | Module enable / disable | `settings.manage` |
 | `/api/time-off` | Time-off requests | authenticated / `timeoff.approve` |
@@ -340,7 +351,7 @@ or request a page.
 | `/api/audit-logs` | Audit trail viewer (module: `audit`) | `audit.read` |
 | `/api/notifications` | In-app notifications (module: `notifications`) | authenticated |
 | `/api/import` | Bulk CSV import | `employee.manage` |
-| `/api/calendar` | Calendar view | authenticated |
+| `/api/calendar` | Calendar subscription tokens and iCal feeds (§7h) | authenticated for tokens; feeds authenticate by token |
 | `/api/events` | Server-sent events stream | authenticated |
 | `/api/directory` | User directory + vCard export/import | `user.read` |
 | `/api/dashboard` | Dashboard statistics | authenticated |
@@ -397,7 +408,7 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   default 15-minute lifetime (`JWT_EXPIRES_IN`). Verified on every request;
   permissions are resolved fresh from the database, so a short access token is
   not a staleness problem. Revoked on logout via the shared JTI blacklist.
-- **Refresh token** (`refresh_token` cookie, scoped to `/api/auth/refresh`): an
+- **Refresh token** (`refresh_token` cookie, scoped to the refresh endpoint's own path, `/api/v1/auth/refresh`): an
   opaque 256-bit token whose **hash** is stored in `refresh_tokens`, default
   30-day lifetime (`JWT_REFRESH_EXPIRES_IN`). `POST /api/auth/refresh` rotates
   it — revoking the presented token and issuing a successor in the same family —
@@ -494,7 +505,7 @@ Enterprise identity-provider login alongside password auth: `sso_providers` (per
 
 The authorization model is **permission-based**. Application code checks permission **codes** (e.g. `schedule.manage`); roles are editable data bundles, not hard-wired concepts. There are no hardcoded role names in the application code.
 
-```
+```text
 permissions  — fixed catalog of capability codes (cannot be added at runtime)
 roles        — configurable named bundles (Administrator, Manager, Employee + any custom)
 role_permissions — M:N, which permissions a role grants
@@ -560,7 +571,7 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 | `shiftswap.approve` | Approve shift swaps |
 | `preferences.manage` | Manage preferences |
 | `report.read` | Reports (also gates the dashboard's monthly labor cost and cost-plan comparison, and lifts `GET /dashboard/attention-items`'s understaffed-shift list from the caller's own org units to unrestricted) |
-| `report.manage` | Create, edit and delete cost plan targets (Administrator only by default; see §10b) |
+| `report.manage` | Create, edit and delete cost plan targets (Administrator only by default) |
 | `audit.read` | Audit logs (including the dashboard recent-activity feed) |
 | `user.read` / `user.manage` | User accounts |
 | `user.read_all` | List the complete, unscoped user directory (Administrator only by default; managers without it get a department-scoped list) |
@@ -597,14 +608,21 @@ means the optimum was requested but the run fell back to greedy, so the output
 is a draft; the UI surfaces this prominently and a warning is logged. This makes
 it unambiguous whenever a schedule is a draft rather than the optimum.
 
-Install the Python solver:
+Install the Python solver in a virtual environment (the backend spawns `python3`
+from `PATH`, so start it from a shell where the environment is active):
 
 ```bash
-cd backend
-pip3 install -r optimization-scripts/requirements.txt
-python3 optimization-scripts/schedule_optimizer.py --help
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r backend/optimization-scripts/requirements.txt
+python3 backend/optimization-scripts/schedule_optimizer.py --help
 # 'or-tools' is already the default; set OPTIMIZATION_ENGINE=greedy to force draft mode
 ```
+
+**Container image**: `backend/Dockerfile` installs neither Python nor OR-Tools and
+does not copy `optimization-scripts/`, so a backend running from that image always
+takes the signalled greedy fallback (`engine: "greedy"`, `degraded: true`). CP-SAT
+runs only where the solver is installed alongside the Node process.
 
 ### Constraint parity between the engines
 
@@ -629,7 +647,7 @@ suggests a `min_staff` for the schedule editor from recent history — a
 statistical seasonal baseline, not a model. For a department, weekday and
 exact start/end time window, it averages how many distinct employees actually
 worked matching shifts on **PUBLISHED** schedules (a draft is not what
-happened) over the last `FORECAST_LOOKBACK_WEEKS` (12 by default), rounding
+happened) over the last `FORECAST_LOOKBACK_WEEKS` (12, a code constant), rounding
 the average up. When there is no matching history, it falls back to the
 matching active shift template's own `min_staff`, or to `1` if neither exists
 — and always reports `basedOnOccurrences`, so the caller can tell a measured
@@ -770,11 +788,13 @@ Runtime feature flags persisted in the `modules` table. All 11 default modules a
 | `attendance` | Clock-in/clock-out punches and approval — see [7a](#7a-attendance-tracking) |
 | `payroll` | Planned-vs-actual labor cost estimation, gates `GET /api/attendance/cost-estimate` on top of `attendance` |
 
-`requireModule(code)` middleware returns **404** (not 401) for disabled modules so consumers cannot infer the route's existence. It runs before `authenticate`.
+A disabled module's routes return **404** (not 401) so consumers cannot infer the route's existence. Two guards exist: `requireModuleForUser(code)` runs after `authenticate` and resolves the module for the caller's organization, including per-organization overrides — every gated router uses it; `requireModule(code)` runs before `authenticate` and is used only by the kiosk punch route, which has no authenticated user.
+
+Six modules are enforced by a guard: `attendance`, `payroll`, `notifications`, `audit`, `reporting`, `integrations`. The other five seeded modules (`scheduling`, `approvals`, `analytics`, `forecasting`, `compliance`) can be toggled but gate no route.
 
 Admin API: `GET /api/modules`, `PUT /api/modules/:code` (requires `settings.manage`).
 
-> **Note (Tier 3+):** The module-enabled cache is in-process only. With multiple backend instances, cache invalidation is not propagated across instances — one node may serve stale enabled/disabled state. At Tier 3+, replace the in-process cache with a Redis-backed store or add a background job that broadcasts cache invalidation to all instances.
+The module-state cache is shared across replicas: a change publishes an invalidation over Redis and a 30-second TTL bounds staleness if the message is missed (`services/moduleCache.ts`).
 
 ---
 
@@ -782,7 +802,7 @@ Admin API: `GET /api/modules`, `PUT /api/modules/:code` (requires `settings.mana
 
 Clock-in/clock-out punches, independent of shift assignment (an employee may punch without one, e.g. for unscheduled work), with a separate approval step before the hours count toward reporting.
 
-```
+```text
 POST /api/attendance/clock-in            clock in (self)
 POST /api/attendance/:id/clock-out       clock out an open record (self, ownership-checked)
 GET  /api/attendance                     list (own for employees, all for holders of attendance.approve)
@@ -802,7 +822,7 @@ Required permissions: `attendance.approve` (approve/reject), `attendance.read` (
 
 **Geofencing (#308)**: `clock-in` optionally carries `latitude`/`longitude`. Enforcement is per-caller and opt-in per department — `GeofenceService.isCallerWithinAllowedGeofence` resolves the departments the caller belongs to; if none of them has an active `department_geofences` row, geofencing has no effect and the coordinates (if any) are stored but not checked. Once at least one of the caller's departments has an active fence, the punch is rejected (a `ValidationError`, and an `attendance.clock_in_rejected_geofence` audit entry) unless the point falls inside at least one of them — a caller in several departments is satisfied by any one fence, so a multi-site employee isn't blocked by a department they aren't physically at. Fences are polygons (`{lat, lng}[]`, at least 3 points), checked with a plain ray-casting point-in-polygon test (`backend/src/utils/geo.ts`) rather than a spatial database feature or a mapping library — deliberately, per this project's usual preference for owned code over a new dependency where the algorithm is small.
 
-```
+```text
 GET    /api/departments/:id/geofences               list a department's fences
 POST   /api/departments/:id/geofences                create a fence
 PUT    /api/departments/:id/geofences/:geofenceId    update a fence
@@ -813,7 +833,7 @@ Same access rule as every other department sub-resource: `settings.manage` reach
 
 **Kiosk clock-in (#309)**: a shared tablet parked at a physical location, punching by employee id rather than a user login — there is deliberately no signed-in user at a kiosk. Authentication is a per-device token (`X-Kiosk-Token` header), not a JWT: `KioskService.authenticate` hashes the header with SHA-256 and looks up `kiosk_devices` by the hash, the same token-hashing pattern `RefreshTokenService` uses for refresh tokens. The raw token exists in plaintext only once, in the create response — only its hash is ever stored, so it cannot be shown again if lost; the admin UI displays it once and the device operator must copy it into the tablet immediately.
 
-```
+```text
 GET    /api/departments/:id/kiosks              list a department's kiosk devices
 POST   /api/departments/:id/kiosks               register a device, returns its one-time raw token
 DELETE /api/departments/:id/kiosks/:kioskId      revoke a device
@@ -867,7 +887,7 @@ In-app notifications (`notifications` table) are the base layer — `Notificatio
 
 `NotificationService.notifyWithin()` is the single seam: inside the SAME transaction as the notification row, it inserts one `email_outbox` row (if email is configured and the recipient has an address), one `push_outbox` row **per active subscription** the recipient has registered (a person with Web Push on two browsers gets it on both), and one `native_push_outbox` row **per active device token** the recipient has registered (a person with the mobile app on two devices gets it on both). Any channel's write failing rolls back the whole notification — a notification that exists is a notification whose delivery intents are durably recorded, never a phantom promise.
 
-```
+```text
 GET    /api/notifications/push/public-key     VAPID public key + `enabled` flag (always 200, never 404 — an
                                                 unconfigured deployment answers `enabled: false` so the SPA can
                                                 hide the toggle rather than surface a broken feature)
@@ -898,7 +918,7 @@ token-based variant"). It requests push permission, calls `PushNotifications.reg
 
 An organization (scoped by `users.organization_name`, this app's existing soft-multi-tenant tag) can register HTTP endpoints that receive a signed POST when a `WebhookEventType` fires: `schedule.published`, `assignment.confirmed`, `approval.decided`.
 
-```
+```text
 GET    /api/webhooks                    list the caller's org's subscriptions
 POST   /api/webhooks                    create — { url, eventTypes[] } — returns the raw secret ONCE
 GET    /api/webhooks/:id                read one (rejects cross-org access)
@@ -1171,18 +1191,57 @@ submission is prepared.
 
 ---
 
+## 7h. Calendar feeds
+
+Employees subscribe to their shifts from any calendar application that supports
+iCal. A feed URL is a credential, so it is tied to a **named token** that can be
+revoked on its own.
+
+```text
+GET    /calendar/tokens                 the caller's subscriptions, revoked ones included
+POST   /calendar/tokens                 create a labelled token; the secret is shown once
+DELETE /calendar/tokens/:id             revoke one subscription
+GET    /calendar/feed.ics?token=…       the token owner's shifts
+GET    /calendar/department/:id.ics?token=…   every shift of a department
+GET    /calendar/aggregate.ics?token=…  shifts filtered by departments, roles, people and range
+```
+
+- Tokens are created and revoked in **Settings → Calendar**. A person may hold
+  several, one per device or application; revoking one leaves the others
+  working. Tokens do not expire and are never rotated in place.
+- The three feeds authenticate by token, not by session cookie. The department
+  feed requires the token's owner to hold `settings.manage` or to be the
+  manager of that department; the aggregate feed re-resolves the owner's
+  permissions and org-unit scope on every fetch, so a subscription never
+  outlives the authority it was created with.
+- Personal and department feeds send `ETag` and
+  `Cache-Control: private, max-age=300` and honour `If-None-Match`.
+
+iCal is poll-based; how often a feed refreshes is decided by the client:
+
+| Client | Shortest refresh |
+|---|---|
+| Google Calendar | about 12–24 hours, set by Google and not configurable |
+| Apple Calendar | 5 minutes |
+| Outlook desktop | 15–30 minutes |
+| Thunderbird | 1 minute |
+
+For immediate updates the SPA uses the SSE stream (§7c) instead.
+
+---
+
 ## 8. Delegation framework
 
 User A can grant User B a time-bounded subset of their own permissions.
 
-```
+```text
 POST   /api/delegations           { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId? }
 GET    /api/delegations           list own delegations (as delegator or delegatee)
 DELETE /api/delegations/:id       revoke (delegator only)
 ```
 
 Rules:
-- Creating and revoking require the `delegation.manage` permission (granted to Administrator and Manager by default); listing one's own delegations only requires authentication.
+- Creating requires `delegation.manage` or `delegation.self`; revoking one's own delegation and listing one's own delegations only require authentication.
 - `permissionCodes` must be a subset of the delegator's current permissions.
 - Self-delegation is rejected.
 - Expired delegations are excluded automatically from `getEffectivePermissions`.
@@ -1194,7 +1253,7 @@ Rules:
 
 Multi-step approval chains per change type. Each `approval_workflows` row holds an ordered list of `approval_steps`.
 
-```
+```text
 GET    /api/approval-workflows            list all (approval.manage)
 POST   /api/approval-workflows            create
 GET    /api/approval-workflows/:type      get by change type
@@ -1203,7 +1262,7 @@ DELETE /api/approval-workflows/:id        delete
 POST   /api/approval-workflows/escalate  trigger escalation check (cron-callable)
 ```
 
-`ApproverResolutionService.resolveApprover(changeType, ctx)` walks steps in order and returns the first non-auto-approved step. `ApprovalDecisionService.processEscalations(nowIso?)` identifies steps whose `escalate_after_hours` deadline has passed. These, along with `ApprovalWorkflowService` (CRUD for `approval_workflows`/`approval_steps`), used to be one `ApprovalEngineService` class — split into workflow configuration, approver resolution, and decision/escalation execution, each with its own single responsibility.
+`ApproverResolutionService.resolveApprover(changeType, ctx)` walks steps in order and returns the first non-auto-approved step. `ApprovalDecisionService.processEscalations()` identifies steps whose `escalate_after_hours` deadline has passed; it runs only when `POST /approval-workflows/escalate` is called (by an operator or an external scheduler) — no worker invokes it. These, along with `ApprovalWorkflowService` (CRUD for `approval_workflows`/`approval_steps`), used to be one `ApprovalEngineService` class — split into workflow configuration, approver resolution, and decision/escalation execution, each with its own single responsibility.
 
 Default change types: `Loan.Request`, `Loan.Cancel`, `Policy.Create`, `Policy.Update`, `Policy.Exception`, `Schedule.Publish`, `Schedule.Override`, `OrgUnit.Update`, `Membership.Update`, `TimeOff.Request`, `ShiftSwap.Request`.
 
@@ -1224,7 +1283,7 @@ Every `pending_approvals` row belongs to exactly one entity — `change_request_
 
 The responsibility matrix maps `(subject group × permission code) → responsible org unit`, supporting multiple offices holding the same responsibility over different subordinate groups.
 
-```
+```text
 GET    /api/responsibility-rules              list rules (responsibility.read)
 POST   /api/responsibility-rules             create rule (responsibility.manage)
 GET    /api/responsibility-rules/resolve     resolve responsible user IDs (responsibility.read)
@@ -1252,7 +1311,7 @@ Required permissions: `responsibility.read` (read), `responsibility.manage` (wri
 
 The change request mechanism lets subordinates propose changes that, once approved and applied, are attributed in the audit log to the authority holder (approver) while preserving the proposer's identity via `on_behalf_of_user_id`.
 
-```
+```text
 GET    /api/change-requests              list all (change_request.review)
 POST   /api/change-requests             submit proposal (change_request.create)
 GET    /api/change-requests/:id         get one (change_request.review or own proposer)
@@ -1278,7 +1337,7 @@ Any workflow-routed decision — change request, time-off, employee loan, or shi
 
 The unit head then has three choices for a decision still sitting with them:
 
-```
+```text
 POST /api/pending-approvals/:id/keep               keep and decide it personally (idempotent)
 POST /api/pending-approvals/:id/delegate            { targetUserId } — hand it to one member of the unit
 POST /api/pending-approvals/:id/open-to-structure   any member of the unit may now decide it
@@ -1298,10 +1357,10 @@ Every keep/delegate/open-to-structure action appends one row to `decision_reassi
 
 ## 9d. Shift swaps
 
-```
+```text
 GET    /api/shift-swap                    list requests, scoped to the caller unless shiftswap.approve (authenticated)
 POST   /api/shift-swap                    propose a swap (authenticated)
-GET    /api/shift-swap/candidates         eligible target assignments for one of the caller's own assignments (authenticated)
+GET    /api/assignments/:id/swap-candidates  eligible target assignments for one of the caller's own assignments (authenticated)
 POST   /api/shift-swap/:id/respond        the target accepts or declines (identity-gated: target only)
 POST   /api/shift-swap/:id/approve        manager approves (shiftswap.approve)
 POST   /api/shift-swap/:id/decline        manager declines (shiftswap.approve)
@@ -1426,7 +1485,7 @@ a good backup.
    ```bash
    docker compose exec backup /scripts/restore.sh --latest
    # or a specific file:
-   docker compose exec backup /scripts/restore.sh /backups/staff_scheduler_YYYYMMDDToooooZ.sql.gz
+   docker compose exec backup /scripts/restore.sh /backups/staff_scheduler_YYYYMMDDTHHMMSSZ.sql.gz
    ```
 4. Bring the backend back up and verify:
    ```bash
@@ -1523,7 +1582,7 @@ Compose has no native per-replica rolling update, so the script does the standar
 scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
 start alongside the old), wait until the load balancer answers, then scale back
 **down** to N — Compose removes the oldest containers, i.e. the previous image.
-Throughout, a poller hits `/api/health` twice a second and the script **fails the
+Throughout, a poller hits `/api/v1/health` twice a second and the script **fails the
 deploy if a single request was dropped**, so "zero downtime" is verified rather
 than asserted.
 
@@ -1571,7 +1630,7 @@ simply defaults to it, unused.
 ### Adding a new route
 
 1. Create `backend/src/routes/myFeature.ts` with `export const createMyFeatureRouter = (pool: Pool): Router => { ... }`.
-2. Register in `backend/src/app.ts`: `app.use('/api/my-feature', createMyFeatureRouter(pool))`.
+2. Register in `backend/src/app.ts`, inside `mountRoutes`, under the versioned prefix (`${prefix}/my-feature`), and add the router to `ROUTE_MOUNTS` in `backend/scripts/generate-openapi.ts` so its operations are checked against the spec.
 3. Add `requireModule('my-module')` and `requirePermission('my.perm')` guards as needed.
 
 ### Adding a new permission
@@ -1593,10 +1652,10 @@ simply defaults to it, unused.
 
 | Tool | Minimum version |
 |------|----------------|
-| Node.js | 18 |
-| npm | 8 |
+| Node.js | 22.12 |
+| npm | 10 |
 | MySQL | 8.0 |
-| Python (optional, for optimizer) | 3.8 |
+| Python (CP-SAT optimizer; in a virtual environment) | 3.11 |
 
 ### Local setup
 
@@ -1630,28 +1689,18 @@ Docker alternative:
 ./stop.sh                # tear down
 ```
 
-### Branch naming
-
-| Prefix | Use for |
-|--------|---------|
-| `feat/` | new feature |
-| `fix/` | bug fix |
-| `refactor/` | internal cleanup without behavior change |
-| `docs/` | documentation only |
-| `chore/` | dependency bumps, tooling |
-
 ### Language and code style
 
 - Code, comments, commit messages, and all documentation: **English**.
-- Chat / issue discussion: match the conversation language.
+- Issues and pull requests: **English** as well.
 - No `@ts-ignore`. No `console.log/error` in backend code — use Winston (`logger`).
 - No local type duplicates — import from `backend/src/types/index.ts` or `frontend/src/types/index.ts`.
 - No fake async (`setTimeout` simulating an API call).
 - No backward-compatibility hacks for removed code.
 - Comments only when the **why** is non-obvious.
-- No service file should exceed 500 lines; extract sub-classes if needed.
+- A service file growing past roughly 500 lines is a prompt to look for a seam and extract a collaborator; it is a target, not a hard limit.
 
-**Input validation**: Use `validateBody(schema)` and `validateParams(schema)` from `src/middleware/validation.ts` with Zod schemas in `src/schemas/`. The `express-validator` library is not used in this codebase and must not be introduced in new code.
+**Input validation**: Use `validateBody(schema)`, `validateParams(schema)` and `validateQuery(schema)` from `src/middleware/validation.ts` with the Zod schemas of `@staff-scheduler/shared` (re-exported by `src/schemas/`). The `express-validator` library is not used in this codebase and must not be introduced in new code.
 
 ### Testing
 
@@ -1659,19 +1708,9 @@ Each domain has tests at the layer where it lives:
 
 - **Service unit tests** — mocked pool, pure business logic.
 - **Route smoke tests** — Supertest + mocked services + mocked auth middleware.
-- **Integration tests** — real DB against `test_staff_scheduler`.
+- **Integration tests** — a real MySQL, in a throwaway `staff_scheduler_itest` database (see §16).
 
-CI commands (must all pass):
-
-```bash
-# Backend
-cd backend && npm run lint && npm run build && npm test
-
-# Frontend
-cd frontend && npm run lint && CI=true npm test -- --watchAll=false && npm run build
-```
-
-Coverage gates are enforced in CI.
+The commands CI runs, the coverage thresholds and the rules for writing tests are in [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md#the-local-gate). Coverage gates are enforced in CI.
 
 Run a single suite:
 ```bash
@@ -1740,7 +1779,7 @@ Feature requests are welcome — describe the use case, not just the solution.
 
 ### Dependency major-version policy
 
-The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and ESLint 8 (the flat-config migration required by ESLint 9+ is pending). Security patches within these majors are applied as they appear.
+The frontend build tooling is Vite (`vite` + `@vitejs/plugin-react`); the former Create React App toolchain and its unpatchable transitive vulnerabilities were removed during that migration. Remaining major-version gaps are deliberate pins, upgraded only when there is a concrete driver: React 18 (React 19 offers no feature this app needs and would force `@testing-library` / type churn), Jest 29 (aligned with the `ts-jest` 29.x line used in both packages), and Jest's `ts-jest` pairing. ESLint is on v9 with flat config in both packages. Security patches within these majors are applied as they appear.
 
 **react-router 6, with the open redirect closed at the call sites.** `react-router-dom ^6.30.4` carries two *moderate* advisories fixed only in 7.x, which is a major with a different route API. `npm audit` gates on *high*, so neither would ever fail the build — this is the record that they were examined rather than missed.
 
@@ -1768,7 +1807,7 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 | Self-service delegation is a permission code, and revoking never needs one | The service was already built for this and nobody had noticed: the route has never accepted a delegator other than the caller, and `createDelegation` refuses any code the delegator does not currently hold. So `delegation.manage` on that route was never a limit on **what** could be delegated — only on **who** was allowed to delegate at all. `delegation.self` says the same thing with the meaning it should have had, and grants nothing new. It is a permission code rather than a new policy table because the issue asked for "a flag per role or per org unit" and a code is already both: roles are configurable data, so granting it to a role IS the per-role flag, and a role grant carrying `scope_org_unit_id` IS the per-org-unit one — where a separate policy table would be a second authorization mechanism beside the one every other decision uses. `delegation.manage` survives rather than being replaced: a deployment wanting delegation to be an administered act keeps exactly that by granting `manage` and withholding `self`, so the two are alternatives rather than a hierarchy, and no ordinary role receives `self` by default because whether people may hand their authority to a colleague unsupervised is an organizational decision. **Revocation lost its permission gate entirely**, which fixes a real defect: `revokeDelegation` already refuses anyone who is not the delegator — stricter than any code could express — while the `delegation.manage` gate in front of it meant someone who created a delegation and later lost that permission could no longer revoke it, so a delegation they granted outlived their ability to withdraw it. Being able to take back authority you handed out must not depend on a permission you might lose. `PermissionRoute` and the sidebar now accept an array of codes meaning ANY of them, since this is the first route reachable by two that are alternatives. |
 | A role timeline shows the events AND the current grants, because neither implies the other | Grants and revocations were already audited — actor, scope, expiry, justification and a `{userId, roleId, scopeOrgUnitId, expiresAt}` snapshot — and simply not consultable. `GET /roles/users/{userId}/timeline` and `GET /roles/{id}/timeline` return both halves together, deliberately: current grants live in `user_roles` and the events live in the audit log, and **neither is derivable from the other**. A grant made before auditing existed, or written by the seed, appears in `user_roles` with no event; a grant that reached its `expires_at` stops applying with no event at all, because nobody revoked it. A view built only from events would state that someone never received a role they demonstrably hold, and would show a lapsed grant as live. So every current grant carries `hasHistory`, and a lapsed one gets a synthesised `expired` entry flagged `derived: true` — inferred rather than recorded, and a reader who wants only what was actually logged can tell them apart. `truncated` says when the cap was hit, so a window is never presented as the whole story. A revocation's payload is in `before_snapshot` and a grant's in `after_snapshot`; reading only one is how half a timeline comes back with a null role. Per user the query uses the `(entity_type, entity_id)` index the audit table already has; per role the id lives inside the JSON snapshot, which no index covers, so that one is a bounded scan over the indexed `action` filter narrowed by `since` — stated in the header rather than left to be discovered, because an unbounded JSON scan over a table that only grows is fine for a year and then is not. Deliberately not waiting for the person-history model (#327): this history is already entirely in the audit log, and when that model lands this becomes one of its consumers rather than a blocker. |
 | The authority over a person is shown by asking the deciders, not by describing them | The model was complete and correctly enforced, and completely invisible: the way to learn who would approve your time off was to file it and watch, and there was no way at all to learn that **nobody** would. `GET /org/authority/:userId?` answers three questions on one screen — who you depend on, who may grant or revoke your roles, and who would decide each step of every kind of request you can file. It resolves nothing itself: the manager chain comes from `OrgUnitService`, the approvers from `ApprovalEngineService`'s own `resolveAllApproversForStep`, the responsible parties from `ResponsibilityRuleService`. A panel that re-implemented any of that would be a second, unreviewed copy of the authority model whose failure mode is the worst kind — a screen that confidently names the wrong approver. A step that resolves to **nobody** is reported with `unresolved: true` and rendered as the loudest thing on the page, because an org unit with no manager or a rule pointing at an empty unit means requests of that kind cannot be decided at all, and this is the only place that is visible. Each name carries the scope that produced it: "Anna decides this" invites the question that "because she manages your unit" answers, and when the answer is wrong the scope names the rule to fix. Role administrators are labelled `responsibility_rule` or `permission` rather than merged — being made responsible for someone and being able to do it everywhere are different statements. Reading your own profile needs no permission, since knowing who decides your requests is what you need in order to use the system; another person's needs `org_unit.read`, the gate the rest of the tree carries. Building it surfaced a real divergence: `ChangeRequestService` resolved the subject's org unit as the **lowest** membership id while the approval engine read `is_primary`, so anyone belonging to two units had their change requests routed against a different unit than their time off, invisibly. Both now call `resolveSubjectContext`, which prefers `is_primary` and keeps the old ordering as the fallback for data predating the single-primary enforcement — so the change can only improve a case, never degrade one. |
-| `process.exit` inside a try/catch always gets an explicit `return` after it | `startServer()`'s DB-connectivity check called `process.exit(1)` on failure with no `return` after it, relying on the process actually dying to stop execution. In production it does; in a test that `jest.spyOn(process, 'exit').mockImplementation(...)` specifically so it can assert the call without killing the runner, it does not — so the fallthrough went on to `buildApp()` and then to `startOutboxWorker(pool)` with the very pool that had just failed its connectivity check, arming a real 30-second `setInterval`. That timer fired long after the triggering test had finished and threw inside an async timer callback in whatever unrelated suite happened to be running under `--runInBand` at that moment — reproduced as `TypeError: pool.getConnection is not a function` inside `OutboxWorker.ts`, crashing the suite with no connection to the actual defect (#394). It reproduced locally and never in CI for a second reason worth its own row: `isEmailConfigured()` gates the worker, `config.notifications.emailEnabled` defaults to **true**, and `config.email.host` always has a fallback — so the real gate is whether `EMAIL_USER`/`EMAIL_PASSWORD` happen to be set, which they commonly are in a developer's local `.env` for manual SMTP testing and never are in CI. `src/__tests__/setup.ts` already had exactly this shape of safety net for Redis (`REDIS_ENABLED` defaulted to `'false'` before `dotenv` can load the `.env` file's value, since dotenv never overwrites an already-set variable) with the same stated reason — a live client's reconnection timer keeping Jest from exiting. Email now gets the identical treatment, so a local `.env`'s SMTP credentials can no longer make a test run non-deterministic depending on whose machine runs it. The guard logic itself moved into `testEnvDefaults.ts`, a module with no side effects beyond the env-var write, specifically so it could be exercised directly — `setup.ts` cannot be re-required mid-test to prove its own guard holds, because it also registers a top-level `beforeEach` and `expect.extend`, and Jest Circus refuses to register a hook once test execution has started ("Hooks cannot be defined inside tests"); `jest.isolateModules` sandboxes the `require` cache, not the shared Circus globals `setup.ts` calls into. Six further cases were added on the strength of an independent review of this fix (a scripted multi-agent pass grepping every `process.exit` call site in `index.ts` for the same fallthrough shape, and proposing coverage gaps): `startOutboxWorker`'s interval is confirmed `unref`'d under REAL timers — the one property fake timers cannot observe, and the most direct pin on the regression class, since an interval that kept its ref would itself keep a bare process alive; a second `startOutboxWorker` call while one is already running is confirmed to arm nothing new (asserted as "unchanged from the count after the first call" rather than a literal number, because Jest's modern fake timers also count a `setImmediate` Winston's logger schedules internally on `logger.info(...)` even when silent — a real count, just not evidence about this guard, and pinning the assertion to that incidental number would fail on a logging-library upgrade for a reason unrelated to the code under test); a stopped worker is confirmed to restart; and `startServer`'s outer catch (a step succeeding the DB check but failing later) and its happy path both got their first test — before this, every case in the file proved what does NOT happen on a failure branch, and none proved the success path does what it is supposed to. Verifying this fix caused no regression also surfaced a second, unrelated, pre-existing flake (#556): under `jest --coverage` with Jest's default parallel workers (not `--runInBand`), a small fraction of runs fail one arbitrary route suite with a symptom that varies by run. Reproduced independently on a clean `main` checkout via `git worktree`, confirming it predates and is unrelated to this fix; filed separately rather than folded in, to keep this fix scoped to the mechanism it actually diagnosed. |
+| `process.exit` inside a try/catch always gets an explicit `return` after it | `startServer()`'s DB-connectivity check called `process.exit(1)` on failure with no `return` after it, relying on the process actually dying to stop execution. In production it does; in a test that `jest.spyOn(process, 'exit').mockImplementation(...)` specifically so it can assert the call without killing the runner, it does not — so the fallthrough went on to `buildApp()` and then to `startOutboxWorker(pool)` with the very pool that had just failed its connectivity check, arming a real 30-second `setInterval`. That timer fired long after the triggering test had finished and threw inside an async timer callback in whatever unrelated suite happened to be running under `--runInBand` at that moment — reproduced as `TypeError: pool.getConnection is not a function` inside `OutboxWorker.ts`, crashing the suite with no connection to the actual defect (#394). It reproduced locally and never in CI for a second reason worth its own row: `isEmailConfigured()` gates the worker, `config.notifications.emailEnabled` defaults to **true**, and `config.email.host` always has a fallback — so the real gate is whether `EMAIL_USER`/`EMAIL_PASSWORD` happen to be set, which they commonly are in a developer's local `.env` for manual SMTP testing and never are in CI. `src/__tests__/setup.ts` already had exactly this shape of safety net for Redis (`REDIS_ENABLED` defaulted to `'false'` before `dotenv` can load the `.env` file's value, since dotenv never overwrites an already-set variable) with the same stated reason — a live client's reconnection timer keeping Jest from exiting. Email now gets the identical treatment, so a local `.env`'s SMTP credentials can no longer make a test run non-deterministic depending on whose machine runs it. The guard logic itself moved into `testEnvDefaults.ts`, a module with no side effects beyond the env-var write, specifically so it could be exercised directly — `setup.ts` cannot be re-required mid-test to prove its own guard holds, because it also registers a top-level `beforeEach` and `expect.extend`, and Jest Circus refuses to register a hook once test execution has started ("Hooks cannot be defined inside tests"); `jest.isolateModules` sandboxes the `require` cache, not the shared Circus globals `setup.ts` calls into. Six further cases were added on the strength of an independent review of this fix (grepping every `process.exit` call site in `index.ts` for the same fallthrough shape, and proposing coverage gaps): `startOutboxWorker`'s interval is confirmed `unref`'d under REAL timers — the one property fake timers cannot observe, and the most direct pin on the regression class, since an interval that kept its ref would itself keep a bare process alive; a second `startOutboxWorker` call while one is already running is confirmed to arm nothing new (asserted as "unchanged from the count after the first call" rather than a literal number, because Jest's modern fake timers also count a `setImmediate` Winston's logger schedules internally on `logger.info(...)` even when silent — a real count, just not evidence about this guard, and pinning the assertion to that incidental number would fail on a logging-library upgrade for a reason unrelated to the code under test); a stopped worker is confirmed to restart; and `startServer`'s outer catch (a step succeeding the DB check but failing later) and its happy path both got their first test — before this, every case in the file proved what does NOT happen on a failure branch, and none proved the success path does what it is supposed to. Verifying this fix caused no regression also surfaced a second, unrelated, pre-existing flake (#556): under `jest --coverage` with Jest's default parallel workers (not `--runInBand`), a small fraction of runs fail one arbitrary route suite with a symptom that varies by run. Reproduced independently on a clean `main` checkout via `git worktree`, confirming it predates and is unrelated to this fix; filed separately rather than folded in, to keep this fix scoped to the mechanism it actually diagnosed. |
 | The request budget is charged per organization, and counted once for the whole deployment | `express-rate-limit` with its defaults was wrong here twice over. Its store is **per process**, and this backend is documented and scripted as horizontally scalable (`--scale backend=2` behind nginx) — so a configured limit of 200/min silently permitted 400/min at two replicas, and nothing in a single-instance test run reveals it. Its key is the **client IP**, which behind a corporate NAT lumps an entire organization into one bucket so the busiest site throttles its own quiet colleagues, while a client spread over several addresses gets a bucket each and the limit does not bind at all. The counters now live in the shared cache store — the same Redis-or-in-process module the JTI blacklist and auth-context cache use — and the key is the caller's **organization** (the root of their org-unit tree), falling back to their user id, then to the IP. Each fallback is an unavailability, not a policy: a user with no org-unit membership still gets a per-caller bucket rather than borrowing anyone's. The token is verified in the limiter, before `authenticate`, because the limiter must protect the login endpoint — an HMAC check with no database, used **only** to choose a counter and never as an authorization decision: an expired or forged token falls through to the IP bucket, so a bad token can never buy the larger organization allowance. The user → organization mapping is cached five minutes, which would be unacceptable for a permission and is fine for a budget; the worst case is that someone who changed organization is charged to their previous one briefly. Every failure mode admits the request and logs a warning, because a limiter that 500s when its own store is unavailable takes the API down to enforce a budget. The login limiter moved onto the same counter for the reason that matters most: at two replicas its ten attempts were twenty, and there the multiplication is a security property rather than a fairness one. It stays IP-keyed deliberately — keying on the submitted email would let an attacker lock a known account out by exhausting its budget on purpose. `express-rate-limit` is no longer a dependency, and the two tests that configured their own instances of it (and so kept passing while testing the library rather than this system) now exercise the middleware the app actually mounts. |
 | The audit gate decides from the report, never from npm's exit code | Both CI jobs ran `npm audit --audit-level=high --omit=dev`, and both failed intermittently with a 400 from `/-/npm/v1/security/audits/quick` — an endpoint the registry is retiring — reporting "Invalid package tree, run npm install to rebuild your package-lock.json". That message was the least likely explanation and the simplest experiment disproved it: re-running the identical job on the identical lockfile passes. npm uses the BULK advisory endpoint and falls back to `quick` when the bulk call fails, so the failure was transport rather than tree. It mattered beyond the annoyance: a security gate that fails for reasons unrelated to security teaches people to re-run it, and once that is the reflex a genuine advisory gets the same treatment. `scripts/audit-dependencies.mjs` asks npm for `--json` and decides locally, because a bare `npm audit` conflates "found a vulnerability" with "could not reach the registry" in one exit code. A parseable report with a high or critical advisory fails the build; a report with nothing at that level passes; **no** report after three attempts with backoff passes with a loud GitHub warning annotation naming what was skipped. That last case is a decision rather than a `|| true`: blocking every merge on an external service's availability is its own failure mode, one nobody can fix from inside the repository, and the realistic response to it is to disable the gate — strictly worse. What is never tolerated is a report that arrives and contains a finding, since no network condition can produce that. npm's own JSON error object parses cleanly and carries no vulnerability metadata, so "parses" is not the test — "carries `metadata.vulnerabilities`" is, and that distinction has its own case in `scripts/audit-dependencies.test.mjs`, run under `node --test` with no framework, because a gate needing the dev dependencies installed to verify itself would be circular. |
 | Exports go through one serializer, and every one is audited | Eight datasets are downloadable as CSV — the three reports, employees, shifts, assignments, attendance and time-off — plus the audit log, which was the only export before this and whose inline serializer became the shared one. Two of its three properties were wrong and both failed silently: no UTF-8 BOM, so Excel on Windows read "Müller" as "MÃ¼ller", and no formula guard, so a value beginning `=`, `+`, `-`, `@`, TAB or CR was evaluated by the spreadsheet — and these files carry names, descriptions and justifications a user typed, which makes `=HYPERLINK(...)` in a display name a live link in the manager's workbook. Such a value is now prefixed with a tab and quoted; the characters are kept, because stripping them would be silent data loss. Columns are DECLARED per dataset rather than derived from the row: an export that serialized whatever the service selected would keep publishing every field added later, and "employees" quietly growing a salary column is a disclosure nobody decided to make. `ExportService` is a class rather than a helper because it is where the audit entry is written — an export copies data out of the access-control system entirely, and no later permission change reaches the file — so an unaudited export would have to be written by deliberately not using it; the entry records the filters, since "exported 412 rows" does not answer *which* 412. Each `/export` endpoint calls the same service method as its JSON sibling with the same filters minus pagination, and each route's filter construction — including the org-unit scope and the "pinned to your own records" rules — was extracted into one function the two share, because a second copy of that clause is a second authorization path. **Streaming was asked for and deliberately not built**: every export is bounded by a range or a scope, and streaming would mean giving up the error envelope on a mid-flight failure, since the status line is already sent. Revisit past roughly a hundred thousand rows; the seam is `toCsv`. Every `/export` endpoint also accepts `?format=csv\|xlsx` (default `csv`); `ExportService.send` is the single method for both, so the audit entry, the filename rule and the before/after ordering cannot drift between formats — only the serializer and the two response headers differ. The XLSX writer (`utils/xlsx.ts`) reuses the same declared `CsvColumn` list and the same formula-injection guard as CSV, but writes numbers and dates as their own cell types rather than as text, which is the reason to open the file over the CSV in the first place. |
@@ -1779,22 +1818,22 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 | A manual assignment is checked against the same contract the optimizer already respects (#330) | Found while scoping #330's "preferences vs constraints" review: `ComplianceEngine.evaluateAssignmentCompliance` — the gate `AssignmentService.createAssignment` runs on every DIRECTLY created assignment — never consulted `employment_contracts` at all, only `user_preferences` then `system_settings`. Meanwhile `AutoScheduleService` (the optimizer) already resolved the same three fields from `EmploymentContractService.resolveLimitsForPeriod` first. The two paths could disagree: a manager sets a 20h/week contract limit, the optimizer respects it, and a manually created assignment outside the optimizer was checked only against a stale `user_preferences` value — the contract had no effect on the one enforcement path meant to be unconditional. Fixed by resolving the same contract lookup first in `evaluateAssignmentCompliance`, ahead of `user_preferences`/`system_settings`, so both paths now agree. A contract field left `null` (deliberately "not constrained" per that contract, see the row below on blank limits) still falls through to `user_preferences`/`system_settings` rather than being treated as truly unbounded — an existing simplification `AutoScheduleService` already made the same way, so this keeps the two paths consistent with each other rather than fixing one gap by opening a new disagreement. |
 | An org unit's audit entry records what it was, not what the request said (#327) | `PUT /org/units/:id` wrote its audit entry from the raw request body as `after`, with no `before` at all — a real gap found while scoping person-history (#327): the body is a partial patch (every field optional), so a request that appoints a new manager and touches nothing else produced an entry saying only `{managerUserId: 42}`, with no record of who held that headship before. An event trail that can't answer "who managed this unit before this change" can't answer the "appointments" question #327 asks about at all. Moved the audit write into `OrgUnitService.update()` itself, the only place that has both the pre-update row and the resolved merged state; `before`/`after` now carry the full resolved shape (name, description, parentId, managerUserId, isActive) either way, not just the touched keys. |
 | The frontend no longer keeps its own copy of `ShiftAssignment` | `types/index.ts` declared `Assignment` by hand alongside the shared package's `z.infer<typeof shiftAssignmentSchema>` — the same schema that generates the OpenAPI component and therefore the API's actual response. The two had already drifted: `userId` was optional on the copy and required on the schema, and two fields marked "legacy" (`employeeId`, `role`) corresponded to nothing the API returns. Code reading `assignment.employeeId` compiled and was always `undefined`, so `assignment.userId ?? assignment.employeeId ?? ''` in the schedule grid carried two fallbacks that could never fire. Removing the copy made the compiler find that on its own, which is the point: a hand-written duplicate is only ever compared by a human, so nothing announces the day the API changes and the copy does not. |
-| An account is deactivated, never deleted, and the UI says so | `DELETE /users/{id}` sets `is_active = 0`: the row stays, and so does everything hanging off it — assignments worked, decisions made, the audit trail. That is the right behaviour and the wrong verb, so the control reads **Deactivate** and the service function is named `deactivateUserAccount`. A button promising removal would be lying about an account that cannot simply disappear. Deactivated accounts stay in the list, because hiding them makes a disabled account indistinguishable from one that never existed — which is exactly the question someone is asking when they cannot find a colleague. The page also states that it is the ACCOUNT and not the employee record: they share a person and almost nothing else, and conflating them is how a deactivated account keeps appearing in a roster. No password field exists here at all — the holder sets their own credential through the reset flow. |
+| An account is deactivated, never deleted, and the UI says so | `DELETE /users/{id}` sets `is_active = 0`: the row stays, and so does everything hanging off it — assignments worked, decisions made, the audit trail. That is the right behaviour and the wrong verb, so the control reads **Deactivate** and the service function is named `deactivateUserAccount`. A button promising removal would be lying about an account that cannot simply disappear. Deactivated accounts stay in the list, because hiding them makes a disabled account indistinguishable from one that never existed — which is exactly the question someone is asking when they cannot find a colleague. The page also states that it is the ACCOUNT and not the employee record: they share a person and almost nothing else, and conflating them is how a deactivated account keeps appearing in a roster. The create form collects an **initial password**: `POST /users` requires one, and there is no invitation or reset flow through which the holder could set their own, so an account created without it could never sign in. An earlier version of the form sent none on the premise that such a flow existed, and every creation was rejected with a 400 — unnoticed because the mutation hook cast its body past the generated contract type and the page test asserted the absence of the field. |
 | Retiring a shift template is soft, and the UI says "Retire" | The server marks a template inactive rather than removing it, which is right: shifts already created from it are ordinary shifts with their own rows, and a template is a pattern used at a moment rather than something those shifts belong to. Calling the control "Delete" would promise a reach into past schedules that does not happen — and that nobody should want, since a shift people have already worked cannot be edited by changing the pattern it came from. The page states what becomes of those shifts, because "retire" with no explanation invites the reader to wonder. `deleteShiftTemplate` also now reports a miss instead of returning `true` unconditionally, which had made the route's 404 branch unreachable: deleting a template that does not exist answered "deleted successfully". |
 | A blank contract limit means "not constrained", never zero | `null` on a limit means the contract does not bound it and the person falls back to their historical default — a different statement from "zero hours" and from "unknown". The form therefore OMITS an untouched field rather than sending `0`, which would cap someone at nothing, and the table prints "not constrained" rather than a dash or a zero. The same distinction runs through an open-ended assignment, shown as "still in force" rather than as a blank end date: one is a deliberate absence, the other looks like missing data. The page states in its own text that limits are set by managers and never by the person they apply to — these are legally bounded and once lived on `user_preferences`, which is how an employee came to be able to raise their own legal maximums. |
 | Being on call is presented as held, not worked | A period is availability, not attendance: the person is reachable, not at work, and the hours are not hours worked. The page keeps it in its own shape rather than the shift's, for the same reason the timeline draws it as a separate source — showing it identically would invite exactly the wrong reading. Coverage (`assignedCount` against `minStaff`) is on every row rather than behind a click, because whether the rota is covered is the only question anyone asks of it. The rota itself is gated with `enabled` on `schedule.read`, not fetched and hidden: it is a statement about where named colleagues have to be reachable. The employee picker is fetched only when a manager has a period open — a picker that is not on screen is a request for an answer nobody reads. |
-| A swap UI names both sides, and says plainly who decides | A swap changes two people's commitments at once, so every candidate is shown as one sentence naming what the requester takes **and** what the other person takes, before anything is sent — a screen showing only one half is how someone agrees to a shift they did not realise they were taking. The person whose shift is being taken currently has no say: `approve` and `decline` are gated on `shiftswap.approve`, so a manager decides and both assignments move. Their row therefore reads "a manager decides this" rather than showing buttons that would 403 or an empty cell that looks like a page which failed to load. Whether that model is right is a separate question (#522); what would be wrong is a UI that hides it. |
+| A swap UI names both sides, and says plainly who decides | A swap changes two people's commitments at once, so every candidate is shown as one sentence naming what the requester takes **and** what the other person takes, before anything is sent — a screen showing only one half is how someone agrees to a shift they did not realise they were taking. The person whose shift is being taken decides first (`POST /shift-swap/:id/respond`, see §9d); only an accepted swap reaches a manager, whose `approve` and `decline` are gated on `shiftswap.approve`. Each row states whose decision is pending rather than showing buttons that would 403 or an empty cell that looks like a page which failed to load. |
 | Swap candidates are their own question, not a widened assignment listing | Proposing a swap needs a colleague's assignment id, and every endpoint that lists other people's assignments is gated on `assignment.manage` — so the feature was reachable only by someone who already knew such an id, which in practice meant not at all. `GET /assignments/{id}/swap-candidates` answers the narrower question instead: the caller must **own** the assignment, and the answer is bounded by the org units they belong to, resolved server-side from membership and narrowed by a scoped role, never accepted from the request. Relaxing `GET /assignments` would have exposed the whole roster to everyone to serve one legitimate case. Excluded: the caller's own, the same shift, shifts already run or beyond a 60-day horizon, and any exchange that would leave either person double-booked — checked through `AssignmentValidator`, not re-derived. The conflict check costs two queries per candidate so it is capped, and `truncated` says when the list is a prefix: a caller told nothing would believe they had seen everything. |
 | Assignments have two screens, not one | "My shifts" offers only confirm and decline, and only on a pending assignment: creating or deleting one is a planner's act on a shift, and putting both on the same page would suggest an employee can give themselves work. The planner's half lives on the shift, behind `assignment.manage`, and uses the server's **available-employees** endpoint rather than the full staff list — the server already applies the skill, availability, conflict and capacity rules, and offering everyone instead would make the user discover those rules one refusal at a time while leaving an endpoint built for exactly that unused. The refusal messages are relayed verbatim: they are the only place in the product where those rules are explained to a person, and the picker narrows the candidates but a rule can still fire between opening it and clicking. |
 | The timeline is lanes and bars, not "the schedule drawn" | A view that renders `shifts` on a time axis would have to be rewritten the first time anything else needs the same picture — a hospital wants its operating theatres on a timeline, where the lane is a room and the bar is a procedure, and none of that is a shift. So the model is deliberately smaller than scheduling: a **lane** is something time is booked against, a **bar** is a half-open interval on one lane, and a **scope** is a date range plus the org units the caller may see. Two sources exist rather than one because an abstraction with a single implementation is an indirection that breaks on the second caller; shifts and on-call periods are both already in the schema, genuinely different in shape, and overlap in time — which is itself what a planner wants to see. Operating theatres are **not** implemented: there is no room, procedure or equipment entity to draw, and inventing one would be the opposite mistake. Each source scopes inside its own query, because "which org unit owns this bar" has a different answer for a person and for a room, so a single downstream filter would be wrong the moment a lane stops being an employee. |
 | Timeline visibility is its own permission, and its projection is narrow | `timeline.read` shows the caller's own organization units and their subtrees; `timeline.read_all` lifts the **membership** bound — a planner is not limited to the ward they happen to belong to — while the org-unit scope a role carries still binds in both cases, so a manager scoped to one ward never sees another's. Two codes because `allowedOrgUnitIds` is NULL — meaning unrestricted — for anyone whose roles carry no org-unit scope, so one code granted to the Employee role would publish the whole organization's movements to everyone in it. The scope is computed from **membership** (`user_org_units`, expanded through the subtree) and intersected with the role scope when there is one, so a scoped role can only narrow it. Someone attached to no unit sees an empty timeline rather than everything — the direction in which a misconfigured membership is visible rather than catastrophic. `schedule.read` is not reused: it governs the schedule as an object of planning, while this governs seeing *people*. The projection is name, activity, start, end and status — never pay, never assignment notes, and **absences do not appear at all**, because showing who is away on the covered days makes leave and sickness deducible. Columns are listed explicitly rather than selected and trimmed, so a column added to `users` later cannot surface here by omission. |
 | Permission-based RBAC (no hardcoded roles) | Roles are customer data. Hard-wiring `admin`/`manager`/`employee` prevents multi-tier hierarchies. `user_roles` grants are scoped and time-bound, supporting org-unit subtree access and temporary elevation. |
-| JWT in httpOnly cookie + JTI blacklist | The cookie prevents XSS from stealing the token. The `jti` claim in each token enables server-side revocation on logout via an in-memory `Map<jti, expiresAt>` with lazy TTL expiry — lightweight and sufficient for single-instance deployments. |
+| JWT in httpOnly cookie + JTI blacklist | The cookie prevents XSS from stealing the token. The `jti` claim in each token enables server-side revocation on logout through a blacklist in the shared cache store: Redis when reachable, so revocation holds across replicas and restarts, with an in-process map as the single-instance fallback. |
 | Auth cookie is `SameSite=Strict` | The SPA's HTML shell is public and all authenticated calls are same-site fetches, so Strict costs nothing and closes the residual CSRF window Lax leaves for top-level GET navigations. |
 | Single MySQL pool per process | `src/index.ts` reuses the pool owned by the `database` singleton (`config/database.ts`) instead of creating a second one, so the configured `DB_POOL_LIMIT` is the real ceiling against MySQL. |
 | Working-time limits live on an effective-dated employment contract | A contract is a shared, named bundle of limits (`employment_contracts`) associated with a person over a period (`user_employment_contracts`). Previously they were columns on `user_preferences`: unshareable, so each person's limits were retyped and drifted independently; undated, so moving to part-time overwrote the value and last month's schedule appeared to violate a limit that did not apply then; and incomplete, since the daily cap was not stored at all — the engines invented `max(8, weekly/5)`, a formula appearing in no contract and no documentation as a decision, yet enforced as a hard constraint. A dedicated entity rather than a `policies` scope because `policies` has no validity period, and effective dating is the whole point. When a schedule period spans a contract change the optimizer takes the **most restrictive** limit in force at any point in it: conservative in the direction that matters, since it can under-schedule someone whose limits rose but never produces a schedule breaching a limit that applied while it ran. Per-shift resolution is the eventual answer and is deliberately not built first, because it makes limits vary per shift and reshapes the problem format both engines agree on. |
 | Equity carries a deviation from the team average, not a raw count | Weekend and night loads were counted per solve, so someone who worked every weekend in March started April level with a colleague who worked none. Carrying raw totals fixes that and creates a worse problem: a person who joined mid-period appears never to have worked a weekend and is chosen for the next ones until they "catch up", which is a penalty for having been hired later. A deviation puts a new joiner at zero — neither owed nor owing. The average is taken over **the candidates of this solve**, not the whole organization, because the comparison that means anything is with the people the solver is choosing between; averaging across departments would compare a ward with an office. Carried values are normalised to be non-negative, which changes nothing the solver optimises (`max − min` is invariant under adding the same constant to every load) and spares both engines a negative lower bound on every load variable. |
-| Labour cost stays out of the optimizer's objective | `hourly_rate` exists on `users` and is deliberately not read by either engine. A cost term makes the solver systematically prefer cheaper staff, and since pay correlates with seniority, age and tenure the cumulative effect is indirect discrimination produced by a system nobody reads as a pay decision — the optimizer assigns shifts, not salaries, and the person on the receiving end can neither see it nor contest it. A low-weight soft term was rejected for the same reason at a smaller scale ("all else equal, pick the cheaper" happens often, and it lands on the same people every time); a hard budget ceiling was rejected because under a tight budget coverage collapses and the solver ends up deciding which shifts go unstaffed, which is a service decision disguised as a technical constraint. Reporting a plan's cost to the planner without it entering the objective remains open and is a separate question. |
+| Labour cost is the lowest objective level, never a weight | `hourly_rate` reaches the CP-SAT engine as the last of four lexicographic levels (MEDIUM > DISRUPTION > SOFT > COST, §6): it can only choose between plans already tied on coverage, disruption, preferences and fairness. It was first kept out of the objective entirely, because a cost term makes the solver systematically prefer cheaper staff and pay correlates with seniority, age and tenure — indirect discrimination by a system nobody reads as a pay decision. That objection holds against a **weighted** term, where "all else equal, pick the cheaper" happens often and lands on the same people every time; as a strict tie-breaker below fairness it cannot trade a person's equity for money. A hard budget ceiling stays rejected: under a tight budget coverage collapses and the solver ends up deciding which shifts go unstaffed, a service decision disguised as a technical constraint. The greedy engine does not read cost at all. |
 | A schedule continues from ONE chosen predecessor, not from every other schedule | The boundary read used to take every other schedule within ±14 days and filter on the *assignment's* status, never the *schedule's* — so drafts and archived generations counted as though they had happened. A planner comparing candidate generations for a period had all of them read at once: one person appeared to be working several overlapping sets of shifts, their consecutive-days and weekly-hours history at the boundary was inflated by however many existed, and the new month was constrained by work that will never happen, since at most one of them can be published. Now: published schedules, which are what happened, plus the explicitly chosen predecessor whatever its status — a planner who names a draft means it. `previous_schedule_id` is a column and not an inferred rule because the inference (latest published schedule for the department ending before this one) is right in the ordinary case and cannot settle the case it exists for; NULL therefore means "resolve the default", not "no predecessor". The candidate list deliberately includes archived schedules — an abandoned generation is precisely what the choice may be between — and flags which one the default would pick, so the UI never re-derives the rule. |
 | A replanning proposal stores the whole solved plan, not just the diff | The plan sits between solving and deciding, and the world moves in between. Storing only the diff and re-deriving the rest at apply time means trusting that nothing else moved. Re-solving at approval and requiring the diff to match was rejected: a solver is not required to return the same optimum twice, so an approved diff could legitimately fail to reproduce and the planner would have approved a decision the system then declines to make. Storing the whole set and verifying it against live data means what gets applied is exactly what was approved, or nothing. The verification is deliberately narrow — shifts still exist and still belong to the schedule, people are still active — and does **not** re-run the constraint validator: the plan was legal when solved, and re-litigating it here would create a second authority on what is legal. A plan invalidated by a genuine change in the inputs is caught by re-solving, not by a second opinion. |
 | Replanning proposals live in their own table, not `change_requests` | `change_requests` carries a proposed payload and routes it through `approval_workflows`, which is the right shape — but its `apply` executes no domain effect for any change type: it marks the row applied and writes an audit entry, leaving a human to perform the change. A replanning diff cannot be performed by hand, and approving it is precisely what must write the rows. Its payload is also unlike the others: hundreds of assignments plus the diff against what people were told, which has to be verified against live data before it can be applied at all. |
@@ -1804,11 +1843,11 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 | Overnight shifts are supported; a shift's `date` is its START date | Night shifts are ordinary in every sector this system targets, and the constraint validator, both optimizer engines, the calendar feed and the compliance engine had always handled them — only the request schemas refused, so careful tested logic existed for a shape the API would not accept. The schemas now reject `startTime === endTime` only (a zero-length shift). Because a shift is a DATE plus two TIME columns, everything that reasons about when a shift runs reconstructs the absolute interval first: `DateUtils.shiftBounds` in application code, `SHIFT_HOURS_SQL` / `SHIFT_ABS_END_SQL` in queries. An overnight shift's hours count entirely against the day it begins — a Monday-night shift is a Monday shift, not four hours of each day. |
 | Hard cutover (no backward-compat shim) | The 3-role ENUM was the root of every hardcoded check. A migration shim would perpetuate the pattern. The seeded bootstrap roles (Administrator/Manager/Employee) reproduce prior behaviour without any shim. |
 | `requireModule` returns 404 | A 401 leaks that the route exists. 404 is the correct response when an entire feature is absent; no information is disclosed. |
-| In-process module cache | Module state changes infrequently. A per-request DB lookup for a static flag is wasteful. Cache invalidation on `setEnabled` is a single line. |
+| Module state is cached, invalidated by pub/sub and bounded by a TTL | Module state changes infrequently, so a per-request DB lookup for a static flag is wasteful. `setEnabled` publishes an invalidation over Redis so every replica drops its copy at once, and a 30-second TTL bounds the damage if that message is ever missed; without Redis the TTL alone applies. |
 | `AuditLogService.write` swallows errors | An audit write failure must never block a business operation. The audit log is observability, not a transaction requirement. |
 | `WITH RECURSIVE` CTE for org-unit subtrees | Fetches the entire subtree in one query. No N+1. Depth is bounded by the org tree (typically < 10 levels). |
 | `approval_matrix` preserved alongside `approval_workflows`, but `ApprovalMatrixService.resolve()` has no remaining callers | The migration of `PolicyExceptionService` onto `approval_workflows`/`pending_approvals` (matching the other request types) removed the last caller that used the matrix as its ENTIRE approval mechanism. `EmployeeLoanService`'s and `PolicyExceptionService`'s one remaining use — a creation-time "does the actor auto-approve their own request" check — turned out to be answering a question `ApprovalEngineService.resolveApprover` already had the pieces to answer, just not in the shape a caller about to INSERT its entity needed (that method discards which step resolved to whom once every step auto-approves, since its contract is "who's the first REAL approver"). `resolveFirstStepAutoApprove(changeType, ctx)` gives both facts for step one specifically, sourced from the same workflow the request is about to be attached to — so both services now decide auto-approval from `approval_workflows`/`approval_steps.auto_approve_for_owner` directly, with no `ApprovalMatrixService` dependency left in either. The matrix table, `ApprovalMatrixService`, and the admin CRUD on `policies.ts` (`GET`/`PUT /policies/approval-matrix`) are unchanged: an admin UI (`Policies.tsx`) still edits the table, and no route or service resolves through it for a real decision anymore — dropping the table needs that UI reworked first, not a data-layer change alone. |
-| Deliberate major-version holds: helmet 7, express-rate-limit 7, jest 29, dotenv 16 | All are actively maintained with zero known vulnerabilities (`npm audit` gate in CI). Their next majors are API-breaking with no security payoff today; upgrades should be dedicated PRs, not drive-by bumps. Express was migrated to 5 (#318) once its predecessor entered security-only maintenance; ESLint was EOL on v8 and has been migrated to v9 flat config. |
+| Deliberate major-version holds: helmet 7, jest 29, dotenv 16 | All are actively maintained with zero known vulnerabilities (`npm audit` gate in CI). Their next majors are API-breaking with no security payoff today; upgrades should be dedicated PRs, not drive-by bumps. Express was migrated to 5 (#318) once its predecessor entered security-only maintenance; ESLint was EOL on v8 and has been migrated to v9 flat config. |
 | Approving an employee loan makes the person schedulable in the destination unit, via `departments.org_unit_id` | `EmployeeLoanService.isOnLoan()` had zero production callers: approving a loan changed only the loan row's own status, never who the optimizer or the manual-assignment picker considered. Loans are scoped to `org_units`; scheduling is scoped to `departments`, a separate hierarchy bridged only by the optional `departments.org_unit_id` FK. `AutoScheduleService.generate` (both engines share this candidate pool) and `AssignmentOrchestrator.getAvailableEmployeesForShift` now widen their `user_departments` membership query with an OR against `EmployeeLoanService.listLoanedInUserIds()` for the department's bridged org unit and the relevant date range — a `LEFT JOIN` rather than the previous `INNER JOIN`, since a loaned-in person may have no `user_departments` row at all. The unavailability and cross-schedule-conflict reads that follow were switched from a fresh `user_departments` subquery to the already-resolved candidate id list, so a loaned-in person's existing commitments are respected exactly like a permanent member's — otherwise they would look free when they were not. A department with no `org_unit_id` bridge degrades to the plain department-only pool, so an installation that never linked the two hierarchies sees no behavior change. `OrgUnitService.listMembersDetailed` separately appends loaned-in staff to the destination unit's roster, flagged `onLoan: true` rather than `isPrimary`, since a manager borrowing someone for two weeks plausibly wants to see them on the roster and real membership is a different, stronger fact than a loan. |
 | Multi-tenancy (F13) scaffolding was removed, not completed | `initial_schema.sql` created a `tenants` table and `resolveTenant` validated an `X-Tenant-Id` header against it, but no other table ever gained a `tenant_id` column and no service ever filtered by tenant — the header validated against a real row while isolating nothing, the worst of both states: implied contract, no actual isolation (#294). This deployment is single-tenant. `20260722070317_drop_tenants_scaffolding.sql` drops the table (`resolveTenant` was deleted in the same change); its `migrate:down` recreates the table exactly as `initial_schema.sql` did, so the decision is reversible without editing either migration. `initial_schema.sql` itself is left as originally merged — its "all tenant-scoped tables should carry a `tenant_id` FK" comment is now a historical record of the abandoned plan, not a live contract; migrations are a log, not documentation to keep current. Multi-tenant isolation, if ever needed, is new work from scratch (a real `tenant_id` FK on every scoped table, systematic filtering, isolation tests) rather than a resumption of this scaffolding, which never isolated anything even while present. |
 | A JSON column is read through `ValidationUtils.parseJsonColumn`, which falls back and logs rather than throwing | MySQL hands a JSON column back either already-parsed or as a raw string depending on driver version and whether the column is `JSON` or a `TEXT` fallback, so every reader wrote `typeof raw === 'string' ? JSON.parse(raw) : raw` — fourteen times, and **five of them with no guard at all**. A malformed value in one row then raised a bare `SyntaxError` out of a row mapper; that is not an `AppError`, so `errorHandler` rendered it as a 500, and because four of the five sat inside mappers used by list endpoints, **one corrupted row made the whole list unreadable**. The fifth, `GeofenceService.isCallerWithinAllowedGeofence`, is on the attendance clock-in path, where a single malformed polygon would have stopped clock-in for an entire department with a 500 and no indication of the cause. The project had already made this call once — `ValidationUtils.parseStringArray` says so in its own comment — but it only covered arrays of strings, so five separate decisions each omitted the guard. `parseJsonColumn<T>(raw, fallback, context)` accepts both shapes, returns the caller's fallback on corruption, and **logs** the offending value (bounded to 200 characters) so a corrupted row is still discoverable: falling back silently would trade an outage for data that is quietly wrong, which is the harder of the two to diagnose. The caller supplies the fallback because only the caller knows what absence means for its own shape — `{}` for a payload, `[]` for a polygon, `null` for "not configured". The geofence fallback is deliberately an EMPTY polygon, which contains no point: a geofence is a restriction, so an unreadable one must fail closed rather than become a silent hole in the control. `PolicyService.parseValue` deliberately keeps its own handling — it falls back to the raw string, because a policy value may legitimately not be JSON — and the two `WebAuthnProvider` parses of client-supplied payloads keep throwing, since malformed client input deserves a 400 rather than a silent default (#723). |
@@ -1820,55 +1859,27 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 
 ## 14. Contribution and review process
 
-### Branching
-
-- `main` — protected; merges only via PR.
-- Feature branches: `feat/<kebab-issue-title>` (e.g. `feat/configurable-rbac`).
-- Each PR closes exactly one issue; link via `Closes #N` in the PR body.
-
-### PR checklist
-
-- [ ] `npm run lint` clean
-- [ ] `npm run build` clean (no TypeScript errors)
-- [ ] `npm test` all passing
-- [ ] New behaviour covered by tests
-- [ ] No `console.log/error` in backend code
-- [ ] No `@ts-ignore`
-- [ ] No AI attribution in commit messages or code
-
-### Commit message format
-
-```
-<type>(<scope>): <short imperative summary>
-
-<body — optional, wrap at 72 chars>
-```
-
-Types: `feat`, `fix`, `refactor`, `test`, `docs`, `ci`, `chore`.
-
-### Code review
-
-- Self-review the diff before requesting a review.
-- PRs should stay under ~400 lines of production code change; split larger work into sequential issues.
-- Reviewer focus: correctness, security, test coverage, naming.
-
-### Security vulnerabilities
-
-Do **not** open a public GitHub issue. Email the maintainer privately at `lucaostinelli@protonmail.com` with: description, reproduction steps, affected commit SHA, impact assessment. Expect acknowledgement within 5 business days and a status update within 15 business days.
+The process is owned by [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md): issue-first workflow, branch and commit conventions, the pull-request checklist, the local gate, the test layers and the merge strategy. It is not repeated here.
 
 ---
 
 ## 15. Security policy
 
-**Supported versions**: the project is pre-1.0. Fixes ship on `main`; track the latest commit.
+**Reporting a vulnerability**: do **not** open a public GitHub issue. Email the maintainer privately at `lucaostinelli@protonmail.com` with a description, reproduction steps, the affected commit SHA and an impact assessment. Expect acknowledgement within 5 business days and a status update within 15 business days.
 
-**Scope (in)**: HTTP API, frontend SPA, OR-Tools optimizer bridge.
+**Supported versions**: fixes ship on `main`; track the latest commit. No release branches are maintained.
 
-**Scope (out)**: vulnerabilities requiring existing admin credentials; third-party services (MySQL, Docker, browser).
+**Scope (in)**: HTTP API, frontend SPA, mobile wrapper, OR-Tools optimizer bridge.
+
+**Scope (out)**: vulnerabilities requiring existing admin credentials; third-party services (MySQL, Redis, Docker, browser).
 
 ---
 
-## 16. End-to-end tests
+## 16. Testing and verification
+
+The test layers, how they map to CI jobs and the rules for writing tests are in [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md#testing). This section documents the tooling itself.
+
+### End-to-end tests
 
 Playwright smoke tests in `frontend/e2e/`. They exercise the real UI against a running demo stack.
 
@@ -1879,15 +1890,15 @@ npx playwright install --with-deps chromium   # one-time
 npm run test:e2e
 ```
 
-Environment variables: `E2E_BASE_URL` (default `http://localhost:3000`), `REACT_APP_API_URL` (default `http://localhost:3001`).
+Environment variables: `E2E_BASE_URL` (default `http://localhost:3000`), `REACT_APP_API_URL` (default `http://localhost:3001/api/v1`), `E2E_SKIP_WEB_SERVER` (reuse an already running dev server), and `E2E_ADMIN_*` / `E2E_MANAGER_*` to override the seeded credentials.
 
 Demo credentials: `admin@demo.staffscheduler.local / demo1234`.
 
-CI job: `Frontend e2e (Playwright)` in `.github/workflows/ci.yml`. Boots a `mysql:8.0` service, seeds demo data, starts the backend and frontend, runs Playwright, uploads HTML report and traces on failure.
+CI job: `Frontend e2e (Playwright) [required]` in `.github/workflows/ci.yml`. Boots MySQL and Redis services, applies the migrations and verifies the rollback path, runs the backend integration suite, seeds demo data, starts the backend and frontend, runs Playwright, and uploads the HTML report and traces on failure.
 
 | Spec | Flow |
 |---|---|
-| `auth.spec.ts` | Admin and manager sign in and reach the dashboard |
+| `auth.spec.ts` | Admin and manager sign in and reach the dashboard; invalid credentials show an error |
 | `schedule.spec.ts` | Admin creates a schedule via the UI |
 | `theme.spec.ts` | Theme toggle cycles between light and dark |
 

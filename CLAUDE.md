@@ -9,7 +9,7 @@ Staff Scheduler is an enterprise workforce management system.
 - **Backend**: Node.js/Express/TypeScript REST API — runs on port **3001**
 - **Frontend**: React 18/TypeScript SPA (Vite) — runs on port **3000**
 - **Mobile**: Capacitor wrapping the built frontend for iOS and Android (`mobile/`)
-- **Database**: MySQL 8.0 (44 tables, schema in `backend/db/migrations/` — dbmate SQL migrations)
+- **Database**: MySQL 8.0 (schema in `backend/db/migrations/` — dbmate SQL migrations)
 - **Optimizer**: Python 3.8+ with Google OR-Tools CP-SAT, invoked via `child_process` from `backend/src/optimization/ScheduleOptimizerORTools.ts`
 
 ## Commands
@@ -72,11 +72,12 @@ npm run lint
 
 ### Backend
 
-The MySQL connection pool is created once in `src/index.ts` and **injected into every router factory** (`createAssignmentsRouter(pool)`, etc.). Each service receives the pool via its constructor. No global service singletons — except the `database` singleton in `src/config/database.ts`, used directly by health checks and the auth middleware.
+The MySQL connection pool is owned by the `database` singleton, obtained once in `src/index.ts` and **injected into every router factory** through `buildApp` in `src/app.ts` (`createAssignmentsRouter(pool)`, etc.). Each service receives the pool via its constructor. No global service singletons — except the `database` singleton in `src/config/database.ts`, used directly by health checks and the auth middleware.
 
-```
+```text
 backend/src/
-├── index.ts                   # Express app bootstrap, pool creation, route mounting
+├── index.ts                   # Process bootstrap: pool, workers, server start, shutdown
+├── app.ts                     # buildApp(): middleware and route mounting under /api/v1
 ├── config/
 │   ├── index.ts               # All env var reads; fail-safe defaults
 │   ├── database.ts            # Singleton Database class (pool, query helpers, transactions)
@@ -96,7 +97,9 @@ backend/src/
 ├── services/                  # Stateless business logic classes, constructed with Pool
 │   ├── RbacService.ts         # Permission resolution, org-unit scoping, role grants
 │   ├── DelegationService.ts   # Temporary authority transfer between users
-│   ├── ApprovalEngineService.ts  # Multi-step configurable approval workflows, escalation
+│   ├── ApprovalWorkflowService.ts    # CRUD for approval workflows and steps
+│   ├── ApproverResolutionService.ts  # Resolves who must decide a step
+│   ├── ApprovalDecisionService.ts    # Decisions and escalation (run via POST /approval-workflows/escalate)
 │   ├── ApprovalStateMachine.ts   # THE authority on legal approval transitions — see below
 │   ├── OptimizationQueue.ts   # BullMQ schedule-optimization jobs (202 + status/cancel)
 │   ├── MailerService.ts       # nodemailer transport, gated by isEmailConfigured()
@@ -132,10 +135,11 @@ request handler.
 
 - `authenticate` — Verifies JWT, loads the user from DB, resolves effective permissions via `RbacService.getEffectivePermissions()` (union of role grants + active delegations), computes `allowedOrgUnitIds` for org-unit scoping, and attaches the enriched `User` to `req.user`. Must be applied first on all protected routes.
 - `requirePermission(code)` — Authorization guard; returns 403 if the authenticated user does not hold the given permission code. Apply after `authenticate`. Example: `requirePermission('schedule.manage')`.
-- `requireModule(code)` — Feature-flag guard; returns 404 (not 401) for disabled modules. Apply before `authenticate` so the route is invisible to all callers when the module is off.
+- `requireModuleForUser(code)` — Feature-flag guard; returns 404 (not 401) for a module disabled for the caller's organization. Apply after `authenticate`; this is the guard every gated router uses.
+- `requireModule(code)` — The same guard without a user, applied before `authenticate`; used only by the kiosk punch route.
 - `userHasPermission(user, code)` — Helper for finer-grained in-handler authorization checks without adding a middleware layer.
 
-**Password reset**: implemented in `UserService`; the relevant route is wired through `createAuthRouter`.
+**Password reset**: not implemented — there is no reset or invitation route, service method or page. Accounts are created with an initial password set by an administrator (`createUserBody` requires one).
 
 **Error handling**: Services throw typed errors from `src/errors` (`NotFoundError` 404, `ConflictError` 409, `ForbiddenError` 403, `ValidationError` 400, `UnauthorizedError` 401); plain `Error` is reserved for internal faults (500). Route handlers do not catch errors — a rejected `async` handler's promise reaches the central `errorHandler` middleware (`src/middleware/errorHandler.ts`) on its own, which renders the envelope. (Express 4 needed every route handler wrapped in an `asyncHandler` helper to get this; Express 5 forwards it natively, so that wrapper was removed — #580.) Never dispatch on `error.message` substrings (an ESLint rule enforces this in `src/routes`). Custom error codes (e.g. `TOTP_REQUIRED`, `INVALID_STATUS`, `DELEGATION_INVALID`) are preserved by catching the typed error in the route and re-rendering with the custom code.
 
@@ -143,7 +147,7 @@ request handler.
 
 ### Frontend
 
-```
+```text
 frontend/src/
 ├── index.tsx / App.tsx        # Entry point and React Router v6 routing
 ├── contexts/AuthContext.tsx   # Global JWT state (login / logout / token refresh)
@@ -201,8 +205,9 @@ The `code` field is required in all error responses.
 - **Auth**: Protected routes apply `authenticate` middleware first, then `requirePermission('permission.key')` for the required permission code. Do not use `requireAdmin`, `requireManager`, or `requireRole` — these do not exist. Permission gating is always code-based.
 - **Validation**: Use `validateBody(schema)` / `validateParams(schema)` / `validateQuery(schema)` from `src/middleware/validation.ts` with Zod schemas from the shared package `@staff-scheduler/shared` (imported via `src/schemas`, which re-exports it — the package is canonical). Do not use `express-validator`. The OpenAPI request bodies and the frontend typed client are both generated from these schemas, so changing one updates the whole contract.
 - **No fake async**: Do not simulate API calls with `setTimeout`. If a feature is not yet implemented, leave the handler empty with a comment — never show a false success alert.
-- **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`). Do not create additional root-level `.md` files.
+- **Documentation files**: Only `README.md` and `DOCUMENTATION.md` as markdown files in the project root (plus `CLAUDE.md` and `.github/`, which holds the contributor guide `.github/CONTRIBUTING.md`). Do not create additional root-level `.md` files.
 - **OpenAPI**: request bodies AND query `parameters` in `backend/openapi/openapi.json` are GENERATED from the shared Zod schemas — never edit either by hand; run `npm run openapi:generate` (backend) after changing a schema, a `validateBody` or a `validateQuery` middleware (CI fails on drift). **Every mounted operation must have a spec entry**, whatever middleware it carries: a route with only `validateParams` produces no generated artefact, and it used to be skipped before the presence check ran — so read-one and delete-one endpoints could be mounted with no OpenAPI entry while generation reported success. The query check is bidirectional: a spec parameter with no `validateQuery` behind it fails generation, and so does a handler reading `req.query` (or `req.body`) directly instead of through a schema. Both directions resolve `$ref` parameters before classifying them — a `$ref` entry has no `in`, so `parameter.in === 'query'` silently skips it, which is how two reusable components published a phantom `limit` on six operations. Query parameters are always generated, so never add one via `$ref`; only the structural `id` path parameter is a legitimate reference, and a `components.parameters` entry nothing references fails generation. The `components.schemas` for the shared domain entities are generated too, from the same Zod schemas that define their types in `packages/shared/src/domain.ts` (each type is a `z.infer`, never a second hand-written copy) — add an entity there and to `DOMAIN_COMPONENTS` to move it from hand-written to derived. Curated prose (summaries, responses, parameter `description` text) is still edited in the file and survives regeneration. Update `DOCUMENTATION.md` in the same PR when endpoints change.
+- **Dates**: a `DATE` column is a calendar day. Read it with `DateUtils.toDateString`, never `toISOString()` (mysql2 returns it at local midnight); do day arithmetic on `YYYY-MM-DD` strings with `dateToMs` / `DAY_MS`. Test fixtures standing in for the driver use `driverDate()` from `src/__tests__/helpers/driverDate`. Both suites must pass off UTC — CI runs them under `America/Los_Angeles` and `Pacific/Auckland`.
 - **Tests**: a test file that declares top-level `const`s but has no top-level `import`/`export` is a *global script* under ts-jest and its names collide with other suites (`TS2451: Cannot redeclare block-scoped variable`). Add `export {};` to such files. Frontend tests that render a component using a query hook must import `render` from `src/test-utils/renderWithClient`.
 - **Database triggers**: always give a trigger a `BEGIN ... END` body, even for a single statement. `mysqldump` wraps trigger bodies in a `/*!50003 ... */` comment; with a bare single statement its terminating `;` lands inside that comment and the dump cannot be restored (the backup-restore CI job catches this).
 - **Observability**: new metrics are registered on the shared registry in `src/observability/metrics.ts`. Never label a metric with a raw path, id or other unbounded value — use the matched route pattern, as the HTTP histogram does.
@@ -236,7 +241,7 @@ The `code` field is required in all error responses.
 
 Backend requires `backend/.env` (copy from `.env.example`):
 
-```
+```text
 DB_HOST=localhost  DB_PORT=3306  DB_USER=...  DB_PASSWORD=...  DB_NAME=staff_scheduler
 JWT_SECRET=...  JWT_EXPIRES_IN=15m  JWT_REFRESH_EXPIRES_IN=30d
 BCRYPT_ROUNDS=12
@@ -251,7 +256,7 @@ and revokes the whole family on reuse of a spent token. `POST /api/auth/refresh`
 is NOT behind `authenticate` — it works precisely when the access token has
 expired. The frontend refreshes proactively (`AuthContext`) and on mount.
 
-Frontend optionally uses `REACT_APP_API_URL=http://localhost:3001` (the dev proxy handles it by default).
+Frontend optionally uses `REACT_APP_API_URL` — the full API base including the version prefix, e.g. `http://localhost:3001/api/v1`; default `/api/v1`, which the dev proxy handles. It is injected at build time from the process environment.
 
 **Optional subsystems**, all off/no-op unless configured — none is required to run locally:
 
@@ -298,10 +303,14 @@ runs — **default `or-tools`**:
 Install the Python solver:
 
 ```bash
-cd backend
-pip3 install -r optimization-scripts/requirements.txt
-python3 optimization-scripts/schedule_optimizer.py --help
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r backend/optimization-scripts/requirements.txt
+python3 backend/optimization-scripts/schedule_optimizer.py --help
 ```
+
+The backend spawns `python3` from `PATH`, so run it (and its tests) with the
+environment active. Without OR-Tools the CP-SAT half of the parity suite skips
+and `npm run test:coverage` falls below the threshold.
 
 Both engines are held to one shared hard-constraint definition in
 `backend/src/optimization/constraintValidator.ts`. The parity suite

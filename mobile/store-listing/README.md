@@ -31,10 +31,10 @@ prepared, and replace the placeholders first.
 > Staff Scheduler is built for organizations that already run their scheduling through the
 > Staff Scheduler platform — this app is a companion client, not a standalone service.
 
-This full description is intentionally generic until real screenshots and a settled
-feature set (auth flow, calendar views, and push notifications are not implemented yet —
-see `DOCUMENTATION.md`'s mobile section) are available to describe accurately. Do not
-submit copy describing features the shipped build doesn't have.
+This full description is intentionally generic: no screenshots of a store build exist.
+Sign-in, the phone-width schedule and calendar views, and push notifications are
+implemented (see the mobile section of `DOCUMENTATION.md`). Do not submit copy describing
+features the shipped build doesn't have.
 
 ## Privacy policy URL
 
