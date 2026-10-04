@@ -79,8 +79,8 @@ export function useOnCallMutations() {
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, ...body }: { id: number } & Record<string, unknown>) =>
-        updateOnCallPeriod(id, body as never),
+      mutationFn: ({ id, ...body }: { id: number } & Parameters<typeof updateOnCallPeriod>[1]) =>
+        updateOnCallPeriod(id, body),
       onSuccess: invalidate,
     }),
     remove: useMutation({

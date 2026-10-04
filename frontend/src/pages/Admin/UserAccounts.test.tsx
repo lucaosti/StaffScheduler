@@ -14,6 +14,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { render } from '../../test-utils/renderWithClient';
 import UserAccounts from './UserAccounts';
+import { createUserBody } from '@staff-scheduler/shared';
 
 const okResponse = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
@@ -86,20 +87,34 @@ describe('listing', () => {
 });
 
 describe('creating', () => {
-  it('never sends a password', async () => {
+  it('sends a body the server contract accepts', async () => {
     render(<UserAccounts />);
     await screen.findByRole('cell', { name: 'Ada Lovelace' });
 
     await userEvent.type(screen.getByLabelText('Email'), 'grace@example.com');
     await userEvent.type(screen.getByLabelText('First name'), 'Grace');
     await userEvent.type(screen.getByLabelText('Last name'), 'Hopper');
+    await userEvent.type(screen.getByLabelText('Initial password'), 'correct-horse');
     await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
     await waitFor(() => expect(createUserAccount).toHaveBeenCalled());
-    // Typing someone else's password into a form is how a shared secret stops
-    // being theirs; the holder sets it through the reset flow.
-    expect(createUserAccount.mock.calls[0][0]).not.toHaveProperty('password');
-    expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+    // Checked against the schema `POST /users` actually validates with, not
+    // against this test's idea of the payload. The previous version of this
+    // test asserted that NO password was sent — and passed, while the server
+    // rejected every such request with a 400, because the service is mocked
+    // here and nothing compared the body to the contract.
+    const parsed = createUserBody.safeParse(createUserAccount.mock.calls[0][0]);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('requires an initial password of the length the contract demands', async () => {
+    render(<UserAccounts />);
+    await screen.findByRole('cell', { name: 'Ada Lovelace' });
+
+    const field = screen.getByLabelText('Initial password');
+    expect(field).toBeRequired();
+    expect(field).toHaveAttribute('minlength', '8');
+    expect(field).toHaveAttribute('type', 'password');
   });
 
   it('omits roleIds entirely when no role is chosen', async () => {
@@ -109,6 +124,7 @@ describe('creating', () => {
     await userEvent.type(screen.getByLabelText('Email'), 'grace@example.com');
     await userEvent.type(screen.getByLabelText('First name'), 'Grace');
     await userEvent.type(screen.getByLabelText('Last name'), 'Hopper');
+    await userEvent.type(screen.getByLabelText('Initial password'), 'correct-horse');
     await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
     await waitFor(() => expect(createUserAccount).toHaveBeenCalled());
@@ -124,6 +140,7 @@ describe('creating', () => {
     await userEvent.type(screen.getByLabelText('Email'), 'grace@example.com');
     await userEvent.type(screen.getByLabelText('First name'), 'Grace');
     await userEvent.type(screen.getByLabelText('Last name'), 'Hopper');
+    await userEvent.type(screen.getByLabelText('Initial password'), 'correct-horse');
     await userEvent.selectOptions(screen.getByLabelText('Role'), '2');
     await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
@@ -141,6 +158,7 @@ describe('creating', () => {
     await userEvent.type(screen.getByLabelText('Email'), 'x@example.com');
     await userEvent.type(screen.getByLabelText('First name'), 'X');
     await userEvent.type(screen.getByLabelText('Last name'), 'Y');
+    await userEvent.type(screen.getByLabelText('Initial password'), 'correct-horse');
     await userEvent.click(screen.getByRole('button', { name: 'Create account' }));
 
     // The server blocks privilege escalation through role assignment by name.

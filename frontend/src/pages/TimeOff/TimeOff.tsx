@@ -45,7 +45,7 @@ const TimeOff: React.FC = () => {
 
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
-  const [type, setType] = useState<string>('vacation');
+  const [type, setType] = useState<(typeof TYPES)[number]>('vacation');
   const [reason, setReason] = useState('');
 
   const mine = useTimeOffQuery(user?.id ? { userId: Number(user.id) } : {});
@@ -109,7 +109,7 @@ const TimeOff: React.FC = () => {
             id="timeoff-type"
             className="form-select"
             value={type}
-            onChange={(e) => setType(e.target.value)}
+            onChange={(e) => setType(e.target.value as (typeof TYPES)[number])}
           >
             {TYPES.map((ty) => (
               <option key={ty} value={ty}>{t(`timeOff.types.${ty}`)}</option>

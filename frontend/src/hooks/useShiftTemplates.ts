@@ -35,12 +35,12 @@ export function useShiftTemplateMutations() {
 
   return {
     create: useMutation({
-      mutationFn: (body: Record<string, unknown>) => createShiftTemplate(body as never),
+      mutationFn: (body: Parameters<typeof createShiftTemplate>[0]) => createShiftTemplate(body),
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, ...body }: { id: number } & Record<string, unknown>) =>
-        updateShiftTemplate(id, body as never),
+      mutationFn: ({ id, ...body }: { id: number } & Parameters<typeof updateShiftTemplate>[1]) =>
+        updateShiftTemplate(id, body),
       onSuccess: invalidate,
     }),
     remove: useMutation({

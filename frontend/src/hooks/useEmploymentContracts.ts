@@ -52,12 +52,12 @@ export function useContractMutations() {
 
   return {
     create: useMutation({
-      mutationFn: (body: Record<string, unknown>) => createContract(body as never),
+      mutationFn: (body: Parameters<typeof createContract>[0]) => createContract(body),
       onSuccess: invalidate,
     }),
     update: useMutation({
-      mutationFn: ({ id, ...body }: { id: number } & Record<string, unknown>) =>
-        updateContract(id, body as never),
+      mutationFn: ({ id, ...body }: { id: number } & Parameters<typeof updateContract>[1]) =>
+        updateContract(id, body),
       onSuccess: invalidate,
     }),
     assign: useMutation({
@@ -65,7 +65,7 @@ export function useContractMutations() {
         userId,
         ...body
       }: { userId: number; contractId: number; effectiveFrom: string; effectiveTo?: string | null }) =>
-        assignContract(userId, body as never),
+        assignContract(userId, body),
       onSuccess: invalidate,
     }),
   };

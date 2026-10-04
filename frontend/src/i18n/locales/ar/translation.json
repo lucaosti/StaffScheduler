@@ -906,6 +906,7 @@
   "admin.userAccounts.form.email": "البريد الإلكتروني",
   "admin.userAccounts.form.firstName": "الاسم الأول",
   "admin.userAccounts.form.lastName": "اسم العائلة",
+  "admin.userAccounts.form.initialPassword": "كلمة المرور الأولية",
   "admin.userAccounts.form.role": "الدور",
   "admin.userAccounts.form.noRole": "بدون دور",
   "admin.userAccounts.form.createAccount": "إنشاء حساب",

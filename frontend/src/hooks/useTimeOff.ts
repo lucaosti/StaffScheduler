@@ -44,8 +44,8 @@ export function useTimeOffMutations() {
 
   return {
     request: useMutation({
-      mutationFn: (body: { startDate: string; endDate: string; type: string; reason?: string }) =>
-        createTimeOffRequest(body as never),
+      mutationFn: (body: Parameters<typeof createTimeOffRequest>[0]) =>
+        createTimeOffRequest(body),
       onSuccess: invalidate,
     }),
     approve: useMutation({
