@@ -146,7 +146,7 @@ services:
         # Vite bakes this at build time. Relative default: the frontend nginx
         # proxies /api to the backend, so the SPA works on any host without
         # knowing the backend's address.
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api}
+        REACT_APP_API_URL: ${REACT_APP_API_URL:-/api/v1}
     container_name: staff_scheduler_frontend
     restart: unless-stopped
     depends_on:
