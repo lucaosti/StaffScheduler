@@ -22,7 +22,7 @@ COPY frontend frontend
 # Vite bakes env vars at build time, so the API base must arrive as a build
 # arg (a runtime env on the nginx container would be ignored). The relative
 # default works with the nginx /api proxy on any host.
-ARG REACT_APP_API_URL=/api
+ARG REACT_APP_API_URL=/api/v1
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
 RUN npm run build --workspace staff-scheduler-frontend
