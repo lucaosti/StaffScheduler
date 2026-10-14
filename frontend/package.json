@@ -4,7 +4,7 @@
   "description": "Frontend React application for Staff Scheduler - Advanced Workforce Management System",
   "private": true,
   "dependencies": {
-    "@capacitor/core": "^8.5.0",
+    "@capacitor/core": "^8.5.3",
     "@capacitor/preferences": "^8.0.1",
     "@capacitor/push-notifications": "^8.0.1",
     "@hookform/resolvers": "^5.4.0",
