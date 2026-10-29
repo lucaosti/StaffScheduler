@@ -66,6 +66,22 @@ function parseDurationMs(value: string, fallbackMs: number): number {
   return amount * multiplier;
 }
 
+/**
+ * Splits CORS_ORIGIN into its comma-separated origins. A list rather than one
+ * value because the web SPA and the Capacitor shells call the same API from
+ * different origins (`capacitor://localhost` on iOS, `https://localhost` on
+ * Android), and a browser accepts exactly one echoed origin per response, so
+ * the server must know every legitimate one. A blank value or a list of empty
+ * entries falls back to the default rather than to an empty allow-list that
+ * would lock the web app out.
+ */
+function parseOriginList(value: string | undefined, fallback: string): string[] {
+  const origins = (value ?? '').split(',').map((origin) => origin.trim()).filter(Boolean);
+  return origins.length > 0 ? origins : [fallback];
+}
+
+const corsAllowedOrigins = parseOriginList(process.env.CORS_ORIGIN, 'http://localhost:3000');
+
 export const config = {
   server: {
     port: parseInt(process.env.PORT || '3001'),
@@ -224,7 +240,12 @@ export const config = {
     rateLimitOrgMax: parseInt(process.env.RATE_LIMIT_ORG_MAX_REQUESTS || '2000'),
   },
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    // The first entry is the web app's own origin: the SSO callback redirects
+    // there and WebAuthn derives its relying-party ID from it, both of which
+    // need one browser origin, not a set. The rest are extra origins allowed to
+    // make credentialed cross-origin calls (the mobile shells).
+    origin: corsAllowedOrigins[0],
+    allowedOrigins: corsAllowedOrigins,
   },
   redis: {
     // On by default: the shared caches (JTI blacklist, auth-context, module

@@ -103,7 +103,7 @@ describe('defaults (bare environment)', () => {
     });
     expect(config.logging).toEqual({ level: 'info', file: './logs/app.log', maxSize: '10m', maxFiles: 5 });
     expect(config.security).toEqual({ bcryptRounds: 12, rateLimitWindow: 60000, rateLimitMax: 200, rateLimitOrgMax: 2000 });
-    expect(config.cors.origin).toBe('http://localhost:3000');
+    expect(config.cors).toEqual({ origin: 'http://localhost:3000', allowedOrigins: ['http://localhost:3000'] });
     expect(config.notifications).toEqual({ enabled: false, emailEnabled: true, inAppEnabled: true });
   });
 });
@@ -144,8 +144,16 @@ describe('explicit environment (full profile)', () => {
     expect(config.optimization).toMatchObject({ engine: 'or-tools', timeout: 60000, maxIterations: 10, populationSize: 20, mutationRate: 0.2, crossoverRate: 0.5 });
     expect(config.logging).toEqual({ level: 'debug', file: '/tmp/l.log', maxSize: '5m', maxFiles: 2 });
     expect(config.security).toEqual({ bcryptRounds: 14, rateLimitWindow: 1000, rateLimitMax: 50, rateLimitOrgMax: 500 });
-    expect(config.cors.origin).toBe('https://app.example.com');
+    expect(config.cors).toEqual({ origin: 'https://app.example.com', allowedOrigins: ['https://app.example.com'] });
     expect(config.notifications).toEqual({ enabled: true, emailEnabled: false, inAppEnabled: false });
+  });
+
+  it('reads CORS_ORIGIN as a comma-separated list whose first entry is the web app', () => {
+    const config = loadConfig({ CORS_ORIGIN: ' https://app.example.com , capacitor://localhost,,https://localhost ' });
+    expect(config.cors).toEqual({
+      origin: 'https://app.example.com',
+      allowedOrigins: ['https://app.example.com', 'capacitor://localhost', 'https://localhost'],
+    });
   });
 
   it('enforces the bcrypt cost floor of 10', () => {
