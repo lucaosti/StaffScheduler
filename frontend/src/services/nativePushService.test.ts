@@ -7,7 +7,10 @@
  * the backend; the web branch (mocked `false`, the default in every other
  * test in this project) must touch none of the native plugin's API at all —
  * that regression guard is the point of this file, mirroring
- * `mobileAuth.test.ts`'s reasoning for the auth flow.
+ * `mobileAuth.test.ts`'s reasoning for the auth flow. The same guard holds on
+ * a native build that did not opt into push (`REACT_APP_NATIVE_PUSH`): there
+ * the plugin's native `register()` would crash the app without Firebase
+ * configured, so it must not be reached at all.
  */
 
 import { Capacitor } from '@capacitor/core';
@@ -51,9 +54,17 @@ const tapHandler = () =>
     | (() => void)
     | undefined;
 
+const originalNativePush = process.env.REACT_APP_NATIVE_PUSH;
+
 beforeEach(() => {
   jest.clearAllMocks();
   resetNativePushListeners();
+  delete process.env.REACT_APP_NATIVE_PUSH;
+});
+
+afterAll(() => {
+  if (originalNativePush === undefined) delete process.env.REACT_APP_NATIVE_PUSH;
+  else process.env.REACT_APP_NATIVE_PUSH = originalNativePush;
 });
 
 describe('registerForNativePush — web platform (regression guard)', () => {
@@ -74,9 +85,28 @@ describe('registerForNativePush — web platform (regression guard)', () => {
   });
 });
 
+describe('registerForNativePush — native platform, push not enabled at build time', () => {
+  beforeEach(() => {
+    isNativePlatformMock.mockReturnValue(true);
+  });
+
+  it.each([undefined, '', 'false', '1'])(
+    'never touches the plugin when REACT_APP_NATIVE_PUSH is %p',
+    async (value) => {
+      if (value !== undefined) process.env.REACT_APP_NATIVE_PUSH = value;
+      await registerForNativePush();
+      expect(requestPermissionsMock).not.toHaveBeenCalled();
+      expect(registerMock).not.toHaveBeenCalled();
+      expect(addListenerMock).not.toHaveBeenCalled();
+      expect(postMock).not.toHaveBeenCalled();
+    }
+  );
+});
+
 describe('registerForNativePush — native platform', () => {
   beforeEach(() => {
     isNativePlatformMock.mockReturnValue(true);
+    process.env.REACT_APP_NATIVE_PUSH = 'true';
     requestPermissionsMock.mockResolvedValue({ receive: 'granted' });
     postMock.mockResolvedValue({ success: true });
   });

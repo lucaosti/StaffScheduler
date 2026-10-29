@@ -156,6 +156,21 @@ describe('explicit environment (full profile)', () => {
     });
   });
 
+  it.each([
+    ['a non-HTTP scheme', 'capacitor://localhost,https://app.example.com'],
+    ['a trailing slash', 'https://app.example.com/'],
+    ['a path', 'https://app.example.com/app'],
+    ['an unparseable value', 'app.example.com'],
+  ])('refuses to start when the first CORS_ORIGIN entry has %s', (_label, value) => {
+    expect(() => loadConfig({ CORS_ORIGIN: value })).toThrow(/first CORS_ORIGIN entry/);
+  });
+
+  it('accepts a non-HTTP scheme after the first CORS_ORIGIN entry', () => {
+    // capacitor://localhost has no URL origin of its own ("null"), so only the
+    // web app's entry can be checked this way.
+    expect(() => loadConfig({ CORS_ORIGIN: 'http://localhost:3000,capacitor://localhost' })).not.toThrow();
+  });
+
   it('enforces the bcrypt cost floor of 10', () => {
     const config = loadConfig({ BCRYPT_ROUNDS: '4' });
     expect(config.security.bcryptRounds).toBe(10);

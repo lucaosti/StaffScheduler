@@ -16,7 +16,7 @@ on:
         # Required because the mobile build refuses to run without an
         # absolute API base (mobile/scripts/check-api-url.mjs): a relative URL
         # would resolve against the WebView's own asset server.
-        description: 'Absolute API base baked into the app, e.g. https://api.example.com/api/v1'
+        description: 'Absolute https API base baked into the app, e.g. https://api.example.com/api/v1'
         required: true
         type: string
 

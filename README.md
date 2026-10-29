@@ -300,6 +300,7 @@ npm run api:generate          # regenerate the typed client from the OpenAPI spe
 ### Mobile (`cd mobile`)
 
 ```bash
+REACT_APP_API_URL=https://api.example.com/api/v1 \
 npm run build                 # build the SPA, copy it, sync native projects
 npm run open:ios
 npm run open:android

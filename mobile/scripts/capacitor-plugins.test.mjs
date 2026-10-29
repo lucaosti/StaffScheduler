@@ -21,17 +21,39 @@ import { fileURLToPath } from 'node:url';
 const mobileDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const frontendSrc = path.join(mobileDir, '..', 'frontend', 'src');
 
-const CAPACITOR_IMPORT = /from\s+['"](@capacitor\/[a-z0-9-]+)['"]/g;
+// Static `from '…'`, side-effect `import '…'` and dynamic `import('…')`: any
+// of them puts the plugin's JavaScript into the bundle and so needs its native
+// half registered.
+const CAPACITOR_IMPORT = /(?:from|import)\s*\(?\s*['"](@capacitor\/[a-z0-9-]+)['"]/g;
+
+const importsIn = (source) => [...source.matchAll(CAPACITOR_IMPORT)].map((match) => match[1]);
 
 function capacitorImports(dir) {
   const found = new Set();
   for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
     if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name)) continue;
     const source = readFileSync(path.join(entry.parentPath, entry.name), 'utf8');
-    for (const match of source.matchAll(CAPACITOR_IMPORT)) found.add(match[1]);
+    for (const name of importsIn(source)) found.add(name);
   }
   return found;
 }
+
+test('the scan recognises every import form', () => {
+  const source = [
+    "import { Capacitor } from '@capacitor/core';",
+    "import '@capacitor/splash-screen';",
+    "const { Camera } = await import('@capacitor/camera');",
+    'const haptics = import( "@capacitor/haptics" );',
+    "import type { PluginListenerHandle } from '@capacitor/app';",
+  ].join('\n');
+  assert.deepEqual(importsIn(source), [
+    '@capacitor/core',
+    '@capacitor/splash-screen',
+    '@capacitor/camera',
+    '@capacitor/haptics',
+    '@capacitor/app',
+  ]);
+});
 
 test('every @capacitor/* package imported by the frontend is a mobile dependency', () => {
   const { dependencies = {} } = JSON.parse(readFileSync(path.join(mobileDir, 'package.json'), 'utf8'));

@@ -26,6 +26,11 @@ export default defineConfig({
     'process.env.REACT_APP_API_URL': JSON.stringify(
       process.env.REACT_APP_API_URL ?? ''
     ),
+    // Opt-in for native push in the Capacitor build; see
+    // src/services/nativePushService.ts for why it cannot default to on.
+    'process.env.REACT_APP_NATIVE_PUSH': JSON.stringify(
+      process.env.REACT_APP_NATIVE_PUSH ?? ''
+    ),
   },
   // The shared workspace package ships as CommonJS (its dist re-exports the Zod
   // schemas via `export *`). It resolves through a symlink to ../packages/shared,

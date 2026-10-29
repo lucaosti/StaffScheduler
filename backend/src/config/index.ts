@@ -80,7 +80,33 @@ function parseOriginList(value: string | undefined, fallback: string): string[] 
   return origins.length > 0 ? origins : [fallback];
 }
 
+/**
+ * Throws unless `value` is exactly an http(s) origin (scheme, host, optional
+ * port — no path, no trailing slash). Applied to the first CORS_ORIGIN entry
+ * only: the SSO callback redirects to it and WebAuthn derives its relying-party
+ * ID from it, so a malformed value would surface much later as a broken login
+ * rather than here. The other entries are left alone on purpose, because a
+ * non-special scheme such as `capacitor://` has no URL origin to compare
+ * against (`new URL(...).origin` is the string "null"), and an entry that can
+ * never match simply allows nothing.
+ */
+function requireHttpOrigin(value: string): void {
+  let origin: string | null = null;
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' || url.protocol === 'http:') origin = url.origin;
+  } catch {
+    /* unparseable: origin stays null and fails the comparison below */
+  }
+  if (origin !== value) {
+    throw new Error(
+      `[config] the first CORS_ORIGIN entry must be the web app's http(s) origin (e.g. https://app.example.com), got "${value}"`
+    );
+  }
+}
+
 const corsAllowedOrigins = parseOriginList(process.env.CORS_ORIGIN, 'http://localhost:3000');
+requireHttpOrigin(corsAllowedOrigins[0]);
 
 export const config = {
   server: {

@@ -909,7 +909,7 @@ A genuinely separate transport from Web Push above, not a reuse: `PushService`/`
 
 **Delivery**: `NativePushWorker` polls `native_push_outbox` with the same shape as `PushWorker` (interval poll, `FOR UPDATE SKIP LOCKED`, 5 retries). The one real difference from the Web Push worker: a `NativePushGoneError` (FCM reporting `NotRegistered`/`InvalidRegistration`, or APNs reporting `Unregistered`/`BadDeviceToken`) deactivates the device token immediately instead of retrying — each vendor signals "this token is permanently invalid" in its own response shape rather than a shared 404/410, so the worker relies on a typed error the provider throws instead of an HTTP status code.
 
-**Mobile client**: `frontend/src/services/nativePushService.ts` runs only under `Capacitor.isNativePlatform()`. `registerForNativePush()` is called once, right after a successful login (`AuthContext.tsx`) — the same lifecycle point the mobile auth flow's token persistence hooks into (§5 "Mobile client:
+**Mobile client**: `frontend/src/services/nativePushService.ts` runs only under `Capacitor.isNativePlatform()`, and only in a build made with `REACT_APP_NATIVE_PUSH=true` (§7g "Native push"). `registerForNativePush()` is called once, right after a successful login (`AuthContext.tsx`) — the same lifecycle point the mobile auth flow's token persistence hooks into (§5 "Mobile client:
 token-based variant"). It requests push permission, calls `PushNotifications.register()`, and on the plugin's `registration` event POSTs the token to `/api/notifications/push/device-token`. A `pushNotificationActionPerformed` tap navigates to the notifications list; deep-linking to the specific notification's target is out of scope for this first version (a fast-follow), matching the design decision that motivated this feature.
 
 ---
@@ -1070,13 +1070,16 @@ directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` o
 
 **Configuration** — two settings are required for the app to reach the API at all:
 
-- **`REACT_APP_API_URL`** must be the backend's absolute API base, including the version
-  prefix (e.g. `https://api.example.com/api/v1`), in the environment of the mobile build.
+- **`REACT_APP_API_URL`** must be the backend's absolute `https` API base, including the
+  version prefix (e.g. `https://api.example.com/api/v1`), in the environment of the mobile
+  build. The API must be served over https for the app, development included: the Android
+  WebView runs the app at `https://localhost` with no cleartext or mixed-content allowance,
+  so it blocks every request to an `http` API.
   The frontend's default is the relative `/api/v1`, which inside a WebView resolves
   against the app's own bundled asset server, so every call would miss the backend. The
   value is baked into the bundle at build time, so `check-api-url.mjs` makes
   `npm run build --workspace=mobile` fail before building when the variable is unset or
-  not an absolute `http(s)` URL.
+  not an absolute `https` URL.
 - **`CORS_ORIGIN`** on the backend is a comma-separated list of exact origins. The
   WebViews call the API from their own origins — `capacitor://localhost` on iOS and
   `https://localhost` on Android — so both must be appended after the web app's origin,
@@ -1085,6 +1088,24 @@ directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` o
   The CORS policy allows the `X-Client-Type` request header that selects the mobile
   token-in-body auth mode (§5 "Mobile client: token-based variant"); without it the
   browser would fail the login and refresh preflights.
+
+**Native push** is off unless the build sets `REACT_APP_NATIVE_PUSH=true` (baked in at
+build time like `REACT_APP_API_URL`); without it the app never calls the push plugin and
+simply receives no native notifications (Web Push in the browser is unaffected). It is
+opt-in because the plugin's native `register()` needs the platform's push configuration:
+on Android it calls Firebase Messaging unconditionally, and without Firebase configured
+that exception escapes the native bridge and crashes the app right after login — a
+JavaScript `try` cannot catch it. Enable it only in a build that has:
+
+- **Android**: the Firebase project's `google-services.json` in `mobile/android/app/`
+  (the Gradle build applies the Google services plugin only when that file exists).
+- **iOS**: the Push Notifications capability on the App target, which adds the
+  `aps-environment` entitlement, and an APNs key configured on the backend (§7c).
+
+```bash
+REACT_APP_API_URL=https://api.example.com/api/v1 REACT_APP_NATIVE_PUSH=true \
+npm run build --workspace=mobile
+```
 
 **Native plugins**: `cap sync` registers native plugins from `mobile/package.json` only,
 never from the frontend workspace that imports them. Every `@capacitor/*` package the
