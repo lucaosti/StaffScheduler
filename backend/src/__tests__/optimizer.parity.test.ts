@@ -704,6 +704,57 @@ describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
 });
 
 /**
+ * An objective CP-SAT cannot represent must fail LOUDLY, through the ERROR
+ * protocol, rather than come back as a quiet MODEL_INVALID with no
+ * assignments (#811).
+ *
+ * The objective stacks its lexicographic levels as multiplied big-M scales,
+ * so the coefficients grow with the product of every level's bound, and on a
+ * realistic instance (100 employees, six weeks, 8 shifts a day) they exceed
+ * 64 bits. Building that instance takes minutes, so this case reaches the
+ * same overflow on a tiny one by inflating the hourly rate — the lowest level
+ * that every scale above it is multiplied by. What is under test is the
+ * guard, not the arithmetic that trips it.
+ */
+describeOrtools('CP-SAT objective overflow guard', () => {
+  it('reports an overflowing objective as an ERROR result, before solving', () => {
+    const employee = (id: string) => ({
+      id,
+      max_hours_per_week: 40,
+      max_consecutive_days: 5,
+      skills: [],
+      unavailable_dates: [],
+      hourly_rate: 1e12,
+    });
+    const shift = (id: string, date: string, start_time: string, end_time: string) => ({
+      id, date, start_time, end_time, min_staff: 2, max_staff: 4,
+    });
+    const problem = {
+      shifts: [
+        shift('s1', '2026-03-02', '00:00', '03:00'),
+        shift('s2', '2026-03-02', '12:00', '15:00'),
+        shift('s3', '2026-03-03', '00:00', '03:00'),
+        shift('s4', '2026-03-03', '12:00', '15:00'),
+      ],
+      employees: [employee('e1'), employee('e2'), employee('e3')],
+      constraints: { max_hours_per_week: 40, max_consecutive_days: 5, min_hours_between_shifts: 8 },
+    };
+
+    const res = spawnSync('python3', [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', '10'], {
+      input: JSON.stringify(problem),
+      encoding: 'utf8',
+    });
+
+    // Exit 2 is the protocol's "no result": the Node wrapper rejects on it and
+    // takes the signalled greedy fallback, which is the point.
+    expect(res.status).toBe(2);
+    const parsed = JSON.parse(res.stdout) as { status: string; error: string };
+    expect(parsed.status).toBe('ERROR');
+    expect(parsed.error).toMatch(/overflow/i);
+  });
+});
+
+/**
  * Overconstrained planning: not enough staff must produce the best partial
  * schedule, not nothing.
  *
