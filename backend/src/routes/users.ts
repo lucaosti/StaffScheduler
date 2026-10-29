@@ -3,11 +3,14 @@
  *
  * WHY THIS EXISTS ALONGSIDE `/api/employees`, WHICH RETURNS THE SAME ROWS. The
  * two are the same data behind different authority. `/api/employees` is the
- * workforce view a scheduling manager reaches with `employee.read`, and it
- * cannot create accounts or change roles. This router is the administrative
- * view: account lifecycle, activation, role assignment. Merging them would mean
- * one permission gate for two genuinely different capabilities, and the
- * narrower one would have to become the wider one.
+ * workforce view a scheduling manager reaches with `employee.read`. This router
+ * is the administrative view: account lifecycle, activation, role assignment.
+ * Merging them would mean one permission gate for two genuinely different
+ * capabilities, and the narrower one would have to become the wider one.
+ * `/api/employees` can still create accounts and set roles (`employee.manage`),
+ * so both routers hold every account write to `UserAuthorityService` — an
+ * earlier version of this comment claimed it could not, and the rule guarding
+ * only this router was bypassed through the other one (#809).
  *
  * WHY THE PASSWORD COLUMN IS NEVER SELECTED INTO A RESPONSE. The column is
  * `password_hash` (never `password`), and the shared `User` type deliberately
@@ -23,7 +26,7 @@
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
-import { RbacService } from '../services/RbacService';
+import { UserAuthorityService } from '../services/UserAuthorityService';
 import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
@@ -33,26 +36,9 @@ import { UpdateUserRequest, User } from '../types';
 export const createUsersRouter = (pool: Pool) => {
   const router = Router();
   const userService = new UserService(pool);
-  const rbacService = new RbacService(pool);
-
-  /**
-   * Anti-privilege-escalation guard. An actor may only grant a role whose
-   * permissions are a subset of their own — unless they hold `role.manage`,
-   * which authorizes assigning any role. Returns an error message, or null
-   * when the assignment is allowed.
-   */
-  const validateRoleAssignment = async (actor: User, roleIds?: number[]): Promise<string | null> => {
-    if (!roleIds || roleIds.length === 0) return null;
-    if (userHasPermission(actor, 'role.manage')) return null;
-    const actorPerms = new Set(actor.permissions ?? []);
-    for (const roleId of roleIds) {
-      const role = await rbacService.getRoleById(roleId);
-      if (!role) return `Role ${roleId} not found`;
-      const escalates = (role.permissions ?? []).some((p) => !actorPerms.has(p));
-      if (escalates) return 'You cannot assign a role with permissions you do not hold';
-    }
-    return null;
-  };
+  // Who may write which account and grant which role is decided in one place
+  // for every surface that writes accounts — see UserAuthorityService.
+  const authority = new UserAuthorityService(pool);
 
   // Get all users (scoped by the caller's permissions)
   router.get('/', authenticate, validateQuery(userListQuery), async (req, res) => {
@@ -108,14 +94,7 @@ export const createUsersRouter = (pool: Pool) => {
 
     const userData = res.locals.body;
 
-    // Prevent privilege escalation through role assignment.
-    const roleError = await validateRoleAssignment(user, userData.roleIds);
-    if (roleError) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: roleError }
-      });
-    }
+    await authority.assertCanAssignRoles(user, userData.roleIds);
 
     const createdUser = await userService.createUser(userData, user.id);
 
@@ -179,23 +158,10 @@ export const createUsersRouter = (pool: Pool) => {
       }
     }
 
-    // Role changes require user management, are subject to the
-    // anti-escalation rule, and may never target one's own account.
-    if (updateData.roleIds !== undefined) {
-      if (user.id === userId) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: 'You cannot change your own roles' }
-        });
-      }
-      const roleError = await validateRoleAssignment(user, updateData.roleIds);
-      if (roleError) {
-        return res.status(403).json({
-          success: false,
-          error: { code: 'FORBIDDEN', message: roleError }
-        });
-      }
-    }
+    // A manager may only write accounts within their own authority, and role
+    // changes are subject to the anti-escalation rule (never one's own roles).
+    if (canManageUsers) await authority.assertCanManageUser(user, userId);
+    await authority.assertCanAssignRoles(user, updateData.roleIds, userId);
 
     const updatedUser = await userService.updateUser(userId, updateData, user.id);
 
@@ -230,6 +196,8 @@ export const createUsersRouter = (pool: Pool) => {
         error: { code: 'INVALID_INPUT', message: 'Cannot delete yourself' }
       });
     }
+
+    await authority.assertCanManageUser(user, userId);
 
     try {
       await userService.deleteUser(userId, user.id);

@@ -16,6 +16,7 @@ import { authenticate, requirePermission } from '../middleware/auth';
 import { validateBody } from '../middleware/validation';
 import { bulkImportEmployeesBody, bulkImportShiftsBody } from '../schemas';
 import { BulkImportService } from '../services/BulkImportService';
+import { AppError } from '../errors';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -27,13 +28,16 @@ export const createBulkImportRouter = (pool: Pool): Router => {
 
   router.use(authenticate, requirePermission('employee.manage'));
 
-  router.post('/employees', validateBody(bulkImportEmployeesBody), async (_req: Request, res: Response) => {
+  router.post('/employees', validateBody(bulkImportEmployeesBody), async (req: Request, res: Response) => {
     const { csv, defaultPassword } = res.locals.body as { csv: string; defaultPassword: string };
     try {
-      const result = await service.importEmployees(csv, defaultPassword);
+      const result = await service.importEmployees(csv, defaultPassword, req.user!);
       const status = result.errors.length > 0 ? 400 : 200;
       res.status(status).json({ success: result.errors.length === 0, data: result });
     } catch (err) {
+      // A refused role grant is an authorization outcome (403), not an import
+      // failure; only unexpected faults become IMPORT_FAILED.
+      if (err instanceof AppError) throw err;
       respondError(res, 500, 'IMPORT_FAILED', (err as Error).message);
     }
   });

@@ -584,7 +584,11 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 
 ### Anti-escalation
 
-Users cannot assign roles that contain permissions they do not themselves hold (unless they hold `role.manage`). Self-role-change is blocked.
+One rule, enforced by `UserAuthorityService` on every surface that writes accounts — `/users`, `/employees` (single and batch), `POST /import/employees` and `POST /directory/import-vcard`:
+
+- **Granting roles**: an actor cannot assign a role containing a permission they do not hold. Imports name roles (`role` column, `X-ROLE` field); the names are resolved and checked for the whole file before anything is written. Changing one's own roles is always refused.
+- **Writing accounts**: an actor cannot update, deactivate or delete another account whose effective permissions are not a subset of their own (so a Manager cannot reset an Administrator's password or strip their roles), and a scoped actor can only write accounts belonging to an org unit inside their scope.
+- Holders of `role.manage` are exempt from both, except the self-role rule. Refusals are `403 FORBIDDEN`.
 
 ---
 

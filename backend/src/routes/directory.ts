@@ -115,6 +115,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       const out = await service.importVcf(vcf, {
         defaultPasswordHash: passwordHash,
         createdBy: req.user!.id,
+        actor: req.user!,
       });
       res.json({ success: true, data: out });
   }

@@ -2151,3 +2151,134 @@ describe('employment contracts run against the real schema', () => {
     expect(later.status).toBe(400);
   });
 });
+
+describe('user-management authority (#809, #810)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+  const PASSWORD = 'itest-authority-1';
+
+  const roleId = async (name: string): Promise<number> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>('SELECT id FROM roles WHERE name = ?', [name]);
+    return rows[0].id as number;
+  };
+
+  const makeUser = async (role: string): Promise<{ id: number; email: string }> => {
+    const email = `authority-${role.toLowerCase()}-${tag()}@example.com`;
+    const [res] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, ?, 'Authority', ?, 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4), role]
+    );
+    await admin.query(
+      'INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE name = ?',
+      [res.insertId, role]
+    );
+    return { id: res.insertId, email };
+  };
+
+  const roleNamesOf = async (id: number): Promise<string[]> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id WHERE ur.user_id = ? ORDER BY r.name`,
+      [id]
+    );
+    return rows.map((r) => r.name as string);
+  };
+
+  const userByEmail = async (email: string): Promise<number | null> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>('SELECT id FROM users WHERE email = ?', [email]);
+    return rows.length ? (rows[0].id as number) : null;
+  };
+
+  it('refuses a manager granting themselves Administrator through /employees', async () => {
+    const manager = await makeUser('Manager');
+    const cookie = await loginCookie(manager.email, PASSWORD);
+    const res = await request(app)
+      .put(`/api/v1/employees/${manager.id}`)
+      .set('Cookie', cookie)
+      .send({ roleIds: [await roleId('Administrator')] });
+    expect(res.status).toBe(403);
+    expect(await roleNamesOf(manager.id)).toEqual(['Manager']);
+  });
+
+  it('refuses a manager creating an Administrator through /employees and /employees/batch', async () => {
+    const manager = await makeUser('Manager');
+    const cookie = await loginCookie(manager.email, PASSWORD);
+    const adminRole = await roleId('Administrator');
+    const single = `authority-new-${tag()}@example.com`;
+    const created = await request(app)
+      .post('/api/v1/employees')
+      .set('Cookie', cookie)
+      .send({ email: single, password: 'Password1!', firstName: 'New', lastName: 'Admin', roleIds: [adminRole] });
+    expect(created.status).toBe(403);
+    expect(await userByEmail(single)).toBeNull();
+
+    const batched = `authority-batch-${tag()}@example.com`;
+    const batch = await request(app)
+      .post('/api/v1/employees/batch')
+      .set('Cookie', cookie)
+      .send({ employees: [{ email: batched, password: 'Password1!', firstName: 'B', lastName: 'A', roleIds: [adminRole] }] });
+    expect(batch.body.data.failed).toBe(1);
+    expect(await userByEmail(batched)).toBeNull();
+  });
+
+  it('refuses a manager importing an Administrator by role name (CSV and vCard)', async () => {
+    const manager = await makeUser('Manager');
+    const cookie = await loginCookie(manager.email, PASSWORD);
+    const csvEmail = `authority-csv-${tag()}@example.com`;
+    const csv = await request(app)
+      .post('/api/v1/import/employees')
+      .set('Cookie', cookie)
+      .send({ csv: `email,firstName,lastName,role\n${csvEmail},C,S,Administrator`, defaultPassword: 'Password1!' });
+    expect(csv.status).toBe(403);
+    expect(await userByEmail(csvEmail)).toBeNull();
+
+    const vcfEmail = `authority-vcf-${tag()}@example.com`;
+    const vcf = await request(app)
+      .post('/api/v1/directory/import-vcard')
+      .set('Cookie', cookie)
+      .send({
+        vcf: `BEGIN:VCARD\nVERSION:3.0\nFN:V C\nEMAIL:${vcfEmail}\nX-ROLE:Administrator\nEND:VCARD`,
+        defaultPassword: 'Password1!',
+      });
+    expect(vcf.status).toBe(403);
+    expect(await userByEmail(vcfEmail)).toBeNull();
+  });
+
+  it('refuses a manager changing an Administrator account', async () => {
+    const manager = await makeUser('Manager');
+    const target = await makeUser('Administrator');
+    const cookie = await loginCookie(manager.email, PASSWORD);
+
+    for (const body of [{ password: 'Takeover-Passw0rd!' }, { email: `taken-${tag()}@example.com` }, { isActive: false }, { roleIds: [] }]) {
+      const viaUsers = await request(app).put(`/api/v1/users/${target.id}`).set('Cookie', cookie).send(body);
+      expect({ body, status: viaUsers.status }).toEqual({ body, status: 403 });
+      const viaEmployees = await request(app).put(`/api/v1/employees/${target.id}`).set('Cookie', cookie).send(body);
+      expect({ body, status: viaEmployees.status }).toEqual({ body, status: 403 });
+    }
+    expect((await request(app).delete(`/api/v1/users/${target.id}`).set('Cookie', cookie)).status).toBe(403);
+    expect((await request(app).delete(`/api/v1/employees/${target.id}`).set('Cookie', cookie)).status).toBe(403);
+
+    // Untouched: the original password still works and the roles are intact.
+    await loginCookie(target.email, PASSWORD);
+    expect(await roleNamesOf(target.id)).toEqual(['Administrator']);
+  });
+
+  it('still lets a manager manage employees and grant roles within their own permissions', async () => {
+    const manager = await makeUser('Manager');
+    const employee = await makeUser('Employee');
+    const cookie = await loginCookie(manager.email, PASSWORD);
+
+    const edited = await request(app)
+      .put(`/api/v1/employees/${employee.id}`)
+      .set('Cookie', cookie)
+      .send({ position: 'Charge nurse', roleIds: [await roleId('Employee')] });
+    expect(edited.status).toBe(200);
+
+    const csvEmail = `authority-ok-${tag()}@example.com`;
+    const csv = await request(app)
+      .post('/api/v1/import/employees')
+      .set('Cookie', cookie)
+      .send({ csv: `email,firstName,lastName,role\n${csvEmail},O,K,Employee`, defaultPassword: 'Password1!' });
+    expect(csv.status).toBe(200);
+    expect(await roleNamesOf((await userByEmail(csvEmail))!)).toEqual(['Employee']);
+  });
+});

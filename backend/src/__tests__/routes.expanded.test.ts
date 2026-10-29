@@ -1963,6 +1963,15 @@ describe('bulk-import router (extended)', () => {
     expect(res.status).toBe(500);
   });
 
+  it('POST /employees 403, not IMPORT_FAILED, when a row names a role the actor cannot grant', async () => {
+    (BulkImportService.prototype.importEmployees as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new ForbiddenError('You cannot assign a role with permissions you do not hold'));
+    const res = await request(app()).post('/api/import/employees').send({ csv: 'x', defaultPassword: 'Pass123!' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
+
   it('POST /shifts 400 missing csv', async () => {
     const res = await request(app()).post('/api/import/shifts').send({});
     expect(res.status).toBe(400);
