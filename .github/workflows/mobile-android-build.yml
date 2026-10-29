@@ -10,7 +10,15 @@ name: Mobile Android build (unsigned)
 # section). Not wired to push/pull_request: the mobile workspace has no
 # application logic yet to justify running this on every commit.
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      api-url:
+        # Required because the mobile build refuses to run without an
+        # absolute API base (mobile/scripts/check-api-url.mjs): a relative URL
+        # would resolve against the WebView's own asset server.
+        description: 'Absolute API base baked into the app, e.g. https://api.example.com/api/v1'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -39,6 +47,8 @@ jobs:
           java-version: '21'
 
       - name: Build frontend and sync Capacitor
+        env:
+          REACT_APP_API_URL: ${{ inputs.api-url }}
         run: npm run build --workspace=mobile
 
       - name: Build debug APK

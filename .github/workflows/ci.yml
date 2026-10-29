@@ -76,7 +76,7 @@ jobs:
         working-directory: .
         run: npm run audit:deps
 
-      - name: Test the audit gate itself
+      - name: Test the repository scripts (audit gate, mobile build checks)
         working-directory: .
         run: npm run test:scripts
 
