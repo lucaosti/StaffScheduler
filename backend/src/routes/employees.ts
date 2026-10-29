@@ -153,8 +153,8 @@ router.get('/:id', authenticate, requirePermission('employee.read'), validatePar
 });
 
 router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (req: Request, res: Response) => {
-  await enforceFieldPolicy(req, res.locals.body, false);
   await authority.assertCanAssignRoles(req.user!, res.locals.body.roleIds);
+  await enforceFieldPolicy(req, res.locals.body, false);
   const employee = await employeeService.createEmployee(res.locals.body);
 
   res.status(201).json({
@@ -171,8 +171,8 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
 router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), async (req: Request, res: Response) => {
   const { employees } = res.locals.body as z.infer<typeof batchCreateEmployeesBody>;
   const result = await runBatch(employees, async (employeeData) => {
-    await enforceFieldPolicy(req, employeeData, false);
     await authority.assertCanAssignRoles(req.user!, employeeData.roleIds);
+    await enforceFieldPolicy(req, employeeData, false);
     return employeeService.createEmployee(employeeData);
   });
 
@@ -189,9 +189,9 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), validateP
   // Partial: a field absent from an update is not being cleared, so a
   // required-field check on it would make every partial update of an incomplete
   // record impossible — and that is the record most in need of updating.
-  await enforceFieldPolicy(req, res.locals.body, true);
-  await authority.assertCanManageUser(req.user!, id);
+  await authority.assertCanManageUser(req.user!, id, { deactivate: res.locals.body.isActive === false });
   await authority.assertCanAssignRoles(req.user!, res.locals.body.roleIds, id);
+  await enforceFieldPolicy(req, res.locals.body, true);
   const employee = await employeeService.updateEmployee(id, res.locals.body);
   // Role changes must not linger in the auth-context cache.
   if (res.locals.body.roleIds !== undefined) await invalidateAuthContext(id);
@@ -205,7 +205,7 @@ router.put('/:id', authenticate, requirePermission('employee.manage'), validateP
 router.delete('/:id', authenticate, requirePermission('employee.manage'), validateParams(idParam), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
-  await authority.assertCanManageUser(req.user!, id);
+  await authority.assertCanManageUser(req.user!, id, { deactivate: true });
   await employeeService.deleteEmployee(id, req.user?.id ?? null);
   res.json({
     success: true,

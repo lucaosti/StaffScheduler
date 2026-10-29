@@ -997,22 +997,26 @@ describe('employees router (extended)', () => {
     let res = await request(app()).delete('/api/employees/abc');
     expect(res.status).toBe(400);
 
+    // The mocked actor is user 1: deactivating oneself is refused (#810).
+    res = await request(app()).delete('/api/employees/1');
+    expect(res.status).toBe(400);
+
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockResolvedValue(undefined);
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(200);
 
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new NotFoundError('Employee not found'));
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(404);
 
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('boom'));
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(500);
   });
 

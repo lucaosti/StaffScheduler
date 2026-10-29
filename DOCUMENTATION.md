@@ -584,11 +584,12 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 
 ### Anti-escalation
 
-One rule, enforced by `UserAuthorityService` on every surface that writes accounts — `/users`, `/employees` (single and batch), `POST /import/employees` and `POST /directory/import-vcard`:
+One rule, enforced by `UserAuthorityService` on every surface that writes accounts — `/users`, `/employees` (single and batch), `POST /import/employees`, `POST /directory/import-vcard` and the directory-field writes under `/directory/users/:id/fields`:
 
-- **Granting roles**: an actor cannot assign a role containing a permission they do not hold. Imports name roles (`role` column, `X-ROLE` field); the names are resolved and checked for the whole file before anything is written. Changing one's own roles is always refused.
-- **Writing accounts**: an actor cannot update, deactivate or delete another account whose effective permissions are not a subset of their own (so a Manager cannot reset an Administrator's password or strip their roles), and a scoped actor can only write accounts belonging to an org unit inside their scope.
-- Holders of `role.manage` are exempt from both, except the self-role rule. Refusals are `403 FORBIDDEN`.
+- **Granting roles**: an actor cannot assign a role containing a permission they do not hold. Imports name roles (`role` column, `X-ROLE` field); the names are resolved and checked for the whole file before anything is written. Changing one's own roles is always refused. Grants made through these surfaces are organization-wide, so an actor whose own roles are scoped to part of the organization cannot grant roles here at all.
+- **Writing accounts**: an actor cannot update, deactivate or delete another account whose effective permissions are not a subset of their own (so a Manager cannot reset an Administrator's password or strip their roles), and a scoped actor can only write accounts belonging to an org unit inside their scope. Nobody can deactivate their own account (`400`).
+- Holders of `role.manage` are exempt from both, except the self-role and self-deactivation rules. Refusals are `403 FORBIDDEN`.
+- Not covered by this rule yet: comparing the *breadth* of a target's scope with the actor's, and who may change org-unit membership (#813, #814).
 
 ---
 

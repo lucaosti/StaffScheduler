@@ -11,7 +11,7 @@ jest.mock('../services/RbacService');
 
 import { RbacService } from '../services/RbacService';
 import { UserAuthorityService } from '../services/UserAuthorityService';
-import { ForbiddenError } from '../errors';
+import { ForbiddenError, ValidationError } from '../errors';
 import { User } from '../types';
 
 const actor = (permissions: string[], allowedOrgUnitIds: number[] | null = null): User =>
@@ -137,5 +137,30 @@ describe('assertCanManageUser', () => {
     await expect(outside.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow('outside your organizational scope');
     const nowhere = makeService([]);
     await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(ForbiddenError);
+  });
+});
+
+describe('scope and self-deactivation (review of #809/#810)', () => {
+  it('refuses any role grant from a scoped actor, since these grants are organization-wide', async () => {
+    const { service } = makeService();
+    await expect(service.assertCanAssignRoles(actor(['employee.read'], [5]), [3], 20)).rejects.toThrow('cannot grant organization-wide roles');
+    await expect(service.assertCanAssignRoleNames(actor(['employee.read'], [5]), ['Employee'])).rejects.toThrow(ForbiddenError);
+  });
+
+  it('still lets a scoped actor clear roles and create accounts without roles', async () => {
+    const { service } = makeService();
+    await expect(service.assertCanAssignRoles(actor(['employee.read'], [5]), [], 20)).resolves.toBeUndefined();
+    await expect(service.assertCanAssignRoleNames(actor(['employee.read'], [5]), ['Ghost'])).resolves.toBeUndefined();
+  });
+
+  it('lets a scoped role.manage holder grant roles', async () => {
+    const { service } = makeService();
+    await expect(service.assertCanAssignRoles(actor(['role.manage'], [5]), [1], 20)).resolves.toBeUndefined();
+  });
+
+  it('refuses deactivating one’s own account, even for role.manage, and allows other self-writes', async () => {
+    const { service } = makeService();
+    await expect(service.assertCanManageUser(actor(['role.manage']), 10, { deactivate: true })).rejects.toThrow(ValidationError);
+    await expect(service.assertCanManageUser(actor([]), 10, { deactivate: false })).resolves.toBeUndefined();
   });
 });

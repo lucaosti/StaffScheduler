@@ -160,7 +160,7 @@ export const createUsersRouter = (pool: Pool) => {
 
     // A manager may only write accounts within their own authority, and role
     // changes are subject to the anti-escalation rule (never one's own roles).
-    if (canManageUsers) await authority.assertCanManageUser(user, userId);
+    if (canManageUsers) await authority.assertCanManageUser(user, userId, { deactivate: updateData.isActive === false });
     await authority.assertCanAssignRoles(user, updateData.roleIds, userId);
 
     const updatedUser = await userService.updateUser(userId, updateData, user.id);
