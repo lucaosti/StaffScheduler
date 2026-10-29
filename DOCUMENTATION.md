@@ -749,10 +749,13 @@ the cause; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
 
 Before solving, the script reads the objective's worst-case magnitude back from
 the built model and refuses one at or above 2^62 with an `ERROR` result. The
-objective stacks its priority levels as multiplied big-M scales, so on a large
-instance (around 100 employees over six weeks) the coefficients can pass 64
-bits; CP-SAT would otherwise return a bare `MODEL_INVALID`, or quietly switch to
-a floating-point objective too coarse to keep the levels apart. Such an instance
+objective stacks its priority levels as multiplied big-M scales, so that
+worst-case magnitude grows with the product of every level's bound — staff
+count, period length, shifts and hourly rates together — and a large enough
+instance reaches it. The limit is conservative: an instance between 2^62 and
+2^63 that CP-SAT might still accept degrades as well. Unguarded, CP-SAT would
+return a bare `MODEL_INVALID`, or quietly switch to a floating-point objective
+too coarse to keep the levels apart. Such an instance
 currently always degrades to greedy; removing the limit means solving the levels
 as lexicographic stages.
 

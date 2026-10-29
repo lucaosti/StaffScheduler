@@ -1333,8 +1333,10 @@ class ScheduleOptimizerORTools:
 
         self.model.Maximize(sum(objective_terms))
 
-    # Headroom below int64 rather than the limit itself: CP-SAT adds the
-    # objective's offset and intermediate sums on top of this bound.
+    # A conservative limit, one bit below int64: an instance whose bound falls
+    # between 2^62 and 2^63, which CP-SAT might still accept, degrades to
+    # greedy too. Accepted because a false refusal costs a signalled draft,
+    # while a missed overflow costs an empty or silently mis-ranked schedule.
     _MAX_OBJECTIVE_MAGNITUDE = 2 ** 62
 
     def _check_objective_magnitude(self):
@@ -1343,8 +1345,10 @@ class ScheduleOptimizerORTools:
 
         WHY THIS CAN HAPPEN. `_build_objective_function` stacks its levels as
         multiplied big-M scales, so coefficients grow with the PRODUCT of every
-        level's bound. On a realistic instance (100 employees, six weeks, 8
-        shifts a day) that passes 64 bits.
+        level's bound, and on a large enough instance (more staff, a longer
+        period, higher rates) the worst-case objective magnitude reaches 64
+        bits. 100 employees over six weeks at 8 shifts a day already sits near
+        2^60, so the margin is a few bits, not orders of magnitude.
 
         WHY IT MUST BE CAUGHT HERE. Neither failure it produces is loud. With
         integer coefficients whose sum overflows, Solve() returns MODEL_INVALID
@@ -1378,7 +1382,15 @@ class ScheduleOptimizerORTools:
         for i, coeff in enumerate(objective.coeffs):
             domain = proto.variables[objective.vars[i]].domain
             magnitude += abs(coeff) * max(abs(domain[0]), abs(domain[-1]))
-        if floating or magnitude >= self._MAX_OBJECTIVE_MAGNITUDE:
+        # Two messages for the two shapes, so a planner (and a test) can tell
+        # which one fired.
+        if floating:
+            raise ValueError(
+                f'Objective coefficients exceed 64 bits, so ortools built a floating-point '
+                f'objective (magnitude {magnitude:.3g}) that cannot rank the stacked '
+                f'objective levels exactly; the instance is too large for them'
+            )
+        if magnitude >= self._MAX_OBJECTIVE_MAGNITUDE:
             raise ValueError(
                 f'Objective magnitude {magnitude:.3g} would overflow CP-SAT\'s 64-bit '
                 f'arithmetic (limit {self._MAX_OBJECTIVE_MAGNITUDE:.3g}); the instance '

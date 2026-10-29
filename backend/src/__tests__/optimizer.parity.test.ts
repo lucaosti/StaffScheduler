@@ -709,27 +709,33 @@ describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
  * assignments (#811).
  *
  * The objective stacks its lexicographic levels as multiplied big-M scales,
- * so the coefficients grow with the product of every level's bound, and on a
- * realistic instance (100 employees, six weeks, 8 shifts a day) they exceed
- * 64 bits. Building that instance takes minutes, so this case reaches the
- * same overflow on a tiny one by inflating the hourly rate — the lowest level
- * that every scale above it is multiplied by. What is under test is the
- * guard, not the arithmetic that trips it.
+ * so the coefficients grow with the product of every level's bound and can
+ * exceed 64 bits on a large instance. Building a large one takes minutes, so
+ * these cases reach the same overflow on a tiny one by inflating the hourly
+ * rate — the lowest level, which every scale above it is multiplied by. What
+ * is under test is the guard, not the arithmetic that trips it.
+ *
+ * Two rates because the overflow takes two different shapes, and the guard
+ * names each differently so a case cannot pass on the wrong branch:
+ *   - 3e9: every coefficient fits int64 but their worst-case sum does not —
+ *     unguarded, CP-SAT's "Possible integer overflow in objective".
+ *   - 1e12: a coefficient itself leaves int64, and ortools silently switches
+ *     to a floating-point objective, which Validate() accepts.
  */
 describeOrtools('CP-SAT objective overflow guard', () => {
-  it('reports an overflowing objective as an ERROR result, before solving', () => {
+  const overflowingProblem = (hourlyRate: number) => {
     const employee = (id: string) => ({
       id,
       max_hours_per_week: 40,
       max_consecutive_days: 5,
       skills: [],
       unavailable_dates: [],
-      hourly_rate: 1e12,
+      hourly_rate: hourlyRate,
     });
     const shift = (id: string, date: string, start_time: string, end_time: string) => ({
       id, date, start_time, end_time, min_staff: 2, max_staff: 4,
     });
-    const problem = {
+    return {
       shifts: [
         shift('s1', '2026-03-02', '00:00', '03:00'),
         shift('s2', '2026-03-02', '12:00', '15:00'),
@@ -739,9 +745,14 @@ describeOrtools('CP-SAT objective overflow guard', () => {
       employees: [employee('e1'), employee('e2'), employee('e3')],
       constraints: { max_hours_per_week: 40, max_consecutive_days: 5, min_hours_between_shifts: 8 },
     };
+  };
 
+  it.each([
+    { shape: 'integer sum past 2^62', hourlyRate: 3e9, reason: /magnitude .* would overflow/i },
+    { shape: 'coefficient past int64', hourlyRate: 1e12, reason: /floating-point objective/i },
+  ])('reports an overflowing objective ($shape) as an ERROR result, before solving', ({ hourlyRate, reason }) => {
     const res = spawnSync('python3', [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', '10'], {
-      input: JSON.stringify(problem),
+      input: JSON.stringify(overflowingProblem(hourlyRate)),
       encoding: 'utf8',
     });
 
@@ -750,7 +761,7 @@ describeOrtools('CP-SAT objective overflow guard', () => {
     expect(res.status).toBe(2);
     const parsed = JSON.parse(res.stdout) as { status: string; error: string };
     expect(parsed.status).toBe('ERROR');
-    expect(parsed.error).toMatch(/overflow/i);
+    expect(parsed.error).toMatch(reason);
   });
 });
 

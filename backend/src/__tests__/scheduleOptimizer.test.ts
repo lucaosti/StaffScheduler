@@ -379,6 +379,36 @@ describe('ScheduleOptimizer.optimize degrades on a non-success solver status', (
     }
   );
 
+  it('carries the script\'s own ERROR reason, not its progress log, on exit 2', async () => {
+    // With --stdout the script writes the ERROR JSON to stdout; stderr holds
+    // only progress lines, which said nothing about why the run failed.
+    const proc = buildFinishingProcess(
+      2,
+      JSON.stringify({ status: 'ERROR', error: 'Objective magnitude 5e+18 would overflow' })
+    );
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('Building CP-SAT model...\n'));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('overflow');
+    expect(result.error).not.toContain('Building CP-SAT model');
+  });
+
+  it('falls back to stderr on a non-zero exit whose stdout is not the ERROR JSON', async () => {
+    const proc = buildFinishingProcess(3, 'not json');
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('Traceback: boom'));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('Traceback: boom');
+  });
+
   it('passes a FEASIBLE solver result through unchanged', async () => {
     mockedSpawn.mockReturnValue(
       buildFinishingProcess(

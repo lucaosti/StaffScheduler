@@ -208,6 +208,16 @@ const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   };
 };
 
+/** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
+const errorReason = (stdout: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(stdout) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export class ScheduleOptimizer {
   private pythonScriptPath: string;
 
@@ -441,8 +451,13 @@ export class ScheduleOptimizer {
               );
             }
           } else {
-            // Non-zero exit — treat as hard error so optimize() can fall back
-            reject(new Error(`Optimizer failed with code ${code}: ${stderrData}`));
+            // Non-zero exit — treat as hard error so optimize() can fall back.
+            // With --stdout the script writes its ERROR JSON (and so the
+            // actual reason, e.g. an objective overflow) to stdout; stderr is
+            // only its progress log. Rejecting with stderr alone handed the
+            // planner "Building CP-SAT model..." as the reason for a degraded
+            // run. stderr stays the fallback for a crash that wrote no JSON.
+            reject(new Error(`Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? stderrData}`));
           }
         });
       });
