@@ -46,6 +46,15 @@ ENV PATH=/opt/venv/bin:$PATH
 RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
     && rm -rf /root/.npm /var/lib/apt/lists/*
 
+# The Docker CLI and its Compose plugin, for scripts/compose-config.test.mjs:
+# `docker compose config` resolves the deployment files the way `up` would and
+# needs no daemon, so no socket is mounted. Copied from the official CLI image
+# (both binaries are static) rather than installed from Docker's apt
+# repository, which would add a third-party source and its signing key for two
+# files.
+COPY --from=docker:29.9.2-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker:29.9.2-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+
 # The repository is bind-mounted and owned by the host user; without this git
 # refuses to run in it, and the drift checks are `git diff --exit-code`.
 RUN git config --system --add safe.directory /workspace
