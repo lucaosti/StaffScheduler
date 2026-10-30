@@ -45,6 +45,7 @@ import {
 } from '../optimization/constraintValidator';
 import { exceedsHours, formatHours, shiftBoundsMs, shiftHours, shiftMinutes } from '../optimization/shiftTime';
 import { allFixtures, fairnessBystanderFixture, feasibleFixtures } from './fixtures/optimizerFixtures';
+import { buildOptimizationProblem } from '../services/autoScheduleProblem';
 
 const toValidated = (
   assignments: Array<{ employeeId: string; shiftId: string }>
@@ -2318,5 +2319,70 @@ describe('shift durations are counted in exact minutes', () => {
     expect(formatHours(510)).toBe('8.5');
     expect(formatHours(480)).toBe('8');
     expect(formatHours(160)).toBe('2.67');
+  });
+});
+
+/**
+ * Rest is the EMPLOYEE's requirement, resolved like ComplianceEngine resolves
+ * it (#838, #883).
+ *
+ * Both engines used to read a single problem-wide figure the builder
+ * hard-coded to 8 h, so neither a contract nor the organization's policy could
+ * change what they produced. The problem is built here the way production
+ * builds it — through buildOptimizationProblem, from resolved working-time
+ * limits — so the test covers the hand-off as well as the engines: changing
+ * the resolved rest from 8 h to 11 h must change both engines' output.
+ */
+describe('per-employee rest reaches both engines', () => {
+  const restProblem = (restHours: number) =>
+    buildOptimizationProblem({
+      schedule: { id: 1, department_id: 1, start_date: '2026-03-02', end_date: '2026-03-03' },
+      // 14:00-22:00 then 07:00-15:00 the next day: a 9 h turnaround.
+      shifts: [
+        { id: 1, date: '2026-03-02', start_time: '14:00', end_time: '22:00', min_staff: 1, max_staff: 1 },
+        { id: 2, date: '2026-03-03', start_time: '07:00', end_time: '15:00', min_staff: 1, max_staff: 1 },
+      ],
+      employees: [{ id: 7, min_hours_per_week: 0 }],
+      pinned: [],
+      pairings: [],
+      contractLimits: new Map(),
+      workingTimeLimits: new Map([
+        [7, { maxHoursPerWeek: 40, maxConsecutiveDays: 5, minRestHoursBetweenShifts: restHours }],
+      ]),
+      unavailableByUser: new Map(),
+      externalAssignmentsByUser: new Map(),
+      carried: new Map(),
+      rotationHistory: new Map(),
+    });
+
+  it('the validator holds an employee to their own rest, not the problem default', () => {
+    const problem = { ...restProblem(11), constraints: { min_hours_between_shifts: 8 } };
+    const both = [
+      { employeeId: '7', shiftId: '1' },
+      { employeeId: '7', shiftId: '2' },
+    ];
+    expect(findConstraintViolations(problem, both).map((v) => v.rule)).toEqual(['min-rest']);
+    expect(findConstraintViolations(restProblem(8), both)).toEqual([]);
+  });
+
+  it('the greedy engine gives the turnaround under 8 h and refuses it under 11 h', async () => {
+    const optimizer = new ScheduleOptimizer();
+    const at8 = toValidated(await optimizer.generateGreedySchedule(restProblem(8)));
+    const at11 = toValidated(await optimizer.generateGreedySchedule(restProblem(11)));
+
+    expect(at8).toHaveLength(2);
+    expect(at11).toHaveLength(1);
+    expect(findConstraintViolations(restProblem(11), at11)).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it('gives the turnaround under 8 h and refuses it under 11 h', () => {
+      const at8 = runPython(restProblem(8));
+      const at11 = runPython(restProblem(11));
+
+      expect(at8).toHaveLength(2);
+      expect(at11).toHaveLength(1);
+      expect(findConstraintViolations(restProblem(11), at11)).toEqual([]);
+    });
   });
 });

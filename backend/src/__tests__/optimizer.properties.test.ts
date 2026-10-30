@@ -180,6 +180,16 @@ describe('seeded instance generator', () => {
     expect(some((p) => p.employees.some((e) => e.max_hours_per_day !== undefined))).toBe(true);
     expect(some((p) => p.employees.some((e) => e.max_consecutive_days !== undefined))).toBe(true);
     expect(some((p) => p.constraints?.min_hours_between_shifts === 10.5)).toBe(true);
+    // An employee whose own rest differs from the problem's (#838).
+    expect(
+      some((p) =>
+        p.employees.some(
+          (e) =>
+            e.min_hours_between_shifts !== undefined &&
+            e.min_hours_between_shifts !== (p.constraints?.min_hours_between_shifts ?? 8)
+        )
+      )
+    ).toBe(true);
     // Durations that are not whole tenths of an hour (2h40 is 2.666...h).
     expect(some((p) => p.shifts.some((s) => /:[1245]0$/.test(s.start_time) || /:[1245]0$/.test(s.end_time)))).toBe(
       true

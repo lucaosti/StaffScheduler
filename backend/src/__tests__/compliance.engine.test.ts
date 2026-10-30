@@ -8,11 +8,13 @@
 
 import {
   CandidateShift,
-  CompliancePolicy,
-  DEFAULT_COMPLIANCE_POLICY,
   ExistingAssignment,
   checkCompliance,
 } from '../services/ComplianceEngine';
+import {
+  DEFAULT_WORKING_TIME_LIMITS,
+  type WorkingTimeLimits,
+} from '../services/WorkingTimeLimitsService';
 
 const makeShift = (
   date: string,
@@ -27,7 +29,7 @@ const makeExisting = (
   endTime = '16:00'
 ): ExistingAssignment => ({ id, date, startTime, endTime });
 
-const tightPolicy: CompliancePolicy = {
+const tightPolicy: WorkingTimeLimits = {
   maxConsecutiveDays: 5,
   minRestHoursBetweenShifts: 8,
   maxHoursPerWeek: 40,
@@ -38,7 +40,7 @@ describe('checkCompliance — passes when there are no violations', () => {
     const result = checkCompliance({
       candidate: makeShift('2026-05-04'),
       existing: [],
-      policy: DEFAULT_COMPLIANCE_POLICY,
+      policy: DEFAULT_WORKING_TIME_LIMITS,
     });
     expect(result).toEqual({ ok: true, violations: [] });
   });

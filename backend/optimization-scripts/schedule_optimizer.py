@@ -545,10 +545,13 @@ class ScheduleOptimizerORTools:
         External assignments are fixed neighbours: a decision shift meeting
         one is forced off.
         """
-        rest_minutes = self._rest_minutes()
-        cliques = self._conflict_cliques(rest_minutes)
-        for employee_id in self.employees:
-            for clique in cliques:
+        for employee_id, employee in self.employees.items():
+            # The employee's own requirement (#838): a contract can ask for
+            # more rest than the organization's default. Cliques are cached
+            # per rest value, so a workforce on two or three distinct values
+            # costs two or three sweeps, not one per person.
+            rest_minutes = self._rest_minutes(employee)
+            for clique in self._conflict_cliques(rest_minutes):
                 present = [
                     v for sid in clique
                     if (v := self._var(employee_id, sid)) is not None
@@ -563,11 +566,17 @@ class ScheduleOptimizerORTools:
                         if (v := self._var(employee_id, sid)) is not None:
                             self.model.Add(v == 0)
 
-    def _rest_minutes(self) -> int:
-        """Required rest between two shifts, in whole minutes rounded up."""
-        return math.ceil(
-            float(self.constraints_config.get('min_hours_between_shifts', 8)) * 60 - 1e-9
-        )
+    def _rest_minutes(self, employee: Dict) -> int:
+        """
+        Rest this employee needs between two shifts, in whole minutes rounded
+        up: their own `min_hours_between_shifts`, else the problem-wide one,
+        else 8 h. The precedence of constraintValidator's minRestHoursFor,
+        which is the authority.
+        """
+        hours = employee.get('min_hours_between_shifts')
+        if hours is None:
+            hours = self.constraints_config.get('min_hours_between_shifts', 8)
+        return math.ceil(float(hours) * 60 - 1e-9)
 
     def _conflict_cliques(self, rest_minutes: int) -> List[List[str]]:
         """

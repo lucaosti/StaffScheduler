@@ -8,12 +8,12 @@
 import {
   CandidateShift,
   checkCompliance,
-  CompliancePolicy,
   evaluateAssignmentCompliance,
   ExistingAssignment,
 } from '../services/ComplianceEngine';
+import type { WorkingTimeLimits } from '../services/WorkingTimeLimitsService';
 
-const policy: CompliancePolicy = {
+const policy: WorkingTimeLimits = {
   maxConsecutiveDays: 3,
   minRestHoursBetweenShifts: 8,
   maxHoursPerWeek: 40,
@@ -94,7 +94,7 @@ describe('evaluateAssignmentCompliance', () => {
   ) => {
     const execute = jest
       .fn()
-      .mockResolvedValueOnce([prefRows, null])
+      .mockResolvedValueOnce([prefRows.map((r) => ({ user_id: 42, ...r })), null])
       .mockResolvedValueOnce([settingRows, null])
       // `PolicyService.getGlobalValues` — an organization's own configured
       // regulatory rule set; empty by default so existing cases exercise the
@@ -333,7 +333,7 @@ describe('evaluateAssignmentCompliance', () => {
       // (weekly hours); a fixture with two rules failing is below.
       const execute = jest
         .fn()
-        .mockResolvedValueOnce([[{ max_hours_per_week: 1, max_consecutive_days: 5 }], null])
+        .mockResolvedValueOnce([[{ user_id: 42, max_hours_per_week: 1, max_consecutive_days: 5 }], null])
         .mockResolvedValueOnce([[], null])
         .mockResolvedValueOnce([[], null]) // global policies
         .mockResolvedValueOnce([[], null])
@@ -360,7 +360,7 @@ describe('evaluateAssignmentCompliance', () => {
       const execute = jest
         .fn()
         .mockResolvedValueOnce([
-          [{ max_hours_per_week: 1, max_consecutive_days: 1 }],
+          [{ user_id: 42, max_hours_per_week: 1, max_consecutive_days: 1 }],
           null,
         ])
         .mockResolvedValueOnce([[], null])

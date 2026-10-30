@@ -2798,3 +2798,93 @@ describe('session lifecycle (#816, #818, #820)', () => {
     });
   });
 });
+
+/**
+ * Working-time limits reach the optimizer through the chain ComplianceEngine
+ * uses (#838, #883), against the real schema and the real engine.
+ *
+ * The problem used to state 8 h of rest for everyone and COALESCE(..., 40) /
+ * COALESCE(..., 5) for anyone without a preference row, so neither an 11 h
+ * contract nor the organization's own policy changed what was generated —
+ * and ComplianceEngine then flagged the turnarounds the optimizer produced.
+ *
+ * Each case is a department of one person and two shifts leaving a 9 h
+ * turnaround, generated through the endpoint. Under 8 h that person works
+ * both; under 11 h, only one.
+ */
+describe('working-time limits reach the optimizer (#838, #883)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  /** A draft schedule whose only candidate is a new user; returns both ids. */
+  const loneCandidateSchedule = async (): Promise<{ scheduleId: number; personId: number }> => {
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active) VALUES (?, 'limits', 1)`,
+      [`limits-${tag()}`]
+    );
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Rest', 'Limited', 1)`,
+      [`limits-${tag()}@example.com`]
+    );
+    await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [
+      person.insertId,
+      dept.insertId,
+    ]);
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE() + INTERVAL 60 DAY, CURDATE() + INTERVAL 66 DAY, ?, 'draft', ?)`,
+      [`limits-${tag()}`, dept.insertId, userId]
+    );
+    // 14:00-22:00, then 07:00-15:00 the next day: 9 h between them.
+    await admin.query(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL 61 DAY, '14:00:00', '22:00:00', 1, 1, 'open'),
+              (?, ?, CURDATE() + INTERVAL 62 DAY, '07:00:00', '15:00:00', 1, 1, 'open')`,
+      [sc.insertId, dept.insertId, sc.insertId, dept.insertId]
+    );
+    return { scheduleId: sc.insertId, personId: person.insertId };
+  };
+
+  const generate = async (scheduleId: number) => {
+    const res = await request(app)
+      .post(`/api/v1/schedules/${scheduleId}/generate`)
+      .set('Cookie', await authCookie())
+      .send({});
+    expect(res.status).toBe(200);
+    return res.body.data as { assignmentsCreated: number; engine: string };
+  };
+
+  it('gives the 9 h turnaround to someone with nothing configured beyond the 8 h setting', async () => {
+    const { scheduleId } = await loneCandidateSchedule();
+    expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+  });
+
+  it('refuses it to someone whose contract requires 11 h of rest', async () => {
+    const { scheduleId, personId } = await loneCandidateSchedule();
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, min_hours_between_shifts, is_active) VALUES (?, 11, 1)`,
+      [`11h rest ${tag()}`]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE())`,
+      [personId, contract.insertId]
+    );
+
+    expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+  });
+
+  it("refuses it under the organization's 11 h rest policy", async () => {
+    const { scheduleId } = await loneCandidateSchedule();
+    const [policy] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO policies (scope_type, scope_id, policy_key, policy_value, imposed_by_user_id, is_active)
+       VALUES ('global', NULL, 'min_rest_hours', '{"hours": 11}', ?, 1)`,
+      [userId]
+    );
+    try {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+    } finally {
+      // Global: left in place it would hold every later test to 11 h.
+      await admin.query('DELETE FROM policies WHERE id = ?', [policy.insertId]);
+    }
+  });
+});

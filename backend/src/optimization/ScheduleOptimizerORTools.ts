@@ -44,7 +44,7 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
-import { coverageShortfalls, findOverCommitments } from './constraintValidator';
+import { coverageShortfalls, findOverCommitments, minRestHoursFor } from './constraintValidator';
 // The overnight-aware time arithmetic these engines share. It used to be four
 // private helpers here and equivalent copies in constraintValidator, kept in
 // step by a comment — see ./shiftTime for why that was not good enough.
@@ -155,7 +155,10 @@ export interface CandidateContext {
   currentShiftAssignees: Set<string>;
   /** Pairing rules in force, if any. */
   pairings?: OptimizationProblem['pairings'];
-  /** Minimum rest hours required between two shifts (mirrors ComplianceEngine's policy). */
+  /**
+   * Minimum rest hours this employee needs between two shifts — their own
+   * requirement (see `minRestHoursFor`), as ComplianceEngine resolves it.
+   */
   minRestHoursBetweenShifts: number;
 }
 
@@ -901,11 +904,6 @@ export class ScheduleOptimizer {
       }
     }
 
-    const minRestHoursBetweenShifts: number =
-      typeof problem.constraints?.min_hours_between_shifts === 'number'
-        ? problem.constraints.min_hours_between_shifts
-        : 8;
-
     // Assign employees to shifts greedily
     for (const shift of sortedShifts) {
       // Candidate filtering: exclude employees that violate any constraint
@@ -917,7 +915,8 @@ export class ScheduleOptimizer {
           assignedShiftIds: employeeAssignments.get(emp.id)!,
           allShifts: allShiftsForLookup,
           dailyMinutesMap,
-          minRestHoursBetweenShifts,
+          // The employee's own rest requirement, by the validator's rule.
+          minRestHoursBetweenShifts: minRestHoursFor(problem, emp),
           // Pass 0 here — max_staff is re-enforced in the assignment loop below
           // so we collect all eligible candidates first.
           currentShiftAssignmentCount: 0,

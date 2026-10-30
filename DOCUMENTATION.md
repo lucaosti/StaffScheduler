@@ -702,6 +702,25 @@ shift, so three 2h40 shifts — exactly 8h — summed to 8.1h. Rounded hours
 `hours`. `ComplianceEngine`, which checks single manual assignments outside the
 engines, still totals rounded hours.
 
+**Working-time limits are resolved per employee, by the same resolver
+`ComplianceEngine` uses.** Weekly hours, consecutive days and minimum rest come
+from `WorkingTimeLimitsService` — employment contract → `user_preferences`
+(weekly hours and consecutive days only) → GLOBAL `policies` row
+(`max_hours_week` / `max_consecutive_days` / `min_rest_hours`) →
+`system_settings` (`scheduling.*`) → defaults (40h, 5 days, 8h) — and every
+employee in the problem carries their own `max_hours_per_week`,
+`max_consecutive_days` and `min_hours_between_shifts`. The problem states no
+problem-wide limit. It used to: `buildOptimizationProblem` set 8h of rest for
+everyone and the loader read `COALESCE(preference, 40)` / `COALESCE(preference,
+5)`, so an 11h-rest contract got 9h turnarounds that `ComplianceEngine` then
+flagged (#838), and an organization that applied the EU preset still got 8h
+rest from every generated schedule (#883). A manual assignment and a generated
+one are now judged against the same number. The validator's `minRestHoursFor`
+defines the precedence for a problem stated by hand (the employee's value, then
+`constraints.min_hours_between_shifts`, then 8h); the greedy calls it, and
+CP-SAT's `_rest_minutes` mirrors it, building its conflict cliques once per
+distinct rest value.
+
 ### Staffing suggestions (seasonal baseline)
 
 `DemandForecastService` (`backend/src/services/DemandForecastService.ts`)
@@ -753,7 +772,7 @@ Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.
 |---|---|---|
 | 1 | Staff cap | `shift.max_staff` — never exceeded |
 | 2 | No double-booking | Absolute-time overlap (overnight-aware, across day boundaries) |
-| 2b | Minimum rest between shifts | `min_hours_between_shifts` (default 8h), across day boundaries |
+| 2b | Minimum rest between shifts | The employee's own `min_hours_between_shifts` (else the problem-wide one, else 8h), across day boundaries |
 | 3 | Declared unavailability | `user_unavailability` rows, expanded to per-day dates |
 | 4 | Skill requirements | `shift_skills` join; employee must hold every required skill |
 | 5 | Daily hours cap | `max(8, emp.max_hours_per_week / 5)` hours per employee per day |
@@ -965,7 +984,8 @@ Device management uses the same `canManageDepartment` access rule as geofences. 
 |---|---|---|---|
 | `PolicyService` | CRUD + scoped lookup on the `policies` table itself. No enforcement logic — it stores and retrieves rows, and `listApplicable`/`getGlobalValues` answer "which rows apply here", never "is this legal". | `routes/policies.ts`, `PolicyValidator`, `ComplianceEngine`, `CompliancePresetService` | Deciding whether a policy is breached — that is every caller's own job once it has the rows. |
 | `PolicyValidator` | One candidate `(user, shift)` pair against every applicable **non-hours** policy (`manual_assignment_locked`, `skill_required`). Reports blocking violations plus whether an approved `PolicyExceptionRequest` already covers each one. | `routes/policies.ts` (`POST /validate/assignment`), `AssignmentService.createAssignment` | Rest-hours/weekly-hours/consecutive-days policies — explicitly routed to `ComplianceEngine` instead (see its own resolution chain below); whole-schedule legality — that's `constraintValidator`'s scope, not a single candidate's. |
-| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through a fixed precedence: employment contract → `user_preferences` → GLOBAL `policies` row → legacy `system_settings` → hardcoded default. Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through `WorkingTimeLimitsService` — employment contract → `user_preferences` → GLOBAL `policies` row → legacy `system_settings` → default — the same resolver the optimizer's problem is built from (#883). Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `WorkingTimeLimitsService` | Resolves weekly hours, consecutive days and minimum rest for a set of users over a period, in four queries for any number of users: contract → `user_preferences` → GLOBAL `policies` → `system_settings` → default. Returns the contracts it read, so a caller needing their other limits does not read them twice. | `ComplianceEngine.evaluateAssignmentCompliance` (one user, one day), `AutoScheduleInputLoader` (the candidate pool, the schedule's period) | Enforcing anything — it answers "what is this person's limit", and both callers decide what breaks it. |
 | `CompliancePresetService` | Applies a **named bundle** of `min_rest_hours`/`max_hours_week`/`max_consecutive_days` policy rows in one call (e.g. `eu_working_time_directive`), upserting by key. Pure convenience over `PolicyService.create` — it contains no rule logic of its own. | `routes/policies.ts` (`POST /presets/:code/apply`) | Enforcement — applying a preset only creates ordinary `policies` rows; `ComplianceEngine` is what makes them count. |
 | `constraintValidator` (facade over `optimization/constraints/*`) | A **whole solved schedule** — every employee, every shift, symmetric all-pairs checks (staff caps, double-booking, skills, unavailability, and its own copies of min-rest/max-consecutive-days/max-weekly-hours scoped to the OPTIMIZATION PROBLEM, not the `policies` table). The one authority both scheduling engines (CP-SAT and greedy) are measured against; drift between them is a red test (`optimizer.parity.test.ts`). | `ScheduleOptimizerORTools`, the greedy engine, `optimizer.parity.test.ts` | Reading the `policies` table at all — a solved schedule's legality is judged against the `OptimizationProblem`'s own per-employee contract fields (`max_hours_per_week`, `max_consecutive_days`, …), resolved into that shape once at problem-build time, not against `policies` rows directly. |
 

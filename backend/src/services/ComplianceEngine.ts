@@ -22,8 +22,11 @@
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { DateUtils } from '../utils';
-import { EmploymentContractService } from './EmploymentContractService';
-import { PolicyService } from './PolicyService';
+import {
+  DEFAULT_WORKING_TIME_LIMITS,
+  WorkingTimeLimitsService,
+  type WorkingTimeLimits,
+} from './WorkingTimeLimitsService';
 import { shiftBoundsMs, shiftHours, dateToMs, DAY_MS, ShiftTimes } from '../optimization/shiftTime';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
@@ -42,22 +45,13 @@ export interface ExistingAssignment extends CandidateShift {
   id: number;
 }
 
-export interface CompliancePolicy {
-  /** Hard upper bound on consecutive working days. */
-  maxConsecutiveDays: number;
-  /** Hard lower bound on rest between two shifts, in hours. */
-  minRestHoursBetweenShifts: number;
-  /** Hard upper bound on hours worked in a rolling 7-day window. */
-  maxHoursPerWeek: number;
-}
-
 interface ComplianceInput {
   /** The shift the user is being asked to take. */
   candidate: CandidateShift;
   /** Active assignments the user already has. */
   existing: ExistingAssignment[];
-  /** Resolved policy thresholds (per-user preferences merged with global defaults). */
-  policy: CompliancePolicy;
+  /** Resolved thresholds (see WorkingTimeLimitsService). */
+  policy: WorkingTimeLimits;
 }
 
 type ComplianceCode =
@@ -75,18 +69,6 @@ interface ComplianceViolation {
 type ComplianceResult =
   | { ok: true; violations: [] }
   | { ok: false; violations: ComplianceViolation[] };
-
-/**
- * Default policy used when the user has no `user_preferences` row and the
- * `system_settings` keys are missing. Conservative numbers — the assumption
- * is that being too strict is a recoverable UX problem; being too lax is a
- * labour-law problem.
- */
-export const DEFAULT_COMPLIANCE_POLICY: CompliancePolicy = {
-  maxConsecutiveDays: 5,
-  minRestHoursBetweenShifts: 8,
-  maxHoursPerWeek: 40,
-};
 
 /* ------------------------------------------------------------------ */
 /* Date helpers                                                        */
@@ -278,30 +260,11 @@ export const checkCompliance = (input: ComplianceInput): ComplianceResult => {
  * Loads policy + active assignments for `userId` and runs `checkCompliance`
  * against `candidate`. Used by `AssignmentService.createAssignment`.
  *
- * Policy resolution order (first match wins per field):
- *   1. The user's employment contract in force on the candidate's date
- *      (`EmploymentContractService.resolveLimitsForPeriod`) — the same,
- *      single resolution the optimizer already uses. Checked FIRST: a
- *      contract is a deliberate, effective-dated limit a manager set, and a
- *      stale `user_preferences` value must not override it.
- *   2. `user_preferences` row for the user (legacy; still the answer for
- *      anyone with no contract assigned)
- *   3. An active GLOBAL `policies` row for the matching key
- *      (`min_rest_hours`/`max_hours_week`/`max_consecutive_days`) — an
- *      organization's own configured regulatory rule set, which an admin can
- *      populate by hand through `POST /api/policies` or in bulk by applying a
- *      jurisdiction preset (`CompliancePresetService`). This is the layer
- *      #312 exists to wire in: the `policies` table and its CRUD already
- *      existed, and `PolicyValidator` already documented that "the heavy
- *      lifting... is performed by the existing ComplianceEngine" — but
- *      nothing here had ever actually read a `policies` row. A configured
- *      rule now genuinely participates in enforcement rather than sitting in
- *      the table as an unenforced record of intent.
- *   4. `system_settings` keys (`scheduling.max_shifts_per_week` is the
- *      legacy proxy for `max_hours_per_week / 8`; we ignore it and read
- *      the explicit keys when present) — the older, non-configurable-per-
- *      scope fallback that `policies` is meant to supersede over time.
- *   5. `DEFAULT_COMPLIANCE_POLICY`
+ * The limits come from `WorkingTimeLimitsService` — contract, then
+ * preference, then the organization's global `policies` (#312), then
+ * `system_settings`, then the defaults — on the candidate's date. It is the
+ * same resolver the optimizer's problem is built from, so a manual
+ * assignment and a generated one are judged against the same limits (#883).
  */
 export const evaluateAssignmentCompliance = async (
   pool: Pool,
@@ -309,67 +272,12 @@ export const evaluateAssignmentCompliance = async (
   candidate: CandidateShift,
   options: { excludeAssignmentId?: number } = {}
 ): Promise<ComplianceResult> => {
-  // Resolve policy.
-  const [prefRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT max_hours_per_week, max_consecutive_days
-       FROM user_preferences
-       WHERE user_id = ?
-       LIMIT 1`,
-    [userId]
-  );
-  const [settingRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT \`key\`, value
-       FROM system_settings
-       WHERE category = 'scheduling'
-         AND \`key\` IN ('min_hours_between_shifts', 'max_consecutive_days', 'max_hours_per_week')`
-  );
-  const settings: Record<string, string> = {};
-  for (const row of settingRows) settings[row.key as string] = row.value as string;
-
-  const globalPolicies = await new PolicyService(pool).getGlobalValues([
-    'min_rest_hours',
-    'max_hours_week',
-    'max_consecutive_days',
-  ]);
-  // `policy_value` is `{ hours: number }` / `{ days: number }` per
-  // PolicyValidator's documented shape for these keys; a malformed or
-  // missing field reads as absent rather than throwing, consistent with
-  // every other layer in this chain treating "not set" as fall-through.
-  const asNumber = (value: unknown, field: string): number | undefined => {
-    const n = (value as Record<string, unknown> | undefined)?.[field];
-    return typeof n === 'number' && n > 0 ? n : undefined;
-  };
-  const globalMinRestHours = asNumber(globalPolicies.min_rest_hours, 'hours');
-  const globalMaxHoursPerWeek = asNumber(globalPolicies.max_hours_week, 'hours');
-  const globalMaxConsecutiveDays = asNumber(globalPolicies.max_consecutive_days, 'days');
-
-  const pref = prefRows[0] as { max_hours_per_week?: number; max_consecutive_days?: number } | undefined;
-  const contracts = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+  const { limits } = await new WorkingTimeLimitsService(pool).resolve(
     [userId],
     candidate.date,
     candidate.date
   );
-  const contract = contracts.get(userId);
-
-  const policy: CompliancePolicy = {
-    maxConsecutiveDays:
-      contract?.maxConsecutiveDays ??
-      pref?.max_consecutive_days ??
-      globalMaxConsecutiveDays ??
-      (Number(settings.max_consecutive_days) ||
-        DEFAULT_COMPLIANCE_POLICY.maxConsecutiveDays),
-    minRestHoursBetweenShifts:
-      contract?.minHoursBetweenShifts ??
-      globalMinRestHours ??
-      (Number(settings.min_hours_between_shifts) ||
-        DEFAULT_COMPLIANCE_POLICY.minRestHoursBetweenShifts),
-    maxHoursPerWeek:
-      contract?.maxHoursPerWeek ??
-      pref?.max_hours_per_week ??
-      globalMaxHoursPerWeek ??
-      (Number(settings.max_hours_per_week) ||
-        DEFAULT_COMPLIANCE_POLICY.maxHoursPerWeek),
-  };
+  const policy = limits.get(userId) ?? DEFAULT_WORKING_TIME_LIMITS;
 
   // Load existing assignments within ±7 days of the candidate so the
   // consecutive-days walker has enough context.

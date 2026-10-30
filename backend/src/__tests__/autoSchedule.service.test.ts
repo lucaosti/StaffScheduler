@@ -56,6 +56,10 @@ interface Fixtures {
   pinned?: Rows;
   pairings?: Rows;
   contracts?: Rows;
+  /** WorkingTimeLimitsService's three organization- and person-level reads. */
+  preferences?: Rows;
+  settings?: Rows;
+  policies?: Rows;
   unavailability?: Rows;
   history?: Rows;
   predecessor?: Rows;
@@ -85,6 +89,9 @@ const MATCHERS: Array<[keyof Fixtures, string]> = [
   ['pinned', 'sa.is_pinned = 1'],
   ['pairings', 'employee_pairings'],
   ['contracts', 'user_employment_contracts'],
+  ['preferences', 'FROM user_preferences'],
+  ['settings', 'FROM system_settings'],
+  ['policies', 'FROM policies'],
   ['unavailability', 'user_unavailability'],
   ['history', 'INTERVAL 90 DAY'],
   ['external', "sc.status = 'published' OR sc.id = ?"],
@@ -114,9 +121,7 @@ const SHIFT_ROW = {
 const EMPLOYEE_ROW = {
   id: 1,
   skill_names: '',
-  max_hours_per_week: 40,
   min_hours_per_week: 0,
-  max_consecutive_days: 5,
 };
 
 /**
@@ -294,6 +299,61 @@ describe('AutoScheduleService.generate', () => {
    * one shape where the old conversion happened to be right — which is exactly
    * why 933 lines of tests never saw it. These feed the driver's real shape.
    */
+  /**
+   * The limits the problem carries come from the chain ComplianceEngine uses
+   * (#838, #883). They were `COALESCE(preference, 40)`, `COALESCE(preference,
+   * 5)` and a constant 8 h of rest for everyone, so neither a contract's rest
+   * nor the organization's policies and settings reached either engine.
+   */
+  describe('working-time limits (#838, #883)', () => {
+    it('resolves each limit through preference, policy and system setting', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        preferences: [{ user_id: 1, max_hours_per_week: 30, max_consecutive_days: null }],
+        policies: [{ policy_key: 'min_rest_hours', policy_value: '{"hours": 11}' }],
+        settings: [{ key: 'max_consecutive_days', value: '4' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      expect(problem.employees[0]).toMatchObject({
+        max_hours_per_week: 30,
+        max_consecutive_days: 4,
+        min_hours_between_shifts: 11,
+      });
+      expect(problem.constraints).toEqual({});
+    });
+
+    it("gives an 11 h-rest contract 11 h, above the organization's policy", async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        contracts: [{ user_id: 1, id: 9, name: 'Night nurse', is_active: 1, min_hours_between_shifts: 11 }],
+        policies: [{ policy_key: 'min_rest_hours', policy_value: '{"hours": 9}' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(lastProblemGiven().employees[0].min_hours_between_shifts).toBe(11);
+    });
+
+    it('falls back to the defaults ComplianceEngine uses when nothing is configured', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(lastProblemGiven().employees[0]).toMatchObject({
+        max_hours_per_week: 40,
+        max_consecutive_days: 5,
+        min_hours_between_shifts: 8,
+      });
+    });
+  });
+
   describe('schedule period conversion (mysql2 hands DATE columns over as Date)', () => {
     // Local midnight, matching how mysql2 materialises a DATE, so the
     // assertion does not depend on the machine's timezone.
