@@ -158,12 +158,13 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
             )}
           </li>
           {recent.length === 0 && (
-            <li><span className="dropdown-item-text text-muted">No new notifications</span></li>
+            <li role="none"><span className="dropdown-item-text text-muted">No new notifications</span></li>
           )}
           {recent.map((n) => (
-            <li key={n.id}>
+            <li key={n.id} role="none">
               <button
                 className="dropdown-item"
+                role="menuitem"
                 type="button"
                 onClick={() => handleSelect(n)}
               >

@@ -17,7 +17,7 @@ test('the shift card menu opens and its Edit action opens the editor', async ({ 
   await page.goto('/shifts');
 
   await page.getByRole('button', { name: 'Shift actions' }).first().click();
-  const edit = page.getByRole('button', { name: 'Edit', exact: true });
+  const edit = page.getByRole('menuitem', { name: 'Edit', exact: true });
   await expect(edit).toBeVisible();
   await edit.click();
 

@@ -148,7 +148,7 @@ describe('<Shifts />', () => {
     await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
     await openShiftMenu();
-    await userEvent.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^edit$/i })[0]);
     await userEvent.clear(screen.getByLabelText(/notes/i));
     await userEvent.type(screen.getByLabelText(/notes/i), 'updated');
     await userEvent.click(screen.getByRole('button', { name: /update shift/i }));
@@ -156,7 +156,7 @@ describe('<Shifts />', () => {
 
     // Delete existing shift — now uses ConfirmModal; click Delete then Confirm
     await openShiftMenu();
-    await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^delete$/i })[0]);
     const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
     await userEvent.click(confirmBtn);
     expect(mockDeleteShift).toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe('<Shifts />', () => {
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
     // Click delete to open the ConfirmModal
     await openShiftMenu();
-    await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^delete$/i })[0]);
     // Click the Cancel button inside the modal instead of Confirm
     const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
     await userEvent.click(cancelBtn);
@@ -202,11 +202,11 @@ describe('<Shifts />', () => {
     render(<Shifts />);
     const toggle = (await screen.findAllByRole('button', { name: /shift actions/i }))[0];
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /^edit$/i })).not.toBeInTheDocument();
 
     await userEvent.click(toggle);
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /^edit$/i }));
 
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
@@ -221,24 +221,24 @@ describe('<Shifts />', () => {
   it('offers the staffing action only with assignment.manage', async () => {
     render(<Shifts />);
     await openShiftMenu();
-    expect(screen.getByRole('button', { name: /Staff/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Staff/ })).toBeInTheDocument();
   });
 
   it('omits the staffing action without assignment.manage', async () => {
     permissions = [];
     render(<Shifts />);
     await openShiftMenu();
-    expect(screen.queryByRole('button', { name: /Staff/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /Staff/ })).not.toBeInTheDocument();
     // Editing and deleting are unaffected: they are a different authority and
     // this change must not have narrowed them.
-    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Delete/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Delete/ })).toBeInTheDocument();
   });
 
   it('opens the staffing panel for the chosen shift', async () => {
     render(<Shifts />);
     await openShiftMenu();
-    await userEvent.click(screen.getByRole('button', { name: /Staff/ }));
+    await userEvent.click(screen.getByRole('menuitem', { name: /Staff/ }));
 
     const dialog = await screen.findByRole('dialog');
     // The heading names the shift, so a modal opened from a long list is not

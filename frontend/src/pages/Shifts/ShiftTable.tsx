@@ -84,9 +84,10 @@ const ShiftTable: React.FC<Props> = ({
                   toggleContent={<i className="bi bi-three-dots" aria-hidden="true"></i>}
                   alignEnd
                 >
-                  <li>
+                  <li role="none">
                     <button
                       className="dropdown-item"
+                      role="menuitem"
                       type="button"
                       onClick={() => onEdit(shift)}
                     >
@@ -94,9 +95,10 @@ const ShiftTable: React.FC<Props> = ({
                     </button>
                   </li>
                   {onManageStaff && (
-                    <li>
+                    <li role="none">
                       <button
                         className="dropdown-item"
+                        role="menuitem"
                         type="button"
                         onClick={() => onManageStaff(shift)}
                       >
@@ -104,12 +106,13 @@ const ShiftTable: React.FC<Props> = ({
                       </button>
                     </li>
                   )}
-                  <li>
+                  <li role="separator">
                     <hr className="dropdown-divider" />
                   </li>
-                  <li>
+                  <li role="none">
                     <button
                       className="dropdown-item text-danger"
+                      role="menuitem"
                       type="button"
                       onClick={() => onDelete(shift.id!)}
                     >

@@ -23,7 +23,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 
 interface Props {
   /** Classes for the toggle button. */
@@ -35,7 +35,11 @@ interface Props {
   /** Align the menu with the toggle's end edge (`dropdown-menu-end`). */
   alignEnd?: boolean;
   menuStyle?: React.CSSProperties;
-  /** The menu's `<li>` items. */
+  /**
+   * The menu's `<li role="none">` items, each holding a
+   * `<button className="dropdown-item" role="menuitem">`; the `.dropdown-item`
+   * class is what keyboard navigation and close-on-choice look for.
+   */
   children: React.ReactNode;
 }
 
@@ -49,14 +53,33 @@ const Dropdown: React.FC<Props> = ({
 }) => {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const toggleId = useId();
+  const menuRef = useRef<HTMLUListElement>(null);
+
+  const items = () =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('.dropdown-item') ?? []);
+
+  // Keyboard behaviour of a WAI-ARIA menu button, which Bootstrap's script
+  // used to supply (#840 review): opening moves focus to the first item,
+  // the arrow keys move between items (wrapping), and Escape or a choice
+  // closes the menu and returns focus to the toggle so a keyboard user is
+  // not dropped at the top of the page.
+  const closeToToggle = () => {
+    setOpen(false);
+    toggleRef.current?.focus();
+  };
 
   useEffect(() => {
     if (!open) return;
+    menuRef.current?.querySelector<HTMLElement>('.dropdown-item')?.focus();
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      toggleRef.current?.focus();
     };
     document.addEventListener('mousedown', onPointerDown);
     document.addEventListener('keydown', onKeyDown);
@@ -66,30 +89,51 @@ const Dropdown: React.FC<Props> = ({
     };
   }, [open]);
 
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const list = items();
+    if (list.length === 0) return;
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    list[(at + step + list.length) % list.length].focus();
+  };
+
+  // Tabbing out of the menu closes it, as a click outside does.
+  const onBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    if (open && !rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+  };
+
   // A choice closes the menu; anything else inside it (a "Mark all read"
   // header link, plain text) leaves it open, as Bootstrap's autoClose does.
   const onMenuClick = (event: React.MouseEvent<HTMLUListElement>) => {
-    if ((event.target as HTMLElement).closest('.dropdown-item')) setOpen(false);
+    if ((event.target as HTMLElement).closest('.dropdown-item')) closeToToggle();
   };
 
   return (
-    <div className="dropdown" ref={rootRef}>
+    <div className="dropdown" ref={rootRef} onBlur={onBlur}>
       <button
+        ref={toggleRef}
+        id={toggleId}
         className={toggleClassName}
         type="button"
         aria-label={toggleLabel}
         aria-expanded={open}
-        aria-haspopup="true"
+        aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
       >
         {toggleContent}
       </button>
       {open && (
         <ul
+          ref={menuRef}
+          role="menu"
+          aria-labelledby={toggleId}
           className={`dropdown-menu show${alignEnd ? ' dropdown-menu-end' : ''}`}
           data-bs-popper="static"
           style={menuStyle}
           onClick={onMenuClick}
+          onKeyDown={onMenuKeyDown}
         >
           {children}
         </ul>
