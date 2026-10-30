@@ -233,6 +233,20 @@ const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   };
 };
 
+/** How long a child that was sent SIGTERM gets to exit before SIGKILL. */
+export const KILL_GRACE_MS = 5000;
+
+/**
+ * Ceiling on the solver's stdout. Its result is one JSON document whose size
+ * grows with the assignments: a 100-employee, 336-shift month is well under
+ * 2 MB. Sixty-four is far beyond any legitimate result and far below what
+ * would threaten the backend's heap.
+ */
+export const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
+
+/** How much of the solver's stderr is kept, from the end, as a crash reason. */
+export const MAX_STDERR_TAIL_CHARS = 64 * 1024;
+
 /** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
 const errorReason = (stdout: string): string | undefined => {
   try {
@@ -409,8 +423,12 @@ export class ScheduleOptimizer {
         timeLimitSeconds.toString(),
       ]);
 
-      let stdoutData = '';
-      let stderrData = '';
+      // stdout is collected as raw chunks and decoded once: decoding each
+      // chunk on its own splits a multi-byte character that straddles two
+      // chunks, and string concatenation copies the whole buffer per chunk.
+      const stdoutChunks: Buffer[] = [];
+      let stdoutBytes = 0;
+      let stderrTail = '';
       let settled = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
@@ -428,6 +446,22 @@ export class ScheduleOptimizer {
         action();
       };
 
+      // Whether the child is still running. NOT `pythonProcess.killed`: that
+      // flag turns true as soon as kill() has DELIVERED a signal, not when the
+      // process exits, so the old `if (!killed) kill('SIGKILL')` after a
+      // SIGTERM could never fire — a solver ignoring SIGTERM ran on unbounded
+      // (#836). exitCode/signalCode stay null until the process has gone.
+      const stillRunning = (): boolean =>
+        pythonProcess.exitCode === null && pythonProcess.signalCode === null;
+
+      // Request graceful termination, then force-kill if it ignores SIGTERM.
+      const terminate = (): void => {
+        pythonProcess.kill('SIGTERM');
+        setTimeout(() => {
+          if (stillRunning()) pythonProcess.kill('SIGKILL');
+        }, KILL_GRACE_MS).unref?.();
+      };
+
       // Watchdog: kill the process and reject if it never settles, so a
       // hanging Python optimizer cannot leak the child process forever.
       const timeoutMs = config.optimization.timeout;
@@ -436,32 +470,43 @@ export class ScheduleOptimizer {
           return;
         }
         logger.error(`Python optimizer timed out after ${timeoutMs}ms; killing process`);
-        // Request graceful termination, then force-kill if it ignores SIGTERM.
-        pythonProcess.kill('SIGTERM');
-        setTimeout(() => {
-          if (!pythonProcess.killed) {
-            pythonProcess.kill('SIGKILL');
-          }
-        }, 5000).unref?.();
+        terminate();
         finalize(() => reject(new Error(`Python optimizer timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
       timeoutHandle.unref?.();
 
-      // Collect stdout (JSON result)
-      pythonProcess.stdout.on('data', (data) => {
-        stdoutData += data.toString();
+      // Collect stdout (JSON result), bounded. A runaway or corrupted child
+      // printing without end would otherwise grow this buffer until the
+      // backend itself ran out of memory; past the cap the output cannot be a
+      // result anyone should parse, so the run is abandoned to the fallback.
+      pythonProcess.stdout.on('data', (data: Buffer) => {
+        if (settled) return;
+        stdoutBytes += data.length;
+        if (stdoutBytes > MAX_STDOUT_BYTES) {
+          logger.error(`Python optimizer output exceeded ${MAX_STDOUT_BYTES} bytes; killing process`);
+          terminate();
+          finalize(() =>
+            reject(new Error(`Python optimizer output exceeded ${MAX_STDOUT_BYTES} bytes`))
+          );
+          return;
+        }
+        stdoutChunks.push(data);
       });
 
-      // Collect stderr (logs)
-      pythonProcess.stderr.on('data', (data) => {
+      // Collect stderr (logs). Only the tail is kept: stderr is a progress
+      // log, read solely as the reason for a crash that wrote no JSON, and a
+      // crash's reason (a traceback) is at its end.
+      pythonProcess.stderr.on('data', (data: Buffer) => {
         const message = data.toString();
-        stderrData += message;
+        stderrTail = (stderrTail + message).slice(-MAX_STDERR_TAIL_CHARS);
         // Log Python script output
         logger.debug(`[Python Optimizer] ${message.trim()}`);
       });
 
       // Handle process completion
       pythonProcess.on('close', (code) => {
+        const stdoutData = Buffer.concat(stdoutChunks).toString('utf8');
+        const stderrData = stderrTail;
         finalize(() => {
           if (code === 0 || code === 1) {
             // A parsed result: a schedule (0) or a status without one (1),
@@ -492,9 +537,20 @@ export class ScheduleOptimizer {
         finalize(() => reject(new Error(`Failed to start Python optimizer: ${err.message}`)));
       });
 
+      // A child that exits before reading all of its input (python3 without
+      // ortools fails on import) closes the pipe while a problem larger than
+      // the pipe buffer is still being written, and the write fails with
+      // EPIPE. With no listener, a stream 'error' is THROWN by the emitter —
+      // as an uncaught exception that took the whole backend down rather than
+      // this one run (#836). Handled here, it is one more reason to fall back.
+      // The 'close' that follows still settles first when it wins the race,
+      // which is the better reason: it carries the child's own exit status.
+      pythonProcess.stdin.on('error', (err) => {
+        finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`)));
+      });
+
       // Send problem data to stdin
-      pythonProcess.stdin.write(JSON.stringify(problem));
-      pythonProcess.stdin.end();
+      pythonProcess.stdin.end(JSON.stringify(problem));
     });
   }
 

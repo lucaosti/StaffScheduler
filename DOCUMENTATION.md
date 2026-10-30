@@ -798,8 +798,15 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Exit code 2 (the script's `ERROR` JSON, e.g. an objective that would overflow) | Rejected promise → `optimize()` logs a warning and falls back to greedy |
 | Exit code 1 with status `INFEASIBLE`, `UNKNOWN` (time limit, no solution) or `MODEL_INVALID` | No schedule in the result → `optimize()` logs a warning and falls back to greedy; the reason names the status |
 | Any other non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
-| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
+| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s if the process has not exited → `optimize()` falls back to greedy |
+| The child exits before reading the problem (e.g. `python3` without ortools), so writing it fails with `EPIPE` | Handled on stdin → `optimize()` falls back to greedy. Unhandled, the stream error was thrown as an uncaught exception and took the backend down (#836) |
+| stdout beyond 64 MB | The process is terminated → `optimize()` falls back to greedy. Only the last 64 KB of stderr is kept, as the reason for a crash that wrote no JSON |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
+
+The SIGKILL escalation tests whether the process has **exited**
+(`exitCode`/`signalCode`), not `ChildProcess.killed`: that flag turns true as
+soon as a signal is delivered, so the escalation used to be dead code and a
+solver ignoring SIGTERM ran on.
 
 Only `OPTIMAL` and `FEASIBLE` count as an OR-Tools result. Every other solver
 status arrives with no assignments, and passing it through used to hand the

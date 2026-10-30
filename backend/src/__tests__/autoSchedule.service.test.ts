@@ -860,6 +860,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       proc.stderr = new EventEmitter();
       proc.stdin = {
         write: jest.fn(),
+        on: jest.fn(),
         end: jest.fn(() =>
           setImmediate(() => {
             // The shape schedule_optimizer.py really writes for this status.
@@ -900,6 +901,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       proc.stderr = new EventEmitter();
       proc.stdin = {
         write: jest.fn(),
+        on: jest.fn(),
         end: jest.fn(() =>
           setImmediate(() => {
             const output = {

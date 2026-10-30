@@ -14,6 +14,9 @@ import {
   ScheduleOptimizer,
   OptimizationProblem,
   CandidateContext,
+  KILL_GRACE_MS,
+  MAX_STDERR_TAIL_CHARS,
+  MAX_STDOUT_BYTES,
 } from '../optimization/ScheduleOptimizerORTools';
 
 jest.mock('child_process', () => ({
@@ -30,8 +33,13 @@ const buildHangingProcess = (): any => {
   const proc = new EventEmitter() as any;
   proc.stdout = new EventEmitter();
   proc.stderr = new EventEmitter();
-  proc.stdin = { write: jest.fn(), end: jest.fn() };
+  proc.stdin = Object.assign(new EventEmitter(), { write: jest.fn(), end: jest.fn() });
+  // A real ChildProcess: `killed` turns true once a signal is delivered, while
+  // exitCode/signalCode stay null until the process has actually exited — and
+  // a process that ignores SIGTERM never does.
   proc.killed = false;
+  proc.exitCode = null;
+  proc.signalCode = null;
   proc.kill = jest.fn(() => {
     proc.killed = true;
     return true;
@@ -591,5 +599,106 @@ describe('ScheduleOptimizer._callPythonOptimizer timeout', () => {
 
     await expect(promise).rejects.toThrow(/timed out after 50ms/);
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+});
+
+/**
+ * The child process can fail in ways that are not a solver answer: it exits
+ * before reading its input, ignores SIGTERM, or writes without end. Each used
+ * to escape this wrapper — an uncaught EPIPE killed the backend, a SIGKILL
+ * that could never fire left a solver running, an unbounded buffer grew with
+ * the child's output (#836). Each must end in the signalled greedy fallback.
+ */
+describe('ScheduleOptimizer subprocess failures (#836)', () => {
+  const originalTimeout = config.optimization.timeout;
+  const problem = (): OptimizationProblem =>
+    buildProblem({
+      shifts: [buildShift({ id: 's1', min_staff: 1 })],
+      employees: [buildEmployee({ id: 'e1' })],
+    });
+
+  beforeEach(() => {
+    mockedSpawn.mockReset();
+  });
+
+  afterEach(() => {
+    config.optimization.timeout = originalTimeout;
+    jest.useRealTimers();
+  });
+
+  it('falls back to greedy when writing the problem fails with EPIPE', async () => {
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    // What a real pipe emits when the child exits before reading the payload.
+    proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('EPIPE');
+    expect(result.assignments).toEqual([expect.objectContaining({ employeeId: 'e1', shiftId: 's1' })]);
+  });
+
+  it('escalates to SIGKILL when the solver ignores SIGTERM', async () => {
+    jest.useFakeTimers();
+    config.optimization.timeout = 50;
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const promise = (new ScheduleOptimizer() as any)._callPythonOptimizer(problem(), 1);
+    const settled = expect(promise).rejects.toThrow(/timed out/);
+    jest.advanceTimersByTime(50);
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    jest.advanceTimersByTime(KILL_GRACE_MS);
+    expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+    await settled;
+  });
+
+  it('does not SIGKILL a solver that exited on SIGTERM', async () => {
+    jest.useFakeTimers();
+    config.optimization.timeout = 50;
+    const proc = buildHangingProcess();
+    proc.kill = jest.fn((signal: string) => {
+      proc.killed = true;
+      proc.signalCode = signal;
+      return true;
+    });
+    mockedSpawn.mockReturnValue(proc);
+
+    const promise = (new ScheduleOptimizer() as any)._callPythonOptimizer(problem(), 1);
+    const settled = expect(promise).rejects.toThrow(/timed out/);
+    jest.advanceTimersByTime(50 + KILL_GRACE_MS);
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+    await settled;
+  });
+
+  it('abandons a solver whose output exceeds the cap, and falls back', async () => {
+    config.optimization.timeout = 2000;
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stdout.emit('data', Buffer.alloc(MAX_STDOUT_BYTES + 1, 0x20));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('exceeded');
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('keeps only the tail of stderr as the crash reason', async () => {
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('x'.repeat(4 * MAX_STDERR_TAIL_CHARS)));
+    proc.stderr.emit('data', Buffer.from('Traceback: boom'));
+    proc.emit('close', 3);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('Traceback: boom');
+    expect(result.error!.length).toBeLessThanOrEqual(MAX_STDERR_TAIL_CHARS + 100);
   });
 });
