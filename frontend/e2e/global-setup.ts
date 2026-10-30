@@ -12,14 +12,22 @@
  */
 
 import { chromium, type FullConfig } from '@playwright/test';
-import { ADMIN, ADMIN_STATE_FILE, login } from './helpers';
+import { ADMIN, ADMIN_STATE_FILE, MANAGER, MANAGER_STATE_FILE, login } from './helpers';
 
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const baseURL = config.projects[0].use.baseURL;
   const browser = await chromium.launch();
-  const context = await browser.newContext({ baseURL });
-  const page = await context.newPage();
-  await login(page, ADMIN.email, ADMIN.password);
-  await context.storageState({ path: ADMIN_STATE_FILE });
+  // One context per account: they are separate sessions, and a shared
+  // context would let the second login replace the first one's cookies.
+  for (const [account, path] of [
+    [ADMIN, ADMIN_STATE_FILE],
+    [MANAGER, MANAGER_STATE_FILE],
+  ] as const) {
+    const context = await browser.newContext({ baseURL });
+    const page = await context.newPage();
+    await login(page, account.email, account.password);
+    await context.storageState({ path });
+    await context.close();
+  }
   await browser.close();
 }

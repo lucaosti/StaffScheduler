@@ -63,8 +63,11 @@ const CreateRequestModal: React.FC<Props> = ({ show, creating, onClose, onSubmit
     }
   };
 
+  // The dim scrim is the .modal's own background, as in ConfirmModal. A
+  // `.modal-backdrop` child sat above the dialog inside .modal's stacking
+  // context and swallowed every click (#941).
   return (
-    <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('changeRequests.newChangeRequest')}>
+    <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('changeRequests.newChangeRequest')} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="modal-dialog modal-lg">
         <div className="modal-content">
           <div className="modal-header">
@@ -150,7 +153,6 @@ const CreateRequestModal: React.FC<Props> = ({ show, creating, onClose, onSubmit
           </div>
         </div>
       </div>
-      <div className="modal-backdrop fade show"></div>
     </div>
   );
 };
