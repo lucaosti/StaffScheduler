@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 import Layout from './Layout';
@@ -181,13 +181,16 @@ describe('Header', () => {
     render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
     fireEvent.click(await screen.findByLabelText('Notifications (1 unread)'));
-    const markAll = await screen.findByRole('button', { name: /mark all read/i });
+    // A role="menu" holds menuitems only: every <li> is role="none", so none
+    // reads as a plain list item (#840 re-review).
+    const markAll = await screen.findByRole('menuitem', { name: /mark all read/i });
+    expect(within(screen.getByRole('menu')).queryAllByRole('listitem')).toHaveLength(0);
     fireEvent.click(markAll);
 
     await waitFor(() =>
       expect(notificationService.markAllNotificationsRead).toHaveBeenCalled()
     );
-    expect(screen.queryByRole('button', { name: /mark all read/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /mark all read/i })).not.toBeInTheDocument();
   });
 
   it('degrades silently when the notifications API fails', async () => {

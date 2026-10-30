@@ -145,18 +145,25 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
           alignEnd
           menuStyle={{ minWidth: '20rem' }}
         >
-          <li className="d-flex align-items-center justify-content-between px-2">
-            <h6 className="dropdown-header mb-0 px-0">Notifications</h6>
-            {unreadCount > 0 && (
+          {/* A role="menu" holds menuitems: every <li> is role="none", and
+              "Mark all read" is an item of its own like the notifications —
+              keyboard-reachable with the arrow keys, closing the menu when
+              chosen (#840 re-review). */}
+          <li role="none">
+            <h6 className="dropdown-header">Notifications</h6>
+          </li>
+          {unreadCount > 0 && (
+            <li role="none">
               <button
-                className="btn btn-link btn-sm text-decoration-none p-0"
+                className="dropdown-item small text-primary"
                 type="button"
+                role="menuitem"
                 onClick={handleMarkAllRead}
               >
                 Mark all read
               </button>
-            )}
-          </li>
+            </li>
+          )}
           {recent.length === 0 && (
             <li role="none"><span className="dropdown-item-text text-muted">No new notifications</span></li>
           )}

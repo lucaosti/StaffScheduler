@@ -8,10 +8,14 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { ADMIN, login } from './helpers';
+import { ADMIN_STATE_FILE } from './helpers';
+
+// Signed in through the run's one shared login (see global-setup.ts): with
+// two browser projects, per-spec logins exceed the backend's login limit.
+test.use({ storageState: ADMIN_STATE_FILE });
 
 test('admin can create a schedule via the UI', async ({ page }) => {
-  await login(page, ADMIN.email, ADMIN.password);
+  await page.goto('/dashboard');
 
   await page.goto('/schedule');
   await page.getByTestId('open-create-schedule').click();
@@ -22,9 +26,15 @@ test('admin can create a schedule via the UI', async ({ page }) => {
   const stamp = Date.now().toString(36);
   // Demo seed data often contains at least one schedule in the near-term date range.
   // Pick a window far enough in the future to avoid "overlapping schedule" conflicts.
+  // Each browser project and each retry gets its own week: the projects
+  // share one database, and the backend refuses a second schedule for the
+  // same department and range (409), so the WebKit run, or a retry, collided
+  // with the week the first run had just created.
+  const { project, retry } = test.info();
+  const runOffset = (project.name === 'webkit' ? 60 : 0) + retry * 14;
   const today = new Date();
   const start = new Date(today);
-  start.setDate(today.getDate() + 60);
+  start.setDate(today.getDate() + 60 + runOffset);
   const end = new Date(start);
   end.setDate(start.getDate() + 7);
   const iso = (d: Date) => d.toISOString().slice(0, 10);

@@ -99,9 +99,16 @@ const Dropdown: React.FC<Props> = ({
     list[(at + step + list.length) % list.length].focus();
   };
 
-  // Tabbing out of the menu closes it, as a click outside does.
+  // Tabbing out of the menu closes it, as a click outside does. Only a blur
+  // toward a known element outside counts: on macOS Safari, iOS WKWebView and
+  // Firefox-mac a button does not take focus on click, so pressing a second
+  // item blurs the focused first one with relatedTarget === null — treated
+  // as "left the menu", that unmounted it before the click landed and Delete
+  // or "Mark all read" did nothing there (#840 re-review). A press outside
+  // is the mousedown listener's job, not this one's.
   const onBlur = (event: React.FocusEvent<HTMLDivElement>) => {
-    if (open && !rootRef.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+    const next = event.relatedTarget as Node | null;
+    if (open && next !== null && !rootRef.current?.contains(next)) setOpen(false);
   };
 
   // A choice closes the menu; anything else inside it (a "Mark all read"

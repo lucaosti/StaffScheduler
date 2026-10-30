@@ -3,7 +3,7 @@
  * JavaScript used to provide and a click-only replacement loses (#840 review).
  */
 
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import Dropdown from './Dropdown';
 
@@ -66,6 +66,22 @@ describe('<Dropdown />', () => {
     expect(onEdit).toHaveBeenCalled();
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Actions' })).toHaveFocus();
+  });
+
+  /**
+   * #840 re-review: on Safari, iOS WKWebView and Firefox-mac a button does
+   * not take focus on click, so pressing a second item blurs the focused
+   * first one with no relatedTarget. Treated as "focus left the menu", that
+   * closed it before the click landed — Delete did nothing there. Outside
+   * presses are the mousedown listener's job; a blur toward nothing is not.
+   */
+  it('stays open when the focused item blurs toward nothing (a WebKit click)', async () => {
+    renderMenu();
+    await userEvent.click(screen.getByRole('button', { name: 'Actions' }));
+
+    fireEvent.blur(screen.getByRole('menuitem', { name: 'Edit' }), { relatedTarget: null });
+
+    expect(screen.getByRole('menu')).toBeInTheDocument();
   });
 
   it('closes when focus tabs out of it', async () => {

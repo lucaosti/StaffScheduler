@@ -46,6 +46,15 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    // Safari's engine, which the Capacitor iOS app's WKWebView also uses, so
+    // engine differences in layout, events and CSS are caught. Note what it
+    // does not cover: Playwright's WebKit is the Linux build, which focuses a
+    // button on click; the macOS/iOS convention of not doing so (the cause of
+    // the menus' blur bug, #840 review) is emulated in menus.spec.ts.
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
+    },
   ],
   webServer: SKIP_WEB_SERVER
     ? undefined

@@ -288,7 +288,8 @@ jobs:
 
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install --with-deps chromium
+        # WebKit too: see the comment in ops/toolchain/Dockerfile.
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Wait for MySQL service
         run: |
