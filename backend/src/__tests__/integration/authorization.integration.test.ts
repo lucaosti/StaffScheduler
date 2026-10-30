@@ -70,7 +70,7 @@ interface Fixtures {
   asgA: number; asgB: number;
   empA: number; empB: number; unassigned: number;
   toA: number; toB: number;
-  attB: number; loanB: number; cpB: number; skill: number;
+  attB: number; loanB: number; cpB: number; skill: number; swapAB: number;
   users: Record<Principal, number>;
 }
 
@@ -206,8 +206,51 @@ const crossUnitProbes = (f: Fixtures): Record<string, Probe[]> => {
       { params: { id: f.empB }, body: { firstName: 'Moved' } },
     ],
     'DELETE /users/{id}': [{ params: { id: f.empB } }],
+    'POST /users': [{
+      body: { email: 'authz-new3@example.com', password: 'longenough1', firstName: 'N', lastName: 'U', departmentIds: [f.deptB] },
+    }],
+    'GET /users/{id}': [{ params: { id: f.empB } }],
+
+    // A CSV row naming another unit's schedule or department lands nothing.
+    'POST /import/shifts': [
+      { body: { csv: `scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n${f.schedB},${f.deptA},${D1},09:00,17:00,1,2` } },
+      { body: { csv: `scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n${f.schedA},${f.deptB},${D1},09:00,17:00,1,2` } },
+    ],
+
+    'POST /departments': [
+      { body: { name: 'Authz new B', orgUnitId: f.unitB } },
+      // A department in no unit would be one the scoped manager could never reach again.
+      { body: { name: 'Authz new none' } },
+    ],
+    'PUT /departments/{id}': [
+      // Moving one's own department — and its schedules — into another unit.
+      { params: { id: f.deptA }, body: { orgUnitId: f.unitB } },
+      { as: 'scopedAdmin', params: { id: f.deptB }, body: { name: 'Renamed' } },
+    ],
+    'DELETE /departments/{id}': [{ as: 'scopedAdmin', params: { id: f.deptB } }],
+    'POST /departments/{id}/users': [
+      { params: { id: f.deptA }, body: { userId: f.empB } },
+      { as: 'scopedAdmin', params: { id: f.deptB }, body: { userId: f.empA } },
+    ],
+    'DELETE /departments/{id}/users/{userId}': [{ as: 'scopedAdmin', params: { id: f.deptB, userId: f.empB } }],
+
+    // Approving a swap rewrites both assignments, so both must be the approver's.
+    'POST /shift-swap/{id}/approve': [{ params: { id: f.swapAB }, body: {} }],
+    'POST /shift-swap/{id}/decline': [{ params: { id: f.swapAB }, body: {} }],
+
+    'GET /directory/users/{id}': [{ params: { id: f.empB } }],
+    'GET /directory/users/{id}/vcard': [{ params: { id: f.empB } }],
+    'GET /org/units/{id}/members': [{ params: { id: f.unitB } }],
+    'GET /org/units/{id}/members/detailed': [{ params: { id: f.unitB } }],
   };
 };
+
+/**
+ * Delegations of codes that act organization-wide cannot be bounded by a unit,
+ * so a scoped one is refused (#814 review): `role.manage` "for ward A" would
+ * still assign any role to anyone.
+ */
+const UNSCOPABLE_DELEGATION_CODES = ['role.manage', 'settings.manage', 'audit.read'];
 
 /** The delegatee holds Manager codes for unit A only, through a delegation (#814). */
 const delegateeProbes = (f: Fixtures): Array<[string, Probe]> => [
@@ -232,26 +275,64 @@ const inUnitProbes = (f: Fixtures): Array<[string, Probe]> => [
   ['GET /reports/hours-worked', { query: { startDate: D1, endDate: D2, departmentId: f.deptA }, status: 200 }],
   // A person who belongs nowhere may be placed in one's own unit.
   ['POST /org/units/{id}/members', { params: { id: f.unitA1 }, body: { userId: f.unassigned }, status: 201 }],
+  ['POST /import/shifts', { body: { csv: `scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n${f.schedA},${f.deptA},${D1},10:00,12:00,1,2` }, status: 200 }],
+  ['POST /users', { body: { email: 'authz-new4@example.com', password: 'longenough1', firstName: 'N', lastName: 'U', departmentIds: [f.deptA] }, status: 201 }],
+  ['PUT /departments/{id}', { params: { id: f.deptA }, body: { description: 'in unit' }, status: 200 }],
+  ['GET /users/{id}', { params: { id: f.empA }, status: 200 }],
 ];
 
-/** List endpoints, as the scoped Manager: unit A's rows in, unit B's out. */
-const listProbes = (f: Fixtures): Array<{ path: string; query?: Record<string, string>; ids: (body: any) => number[]; has: number; lacks: number }> => [
-  { path: '/schedules', ids: (b) => b.data.map((s: any) => s.id), has: f.schedA, lacks: f.schedB },
-  { path: '/shifts', ids: (b) => b.data.map((s: any) => s.id), has: f.shiftA, lacks: f.shiftB },
-  { path: '/assignments', ids: (b) => b.data.map((a: any) => a.id), has: f.asgA, lacks: f.asgB },
-  { path: '/employees', ids: (b) => b.data.map((u: any) => u.id), has: f.empA, lacks: f.empB },
-  { path: '/time-off', ids: (b) => b.data.map((t: any) => t.id), has: f.toA, lacks: f.toB },
-  { path: '/attendance', ids: (b) => b.data.map((a: any) => a.id), has: -1, lacks: f.attB },
-  { path: '/org/loans', ids: (b) => b.data.map((l: any) => l.id), has: -1, lacks: f.loanB },
-  { path: '/cost-plans', ids: (b) => b.data.map((c: any) => c.id), has: -1, lacks: f.cpB },
-  {
-    path: '/reports/cost-by-department',
-    query: { startDate: D1, endDate: D2 },
-    ids: (b) => b.data.map((r: any) => r.departmentId),
-    has: f.deptA,
-    lacks: f.deptB,
-  },
-];
+interface ListProbe {
+  as?: Principal;
+  query?: Record<string, string>;
+  /** True when the response carries a unit-B row. */
+  leaks: (res: request.Response) => boolean;
+  /** True when it carries the unit-A row it should (omitted where no fixture exists). */
+  has?: (res: request.Response) => boolean;
+}
+
+/**
+ * Unit B markers in a response body: its schedule, department and person
+ * (fixtures name people after their e-mail), or a violation code only B has.
+ */
+const B_MARKERS = ['Sched B', 'Dept B', 'authz-emp-b', 'AUTHZ_B'];
+const textLeaks = (res: request.Response) => B_MARKERS.some((m) => (res.text ?? '').includes(m));
+const idsOf = (res: request.Response, key = 'id'): number[] => (res.body?.data ?? []).map((r: any) => r[key]);
+
+/**
+ * List and aggregate endpoints — every `filtered` operation of the matrix must
+ * appear — as the scoped Manager unless stated: unit A's rows in, unit B's out.
+ */
+const listProbes = (f: Fixtures): Record<string, ListProbe[]> => {
+  const range = { startDate: D1, endDate: D2 };
+  return {
+    'GET /schedules': [{ leaks: (r) => idsOf(r).includes(f.schedB), has: (r) => idsOf(r).includes(f.schedA) }],
+    'GET /shifts': [{ leaks: (r) => idsOf(r).includes(f.shiftB), has: (r) => idsOf(r).includes(f.shiftA) }],
+    'GET /shifts/export': [{ leaks: textLeaks }],
+    'GET /assignments': [{ leaks: (r) => idsOf(r).includes(f.asgB), has: (r) => idsOf(r).includes(f.asgA) }],
+    'GET /assignments/export': [{ leaks: textLeaks }],
+    'GET /employees': [{ leaks: (r) => idsOf(r).includes(f.empB), has: (r) => idsOf(r).includes(f.empA) }],
+    'GET /employees/export': [{ leaks: textLeaks }],
+    'GET /time-off': [{ leaks: (r) => idsOf(r).includes(f.toB), has: (r) => idsOf(r).includes(f.toA) }],
+    'GET /time-off/export': [{ leaks: textLeaks }],
+    'GET /attendance': [{ leaks: (r) => idsOf(r).includes(f.attB) }],
+    'GET /attendance/export': [{ leaks: textLeaks }],
+    'GET /org/loans': [{ leaks: (r) => idsOf(r).includes(f.loanB) }],
+    'GET /cost-plans': [{ leaks: (r) => idsOf(r).includes(f.cpB) }],
+    'GET /reports/cost-by-department': [{
+      query: range,
+      leaks: (r) => idsOf(r, 'departmentId').includes(f.deptB),
+      has: (r) => idsOf(r, 'departmentId').includes(f.deptA),
+    }],
+    'GET /reports/cost-by-department/export': [{ query: range, leaks: textLeaks }],
+    'GET /reports/attendance-anomalies': [{ query: range, leaks: (r) => idsOf(r, 'attendanceRecordId').includes(f.attB) }],
+    'GET /reports/compliance-violations-trend': [{ query: { startDate: '2031-03-01', endDate: '2031-03-31' }, leaks: textLeaks }],
+    'GET /timeline': [
+      { query: { from: '2031-03-01', to: '2031-03-31' }, leaks: textLeaks },
+      // Delegated timeline.read_all for unit A lifts the membership bound only there (#814 review).
+      { as: 'delegatee', query: { from: '2031-03-01', to: '2031-03-31' }, leaks: textLeaks },
+    ],
+  };
+};
 
 let admin: mysql.Connection;
 let app: Express;
@@ -332,6 +413,10 @@ beforeAll(async () => {
   const empB = await createUser('authz-emp-b@example.com', unitB, 'Employee');
   const unassigned = await createUser('authz-unassigned@example.com', null, null);
   await admin.query('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?), (?, ?)', [empA, deptA, empB, deptB]);
+  // The scoped manager runs department A, so the department routes' own
+  // manager-of-this-department check passes and only scope is left to refuse.
+  await admin.query('UPDATE departments SET manager_id = ? WHERE id = ?', [users.scopedManager, deptA]);
+  await admin.query('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)', [users.scopedManager, deptA]);
 
   const schedA = await insert(
     `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by) VALUES ('Sched A', ?, ?, ?, 'draft', ?)`,
@@ -351,6 +436,19 @@ beforeAll(async () => {
   const shiftB = await shift(schedB, deptB, '2031-03-05');
   const asgA = await insert(`INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`, [shiftA, empA]);
   const asgB = await insert(`INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`, [shiftB, empB]);
+  // A unit-B shift within the calendar feed's window (which ends a year from today).
+  const shiftBSoon = await insert(
+    `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+     VALUES (?, ?, CURDATE() + INTERVAL 2 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+    [schedB, deptB]
+  );
+  await insert(`INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`, [shiftBSoon, empB]);
+  const shiftASoon = await insert(
+    `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+     VALUES (?, ?, CURDATE() + INTERVAL 2 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+    [schedA, deptA]
+  );
+  await insert(`INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'pending')`, [shiftASoon, empA]);
   const toA = await insert(`INSERT INTO time_off_requests (user_id, start_date, end_date, type) VALUES (?, ?, ?, 'vacation')`, [empA, D1, D1]);
   const toB = await insert(`INSERT INTO time_off_requests (user_id, start_date, end_date, type) VALUES (?, ?, ?, 'vacation')`, [empB, D1, D1]);
   const attB = await insert(`INSERT INTO attendance_records (user_id, clock_in, status) VALUES (?, '2031-03-05 09:00:00', 'pending')`, [empB]);
@@ -364,11 +462,18 @@ beforeAll(async () => {
     [deptB, D1, D2, users.admin]
   );
   const skill = await insert(`INSERT INTO skills (name) VALUES ('Authz skill')`);
+  // A swap between unit A's and unit B's assignment, and a violation only B has.
+  const swapAB = await insert(
+    `INSERT INTO shift_swap_requests (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, status)
+     VALUES (?, ?, ?, ?, 'pending')`,
+    [empA, asgA, empB, asgB]
+  );
+  await insert(`INSERT INTO compliance_violations (user_id, code, message, detected_at) VALUES (?, 'AUTHZ_B', 'b', '2031-03-05 10:00:00')`, [empB]);
   await admin.query('INSERT INTO user_skills (user_id, skill_id, proficiency_level) VALUES (?, ?, 3)', [empB, skill]);
 
   f = {
     unitA, unitA1, unitB, deptA, deptB, schedA, schedB, shiftA, shiftA2, shiftB, asgA, asgB,
-    empA, empB, unassigned, toA, toB, attB, loanB, cpB, skill, users,
+    empA, empB, unassigned, toA, toB, attB, loanB, cpB, skill, swapAB, users,
   };
 
   const { database } = require('../../config/database');
@@ -392,7 +497,7 @@ beforeAll(async () => {
   // The unscoped Manager delegates Manager codes to the delegatee for unit A only.
   const delegation = await request(app).post(`${API}/delegations`).set('Cookie', cookies.unscopedManager!).send({
     delegateeId: users.delegatee,
-    permissionCodes: ['schedule.read', 'schedule.manage', 'shift.manage', 'assignment.manage', 'employee.read', 'timeoff.approve'],
+    permissionCodes: ['schedule.read', 'schedule.manage', 'shift.manage', 'assignment.manage', 'employee.read', 'timeoff.approve', 'timeline.read', 'timeline.read_all'],
     expiresAt: '2037-12-31 00:00:00',
     scopeOrgUnitId: unitA,
   });
@@ -416,13 +521,15 @@ describe('the matrix covers every mounted operation', () => {
     expect(Object.keys(AUTHORIZATION_MATRIX).filter((op) => !ops.includes(op))).toEqual([]);
   });
 
-  it('reaches every route the app mounts', () => {
-    const reached = new Set<object>();
+  // Per method, not per route object: one `router.route()` may answer several
+  // methods, and a second method added to it must still need its own entry.
+  it('reaches every route and method the app mounts', () => {
+    const reached = new Map<object, Set<string>>();
     const resolveAll = (entries: Array<[string, string]>) => {
       for (const [method, path] of entries) {
         const found = resolveRoute(app, method, path);
         expect({ op: `${method} ${path}`, found: Boolean(found) }).toEqual({ op: `${method} ${path}`, found: true });
-        if (found) reached.add(found.route);
+        if (found) reached.set(found.route, (reached.get(found.route) ?? new Set()).add(method.toLowerCase()));
       }
     };
     resolveAll(specOperations().map((op) => {
@@ -430,8 +537,30 @@ describe('the matrix covers every mounted operation', () => {
       return [m, `${API}${concretePath(p)}`];
     }));
     resolveAll(Object.keys(EXTRA_OPERATIONS).map((op) => op.split(' ') as [string, string]));
-    const unreached = allRoutes(app).filter((r) => !reached.has(r.route)).map((r) => `${r.methods.join(',')} ${r.path}`);
+    const unreached = allRoutes(app).flatMap((r) =>
+      r.methods.filter((m) => !reached.get(r.route)?.has(m)).map((m) => `${m.toUpperCase()} ${r.path}`)
+    );
     expect(unreached).toEqual([]);
+  });
+
+  it('gives every org-wide, shared and gap entry a reason, and every gap the follow-up issue', () => {
+    const wrong = Object.entries({ ...AUTHORIZATION_MATRIX, ...EXTRA_OPERATIONS }).flatMap(([op, rule]) => {
+      if (['org', 'shared', 'gap'].includes(rule.scope) && !rule.note?.trim()) return [`${op}: ${rule.scope} without a reason`];
+      if (rule.scope === 'gap' && !rule.note!.includes('#926')) return [`${op}: gap not referencing #926`];
+      return [];
+    });
+    expect(wrong).toEqual([]);
+  });
+
+  it('probes every filtered operation as a list', () => {
+    const probes = listProbes(f);
+    const wrong = Object.entries(AUTHORIZATION_MATRIX).flatMap(([op, rule]) => [
+      ...(rule.scope === 'filtered' && !probes[op]?.length ? [`${op} is filtered but has no list probe`] : []),
+    ]);
+    for (const op of Object.keys(probes)) {
+      if (AUTHORIZATION_MATRIX[op]?.scope !== 'filtered') wrong.push(`${op} is list-probed but not declared filtered`);
+    }
+    expect(wrong).toEqual([]);
   });
 });
 
@@ -469,7 +598,34 @@ describe('each operation carries exactly its declared gate', () => {
     }
     expect(wrong).toEqual([]);
   });
+
+  /**
+   * Which codes a unit scope can bound, derived from this table rather than
+   * kept by hand: a code is bounded when it admits unit-scoped or filtered
+   * operations and admits no `org` one. DelegationService refuses a scoped
+   * delegation of any other code (#814 review), so the production list must be
+   * exactly this — a new org-wide operation behind a bounded code removes it.
+   */
+  it('derives the codes a scoped delegation may carry from the table', () => {
+    const { UNIT_SCOPED_PERMISSIONS } = require('../../services/access/AccessPolicy') as { UNIT_SCOPED_PERMISSIONS?: ReadonlySet<string> };
+    const bounded = new Set<string>(HANDLER_SCOPED_CODES);
+    const orgWide = new Set<string>();
+    for (const [op, rule] of Object.entries(AUTHORIZATION_MATRIX)) {
+      const codes = [
+        ...(rule.requires === 'public' ? [] : rule.requires),
+        ...chainOf(op).flatMap((h) => ((h.accessRule as { permissions?: string[] } | undefined)?.permissions ?? [])),
+      ];
+      if (rule.scope === 'unit' || rule.scope === 'filtered') codes.forEach((c) => bounded.add(c));
+      if (rule.scope === 'org') codes.forEach((c) => orgWide.add(c));
+    }
+    const derived = [...bounded].filter((c) => !orgWide.has(c)).sort();
+    expect([...(UNIT_SCOPED_PERMISSIONS ?? [])].sort()).toEqual(derived);
+    for (const code of UNSCOPABLE_DELEGATION_CODES) expect(derived).not.toContain(code);
+  });
 });
+
+/** Codes the handler (not the route chain) bounds by scope: `timeline.read_all` lifts only the membership bound. */
+const HANDLER_SCOPED_CODES = ['timeline.read_all'];
 
 describe('the gate refuses callers without it', () => {
   it('answers 401 to an unauthenticated caller on every non-public operation', async () => {
@@ -525,15 +681,17 @@ describe('org-unit scope (#813)', () => {
   });
 
   it('filters list endpoints to the caller\'s units', async () => {
-    for (const probe of listProbes(f)) {
-      let req = request(app).get(`${API}${probe.path}`).set('Cookie', cookies.scopedManager!);
-      if (probe.query) req = req.query(probe.query);
-      const res = await req;
-      expect({ path: probe.path, status: res.status }).toEqual({ path: probe.path, status: 200 });
-      const ids = probe.ids(res.body);
-      expect({ path: probe.path, leaks: ids.includes(probe.lacks) }).toEqual({ path: probe.path, leaks: false });
-      if (probe.has !== -1) expect({ path: probe.path, has: ids.includes(probe.has) }).toEqual({ path: probe.path, has: true });
+    const wrong: string[] = [];
+    for (const [op, probes] of Object.entries(listProbes(f))) {
+      for (const probe of probes) {
+        const as = probe.as ?? 'scopedManager';
+        const res = await call(as, op, { query: probe.query });
+        if (res.status !== 200) wrong.push(`${op} as ${as} → ${res.status}`);
+        else if (probe.leaks(res)) wrong.push(`${op} as ${as} leaks unit B`);
+        else if (probe.has && !probe.has(res)) wrong.push(`${op} as ${as} misses unit A`);
+      }
     }
+    expect(wrong).toEqual([]);
   });
 
   it('leaves unscoped callers unrestricted', async () => {
@@ -567,5 +725,29 @@ describe('delegation scope (#814)', () => {
     }
     const inside = await request(app).post(`${API}/delegations`).set('Cookie', cookies.scopedManager!).send({ ...base, scopeOrgUnitId: f.unitA1 });
     expect(inside.status).toBe(201);
+  });
+
+  it('refuses a scoped delegation of a code that acts organization-wide', async () => {
+    for (const code of UNSCOPABLE_DELEGATION_CODES) {
+      const res = await request(app).post(`${API}/delegations`).set('Cookie', cookies.admin!).send({
+        delegateeId: f.users.nobody,
+        permissionCodes: [code],
+        expiresAt: '2037-12-31 00:00:00',
+        scopeOrgUnitId: f.unitA,
+      });
+      expect({ code, status: res.status, error: res.body.error?.code }).toEqual({ code, status: 422, error: 'DELEGATION_INVALID' });
+    }
+  });
+
+  it('bounds the aggregate calendar feed by a delegated scope', async () => {
+    const token = await request(app).post(`${API}/calendar/tokens`).set('Cookie', cookies.delegatee!).send({ label: 'authz' });
+    expect(token.status).toBe(201);
+    const feed = await request(app).get(`${API}/calendar/aggregate.ics`).query({ token: token.body.data.token, futureDays: 30 });
+    expect(feed.status).toBe(200);
+    expect({ hasA: feed.text.includes('Dept A'), hasB: feed.text.includes('Dept B') }).toEqual({ hasA: true, hasB: false });
+    // Control: the same feed for an unscoped reader does carry unit B.
+    const adminToken = await request(app).post(`${API}/calendar/tokens`).set('Cookie', cookies.admin!).send({ label: 'authz' });
+    const all = await request(app).get(`${API}/calendar/aggregate.ics`).query({ token: adminToken.body.data.token, futureDays: 30 });
+    expect(all.text).toContain('Dept B');
   });
 });
