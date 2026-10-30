@@ -738,13 +738,31 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Failure mode | Behaviour |
 |---|---|
 | `python3` not found (ENOENT) | `spawn` emits `error` → `optimize()` logs a warning and falls back to greedy |
-| Non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
+| Exit code 2 (the script's `ERROR` JSON, e.g. an objective that would overflow) | Rejected promise → `optimize()` logs a warning and falls back to greedy |
+| Exit code 1 with status `INFEASIBLE`, `UNKNOWN` (time limit, no solution) or `MODEL_INVALID` | No schedule in the result → `optimize()` logs a warning and falls back to greedy; the reason names the status |
+| Any other non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
 | Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
 
-The `optimize()` return status is `GREEDY_FALLBACK` when the Python solver was
-unavailable; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
-`degraded: true` result rather than a silent substitution.
+Only `OPTIMAL` and `FEASIBLE` count as an OR-Tools result. Every other solver
+status arrives with no assignments, and passing it through used to hand the
+planner an empty schedule reported as the optimum — on a published schedule, a
+replan proposal with zero assignments (#811). The `optimize()` return status is
+therefore `GREEDY_FALLBACK` whenever the solver produced no schedule, whatever
+the cause; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
+`degraded: true` result with the reason, rather than a silent substitution.
+
+Before solving, the script reads the objective's worst-case magnitude back from
+the built model and refuses one at or above 2^62 with an `ERROR` result. The
+objective stacks its priority levels as multiplied big-M scales, so that
+worst-case magnitude grows with the product of every level's bound — staff
+count, period length, shifts and hourly rates together — and a large enough
+instance reaches it. The limit is conservative: an instance between 2^62 and
+2^63 that CP-SAT might still accept degrades as well. Unguarded, CP-SAT would
+return a bare `MODEL_INVALID`, or quietly switch to a floating-point objective
+too coarse to keep the levels apart. Such an instance
+currently always degrades to greedy; removing the limit means solving the levels
+as lexicographic stages.
 
 **CP-SAT formulation**:
 

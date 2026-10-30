@@ -228,7 +228,11 @@ export class AutoScheduleService {
     }
 
     const result = await optimizer.optimize(problem);
-    if (result.status !== 'GREEDY_FALLBACK' && result.status !== 'ERROR') {
+    // Named positively: only a status that carries a schedule is an or-tools
+    // result. optimize() already folds every other solver status into
+    // GREEDY_FALLBACK (#811); listing the failures instead is how an empty
+    // MODEL_INVALID answer once passed through here as a success.
+    if (result.status === 'OPTIMAL' || result.status === 'FEASIBLE') {
       return { assignments: result.assignments, engine: 'or-tools', degraded: false };
     }
 

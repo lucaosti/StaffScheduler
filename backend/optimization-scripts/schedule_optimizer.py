@@ -138,6 +138,9 @@ class ScheduleOptimizerORTools:
         # 3. Build objective function
         self._build_objective_function()
 
+        # 4. Refuse an objective CP-SAT cannot represent exactly, before solving.
+        self._check_objective_magnitude()
+
         print(f"Model built: {len(self.assignments)} assignment variables", file=sys.stderr)
 
     def _abs_bounds(self, shift: Dict) -> Tuple[int, int]:
@@ -1329,6 +1332,70 @@ class ScheduleOptimizerORTools:
         # discourage solutions the hard constraint already forbids.
 
         self.model.Maximize(sum(objective_terms))
+
+    # A conservative limit, one bit below int64: an instance whose bound falls
+    # between 2^62 and 2^63, which CP-SAT might still accept, degrades to
+    # greedy too. Accepted because a false refusal costs a signalled draft,
+    # while a missed overflow costs an empty or silently mis-ranked schedule.
+    _MAX_OBJECTIVE_MAGNITUDE = 2 ** 62
+
+    def _check_objective_magnitude(self):
+        """
+        Raise when the objective's worst-case magnitude would overflow.
+
+        WHY THIS CAN HAPPEN. `_build_objective_function` stacks its levels as
+        multiplied big-M scales, so coefficients grow with the PRODUCT of every
+        level's bound, and on a large enough instance (more staff, a longer
+        period, higher rates) the worst-case objective magnitude reaches 64
+        bits. 100 employees over six weeks at 8 shifts a day already sits near
+        2^60, so the margin is a few bits, not orders of magnitude.
+
+        WHY IT MUST BE CAUGHT HERE. Neither failure it produces is loud. With
+        integer coefficients whose sum overflows, Solve() returns MODEL_INVALID
+        with no assignments and no reason — which the Node wrapper once read
+        as a finished, empty schedule (#811). With a coefficient that no longer
+        fits int64, the Python wrapper quietly switches to a floating-point
+        objective: above 1e20 that is MODEL_INVALID again, below it the solve
+        "succeeds" on doubles too coarse to keep the levels apart — the same
+        inverted priorities the docstring above warns about, but undetectable.
+        Raising sends the run through the ERROR protocol in main() instead:
+        exit 2, the reason in the JSON, and the Node wrapper's signalled greedy
+        fallback.
+
+        WHY A BOUND READ FROM THE MODEL, NOT model.Validate(). Validate() does
+        catch the integer case, but accepts the floating-point one, which only
+        fails at Solve() — or does not fail at all. Reading the bound back from
+        the built proto covers both, and it is derived from what was actually
+        built rather than tracked alongside it, so it cannot drift from the
+        objective the way the level bounds once did.
+
+        Fixing the overflow itself means solving the levels as lexicographic
+        stages (optimise one, fix it as a constraint, optimise the next) — a
+        redesign of the objective, deliberately not attempted here.
+        """
+        proto = self.model.Proto()
+        floating = proto.HasField('floating_point_objective')
+        objective = proto.floating_point_objective if floating else proto.objective
+        magnitude = 0
+        # Indexed rather than zipped, for the same B905 / Python 3.8 reason as
+        # the consecutive-days scan above.
+        for i, coeff in enumerate(objective.coeffs):
+            domain = proto.variables[objective.vars[i]].domain
+            magnitude += abs(coeff) * max(abs(domain[0]), abs(domain[-1]))
+        # Two messages for the two shapes, so a planner (and a test) can tell
+        # which one fired.
+        if floating:
+            raise ValueError(
+                f'Objective coefficients exceed 64 bits, so ortools built a floating-point '
+                f'objective (magnitude {magnitude:.3g}) that cannot rank the stacked '
+                f'objective levels exactly; the instance is too large for them'
+            )
+        if magnitude >= self._MAX_OBJECTIVE_MAGNITUDE:
+            raise ValueError(
+                f'Objective magnitude {magnitude:.3g} would overflow CP-SAT\'s 64-bit '
+                f'arithmetic (limit {self._MAX_OBJECTIVE_MAGNITUDE:.3g}); the instance '
+                f'is too large for the stacked objective levels'
+            )
 
     def _get_preference(self, employee_id: str, shift_id: str) -> int:
         """
