@@ -107,11 +107,12 @@ export class WebhookService {
 
   async listDeliveries(subscriptionId: number, limit = 50): Promise<RowDataPacket[]> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      // Inlined rather than bound — see limitOffsetClause.
+      // Inlined rather than bound — see limitOffsetClause. `id` makes the
+      // order total, so which same-second rows fall inside the limit is stable.
       `SELECT id, event_type, status, attempts, response_status, last_error, created_at, processed_at
          FROM webhook_deliveries
         WHERE subscription_id = ?
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         ${limitOffsetClause({ limit }, { defaultLimit: 50, maxLimit: 200 })}`,
       [subscriptionId]
     );

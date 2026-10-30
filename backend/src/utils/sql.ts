@@ -123,6 +123,10 @@ export const PAGE_SIZE_MAX = 200;
  * log, change requests, notifications, webhook deliveries) or not at all (the
  * five #824 listings); the bounds are the only thing that legitimately differs
  * between them, so they are the only parameter.
+ *
+ * `bounds` ARE TRUSTED. They are internal integer constants chosen in code
+ * (`AUDIT_PAGE_BOUNDS` and the like), never derived from a request, and are
+ * not re-validated: only `window` carries caller input.
  */
 export const limitOffsetClause = (
   window: { limit?: number; offset?: number },

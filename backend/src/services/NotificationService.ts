@@ -191,11 +191,12 @@ export class NotificationService {
     if (options.unreadOnly) {
       conditions.push('is_read = 0');
     }
-    // Inlined rather than bound — see limitOffsetClause.
+    // Inlined rather than bound — see limitOffsetClause. `id` makes the
+    // order total, so which same-second rows fall inside the limit is stable.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM notifications
         WHERE ${conditions.join(' AND ')}
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         ${limitOffsetClause({ limit: options.limit }, { defaultLimit: 50, maxLimit: 200 })}`,
       params
     );

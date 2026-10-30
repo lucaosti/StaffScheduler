@@ -2434,35 +2434,131 @@ describe('user-management authority (#809, #810)', () => {
  */
 describe('paginated listings run against the real schema (#824)', () => {
   const PAGE_SIZE = 2;
+  // Odd and larger than PAGE_SIZE, so every page boundary of a walk over the
+  // tie group falls INSIDE it at least once.
   const ROWS = 5;
+  const TIE_TAG = 'itest.paging.tie';
+  // Every seeded row of a resource is identical on that listing's primary
+  // sort, so their relative order is decided by the `id` tiebreaker alone:
+  // drop it and MySQL is free to repeat a row on two pages and skip another.
+  // Measured on 8.0: removing it makes the schedules, shifts and change-request
+  // cases fail; for users, assignments and the audit log the server's plan
+  // happens to yield id order anyway, so there the tests pin the contract
+  // rather than catch a removal.
+  const seeded: Record<string, { ids: number[]; idOrder: 'asc' | 'desc' }> = {};
 
   beforeAll(async () => {
-    // Enough rows on every resource that page 2 is full and distinct from
-    // page 1, whatever the earlier suites happened to leave behind.
     const [dept] = await admin.query<mysql.ResultSetHeader>(
       `INSERT INTO departments (name, description, is_active) VALUES ('Itest Paging Dept', 'pagination', 1)`
     );
+    // One shift slot, far from every other fixture's dates.
+    const slot = { offsetDays: 400, start: '08:00:00', end: '12:00:00' };
+    const users: number[] = [];
+    const schedules: number[] = [];
+    const shifts: number[] = [];
+    const assignments: number[] = [];
+    const audit: number[] = [];
+    const changeRequests: number[] = [];
     for (let i = 0; i < ROWS; i++) {
       const [user] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
-         VALUES (?, 'x', 'Paging', ?, 1)`,
-        [`itest-paging-${i}@example.com`, `Person${i}`]
+         VALUES (?, 'x', 'Paging', 'Twin', 1)`,
+        [`itest-paging-${i}@example.com`]
       );
+      users.push(user.insertId);
       const [sched] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
          VALUES (?, CURDATE() + INTERVAL ? DAY, CURDATE() + INTERVAL ? DAY, ?, 'draft', ?)`,
-        [`Itest Paging ${i}`, i * 7, i * 7 + 6, dept.insertId, userId]
+        [`Itest Paging ${i}`, slot.offsetDays, slot.offsetDays + 6, dept.insertId, userId]
       );
+      schedules.push(sched.insertId);
       const [shift] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
-         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, '08:00:00', '12:00:00', 1, 2, 'open')`,
-        [sched.insertId, dept.insertId, i * 7]
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, ?, ?, 1, 2, 'open')`,
+        [sched.insertId, dept.insertId, slot.offsetDays, slot.start, slot.end]
       );
-      await admin.query(
+      shifts.push(shift.insertId);
+      const [assignment] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
         [shift.insertId, user.insertId]
       );
+      assignments.push(assignment.insertId);
+      // Same second, as a burst of writes from one request produces.
+      const [log] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO audit_logs (user_id, action, entity_type, created_at)
+         VALUES (?, ?, 'paging', '2030-01-01 00:00:00')`,
+        [userId, TIE_TAG]
+      );
+      audit.push(log.insertId);
+      const [cr] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO change_requests (change_type, proposer_user_id, target_entity_type, proposed_payload, created_at)
+         VALUES (?, ?, 'paging', '{}', '2030-01-01 00:00:00')`,
+        [TIE_TAG, userId]
+      );
+      changeRequests.push(cr.insertId);
     }
+    seeded.employees = { ids: users, idOrder: 'asc' };
+    seeded.users = { ids: users, idOrder: 'asc' };
+    seeded.assignments = { ids: assignments, idOrder: 'asc' };
+    seeded.schedules = { ids: schedules, idOrder: 'desc' };
+    seeded.shifts = { ids: shifts, idOrder: 'asc' };
+    seeded.audit = { ids: audit, idOrder: 'desc' };
+    seeded.changeRequests = { ids: changeRequests, idOrder: 'desc' };
+  });
+
+  const sortedIds = (ids: number[], order: 'asc' | 'desc'): number[] =>
+    [...ids].sort((a, b) => (order === 'asc' ? a - b : b - a));
+
+  it.each(['employees', 'users', 'assignments', 'schedules', 'shifts'])(
+    'GET /api/v1/%s pages through tied rows by id, without repeats or gaps',
+    async (resource) => {
+      const cookie = await authCookie();
+      const all = await request(app).get(`/api/v1/${resource}`).set('Cookie', cookie);
+      expect(all.status).toBe(200);
+      const total = all.body.data.length;
+
+      const walked: number[] = [];
+      for (let n = 1; n <= Math.ceil(total / PAGE_SIZE); n++) {
+        const res = await request(app)
+          .get(`/api/v1/${resource}?page=${n}&pageSize=${PAGE_SIZE}`)
+          .set('Cookie', cookie);
+        expect(res.status).toBe(200);
+        walked.push(...res.body.data.map((row: { id: number }) => row.id));
+      }
+
+      // Every row exactly once, in the listing's order.
+      expect(walked).toEqual(all.body.data.map((row: { id: number }) => row.id));
+      const { ids, idOrder } = seeded[resource];
+      expect(walked.filter((id) => ids.includes(id))).toEqual(sortedIds(ids, idOrder));
+    }
+  );
+
+  it('GET /api/v1/audit-logs pages through same-second entries newest id first', async () => {
+    const cookie = await authCookie();
+    const walked: number[] = [];
+    for (let n = 1; n <= Math.ceil(ROWS / PAGE_SIZE); n++) {
+      const res = await request(app)
+        .get(`/api/v1/audit-logs?action=${TIE_TAG}&page=${n}&pageSize=${PAGE_SIZE}`)
+        .set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.meta.total).toBe(ROWS);
+      walked.push(...res.body.data.map((row: { id: number }) => row.id));
+    }
+    expect(walked).toEqual(sortedIds(seeded.audit.ids, 'desc'));
+  });
+
+  it('GET /api/v1/change-requests pages through same-second requests newest id first', async () => {
+    const cookie = await authCookie();
+    const walked: number[] = [];
+    for (let offset = 0; offset < ROWS; offset += PAGE_SIZE) {
+      const res = await request(app)
+        .get(`/api/v1/change-requests?changeType=${TIE_TAG}&limit=${PAGE_SIZE}&offset=${offset}`)
+        .set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.total).toBe(ROWS);
+      walked.push(...res.body.data.items.map((row: { id: number }) => row.id));
+    }
+    expect(walked).toEqual(sortedIds(seeded.changeRequests.ids, 'desc'));
   });
 
   it.each(['employees', 'users', 'assignments', 'schedules', 'shifts'])(

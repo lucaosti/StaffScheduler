@@ -163,10 +163,12 @@ export class AuditLogService {
     const total = (countRows[0] as { c: number }).c;
 
     // Inlined rather than bound — see limitOffsetClause for why a placeholder
-    // fails under `execute()` and why the rendered integers are safe.
+    // fails under `execute()` and why the rendered integers are safe. `id`
+    // breaks ties: one request writes several entries within the same second,
+    // and without a total order a page boundary could repeat or skip one.
     const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where}
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         ${limitOffsetClause(filters, AUDIT_PAGE_BOUNDS)}`,
       params
     );

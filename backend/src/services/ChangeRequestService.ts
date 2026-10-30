@@ -30,6 +30,9 @@ import { ApprovalWorkflowService } from './ApprovalWorkflowService';
 import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { resolveSubjectContext } from './subjectContext';
 
+// Same bounds as the audit log: a review queue is read in long runs.
+const CHANGE_REQUEST_PAGE_BOUNDS = { defaultLimit: 100, maxLimit: 500 };
+
 const mapRow = (row: RowDataPacket): ChangeRequest => ({
   id: row.id as number,
   changeType: row.change_type as string,
@@ -101,9 +104,12 @@ export class ChangeRequestService {
     );
     const total = (countRows[0] as { c: number }).c;
 
-    // Inlined rather than bound — see limitOffsetClause.
+    // Inlined rather than bound — see limitOffsetClause. `id` breaks
+    // same-second ties so a page boundary never repeats or skips a request.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM change_requests${where} ORDER BY created_at DESC ${limitOffsetClause(filters, { defaultLimit: 100, maxLimit: 500 })}`,
+      `SELECT * FROM change_requests${where}
+        ORDER BY created_at DESC, id DESC
+        ${limitOffsetClause(filters, CHANGE_REQUEST_PAGE_BOUNDS)}`,
       params
     );
 
