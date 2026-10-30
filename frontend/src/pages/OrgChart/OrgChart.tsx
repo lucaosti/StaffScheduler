@@ -335,8 +335,11 @@ const OrgChart: React.FC = () => {
         </div>
       </div>
 
+      {/* The dim scrim is the .modal's own background, as in ConfirmModal: a
+          `.modal-backdrop` child sat above the dialog inside .modal's stacking
+          context and swallowed every click (#941). */}
       {selectedNode && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('orgChart.detailsAriaLabel', { name: selectedNode.name })}>
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('orgChart.detailsAriaLabel', { name: selectedNode.name })} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-dialog-scrollable">
             <div className="modal-content">
               <div className="modal-header">
@@ -380,7 +383,6 @@ const OrgChart: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show"></div>
         </div>
       )}
     </div>

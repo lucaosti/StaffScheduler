@@ -40,8 +40,12 @@ const ReviewRequestModal: React.FC<Props> = ({ target, mode, reviewing, onClose,
     }
   };
 
+  // The dim scrim is the .modal's own background, as in ConfirmModal. A
+  // `.modal-backdrop` child sat above the dialog inside .modal's stacking
+  // context and swallowed every click (#941).
   return (
     <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
       aria-label={mode === 'approve'
         ? t('changeRequests.approveAriaLabel', { id: target.id })
         : t('changeRequests.rejectAriaLabel', { id: target.id })}>
@@ -94,7 +98,6 @@ const ReviewRequestModal: React.FC<Props> = ({ target, mode, reviewing, onClose,
           </div>
         </div>
       </div>
-      <div className="modal-backdrop fade show"></div>
     </div>
   );
 };
