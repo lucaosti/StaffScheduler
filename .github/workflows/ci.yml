@@ -76,7 +76,7 @@ jobs:
         working-directory: .
         run: npm run audit:deps
 
-      - name: Test the audit gate itself
+      - name: Test the repository scripts (audit gate, mobile build checks)
         working-directory: .
         run: npm run test:scripts
 
@@ -316,7 +316,7 @@ jobs:
           npx dbmate --no-dump-schema rollback
           npx dbmate --no-dump-schema up
 
-      - name: Backend integration tests (real MySQL)
+      - name: Backend integration tests (real MySQL, real Redis)
         working-directory: backend
         env:
           DB_HOST: 127.0.0.1
@@ -324,6 +324,9 @@ jobs:
           DB_USER: root
           DB_PASSWORD: demo1234
           JWT_SECRET: ci-secret-please-change
+          # The optimization-queue suite runs real BullMQ against the job's
+          # Redis service: the library's own id validation is what #889 missed.
+          REDIS_URL: redis://127.0.0.1:6379
         run: npm run test:integration
 
       - name: Seed demo data

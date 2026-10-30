@@ -331,6 +331,104 @@ describe('ScheduleOptimizer.optimize falls back to greedy when Python is unavail
 });
 
 /**
+ * A run the solver finished without producing a schedule is not a success.
+ *
+ * Exit code 1 carries a parsed result — but for every status other than
+ * OPTIMAL and FEASIBLE that result has no assignments. Passing it through
+ * handed the planner an EMPTY schedule labelled as the optimum (#811):
+ * MODEL_INVALID from an objective whose coefficients overflow on a realistic
+ * instance, UNKNOWN from a time limit hit before any solution, INFEASIBLE
+ * from genuinely conflicting hard rules. Each must take the same signalled
+ * greedy fallback as a missing python3.
+ */
+describe('ScheduleOptimizer.optimize degrades on a non-success solver status', () => {
+  /** A child process that writes `stdout` and exits with `code` once fed. */
+  const buildFinishingProcess = (code: number, stdout: string): any => {
+    const proc = buildHangingProcess();
+    proc.stdin.end = jest.fn(() =>
+      setImmediate(() => {
+        proc.stdout.emit('data', Buffer.from(stdout));
+        proc.emit('close', code);
+      })
+    );
+    return proc;
+  };
+
+  const problem = (): OptimizationProblem =>
+    buildProblem({
+      shifts: [buildShift({ id: 's1', min_staff: 1 })],
+      employees: [buildEmployee({ id: 'e1' })],
+    });
+
+  beforeEach(() => {
+    mockedSpawn.mockReset();
+  });
+
+  it.each(['MODEL_INVALID', 'UNKNOWN', 'INFEASIBLE'])(
+    'falls back to greedy, naming the status, when the solver reports %s',
+    async (status) => {
+      mockedSpawn.mockReturnValue(
+        buildFinishingProcess(1, JSON.stringify({ status, assignments: [], statistics: {} }))
+      );
+
+      const result = await new ScheduleOptimizer().optimize(problem());
+
+      expect(result.status).toBe('GREEDY_FALLBACK');
+      expect(result.assignments).toEqual([expect.objectContaining({ employeeId: 'e1', shiftId: 's1' })]);
+      expect(result.error).toContain(status);
+    }
+  );
+
+  it('carries the script\'s own ERROR reason, not its progress log, on exit 2', async () => {
+    // With --stdout the script writes the ERROR JSON to stdout; stderr holds
+    // only progress lines, which said nothing about why the run failed.
+    const proc = buildFinishingProcess(
+      2,
+      JSON.stringify({ status: 'ERROR', error: 'Objective magnitude 5e+18 would overflow' })
+    );
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('Building CP-SAT model...\n'));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('overflow');
+    expect(result.error).not.toContain('Building CP-SAT model');
+  });
+
+  it('falls back to stderr on a non-zero exit whose stdout is not the ERROR JSON', async () => {
+    const proc = buildFinishingProcess(3, 'not json');
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('Traceback: boom'));
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain('Traceback: boom');
+  });
+
+  it('passes a FEASIBLE solver result through unchanged', async () => {
+    mockedSpawn.mockReturnValue(
+      buildFinishingProcess(
+        0,
+        JSON.stringify({
+          status: 'FEASIBLE',
+          assignments: [{ employeeId: 'e1', shiftId: 's1' }],
+          statistics: { is_optimal: false, total_assigned_shifts: 1 },
+        })
+      )
+    );
+
+    const result = await new ScheduleOptimizer().optimize(problem());
+
+    expect(result.status).toBe('FEASIBLE');
+    expect(result.assignments).toEqual([{ employeeId: 'e1', shiftId: 's1' }]);
+  });
+});
+
+/**
  * Explicit tests for the TypeScript-only greedy path, covering the five
  * scenarios requested by the task specification:
  *   1. evaluateCandidate — available employee → true

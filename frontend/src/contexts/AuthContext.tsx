@@ -109,8 +109,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Native only: populate the in-memory token cache from secure storage
       // before the first API call, so `getAuthHeaders` has an access token to
       // attach. A no-op on the web platform (isNativePlatform() is false).
-      if (isNativePlatform()) await loadCachedTokens();
+      // Inside the try on purpose: a storage rejection must end in the same
+      // logged-out state as any other failed bootstrap. Awaited outside it, the
+      // rejection skipped every dispatch below and left `isLoading` true, so
+      // the protected routes spun forever instead of showing the login page.
       try {
+        if (isNativePlatform()) await loadCachedTokens();
         const response = await authService.verifyToken();
         if (response.success && response.data) {
           dispatch({ type: 'LOGIN_SUCCESS', payload: { user: response.data } });

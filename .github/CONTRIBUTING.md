@@ -219,7 +219,7 @@ Step-by-step recipes for adding an endpoint, a page or a migration are in
 | Frontend unit | jsdom, React Testing Library, mocked services or MSW | `cd frontend && npm test` | Frontend |
 | End to end | Playwright, real backend, seeded MySQL and Redis | `cd frontend && npm run test:e2e` | e2e |
 | Backup and restore | real dump, drop, restore | `backup-restore` workflow | weekly and on change |
-| Dependency audit gate | its own unit tests | `npm run test:scripts` (root) | Backend |
+| Repository scripts | the audit gate's decision, the mobile build's API-URL check and native-plugin list | `npm run test:scripts` (root) | Backend |
 | Simulation harness | a seeded MySQL; not part of CI | `cd backend && npm run sim:run` | — |
 
 Details of the integration suite, the dead-code tools and the simulation

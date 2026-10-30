@@ -6,6 +6,7 @@
  */
 
 import { UserDirectoryService } from '../services/UserDirectoryService';
+import { ADMIN_ACTOR } from './helpers/permissions';
 
 const makePool = () => {
   const execute = jest.fn();
@@ -58,7 +59,7 @@ describe('UserDirectoryService.importVcf — custom X- fields are persisted', ()
       'END:VCARD\r\n';
 
     const service = new UserDirectoryService(pool);
-    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1 });
+    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1, actor: ADMIN_ACTOR });
 
     expect(out.inserted).toBe(1);
     expect(out.skipped).toEqual([]);
@@ -85,7 +86,7 @@ describe('UserDirectoryService.importVcf — custom X- fields are persisted', ()
       'END:VCARD\r\n';
 
     const service = new UserDirectoryService(pool);
-    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1 });
+    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1, actor: ADMIN_ACTOR });
 
     expect(out.inserted).toBe(1);
     // 3 calls: duplicate check, INSERT user, INSERT IGNORE user_roles
@@ -111,7 +112,7 @@ describe('UserDirectoryService.importVcf — DB error handling', () => {
       'END:VCARD\r\n';
 
     const service = new UserDirectoryService(pool);
-    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1 });
+    const out = await service.importVcf(vcf, { defaultPasswordHash: 'hash', createdBy: 1, actor: ADMIN_ACTOR });
 
     expect(out.inserted).toBe(0);
     expect(out.skipped).toHaveLength(1);

@@ -7,8 +7,9 @@
  * - TypeScript prepares problem data (shifts, employees, preferences, constraints)
  * - Calls Python script with OR-Tools CP-SAT solver via child_process
  * - Python script returns optimal/feasible solution
- * - On Python failure (not installed, timeout, non-zero exit), optimize() falls
- *   back to the TypeScript greedy solver automatically
+ * - On Python failure (not installed, timeout, non-zero exit) or a solver
+ *   status that carries no schedule (anything but OPTIMAL/FEASIBLE), optimize()
+ *   falls back to the TypeScript greedy solver automatically
  *
  * Greedy algorithm complexity: O(shifts × employees) per run.
  *
@@ -66,8 +67,24 @@ import type {
   OptimizationProblem,
 } from './types';
 
+/**
+ * Every status schedule_optimizer.py can report with a parsed result (exit 0
+ * or 1). Only the first two carry a schedule; the rest come back with no
+ * assignments at all.
+ */
+type SolverStatus = 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | 'MODEL_INVALID' | 'UNKNOWN';
+
+interface SolverResult extends Omit<OptimizationResult, 'status'> {
+  status: SolverStatus;
+}
+
+/**
+ * What optimize() returns. Deliberately NOT a superset of SolverStatus: a
+ * solver status without a schedule is turned into GREEDY_FALLBACK inside
+ * optimize(), so no caller can mistake an empty answer for the optimum (#811).
+ */
 interface OptimizationResult {
-  status: 'OPTIMAL' | 'FEASIBLE' | 'INFEASIBLE' | 'ERROR' | 'GREEDY_FALLBACK';
+  status: 'OPTIMAL' | 'FEASIBLE' | 'ERROR' | 'GREEDY_FALLBACK';
   objectiveValue?: number;
   solveTimeSeconds: number;
   assignments: ScheduleAssignment[];
@@ -155,13 +172,13 @@ export interface CandidateContext {
  * the shortfall fields should degrade to "nothing reported", not take down a
  * run that otherwise produced a usable schedule.
  */
-const mapPythonResult = (raw: Record<string, unknown>): OptimizationResult => {
+const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   const stats = (raw.statistics ?? {}) as Record<string, unknown>;
   const coverage = (stats.coverage_stats ?? {}) as Record<string, unknown>;
   const understaffed = (coverage.understaffed_shifts ?? []) as Array<Record<string, unknown>>;
 
   return {
-    ...(raw as unknown as OptimizationResult),
+    ...(raw as unknown as SolverResult),
     overCommittedEmployees: ((raw.over_committed_employees ?? []) as Array<Record<string, unknown>>).map(
       (o) => ({
         employeeId: String(o.employee_id),
@@ -191,6 +208,16 @@ const mapPythonResult = (raw: Record<string, unknown>): OptimizationResult => {
   };
 };
 
+/** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
+const errorReason = (stdout: string): string | undefined => {
+  try {
+    const parsed = JSON.parse(stdout) as { error?: unknown };
+    return typeof parsed.error === 'string' ? parsed.error : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export class ScheduleOptimizer {
   private pythonScriptPath: string;
 
@@ -207,7 +234,8 @@ export class ScheduleOptimizer {
    * Optimize schedule using OR-Tools CP-SAT solver.
    *
    * Falls back to the greedy TypeScript solver when Python is unavailable,
-   * the process times out, or the process exits with a non-zero code.
+   * the process times out, the process exits with a code other than 0 or 1,
+   * or the solver finishes with a status that carries no schedule.
    *
    * @param problem - Problem data with shifts, employees, preferences
    * @param optimizationConfig - Optimization configuration
@@ -243,16 +271,27 @@ export class ScheduleOptimizer {
       logger.info(`Optimization completed in ${elapsedTime.toFixed(2)}s`);
       logger.info(`Status: ${result.status}, Assignments: ${result.assignments.length}`);
 
+      // Only these two statuses come with a schedule. INFEASIBLE, UNKNOWN (time
+      // limit hit before any solution) and MODEL_INVALID all arrive with zero
+      // assignments, and passing them through handed the planner an empty
+      // schedule as an or-tools success (#811). Thrown so they take the SAME
+      // signalled fallback as a missing python3, rather than a second path
+      // every caller would have to know to check for.
+      if (result.status !== 'OPTIMAL' && result.status !== 'FEASIBLE') {
+        throw new Error(`OR-Tools solver finished with status ${result.status} and no schedule`);
+      }
+
       if (result.statistics.coverageStats) {
         logger.info(`Coverage: ${result.statistics.coverageStats.coveragePercentage.toFixed(1)}%`);
       }
 
-      return result;
+      return { ...result, status: result.status };
     } catch (error) {
-      // Python not installed, process timed out, or non-zero exit — fall back
-      // to the TypeScript greedy solver so callers always get a usable result.
+      // Python not installed, process timed out, non-zero exit, or a solver
+      // status without a schedule — fall back to the TypeScript greedy solver
+      // so callers always get a usable result.
       const reason = error instanceof Error ? error.message : 'Unknown error';
-      logger.warn(`Python optimizer unavailable (${reason}); falling back to greedy solver`);
+      logger.warn(`OR-Tools optimizer produced no schedule (${reason}); falling back to greedy solver`);
 
       try {
         const greedy = await this.generateGreedySchedule(problem);
@@ -334,7 +373,7 @@ export class ScheduleOptimizer {
   private async _callPythonOptimizer(
     problem: OptimizationProblem,
     timeLimitSeconds: number
-  ): Promise<OptimizationResult> {
+  ): Promise<SolverResult> {
     return new Promise((resolve, reject) => {
       // Spawn Python process
       const pythonProcess = spawn('python3', [
@@ -400,7 +439,8 @@ export class ScheduleOptimizer {
       pythonProcess.on('close', (code) => {
         finalize(() => {
           if (code === 0 || code === 1) {
-            // Success (0) or infeasible (1)
+            // A parsed result: a schedule (0) or a status without one (1),
+            // which optimize() turns into the greedy fallback.
             try {
               resolve(mapPythonResult(JSON.parse(stdoutData)));
             } catch (parseError) {
@@ -411,8 +451,13 @@ export class ScheduleOptimizer {
               );
             }
           } else {
-            // Non-zero exit — treat as hard error so optimize() can fall back
-            reject(new Error(`Optimizer failed with code ${code}: ${stderrData}`));
+            // Non-zero exit — treat as hard error so optimize() can fall back.
+            // With --stdout the script writes its ERROR JSON (and so the
+            // actual reason, e.g. an objective overflow) to stdout; stderr is
+            // only its progress log. Rejecting with stderr alone handed the
+            // planner "Building CP-SAT model..." as the reason for a degraded
+            // run. stderr stays the fallback for a crash that wrote no JSON.
+            reject(new Error(`Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? stderrData}`));
           }
         });
       });

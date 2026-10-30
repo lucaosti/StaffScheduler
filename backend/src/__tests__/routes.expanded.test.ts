@@ -997,22 +997,26 @@ describe('employees router (extended)', () => {
     let res = await request(app()).delete('/api/employees/abc');
     expect(res.status).toBe(400);
 
+    // The mocked actor is user 1: deactivating oneself is refused (#810).
+    res = await request(app()).delete('/api/employees/1');
+    expect(res.status).toBe(400);
+
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockResolvedValue(undefined);
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(200);
 
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new NotFoundError('Employee not found'));
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(404);
 
     (EmployeeService.prototype.deleteEmployee as jest.Mock) = jest
       .fn()
       .mockRejectedValue(new Error('boom'));
-    res = await request(app()).delete('/api/employees/1');
+    res = await request(app()).delete('/api/employees/2');
     expect(res.status).toBe(500);
   });
 
@@ -1961,6 +1965,15 @@ describe('bulk-import router (extended)', () => {
       .mockRejectedValue(new Error('x'));
     const res = await request(app()).post('/api/import/employees').send({ csv: 'x', defaultPassword: 'Pass123!' });
     expect(res.status).toBe(500);
+  });
+
+  it('POST /employees 403, not IMPORT_FAILED, when a row names a role the actor cannot grant', async () => {
+    (BulkImportService.prototype.importEmployees as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new ForbiddenError('You cannot assign a role with permissions you do not hold'));
+    const res = await request(app()).post('/api/import/employees').send({ csv: 'x', defaultPassword: 'Pass123!' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
   });
 
   it('POST /shifts 400 missing csv', async () => {
