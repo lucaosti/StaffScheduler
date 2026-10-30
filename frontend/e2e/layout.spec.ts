@@ -66,14 +66,51 @@ test.describe('Arabic at phone width', () => {
       });
     });
 
+  /**
+   * #954: the dashboard's Recent Activity rows overflowed the screen, but only
+   * when there were rows — and whether the e2e database has audit rows
+   * depended on which suites ran before it. The rows are therefore served
+   * here: one ordinary description, and one that is a single unbroken token
+   * (an email address, a path, a pasted identifier), which is what overflowed —
+   * it cannot wrap at a space.
+   */
+  const descriptions = [
+    'Updated the assignment of a nurse on the night shift in the emergency department',
+    'Imported emergency.department.night.coordinator@demo.staffscheduler.local',
+    'Changed /org/units/12/members/detailed?includeInactive=true&sort=lastName',
+  ];
+  const activityRows = descriptions.map((description, i) => ({
+    id: 900 + i,
+    userId: 1,
+    onBehalfOfUserId: null,
+    action: 'update',
+    entityType: 'assignment',
+    entityId: 40 + i,
+    description,
+    justification: null,
+    createdAt: '2026-10-30T23:59:59.000Z',
+  }));
+
   for (const path of ['/dashboard', '/shifts', '/schedule']) {
     test(`${path} fits the screen and its heading is not covered`, async ({ browser }) => {
       const page = await adminPage(browser, { viewport: { width: 390, height: 844 } });
+      await page.route('**/audit-logs?*', (route) =>
+        route.fulfill({
+          json: {
+            success: true,
+            data: activityRows,
+            pagination: { page: 1, pageSize: 5, total: activityRows.length, totalPages: 1 },
+          },
+        })
+      );
       await page.evaluate(() => window.localStorage.setItem('locale', 'ar'));
       await page.goto(path);
       await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
       const heading = page.locator('h1').first();
       await expect(heading).toBeVisible();
+      if (path === '/dashboard') {
+        await expect(page.locator('.list-group-item').first()).toBeVisible();
+      }
 
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
       // On failure, name the elements that stick out, so the message says
