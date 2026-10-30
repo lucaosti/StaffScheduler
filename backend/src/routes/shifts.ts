@@ -78,12 +78,12 @@ const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
 
 // Shift Template Routes
 
-router.get('/templates', authenticate, requirePermission('schedule.read'), async (_req: Request, res: Response) => {
-  const templates = await templateService.getAllShiftTemplates();
+router.get('/templates', authenticate, requirePermission('schedule.read'), async (req: Request, res: Response) => {
+  const templates = await templateService.getAllShiftTemplates(scopeFilter(req.user!, 'schedule.read'));
   res.json({ success: true, data: templates });
 });
 
-router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const template = await templateService.getShiftTemplateById(id);
@@ -97,7 +97,7 @@ router.get('/templates/:id', authenticate, requirePermission('schedule.read'), v
   res.json({ success: true, data: template });
 });
 
-router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (_req: Request, res: Response) => {
+router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), scope.reach('shift.manage', 'department', 'body.departmentId'), async (_req: Request, res: Response) => {
   const template = await templateService.createShiftTemplate(res.locals.body);
 
   res.status(201).json({
@@ -107,7 +107,7 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), valid
   });
 });
 
-router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (_req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), scope.reach('shift.manage', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const template = await templateService.updateShiftTemplate(id, res.locals.body);
@@ -125,7 +125,7 @@ router.put('/templates/:id', authenticate, requirePermission('shift.manage'), va
   });
 });
 
-router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), scope.reach('shift.manage', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const success = await templateService.deleteShiftTemplate(id);

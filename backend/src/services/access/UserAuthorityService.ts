@@ -37,8 +37,10 @@
  * WHY ORG-UNIT SCOPE APPLIES TO TARGETS AND GRANTS. A scoped actor reaching an
  * account outside their subtree is the cross-unit access scoping exists to
  * prevent; such a target is answered 404, like every out-of-scope row (see
- * AccessPolicy for why). A target belonging to no unit is reachable only by
- * unscoped actors. Grants made here are always organization-wide
+ * AccessPolicy for why). A target belonging to no unit yet is reachable, as
+ * everywhere in AccessPolicy: it is the account a scoped manager just created
+ * and must be able to staff and edit; the permission-subset test still bounds
+ * which such accounts may be written. Grants made here are always organization-wide
  * (`scope_org_unit_id NULL`), so a scoped actor granting any role would hand
  * out authority wider than their own — e.g. create an org-wide Manager with a
  * password they chose and log in as it. Scoped actors therefore create
@@ -116,15 +118,11 @@ export class UserAuthorityService {
    * org-unit scope. Writing one's own account is otherwise decided by the
    * caller's self-service rules — except deactivating it, which is refused for
    * everyone: it would lock the actor out, possibly the last Administrator.
-   *
-   * `allowUnassigned` admits a target belonging to no org unit even for a
-   * scoped actor — the one case where that is right is placing such an account
-   * INTO the actor's unit (org membership writes); the subset test still holds.
    */
   async assertCanManageUser(
     actor: User,
     targetUserId: number,
-    change: { deactivate?: boolean; allowUnassigned?: boolean } = {}
+    change: { deactivate?: boolean } = {}
   ): Promise<void> {
     if (targetUserId === actor.id) {
       if (change.deactivate) throw new ValidationError('You cannot deactivate your own account');
@@ -143,8 +141,7 @@ export class UserAuthorityService {
         [targetUserId]
       );
       const units = rows.map((r) => r.org_unit_id as number);
-      const unassigned = units.length === 0 && change.allowUnassigned === true;
-      if (!unassigned) assertInScope(actor, this.permission, units, 'User');
+      if (units.length > 0) assertInScope(actor, this.permission, units, 'User');
     }
 
     const targetPermissions = await this.rbac.getEffectivePermissions(targetUserId);

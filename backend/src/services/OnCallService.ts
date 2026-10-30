@@ -16,6 +16,7 @@ import { usingConnection } from '../utils/transaction';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
+import { unitCondition } from './access/AccessPolicy';
 
 type OnCallStatus = 'open' | 'assigned' | 'cancelled';
 type OnCallAssignmentStatus = 'pending' | 'confirmed' | 'cancelled';
@@ -151,6 +152,8 @@ export class OnCallService {
   }
 
   async listPeriods(filters: {
+    /** The caller's org-unit scope (AccessPolicy.scopeFilter); absent = unrestricted. */
+    orgUnitIds?: number[];
     departmentId?: number;
     status?: OnCallStatus;
     rangeStart?: string;
@@ -173,6 +176,11 @@ export class OnCallService {
     if (filters.rangeEnd) {
       conditions.push('p.date <= ?');
       params.push(filters.rangeEnd);
+    }
+    const scope = unitCondition('d.org_unit_id', filters.orgUnitIds);
+    if (scope) {
+      conditions.push(scope.sql);
+      params.push(...scope.params);
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(

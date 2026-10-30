@@ -41,9 +41,11 @@
  * Departments and org units are two hierarchies (scheduling and authority)
  * bridged by `departments.org_unit_id`: a department-owned row is in scope when
  * its department's org unit is; a person is in scope when any org unit they
- * belong to (`user_org_units`) is. A row whose unit is NULL — a department
- * attached to no org unit, a person belonging to none — is reachable only by
- * unscoped callers, since no scoped authority covers it.
+ * belong to (`user_org_units`) is. A department attached to no org unit is
+ * reachable only by unscoped callers, since no scoped authority covers it. A
+ * person who belongs to no unit is the exception, and is reachable (see the
+ * `unassigned` resolver flag): they belong to no one's authority, and refusing
+ * them would strand the accounts scoped managers create.
  *
  * Rejected: passing the actor into every service method. It would put the same
  * check into a hundred signatures, and the services are also called by seeding,
@@ -72,7 +74,12 @@ export type ScopedKind =
   | 'loan'
   | 'costPlan'
   | 'orgUnit'
-  | 'shiftSwap';
+  | 'shiftSwap'
+  | 'onCallPeriod'
+  | 'shiftTemplate'
+  | 'pairing'
+  | 'changeRequest'
+  | 'policyException';
 
 /**
  * The caller's scope for one permission: the delegation override for that code
@@ -149,28 +156,27 @@ export const memberCondition = (userColumn: string, orgUnitIds: number[] | undef
 
 
 /**
- * The codes a unit scope can bound: every operation they admit either touches a
- * unit-owned row, lists by scope, or is shared reference data. A delegation
+ * The codes a unit scope can bound: every operation they admit touches a
+ * unit-owned row or lists by scope — none reads or writes organization-wide
+ * data, and none is a known unscoped gap. A delegation
  * scoped to a unit may carry only these (DelegationService) — a scoped
  * `role.manage` would still assign any role to anyone, because nothing about
  * role administration belongs to a unit.
  *
  * Not maintained by hand in isolation: the authorization matrix suite derives
  * this set from the declared table (codes of `unit`/`filtered` operations,
- * minus any code that also admits an `org` one) and fails when it differs.
+ * minus any code that also admits an `org`, `shared` or `gap` one, handler
+ * checks included) and fails when it differs. Closing a gap is therefore what
+ * can make a code delegable for one unit again.
  */
 export const UNIT_SCOPED_PERMISSIONS: ReadonlySet<string> = new Set([
   'assignment.manage',
   'attendance.approve',
   'attendance.read',
-  'department.manage',
-  'employee.manage',
-  'employee.read',
   'loan.approve',
   'loan.request',
-  'org_unit.read',
+  'oncall.manage',
   'report.manage',
-  'report.read',
   'schedule.manage',
   'schedule.optimize',
   'schedule.publish',
@@ -180,94 +186,172 @@ export const UNIT_SCOPED_PERMISSIONS: ReadonlySet<string> = new Set([
   'timeline.read',
   'timeline.read_all',
   'timeoff.approve',
-  'user.manage',
-  'user.read',
 ]);
 
-/**
- * One query per kind, over a list of ids; each row yields `id`, `unit` and,
- * where ownership applies, `owner`. `all` marks a row that spans units and is
- * reachable only when EVERY unit is: approving a swap rewrites both
- * assignments, so a manager of one side alone must not decide it.
- */
-const RESOLVERS: Record<ScopedKind, { label: string; sql: (ids: string) => string; all?: boolean }> = {
-  department: { label: 'Department', sql: (ids) => `SELECT id, org_unit_id AS unit, NULL AS owner FROM departments WHERE id IN (${ids})` },
+
+interface Resolver {
+  label: string;
+  /** SQL over `ids` placeholders, selecting `id`, `unit`, `owner` and `party`. */
+  sql: (ids: string) => string;
+  /** How many times the id list appears in `sql` (a UNION repeats it). */
+  repeat?: number;
+  /**
+   * The row spans several parties (`party`), and is reachable only when EVERY
+   * party is: approving a swap rewrites both assignments, and a pairing binds
+   * two people, so a manager of one side alone must not decide it.
+   */
+  all?: boolean;
+  /**
+   * A party in no org unit counts as reachable. A person who belongs nowhere
+   * belongs to no one's authority, and refusing them would leave an account a
+   * scoped manager has just created (`POST /users`, the imports) impossible to
+   * staff or edit by anyone but an Administrator. The permission-subset rule
+   * of UserAuthorityService still bounds which such accounts may be written.
+   */
+  unassigned?: boolean;
+}
+
+const RESOLVERS: Record<ScopedKind, Resolver> = {
+  department: { label: 'Department', sql: (ids) => `SELECT id, org_unit_id AS unit, NULL AS owner, NULL AS party FROM departments WHERE id IN (${ids})` },
   schedule: {
     label: 'Schedule',
-    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner FROM schedules s
+    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM schedules s
             LEFT JOIN departments d ON d.id = s.department_id WHERE s.id IN (${ids})`,
   },
   shift: {
     label: 'Shift',
-    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner FROM shifts s
+    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM shifts s
             LEFT JOIN departments d ON d.id = s.department_id WHERE s.id IN (${ids})`,
   },
   assignment: {
     label: 'Assignment',
-    sql: (ids) => `SELECT sa.id, d.org_unit_id AS unit, sa.user_id AS owner FROM shift_assignments sa
+    sql: (ids) => `SELECT sa.id, d.org_unit_id AS unit, sa.user_id AS owner, NULL AS party FROM shift_assignments sa
             JOIN shifts s ON s.id = sa.shift_id
             LEFT JOIN departments d ON d.id = s.department_id WHERE sa.id IN (${ids})`,
   },
   costPlan: {
     label: 'Cost plan',
-    sql: (ids) => `SELECT c.id, d.org_unit_id AS unit, NULL AS owner FROM cost_plans c
+    sql: (ids) => `SELECT c.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM cost_plans c
             LEFT JOIN departments d ON d.id = c.department_id WHERE c.id IN (${ids})`,
   },
   user: {
     label: 'User',
-    sql: (ids) => `SELECT u.id, uou.org_unit_id AS unit, u.id AS owner FROM users u
+    unassigned: true,
+    sql: (ids) => `SELECT u.id, uou.org_unit_id AS unit, u.id AS owner, NULL AS party FROM users u
             LEFT JOIN user_org_units uou ON uou.user_id = u.id WHERE u.id IN (${ids})`,
   },
   timeOff: {
     label: 'Time-off request',
-    sql: (ids) => `SELECT t.id, uou.org_unit_id AS unit, t.user_id AS owner FROM time_off_requests t
+    sql: (ids) => `SELECT t.id, uou.org_unit_id AS unit, t.user_id AS owner, NULL AS party FROM time_off_requests t
             LEFT JOIN user_org_units uou ON uou.user_id = t.user_id WHERE t.id IN (${ids})`,
   },
   attendance: {
     label: 'Attendance record',
-    sql: (ids) => `SELECT a.id, uou.org_unit_id AS unit, a.user_id AS owner FROM attendance_records a
+    sql: (ids) => `SELECT a.id, uou.org_unit_id AS unit, a.user_id AS owner, NULL AS party FROM attendance_records a
             LEFT JOIN user_org_units uou ON uou.user_id = a.user_id WHERE a.id IN (${ids})`,
   },
   // A loan is decided by the unit receiving the person — the same unit the
   // approval workflow resolves its approvers from (EmployeeLoanService).
-  loan: { label: 'Loan', sql: (ids) => `SELECT id, to_org_unit_id AS unit, NULL AS owner FROM employee_loans WHERE id IN (${ids})` },
-  orgUnit: { label: 'Org unit', sql: (ids) => `SELECT id, id AS unit, NULL AS owner FROM org_units WHERE id IN (${ids})` },
+  loan: { label: 'Loan', sql: (ids) => `SELECT id, to_org_unit_id AS unit, NULL AS owner, NULL AS party FROM employee_loans WHERE id IN (${ids})` },
+  orgUnit: { label: 'Org unit', sql: (ids) => `SELECT id, id AS unit, NULL AS owner, NULL AS party FROM org_units WHERE id IN (${ids})` },
   shiftSwap: {
     label: 'Shift swap request',
     all: true,
-    sql: (ids) => `SELECT r.id, d.org_unit_id AS unit, NULL AS owner FROM shift_swap_requests r
+    sql: (ids) => `SELECT r.id, d.org_unit_id AS unit, NULL AS owner, sa.id AS party FROM shift_swap_requests r
             JOIN shift_assignments sa ON sa.id IN (r.requester_assignment_id, r.target_assignment_id)
             JOIN shifts s ON s.id = sa.shift_id
             LEFT JOIN departments d ON d.id = s.department_id WHERE r.id IN (${ids})`,
   },
+  onCallPeriod: {
+    label: 'On-call period',
+    sql: (ids) => `SELECT p.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM on_call_periods p
+            LEFT JOIN departments d ON d.id = p.department_id WHERE p.id IN (${ids})`,
+  },
+  shiftTemplate: {
+    label: 'Shift template',
+    sql: (ids) => `SELECT t.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM shift_templates t
+            LEFT JOIN departments d ON d.id = t.department_id WHERE t.id IN (${ids})`,
+  },
+  pairing: {
+    label: 'Employee pairing',
+    all: true,
+    unassigned: true,
+    repeat: 2,
+    sql: (ids) => `SELECT p.id, uou.org_unit_id AS unit, NULL AS owner, p.user_id AS party FROM employee_pairings p
+            LEFT JOIN user_org_units uou ON uou.user_id = p.user_id WHERE p.id IN (${ids})
+          UNION ALL
+          SELECT p.id, uou.org_unit_id AS unit, NULL AS owner, p.other_user_id AS party FROM employee_pairings p
+            LEFT JOIN user_org_units uou ON uou.user_id = p.other_user_id WHERE p.id IN (${ids})`,
+  },
+  // A change request is about its proposer's own situation — the same subject
+  // the approval routing resolves (resolveSubjectContext).
+  changeRequest: {
+    label: 'Change request',
+    sql: (ids) => `SELECT c.id, uou.org_unit_id AS unit, NULL AS owner, NULL AS party FROM change_requests c
+            LEFT JOIN user_org_units uou ON uou.user_id = c.proposer_user_id WHERE c.id IN (${ids})`,
+  },
+  // An exception to a policy for a shift lives in that shift's unit; any other
+  // target is judged by the requester's units.
+  policyException: {
+    label: 'Policy exception',
+    repeat: 2,
+    sql: (ids) => `SELECT r.id, d.org_unit_id AS unit, NULL AS owner, NULL AS party FROM policy_exception_requests r
+            JOIN shifts s ON r.target_type IN ('shift_assignment', 'shift') AND s.id = r.target_id
+            LEFT JOIN departments d ON d.id = s.department_id WHERE r.id IN (${ids})
+          UNION ALL
+          SELECT r.id, uou.org_unit_id AS unit, NULL AS owner, NULL AS party FROM policy_exception_requests r
+            LEFT JOIN user_org_units uou ON uou.user_id = r.requested_by_user_id
+           WHERE r.id IN (${ids}) AND r.target_type NOT IN ('shift_assignment', 'shift')`,
+  },
 };
 
+/**
+ * Ids per resolver query. MySQL refuses a statement with more than 65,535
+ * placeholders, so an import of tens of thousands of rows resolved in one
+ * `IN (...)` would fail as an internal error; this keeps every statement far
+ * below that, at a handful of queries for any realistic file.
+ */
+export const RESOLVE_CHUNK = 1000;
+
 interface ResolvedRow {
-  units: Array<number | null>;
+  /** Org units per party (one party, `''`, for single-party kinds). */
+  parties: Map<string, Array<number | null>>;
   owner: number | null;
 }
 
-/** Whether a row of `kind` with these units lies inside `scope`. */
-const rowInScope = (kind: ScopedKind, scope: Scope, units: Array<number | null>): boolean =>
-  RESOLVERS[kind].all ? scope === null || units.every((u) => u !== null && scope.includes(u)) : inScope(scope, units);
+/** Whether a row of `kind` lies inside `scope`. */
+const rowInScope = (kind: ScopedKind, scope: Scope, row: ResolvedRow): boolean => {
+  if (scope === null) return true;
+  const { all, unassigned } = RESOLVERS[kind];
+  const partyIn = (units: Array<number | null>) =>
+    (unassigned === true && units.every((u) => u === null)) || inScope(scope, units);
+  const parties = [...row.parties.values()];
+  return all ? parties.every(partyIn) : partyIn(parties.flat());
+};
 
 export class AccessPolicy {
   constructor(private readonly pool: Pool) {}
 
-  /** The org units and owner of each existing row among `ids`, in one query. */
+  /** The org units and owner of each existing row among `ids`, in chunked queries. */
   private async resolve(kind: ScopedKind, ids: number[]): Promise<Map<number, ResolvedRow>> {
     const distinct = [...new Set(ids)];
     const found = new Map<number, ResolvedRow>();
-    if (distinct.length === 0) return found;
-    const [rows] = await this.pool.execute<RowDataPacket[]>(RESOLVERS[kind].sql(distinct.map(() => '?').join(', ')), distinct);
-    for (const r of rows) {
-      const id = r.id as number;
-      const row = found.get(id) ?? { units: [], owner: (r.owner ?? null) as number | null };
-      row.units.push((r.unit ?? null) as number | null);
-      found.set(id, row);
+    const resolver = RESOLVERS[kind];
+    for (let i = 0; i < distinct.length; i += RESOLVE_CHUNK) {
+      const chunk = distinct.slice(i, i + RESOLVE_CHUNK);
+      const params = Array.from({ length: resolver.repeat ?? 1 }, () => chunk).flat();
+      const [rows] = await this.pool.execute<RowDataPacket[]>(resolver.sql(chunk.map(() => '?').join(', ')), params);
+      for (const r of rows) {
+        const id = r.id as number;
+        const row = found.get(id) ?? { parties: new Map(), owner: (r.owner ?? null) as number | null };
+        const party = String(r.party ?? '');
+        row.parties.set(party, [...(row.parties.get(party) ?? []), (r.unit ?? null) as number | null]);
+        found.set(id, row);
+      }
     }
     return found;
   }
+
 
   /**
    * A per-id check for a batch whose rows succeed or fail one by one: the rows
@@ -281,7 +365,7 @@ export class AccessPolicy {
     const rows = await this.resolve(kind, ids);
     return (id: number) => {
       const row = rows.get(id);
-      if (!row || !scopes.some((s) => rowInScope(kind, s, row.units))) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
+      if (!row || !scopes.some((s) => rowInScope(kind, s, row))) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     };
   }
 
@@ -308,7 +392,7 @@ export class AccessPolicy {
     const row = (await this.resolve(kind, [id])).get(id);
     if (!row) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     if (assertOwnerOr(user, row.owner, permissions)) return;
-    if (!scopes.some((s) => rowInScope(kind, s, row.units))) {
+    if (!scopes.some((s) => rowInScope(kind, s, row))) {
       throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     }
   }

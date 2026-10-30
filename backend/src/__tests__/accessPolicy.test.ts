@@ -15,6 +15,7 @@ import {
   assertOwnerOr,
   inScope,
   memberCondition,
+  RESOLVE_CHUNK,
   scopeFilter,
   scopeFor,
   unitCondition,
@@ -146,6 +147,44 @@ describe('AccessPolicy', () => {
     expect(p.execute.mock.calls[0][1]).toEqual([4, 5]);
   });
 
+  // MySQL caps a statement at 65,535 placeholders; a large import must not 500.
+  it('resolves a very large id list in chunks', async () => {
+    const p = policyPool();
+    p.row(null, [1]);
+    const ids = Array.from({ length: RESOLVE_CHUNK * 2 + 5 }, (_, i) => i + 1);
+    await new AccessPolicy(p.pool).assertReach(scoped, 'schedule.read', 'schedule', ids);
+    expect(p.execute).toHaveBeenCalledTimes(3);
+    expect(p.execute.mock.calls.map((c) => (c[1] as number[]).length)).toEqual([RESOLVE_CHUNK, RESOLVE_CHUNK, 5]);
+  });
+
+  it('binds every id list of a multi-part resolver', async () => {
+    const p = policyPool();
+    p.missing();
+    await expect(new AccessPolicy(p.pool).assertReach(scoped, 'schedule.read', 'pairing', [7, 8])).rejects.toThrow('Employee pairing not found');
+    expect(p.execute.mock.calls[0][1]).toEqual([7, 8, 7, 8]);
+  });
+
+  it('reaches a person in no org unit, but not a department in none', async () => {
+    const p = policyPool();
+    const policy = new AccessPolicy(p.pool);
+    p.row(null, [null]);
+    await expect(policy.assertReach(scoped, 'schedule.read', 'user', 3)).resolves.toBeUndefined();
+    await expect(policy.assertReach(scoped, 'schedule.read', 'department', 3)).rejects.toThrow('Department not found');
+  });
+
+  it('reaches a pairing only when both people are in scope or in no unit', async () => {
+    const p = policyPool();
+    const policy = new AccessPolicy(p.pool);
+    const rows = (a: Array<number | null>, b: Array<number | null>) =>
+      p.execute.mockResolvedValue([[...a.map((unit) => ({ id: 9, unit, party: 1 })), ...b.map((unit) => ({ id: 9, unit, party: 2 }))], null]);
+    rows([1], [1, 4]);
+    await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).resolves.toBeUndefined();
+    rows([1], [null]);
+    await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).resolves.toBeUndefined();
+    rows([1], [4]);
+    await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).rejects.toThrow(NotFoundError);
+  });
+
   it('checks a batch row by row after resolving it once', async () => {
     const p = policyPool();
     p.execute.mockResolvedValue([[{ id: 4, unit: 1, owner: null }, { id: 5, unit: 2, owner: null }], null]);
@@ -163,11 +202,15 @@ describe('AccessPolicy', () => {
     const p = policyPool();
     const policy = new AccessPolicy(p.pool);
     const approver = user({ permissions: ['shiftswap.approve'], allowedOrgUnitIds: [1] });
-    p.row(null, [1, 1]);
+    // One row per assignment (the party), each with its shift's unit.
+    const sides = (a: number | null, b: number | null) =>
+      p.execute.mockResolvedValue([[{ id: 3, unit: a, party: 10 }, { id: 3, unit: b, party: 11 }], null]);
+    sides(1, 1);
     await expect(policy.assertReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).resolves.toBeUndefined();
-    p.row(null, [1, 2]);
+    sides(1, 2);
     await expect(policy.assertReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).rejects.toThrow('Shift swap request not found');
-    p.row(null, [1, null]);
+    // A department in no unit is not "unassigned": swaps get no such allowance.
+    sides(1, null);
     await expect(policy.assertOwnerOrReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).rejects.toThrow(NotFoundError);
   });
 

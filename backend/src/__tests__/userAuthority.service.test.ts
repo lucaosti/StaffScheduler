@@ -132,13 +132,13 @@ describe('assertCanManageUser', () => {
     await expect(service.assertCanManageUser(actor(['user.manage'], [5, 6]), 20)).resolves.toBeUndefined();
   });
 
-  it('refuses a scoped actor an account outside their units, or in no unit at all', async () => {
+  it('refuses a scoped actor an account in another unit, but not one in no unit at all', async () => {
     const outside = makeService([{ org_unit_id: 9 }]);
     await expect(outside.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(NotFoundError);
+    // An account in no unit is the one a scoped manager just created: theirs to
+    // staff and edit, still bounded by the permission-subset rule.
     const nowhere = makeService([]);
-    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(NotFoundError);
-    // Placing an account that belongs nowhere into one's unit is the one exception.
-    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20, { allowUnassigned: true })).resolves.toBeUndefined();
+    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).resolves.toBeUndefined();
   });
 });
 

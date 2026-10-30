@@ -185,7 +185,7 @@ export const createOrgRouter = (pool: Pool): Router => {
   });
 
   router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), scope.reach('employee.manage', 'orgUnit', 'params.id'), async (req: Request, res: Response) => {
-    await memberAuthority.assertCanManageUser(req.user!, res.locals.body.userId, { allowUnassigned: true });
+    await memberAuthority.assertCanManageUser(req.user!, res.locals.body.userId);
     const created = await units.addMember(
       res.locals.body.userId,
       res.locals.params.id,
