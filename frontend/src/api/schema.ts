@@ -3794,7 +3794,7 @@ export interface paths {
         put?: never;
         /**
          * Bulk import shifts
-         * @description Admin/manager only.
+         * @description Requires `shift.manage`. Every row's schedule and department must lie in the caller's org-unit scope; a row naming another unit's id answers 404 for the whole file, before anything is written.
          */
         post: {
             parameters: {
@@ -3820,6 +3820,7 @@ export interface paths {
                 };
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
             };
         };
         delete?: never;
