@@ -19,6 +19,14 @@ repo root (single root `package-lock.json`; also compiles
 `packages/shared`, the shared Zod-schema/type package both apps import).
 Never run `npm install` inside `backend/` or `frontend/`.
 
+**Run everything through Docker.** The verification gate, a seeded dev server
+and every check below run in containers via `./scripts/verify-in-docker.sh`
+(`all` by default; gate names, `serve`, `shell`, `down` — see
+`scripts/verify.sh`). Do not install MySQL, Python packages, browsers or other
+tooling on the host, and do not start host servers: results must not depend on
+the host OS. The npm commands below are what the container runs; use them
+inside `./scripts/verify-in-docker.sh shell`.
+
 ### Backend (`cd backend`)
 
 ```bash
