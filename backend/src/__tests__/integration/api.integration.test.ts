@@ -36,6 +36,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { migrationUpSql } from '../helpers/schema';
 import { expectErrorEnvelope, expectSuccessEnvelope } from '../helpers/openapiEnvelope';
+import { totp } from '../../utils/totp';
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -2149,6 +2150,54 @@ describe('employment contracts run against the real schema', () => {
       .set('Cookie', cookie)
       .send({ contractId, effectiveFrom: '2046-01-01' });
     expect(later.status).toBe(400);
+  });
+});
+
+describe('TOTP two-factor authentication against the real schema (#899)', () => {
+  const PASSWORD = 'itest-totp-password-1';
+
+  // Codes are derived from one fixed instant so the test controls which time
+  // step each code belongs to. Starting near the end of a step could let the
+  // clock cross into the next one mid-test and push the oldest code out of
+  // the ±1 window, so wait for a fresh step first.
+  const freshStep = async (): Promise<number> => {
+    const into = Math.floor(Date.now() / 1000) % 30;
+    if (into > 20) await new Promise((r) => setTimeout(r, (31 - into) * 1000));
+    return Math.floor(Date.now() / 1000);
+  };
+
+  it('accepts a code once, rejects its replay, and lets a newer code disable the method', async () => {
+    const email = `itest-totp-${Date.now()}@example.com`;
+    await admin.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, ?, 'Totp', 'User', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    const cookie = await loginCookie(email, PASSWORD);
+
+    const setup = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    expect(setup.status).toBe(200);
+    const secret = setup.body.data.secret as string;
+
+    const now = await freshStep();
+    const previous = totp(secret, { nowSeconds: now - 30 });
+    const current = totp(secret, { nowSeconds: now });
+
+    const enable = await request(app).post('/api/v1/auth/2fa/enable').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(enable.status).toBe(200);
+
+    const first = await request(app).post('/api/v1/auth/2fa/verify').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(first.body.data).toEqual({ valid: true });
+
+    const replay = await request(app).post('/api/v1/auth/2fa/verify').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(replay.body.data).toEqual({ valid: false });
+
+    const disable = await request(app).post('/api/v1/auth/2fa/disable').set('Cookie', cookie).send({ methodType: 'totp', code: current });
+    expect(disable.status).toBe(200);
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ? AND tf.method_type = 'totp'`,
+      [email]
+    );
+    expect(rows[0].n).toBe(0);
   });
 });
 
