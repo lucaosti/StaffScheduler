@@ -233,9 +233,11 @@ describe('GET /api/auth/verify', () => {
   });
 });
 
-describe('POST /api/auth/logout', () => {
-  it('returns 401 without a token', async () => {
-    const res = await request(buildApp()).post('/api/auth/logout');
-    expect(res.status).toBe(401);
+describe('POST /api/auth/refresh/logout', () => {
+  // Not behind authenticate (#816): a logout must complete with no valid
+  // access token, which is exactly when it used to 401 and revoke nothing.
+  it('succeeds without a token', async () => {
+    const res = await request(buildApp()).post('/api/auth/refresh/logout');
+    expect(res.status).toBe(200);
   });
 });

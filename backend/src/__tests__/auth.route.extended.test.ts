@@ -2,7 +2,7 @@
  * Extended auth route tests — covers branches that the basic smoke tests miss:
  *   - GET /verify: the success path, and the error catch.
  *   - POST /refresh: the success path and the error catch.
- *   - POST /logout: the authenticated success path.
+ *   - POST /refresh/logout: what it revokes, with and without a valid access token.
  *   - POST /login: service throws (catch block).
  */
 
@@ -81,6 +81,7 @@ describe('POST /api/auth/refresh', () => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
     // A valid rotation returns the user id and a brand-new refresh token.
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 7,
       issued: { token: 'new-refresh-token', expiresAt: new Date(Date.now() + 1000) },
     });
@@ -112,8 +113,8 @@ describe('POST /api/auth/refresh', () => {
     expect(res.body.error.code).toBe('REFRESH_INVALID');
   });
 
-  it('returns 401 when the refresh token is invalid/reused (rotate returns null)', async () => {
-    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue(null);
+  it('returns 401 when the refresh token is invalid/reused (rotate returns invalid)', async () => {
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({ status: 'invalid' });
     const res = await request(buildApp())
       .post('/api/auth/refresh')
       .set('Cookie', 'refresh_token=stolen');
@@ -123,23 +124,74 @@ describe('POST /api/auth/refresh', () => {
 
   it('revokes and rejects when the account is gone or inactive', async () => {
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 7,
       issued: { token: 'new', expiresAt: new Date(Date.now() + 1000) },
     });
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(null);
-    const revoke = jest.fn().mockResolvedValue(undefined);
-    (RefreshTokenService.prototype.revoke as jest.Mock) = revoke;
+    const revokeFamilyOf = jest.fn().mockResolvedValue(undefined);
+    (RefreshTokenService.prototype.revokeFamilyOf as jest.Mock) = revokeFamilyOf;
 
     const res = await request(buildApp())
       .post('/api/auth/refresh')
       .set('Cookie', 'refresh_token=valid-but-orphaned');
 
     expect(res.status).toBe(401);
-    expect(revoke).toHaveBeenCalledWith('new');
+    expect(revokeFamilyOf).toHaveBeenCalledWith('new');
+  });
+
+  it('answers a superseded token with 409 and leaves the cookies alone', async () => {
+    (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({ status: 'superseded' });
+    const res = await request(buildApp())
+      .post('/api/auth/refresh')
+      .set('Cookie', 'refresh_token=raced');
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('REFRESH_SUPERSEDED');
+    // Another tab's refresh may already have stored the successor in the
+    // shared jar; clearing here would destroy it.
+    expect(res.headers['set-cookie']).toBeUndefined();
   });
 });
 
-describe('POST /api/auth/logout', () => {
+describe('POST /api/auth/refresh/logout — what it revokes', () => {
+  let revokeFamilyOf: jest.Mock;
+  beforeEach(() => {
+    revokeFamilyOf = jest.fn().mockResolvedValue(undefined);
+    (RefreshTokenService.prototype.revokeFamilyOf as jest.Mock) = revokeFamilyOf;
+  });
+
+  it('revokes the cookie session even when the access token has expired', async () => {
+    const expired = jwt.sign({ userId: 7, jti: 'expired-jti', exp: Math.floor(Date.now() / 1000) - 60 }, config.jwt.secret);
+    const res = await request(buildApp())
+      .post('/api/auth/refresh/logout')
+      .set('Cookie', `token=${expired}; refresh_token=web-session`);
+    expect(res.status).toBe(200);
+    expect(revokeFamilyOf).toHaveBeenCalledWith('web-session');
+  });
+
+  it('revokes the body token of a mobile client', async () => {
+    const res = await request(buildApp())
+      .post('/api/auth/refresh/logout')
+      .set('X-Client-Type', 'mobile')
+      .send({ refreshToken: 'device-session' });
+    expect(res.status).toBe(200);
+    expect(revokeFamilyOf).toHaveBeenCalledWith('device-session');
+  });
+
+  it('ignores a body token from a web client, as /refresh does', async () => {
+    const res = await request(buildApp()).post('/api/auth/refresh/logout').send({ refreshToken: 'someone-elses' });
+    expect(res.status).toBe(200);
+    expect(revokeFamilyOf).not.toHaveBeenCalled();
+  });
+
+  it('succeeds with no credentials at all, so the client can always finish logging out', async () => {
+    const res = await request(buildApp()).post('/api/auth/refresh/logout').set('Authorization', 'Bearer forged');
+    expect(res.status).toBe(200);
+    expect(revokeFamilyOf).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /api/auth/refresh/logout', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
@@ -151,7 +203,7 @@ describe('POST /api/auth/logout', () => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
     const token = signToken({ userId: 7, email: 'a@x.com', role: 'manager' });
 
-    const res = await request(buildApp()).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+    const res = await request(buildApp()).post('/api/auth/refresh/logout').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -218,7 +270,7 @@ describe('POST /api/auth/login — rate limiting', () => {
 });
 
 
-describe('POST /api/auth/logout — server-side revocation', () => {
+describe('POST /api/auth/refresh/logout — server-side revocation', () => {
   beforeEach(() => {
     (UserService as jest.MockedClass<typeof UserService>).mockClear();
     (database.getPool as jest.Mock).mockReturnValue({});
@@ -235,7 +287,7 @@ describe('POST /api/auth/logout — server-side revocation', () => {
     const token = signToken({ userId: 7, jti: `logout-test-${Date.now()}` });
 
     const app = buildApp();
-    const logout = await request(app).post('/api/auth/logout').set('Authorization', `Bearer ${token}`);
+    const logout = await request(app).post('/api/auth/refresh/logout').set('Authorization', `Bearer ${token}`);
     expect(logout.status).toBe(200);
 
     const replay = await request(app).get('/api/auth/verify').set('Authorization', `Bearer ${token}`);

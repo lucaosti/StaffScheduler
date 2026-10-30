@@ -200,15 +200,15 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 POST /api/auth/login             { email, password, code?, methodType? } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
 POST /api/auth/login/challenge   { email, password, methodType } → pre-session challenge request (email code delivery, WebAuthn assertion options)
 GET  /api/auth/verify            (cookie) → { user }
-POST /api/auth/refresh           (cookie) → rotates cookie; body: { user }
-POST /api/auth/logout            blacklists the JTI and clears the cookie
+POST /api/v1/auth/refresh        (cookie) → rotates cookie; body: { user }; 409 REFRESH_SUPERSEDED when a concurrent refresh just rotated it
+POST /api/v1/auth/refresh/logout (cookie) → revokes the refresh-token family, blacklists the JTI if still valid, clears both cookies
 ```
 
 With `X-Client-Type: mobile` (see "Mobile client: token-based variant" below),
 `/login` and `/refresh` additionally set `accessToken`/`refreshToken` on the
 response body, alongside the cookies above rather than instead of them; and
-`/refresh` also accepts `{ refreshToken }` in the body as a fallback when the
-cookie is absent. Neither behavior is present without that header.
+`/refresh` and `/refresh/logout` also accept `{ refreshToken }` in the body as a
+fallback when the cookie is absent. Neither behavior is present without that header.
 
 JWT payload: `{ userId, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via a blacklist with TTL-based expiry, held in the shared cache store (Redis when reachable, in-process otherwise). The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
 
@@ -411,12 +411,41 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
 - **Refresh token** (`refresh_token` cookie, scoped to the refresh endpoint's own path, `/api/v1/auth/refresh`): an
   opaque 256-bit token whose **hash** is stored in `refresh_tokens`, default
   30-day lifetime (`JWT_REFRESH_EXPIRES_IN`). `POST /api/auth/refresh` rotates
-  it — revoking the presented token and issuing a successor in the same family —
+  it — claiming the presented token with a conditional `UPDATE` and issuing a
+  successor in the same family only if that claim won, all in one transaction —
   and mints a new access token. It is deliberately **not** behind the auth
   middleware, so it works exactly when the access token has expired.
 - **Reuse detection**: replaying an already-rotated refresh token revokes the
   entire token family (`RefreshTokenService`), bounding a stolen token to one
-  rotation window. Logout revokes both the access JTI and the refresh token.
+  rotation window.
+- **Concurrent refreshes**: because the claim comes first, two requests racing
+  with one token can never both get a successor (that used to fork the family).
+  A token presented again within 10 seconds of its rotation is answered
+  409 `REFRESH_SUPERSEDED` — nothing issued, nothing revoked, cookies untouched —
+  rather than treated as reuse, so two tabs refreshing at once do not sign the
+  user out everywhere. The SPA avoids the race in the first place — one
+  in-flight refresh per tab, serialised across tabs with a Web Lock where the
+  browser has them — and otherwise retries after 250 ms and 1 s, by when the
+  winning refresh's cookie has landed in the shared jar. If every retry is
+  still superseded, the successor went to another client (a stolen token
+  rotated first), so the SPA calls logout, which revokes the family. A replay
+  after the window is reuse as above. Rotation locks the owning `users` row
+  before the token row — the same order a password change takes — so the two
+  cannot deadlock.
+- **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
+  path, because that is the only place a browser sends the cookie, and not
+  behind the auth middleware, so it works with an expired access token. It
+  revokes the presented refresh token's whole family and blacklists the access
+  JTI if the access token is still valid; a native client passes its refresh
+  token in the body. Widening the cookie path so `/auth/logout` could receive it
+  was rejected for the exposure reason above.
+- **Password changes and deactivation end every session**: `UserService`
+  revokes all of the user's refresh tokens, in the same transaction, whenever
+  the password is changed (via `/users` or `/employees`) or the account is
+  deactivated or deleted, and drops the cached auth context. Access tokens
+  already issued stay valid until they expire (at most `JWT_EXPIRES_IN`) after
+  a password change; a deactivated account's are rejected at once, because
+  `authenticate` checks `is_active`.
 
 The SPA refreshes proactively before expiry and falls back to a refresh on page
 load, so an active session is never interrupted. See `RefreshTokenService` and

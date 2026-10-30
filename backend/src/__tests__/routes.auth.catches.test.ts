@@ -45,6 +45,7 @@ describe('POST /api/auth/refresh — unexpected fault', () => {
       .fn()
       .mockResolvedValue({ id: 7, email: 'a@x.com', firstName: 'A', lastName: 'B', isActive: true });
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 7,
       issued: { token: 'new-refresh', expiresAt: new Date(Date.now() + 1000) },
     });

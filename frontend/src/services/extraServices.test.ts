@@ -308,9 +308,9 @@ describe('authService extra', () => {
     expect((lastInit().method ?? 'GET')).toBe('GET');
   });
 
-  it('logout POSTs /auth/logout and does not throw', async () => {
+  it('logout POSTs /auth/refresh/logout and does not throw', async () => {
     await authService.logout();
-    expect(lastUrl()).toMatch(/\/auth\/logout$/);
+    expect(lastUrl()).toMatch(/\/auth\/refresh\/logout$/);
     expect(lastInit().method).toBe('POST');
   });
 });
