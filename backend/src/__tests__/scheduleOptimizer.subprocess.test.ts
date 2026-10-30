@@ -1,5 +1,6 @@
 /**
- * The OR-Tools wrapper against a REAL child process (#836).
+ * The OR-Tools wrapper and the solver script as REAL child processes (#836,
+ * #837).
  *
  * Kept apart from scheduleOptimizer.test.ts because that suite mocks
  * `child_process` whole, and the defect here only exists between two real
@@ -16,6 +17,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem } from '../optimization/types';
+import { describeOrtools, solveCpSat } from './helpers/cpSat';
 
 describe('ScheduleOptimizer with a solver that exits without reading its input', () => {
   let dir: string;
@@ -47,5 +49,24 @@ describe('ScheduleOptimizer with a solver that exits without reading its input',
     // was an uncaught exception and the test process died.
     expect(result.status).toBe('GREEDY_FALLBACK');
     expect(result.assignments).toEqual([expect.objectContaining({ employeeId: 'e1', shiftId: 's1' })]);
+  });
+});
+
+/**
+ * `--time-limit` is the script's whole budget, model build included (#837):
+ * a build that leaves less than a second must be reported as no schedule,
+ * with the reason, rather than searched past the caller's deadline.
+ */
+describeOrtools('schedule_optimizer.py time budget', () => {
+  it('reports UNKNOWN, naming the build, when the build leaves no time to search', () => {
+    const problem: OptimizationProblem = {
+      shifts: [{ id: 's1', date: '2026-03-02', start_time: '09:00', end_time: '17:00', min_staff: 1 }],
+      employees: [{ id: 'e1', max_hours_per_week: 40, skills: [], unavailable_dates: [] }],
+    };
+
+    const result = solveCpSat(problem, process.env, 0.5);
+
+    expect(result.status).toBe('UNKNOWN');
+    expect(result.error).toMatch(/building the model took .* time limit/);
   });
 });

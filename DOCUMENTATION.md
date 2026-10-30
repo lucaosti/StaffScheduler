@@ -803,6 +803,30 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | stdout beyond 64 MB | The process is terminated → `optimize()` falls back to greedy. Only the last 64 KB of stderr is kept, as the reason for a crash that wrote no JSON |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
 
+**Time budget.** `--time-limit` is the script's **total** budget, model build
+included, and it is set strictly inside the watchdog: `OPTIMIZATION_TIMEOUT`
+minus a margin of a tenth (at least 5 s) for the interpreter start, CP-SAT
+stopping slightly late, and the result's serialisation and parse
+(`solverTimeLimitSeconds`). The script measures its own input parse and model
+build and searches only for what is left (`solve_time_budget`); with less than
+a second left it reports `UNKNOWN`, naming the build, rather than searching
+past the deadline. The search limit used to equal the watchdog, so a run that
+searched to its limit was always killed first and degraded, discarding the
+feasible solution it was about to return (#837). The build time is measured
+rather than estimated by the caller because it depends on the instance
+(employees × shifts, and how many pairings survive eligibility).
+
+The model build precomputes each shift's bounds, date and duration once, and
+expresses no-double-booking and minimum rest as one conflict relation: two
+shifts conflict exactly when their intervals, each extended by the required
+rest, meet. That relation is an interval graph, so one sweep finds its maximal
+cliques and each becomes a single `AddAtMostOne` — equivalent to the pairwise
+constraints, tighter for the solver, and computed once per rest value instead
+of once per employee. The former pairwise builders recomputed both shifts'
+bounds (with a date parse) on every comparison for every employee; measured in
+the toolchain container, the build went from 21.2 s to 0.4 s at 40 employees
+× 224 shifts and from 118 s to 1.5 s at 100 × 336.
+
 The SIGKILL escalation tests whether the process has **exited**
 (`exitCode`/`signalCode`), not `ChildProcess.killed`: that flag turns true as
 soon as a signal is delivered, so the escalation used to be dead code and a

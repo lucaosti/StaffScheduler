@@ -247,6 +247,38 @@ export const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 /** How much of the solver's stderr is kept, from the end, as a crash reason. */
 export const MAX_STDERR_TAIL_CHARS = 64 * 1024;
 
+/** The least of the watchdog kept back from the solver's budget, in ms. */
+const MIN_SOLVER_MARGIN_MS = 5000;
+
+/** The share of the watchdog kept back from the solver's budget. */
+const SOLVER_MARGIN_SHARE = 0.1;
+
+/**
+ * The `--time-limit` handed to the solver: the watchdog minus a margin, in
+ * whole seconds, and never more than a caller asked for.
+ *
+ * WHY IT IS NOT THE WATCHDOG ITSELF. The limit used to be 300 s against a
+ * 300 000 ms watchdog, while the script spent part of that building its model
+ * before searching at all — so a run that searched to its limit was always
+ * killed first and degraded to greedy, throwing away the feasible solution it
+ * was about to return (#837).
+ *
+ * The limit is the script's TOTAL budget. The model build, whose length
+ * depends on the instance and cannot be estimated from here, is the script's
+ * to subtract: it measures its own build time and searches only for what is
+ * left (`solve_time_budget` in schedule_optimizer.py). What this margin covers
+ * is what happens outside that budget — the interpreter and ortools import
+ * before the clock starts, CP-SAT stopping slightly after its limit, and the
+ * result's serialisation, transfer and parse. A tenth of the watchdog, and at
+ * least five seconds, leaves room for all of it at every size this runs at.
+ */
+export const solverTimeLimitSeconds = (watchdogMs: number, requestedSeconds?: number): number => {
+  const margin = Math.max(MIN_SOLVER_MARGIN_MS, watchdogMs * SOLVER_MARGIN_SHARE);
+  const available = Math.floor((watchdogMs - margin) / 1000);
+  const limit = requestedSeconds === undefined ? available : Math.min(requestedSeconds, available);
+  return Math.max(1, limit);
+};
+
 /** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
 const errorReason = (stdout: string): string | undefined => {
   try {
@@ -302,7 +334,7 @@ export class ScheduleOptimizer {
       // Call Python optimizer
       const result = await this._callPythonOptimizer(
         problemData,
-        optimizationConfig.timeLimitSeconds || 300
+        solverTimeLimitSeconds(config.optimization.timeout, optimizationConfig.timeLimitSeconds)
       );
 
       const elapsedTime = (Date.now() - startTime) / 1000;
@@ -317,7 +349,10 @@ export class ScheduleOptimizer {
       // signalled fallback as a missing python3, rather than a second path
       // every caller would have to know to check for.
       if (result.status !== 'OPTIMAL' && result.status !== 'FEASIBLE') {
-        throw new Error(`OR-Tools solver finished with status ${result.status} and no schedule`);
+        throw new Error(
+          `OR-Tools solver finished with status ${result.status} and no schedule` +
+            (result.error ? `: ${result.error}` : '')
+        );
       }
 
       if (result.statistics.coverageStats) {

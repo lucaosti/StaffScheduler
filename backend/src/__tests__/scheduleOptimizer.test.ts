@@ -17,6 +17,7 @@ import {
   KILL_GRACE_MS,
   MAX_STDERR_TAIL_CHARS,
   MAX_STDOUT_BYTES,
+  solverTimeLimitSeconds,
 } from '../optimization/ScheduleOptimizerORTools';
 
 jest.mock('child_process', () => ({
@@ -599,6 +600,47 @@ describe('ScheduleOptimizer._callPythonOptimizer timeout', () => {
 
     await expect(promise).rejects.toThrow(/timed out after 50ms/);
     expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+  });
+});
+
+/**
+ * The solver's budget must fit inside the watchdog with room to spare. It used
+ * to BE the watchdog (300 s against 300 000 ms), so a run that searched to its
+ * limit after building its model was always killed first and degraded (#837).
+ */
+describe('solverTimeLimitSeconds (#837)', () => {
+  it('keeps a tenth of the default watchdog back', () => {
+    expect(solverTimeLimitSeconds(300_000)).toBe(270);
+  });
+
+  it('keeps at least five seconds back from a short watchdog', () => {
+    expect(solverTimeLimitSeconds(20_000)).toBe(15);
+  });
+
+  it('honours a smaller requested limit, and caps a larger one', () => {
+    expect(solverTimeLimitSeconds(300_000, 60)).toBe(60);
+    expect(solverTimeLimitSeconds(300_000, 600)).toBe(270);
+  });
+
+  it('never goes below one second', () => {
+    expect(solverTimeLimitSeconds(3_000)).toBe(1);
+  });
+
+  it('is what optimize() hands the solver, strictly below the watchdog', async () => {
+    mockedSpawn.mockReset();
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(
+      buildProblem({ shifts: [buildShift()], employees: [buildEmployee()] })
+    );
+    proc.emit('error', new Error('spawn python3 ENOENT'));
+    await resultPromise;
+
+    const args: string[] = mockedSpawn.mock.calls[0][1];
+    const limit = Number(args[args.indexOf('--time-limit') + 1]);
+    expect(limit).toBe(solverTimeLimitSeconds(config.optimization.timeout));
+    expect(limit * 1000).toBeLessThan(config.optimization.timeout);
   });
 });
 
