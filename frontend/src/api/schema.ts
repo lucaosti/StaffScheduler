@@ -8432,7 +8432,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List shifts of a department */
+        /**
+         * List shifts of a department
+         * @description Requires `schedule.read`. A department outside the caller's org-unit scope is answered 404, as a missing one is.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -8452,6 +8455,8 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
             };
         };
         put?: never;
@@ -8469,7 +8474,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List shifts of a schedule */
+        /**
+         * List shifts of a schedule
+         * @description Requires `schedule.read`. A schedule outside the caller's org-unit scope is answered 404, as a missing one is.
+         */
         get: {
             parameters: {
                 query?: never;
@@ -8489,6 +8497,8 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
             };
         };
         put?: never;
