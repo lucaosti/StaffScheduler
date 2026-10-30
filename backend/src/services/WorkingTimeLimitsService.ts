@@ -189,14 +189,21 @@ const tightest = (direction: 'cap' | 'floor', values: Personal[]): number => {
  * the demo seed creates one for everyone — got 40 h and 5 days under a
  * 36 h / 4-day policy. A preference is the person's wish and a contract the
  * employer's terms; neither can waive a rule the organization adopted (often
- * a jurisdiction's, applied as a preset). Taking "first match" instead of
- * "tightest" was rejected for exactly that reason, and so was ignoring the
- * preference row: a stricter personal cap (someone asking for fewer hours) is
+ * a jurisdiction's, applied as a preset). Ignoring the preference row was
+ * rejected: a stricter personal cap (someone asking for fewer hours) is
  * legitimate and is still honoured.
  *
- * With no policy value, the old order stands — contract, then preference,
- * then the system setting or default — because the setting and the default
- * are fallbacks, not rules anyone adopted.
+ * THE CONTRACT AND THE PREFERENCE ARE ONE PERSONAL LAYER, contract first —
+ * first match between them, and only then the ceiling on top. They were first
+ * compared as separate layers (the tightest of policy, contract and
+ * preference), which made the 40 h / 5-day defaults binding wherever a policy
+ * existed: under the EU preset (48 h, 6 days) a 48 h / 6-day full-time
+ * contract resolved to 40 h / 5, so applying a looser preset tightened
+ * everyone. The contract is the deliberate, effective-dated limit; the
+ * preference is consulted only where no contract states one.
+ *
+ * With no policy value, the personal layer stands, then the system setting or
+ * default — fallbacks, not rules anyone adopted.
  *
  * WHEN THE CONTRACT DOES NOT COVER THE PERIOD, its value only governs part of
  * it. The rest of the period is governed by what applies without it, so the
@@ -215,10 +222,18 @@ const resolveField = (
     contractCoversPeriod: boolean;
   }
 ): number => {
-  const resolve = (contract: Personal): number =>
-    layers.policy !== undefined
-      ? tightest(direction, [layers.policy, contract, layers.preference])
-      : (contract ?? layers.preference ?? layers.fallback);
+  // The contract and the preference are ONE personal layer, contract first:
+  // the preference speaks only where no contract states the limit. Taking the
+  // tightest of all three instead made the 40 h / 5 days every preferences
+  // row carries binding over a contract that said otherwise — under the EU
+  // preset, a 48 h contract resolved to 40 h, so applying a LOOSER policy
+  // silently tightened everyone.
+  const resolve = (contract: Personal): number => {
+    const personal = contract ?? layers.preference;
+    return layers.policy !== undefined
+      ? tightest(direction, [layers.policy, personal])
+      : (personal ?? layers.fallback);
+  };
   const withContract = resolve(layers.contract);
   if (layers.contract == null || layers.contractCoversPeriod) return withContract;
   return tightest(direction, [withContract, resolve(null)]);

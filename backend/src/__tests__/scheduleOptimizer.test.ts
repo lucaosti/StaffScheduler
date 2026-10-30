@@ -15,6 +15,7 @@ import {
   OptimizationProblem,
   CandidateContext,
   KILL_GRACE_MS,
+  MAX_REASON_CHARS,
   MAX_STDERR_TAIL_CHARS,
   MAX_STDOUT_BYTES,
   solverTimeLimitSeconds,
@@ -700,6 +701,55 @@ describe('ScheduleOptimizer subprocess failures (#836)', () => {
     expect(result.status).toBe('GREEDY_FALLBACK');
     expect(result.error).toContain("ModuleNotFoundError: No module named 'ortools'");
     expect(result.error).not.toContain('EPIPE');
+  });
+
+  it('terminates a child that outlives the stdin grace, and arms the timer once for repeated errors', async () => {
+    jest.useFakeTimers();
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    const epipe = () => Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+    proc.stdin.emit('error', epipe());
+    jest.advanceTimersByTime(STDIN_ERROR_GRACE_MS / 2);
+    proc.stdin.emit('error', epipe());
+    // The first error's deadline: a second timer must not have replaced it
+    // with a later one, nor added a second rejection.
+    jest.advanceTimersByTime(STDIN_ERROR_GRACE_MS / 2);
+    const result = await resultPromise;
+
+    expect(result.error).toContain('EPIPE');
+    // Abandoned, so stopped: otherwise the child keeps running unwatched.
+    expect(proc.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(proc.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives the parse error, not the progress log, when the solver exits 0 without JSON', async () => {
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('Building CP-SAT model...\nSearch workers: 8\n'));
+    proc.stdout.emit('data', Buffer.from('{"status": "OPT'));
+    proc.emit('close', 0);
+    const result = await resultPromise;
+
+    expect(result.error).toContain('Failed to parse optimizer output');
+    expect(result.error).not.toContain('Building CP-SAT model');
+  });
+
+  it('keeps a crash reason to the end of stderr, short enough for the planner to read', async () => {
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stderr.emit('data', Buffer.from('progress line\n'.repeat(2000)));
+    proc.stderr.emit('data', Buffer.from('Traceback: boom'));
+    proc.emit('close', 1);
+    const result = await resultPromise;
+
+    expect(result.error).toContain('Traceback: boom');
+    expect(result.error!.length).toBeLessThanOrEqual(MAX_REASON_CHARS + 100);
   });
 
   it('escalates to SIGKILL when the solver ignores SIGTERM', async () => {

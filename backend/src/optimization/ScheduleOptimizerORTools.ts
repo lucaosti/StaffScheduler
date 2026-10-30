@@ -289,6 +289,16 @@ export const solverTimeLimitSeconds = (watchdogMs: number, requestedSeconds?: nu
   return Math.max(1, limit);
 };
 
+/**
+ * How much of stderr becomes a degraded run's reason. The reason reaches the
+ * planner's banner; the end of a traceback says what failed, and 64 KB of
+ * progress log above it says nothing they can use.
+ */
+export const MAX_REASON_CHARS = 500;
+
+/** The end of the solver's stderr, as a crash reason a person can read. */
+const crashReason = (stderr: string): string => stderr.trim().slice(-MAX_REASON_CHARS);
+
 /** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
 const errorReason = (stdout: string): string | undefined => {
   try {
@@ -562,14 +572,15 @@ export class ScheduleOptimizer {
             try {
               resolve(mapPythonResult(JSON.parse(stdoutData)));
             } catch (parseError) {
-              // No JSON: the child died before answering (python exits 1 on
-              // an import error), so its stderr is the reason, not the parse.
+              // No JSON. On exit 1 the child died before answering (python
+              // exits 1 on an import error), so the end of its stderr is the
+              // reason. On exit 0 it claimed success and wrote something
+              // unreadable: the parse error is the reason, and stderr is only
+              // its progress log, which does not belong in a planner's banner.
               const parseReason = parseError instanceof Error ? parseError.message : 'Unknown error';
-              reject(
-                new Error(
-                  `Failed to parse optimizer output (exit ${code}): ${stderrData.trim() || stdinError?.message || parseReason}`
-                )
-              );
+              const reason =
+                code === 0 ? parseReason : crashReason(stderrData) || stdinError?.message || parseReason;
+              reject(new Error(`Failed to parse optimizer output (exit ${code}): ${reason}`));
             }
           } else {
             // Non-zero exit — treat as hard error so optimize() can fall back.
@@ -580,7 +591,7 @@ export class ScheduleOptimizer {
             // run. stderr stays the fallback for a crash that wrote no JSON.
             reject(
               new Error(
-                `Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? (stderrData || stdinError?.message)}`
+                `Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? (crashReason(stderrData) || stdinError?.message)}`
               )
             );
           }
@@ -606,11 +617,16 @@ export class ScheduleOptimizer {
       // dropped. 'close' settles with that stderr; the timer only covers a
       // child that keeps running after closing its stdin.
       pythonProcess.stdin.on('error', (err) => {
+        // The first error sets the deadline; a later one on the same stream
+        // must neither push it back nor leave a second timer behind.
+        if (stdinError) return;
         stdinError = err;
-        stdinErrorHandle = setTimeout(
-          () => finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`))),
-          STDIN_ERROR_GRACE_MS
-        );
+        stdinErrorHandle = setTimeout(() => {
+          if (settled) return;
+          // Abandoned, so stopped: otherwise the child runs on unwatched.
+          terminate();
+          finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`)));
+        }, STDIN_ERROR_GRACE_MS);
         stdinErrorHandle.unref?.();
       });
 

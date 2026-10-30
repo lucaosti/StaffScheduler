@@ -299,6 +299,29 @@ describe('evaluateAssignmentCompliance', () => {
       }
     });
 
+    it("does not let the preference row's 40 h default override a contract that matches the policy", async () => {
+      // 48 h policy and 48 h contract, default 40 h preference: an 8 h
+      // candidate on top of 40 h already worked is 48 h, which is legal.
+      const pool = makePool(
+        [{ max_hours_per_week: 40, max_consecutive_days: 5 }],
+        [],
+        [1, 2, 3, 4, 5].map((d) => ({
+          id: d,
+          date: `2026-06-0${d}`,
+          start_time: '09:00',
+          end_time: '17:00',
+        })),
+        [{ user_id: 42, id: 1, name: 'Full-time', is_active: 1, max_hours_per_week: 48 }],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 48 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-06',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.violations ?? []).not.toContainEqual(expect.objectContaining({ code: 'MAX_WEEKLY_HOURS' }));
+    });
+
     it('enforces a global min_rest_hours policy', async () => {
       const pool = makePool(
         [],

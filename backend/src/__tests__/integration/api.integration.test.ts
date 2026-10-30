@@ -3115,6 +3115,27 @@ describe('working-time limits reach the optimizer (#838, #883)', () => {
     });
   });
 
+  it('does not let a default preferences row tighten a contract that matches the policy', async () => {
+    // EU-preset shape: 48 h policy, 48 h contract, and the 40 h every
+    // preferences row carries. Five 9 h shifts are 45 h — legal under the
+    // contract, refused at the fifth under the preference default.
+    const { scheduleId, personId } = await loneCandidateSchedule(
+      [61, 62, 63, 64, 65].map((d): [number, string, string] => [d, '08:00:00', '17:00:00'])
+    );
+    await defaultPreferences(personId);
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, max_hours_per_week, is_active) VALUES (?, 48, 1)`,
+      [`48h week ${tag()}`]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE())`,
+      [personId, contract.insertId]
+    );
+    await withPolicy('max_hours_week', { hours: 48 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(5);
+    });
+  });
+
   it("does not let a default preferences row lift the organization's consecutive-days policy", async () => {
     const { scheduleId, personId } = await loneCandidateSchedule([
       [61, '09:00:00', '17:00:00'],

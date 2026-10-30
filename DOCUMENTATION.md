@@ -732,6 +732,13 @@ The rule, per limit:
   40/5 into every row it creates, and the demo seed creates one for everyone,
   so a 36h / 4-day policy reached nobody who had a preferences row. A stricter
   personal value is still honoured.
+- **The contract and the preference are one personal layer, contract first**:
+  the preference speaks only where no contract states the limit, and the
+  policy ceiling is applied to that one value. Treating them as separate
+  layers (the tightest of all three) made the preference row's 40h / 5-day
+  defaults binding wherever a policy existed: under the EU preset (48h,
+  6 days) a 48h / 6-day full-time contract resolved to 40h / 5, so applying a
+  looser preset silently tightened everyone.
 - **With no policy value**, the contract, then the preference, then
   `system_settings` (`scheduling.*`), then the defaults (40h, 5 days, 8h) —
   the setting and the default are fallbacks, not rules anyone adopted.
@@ -852,7 +859,7 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Exit code 1 with status `INFEASIBLE`, `UNKNOWN` (time limit, no solution) or `MODEL_INVALID` | No schedule in the result → `optimize()` logs a warning and falls back to greedy; the reason names the status |
 | Any other non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
 | Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s if the process has not exited → `optimize()` falls back to greedy |
-| The child exits before reading the problem (e.g. `python3` without ortools), so writing it fails with `EPIPE` | Handled on stdin → `optimize()` falls back to greedy. Unhandled, the stream error was thrown as an uncaught exception and took the backend down (#836). The error is recorded and the run settles on the child's `close`, so the degraded reason is the child's own stderr (`ModuleNotFoundError: No module named 'ortools'`), not the `EPIPE` that nearly always reaches Node first; a 2 s timer settles with the `EPIPE` only if the child does not exit |
+| The child exits before reading the problem (e.g. `python3` without ortools), so writing it fails with `EPIPE` | Handled on stdin → `optimize()` falls back to greedy. Unhandled, the stream error was thrown as an uncaught exception and took the backend down (#836). The error is recorded and the run settles on the child's `close`, so the degraded reason is the child's own stderr (`ModuleNotFoundError: No module named 'ortools'`), not the `EPIPE` that nearly always reaches Node first; a 2 s timer terminates the child and settles with the `EPIPE` only if it does not exit. A crash reason is the last 500 characters of stderr; on exit 0 with unreadable stdout it is the parse error, not the progress log |
 | stdout beyond 64 MB | The process is terminated → `optimize()` falls back to greedy. Only the last 64 KB of stderr is kept, as the reason for a crash that wrote no JSON |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
 
@@ -860,7 +867,10 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 included, and it is set strictly inside the watchdog: `OPTIMIZATION_TIMEOUT`
 minus a margin of a tenth (at least 5 s) for the interpreter start, CP-SAT
 stopping slightly late, and the result's serialisation and parse
-(`solverTimeLimitSeconds`). `OPTIMIZATION_TIMEOUT` below 10 000 ms is refused at
+(`solverTimeLimitSeconds`). **Upgrade note:** `OPTIMIZATION_TIMEOUT` is a plain
+integer of milliseconds, and a value below 10 000 or a non-numeric one (such as
+`5m`, which used to be read as 5 ms) now refuses to start; check deployments
+that set it. It is refused at
 startup: under about 6 s the solver's limit (never less than 1 s) would reach the
 watchdog. The script measures, from process start — before the ortools import,
 which alone takes a few hundred milliseconds — its start-up, input parse and

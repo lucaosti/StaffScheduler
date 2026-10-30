@@ -78,6 +78,27 @@ describe('the global policy is a ceiling', () => {
     expect(limits).toEqual({ maxHoursPerWeek: 20, maxConsecutiveDays: 3, minRestHoursBetweenShifts: 12 });
   });
 
+  it("lets a contract matching the policy stand over the preference row's 40 h / 5-day defaults", async () => {
+    // The EU preset (48 h, 6 days) with full-time 48 h / 6-day contracts: the
+    // default preferences row must not quietly tighten everyone to 40 h / 5.
+    // The contract and the preference are one personal layer, contract first;
+    // only the policy sits above it.
+    const limits = await resolve({
+      preferences: [{ user_id: 7, max_hours_per_week: 40, max_consecutive_days: 5 }],
+      contracts: [contract({ max_hours_per_week: 48, max_consecutive_days: 6 })],
+      policies: [policy('max_hours_week', { hours: 48 }), policy('max_consecutive_days', { days: 6 })],
+    });
+    expect(limits).toMatchObject({ maxHoursPerWeek: 48, maxConsecutiveDays: 6 });
+  });
+
+  it('still applies a stricter preference under the policy when no contract states the limit', async () => {
+    const limits = await resolve({
+      preferences: [{ user_id: 7, max_hours_per_week: 40, max_consecutive_days: 5 }],
+      policies: [policy('max_hours_week', { hours: 48 })],
+    });
+    expect(limits.maxHoursPerWeek).toBe(40);
+  });
+
   it('leaves the old order in place when no policy exists: contract, preference, setting', async () => {
     const limits = await resolve({
       preferences: [{ user_id: 7, max_hours_per_week: 40, max_consecutive_days: null }],
