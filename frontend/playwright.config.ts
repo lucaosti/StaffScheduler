@@ -22,6 +22,8 @@ const SKIP_WEB_SERVER = process.env.E2E_SKIP_WEB_SERVER === '1';
 
 export default defineConfig({
   testDir: './e2e',
+  // One ADMIN login per run, shared through `adminPage` (see the file).
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

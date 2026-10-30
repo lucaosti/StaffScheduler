@@ -12,6 +12,7 @@
 import React, { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { isRtl } from './index';
+import { applyBootstrapDirection } from './bootstrapStylesheet';
 
 const DirectionSync: React.FC = () => {
   const { i18n } = useTranslation();
@@ -21,6 +22,8 @@ const DirectionSync: React.FC = () => {
       const dir = isRtl(locale) ? 'rtl' : 'ltr';
       document.documentElement.setAttribute('dir', dir);
       document.documentElement.setAttribute('lang', locale);
+      // `dir` alone does not mirror Bootstrap's utilities (#845).
+      void applyBootstrapDirection(dir);
     };
 
     applyDirection(i18n.language);

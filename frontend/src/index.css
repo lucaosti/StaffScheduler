@@ -300,12 +300,11 @@ code {
  * RTL support (i18n).
  *
  * `<html dir="rtl">` is set reactively by `DirectionSync` when the active
- * locale is Arabic. Bootstrap 5's utility classes (`ms-*`, `me-*`,
- * `text-start`, `text-end`, ...) are logical properties already, so most of
- * the app mirrors correctly with no extra CSS — confirmed on the Login page
- * (`pages/Auth/Login.tsx`), which uses only those utilities and needed no
- * overrides here. This block exists for the cases Bootstrap's utilities
- * don't cover: physical (non-logical) properties defined above, like
+ * locale is Arabic, and the RTL build of Bootstrap is linked in its place
+ * (`i18n/bootstrapStylesheet.ts`; the default build's utilities are physical,
+ * `.ms-2` being `margin-left`). That mirrors Bootstrap's own classes. This
+ * block exists for what Bootstrap does not ship: physical properties in the
+ * app's own CSS above, like
  * `.sidebar`'s `left`/`border-right` and `.main-content`'s `margin-left`.
  * Physical properties only make sense for LTR, so keep new custom CSS on
  * logical properties (`margin-inline-start`, `inset-inline-start`, ...)

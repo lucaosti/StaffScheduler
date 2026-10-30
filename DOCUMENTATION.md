@@ -1108,9 +1108,15 @@ manages the override rows.
 **RTL**: `frontend/src/i18n/DirectionSync.tsx`, mounted once in `App.tsx`, reactively sets
 `dir` and `lang` on `<html>` from the active i18next locale (`dir="rtl"` for Arabic). It
 targets `<html>` rather than a nested wrapper so anything rendered outside the React tree
-(Bootstrap modals, portals) still inherits the correct writing direction. Bootstrap 5's
-utility classes (`ms-*`, `me-*`, `text-start`, `text-end`, ...) are logical properties
-already, so most of the app mirrors correctly with zero extra CSS. `frontend/src/index.css`
+(Bootstrap modals, portals) still inherits the correct writing direction. `dir` alone
+does not mirror Bootstrap: its default build defines the utilities (`ms-*`, `me-*`,
+`text-start`, `text-end`, ...) as physical properties (`.ms-2` is `margin-left`). So
+Bootstrap is linked, not bundled: `index.tsx` imports both `bootstrap.min.css` and
+`bootstrap.rtl.min.css` as URLs, and `i18n/bootstrapStylesheet.ts` attaches the one
+matching the direction — at startup, before the first render, and again from
+`DirectionSync` on every locale change, keeping the old sheet until the new one has
+loaded (#845). The link is the first stylesheet in `<head>`, so the app's own CSS still
+overrides it. `frontend/src/index.css`
 carries a documented `[dir='rtl']` override block for the handful of physical (non-logical)
 properties the app's own CSS still uses (`.sidebar`'s `left`/`border-right`,
 `.main-content`'s `margin-left`) — new custom CSS should prefer logical properties

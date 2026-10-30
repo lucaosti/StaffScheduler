@@ -10,14 +10,13 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { ADMIN, login } from './helpers';
+import { adminPage } from './helpers';
 
-test('the shift card menu opens and its Edit action opens the editor', async ({ page }) => {
-  await login(page, ADMIN.email, ADMIN.password);
+test('the shift card menu opens and its Edit action opens the editor', async ({ browser }) => {
+  const page = await adminPage(browser);
   await page.goto('/shifts');
 
-  const toggle = page.getByRole('button', { name: 'Shift actions' }).first();
-  await toggle.click();
+  await page.getByRole('button', { name: 'Shift actions' }).first().click();
   const edit = page.getByRole('button', { name: 'Edit', exact: true });
   await expect(edit).toBeVisible();
   await edit.click();
@@ -25,8 +24,8 @@ test('the shift card menu opens and its Edit action opens the editor', async ({ 
   await expect(page.getByRole('dialog')).toBeVisible();
 });
 
-test('the notification bell opens its menu', async ({ page }) => {
-  await login(page, ADMIN.email, ADMIN.password);
+test('the notification bell opens its menu', async ({ browser }) => {
+  const page = await adminPage(browser);
 
   await page.getByRole('button', { name: /^Notifications/ }).click();
 
