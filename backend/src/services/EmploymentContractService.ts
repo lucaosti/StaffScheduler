@@ -248,30 +248,40 @@ export class EmploymentContractService {
   }
 
   /**
-   * The limits to enforce for each user over a scheduling period.
+   * The limits to enforce for each user over a scheduling period, and which
+   * users' contracts cover the WHOLE period.
    *
-   * Returns the tightest bound in force at any point in `[startDate, endDate]`
-   * — see the module note for why conservative rather than per-shift. Users
-   * with no contract are absent from the map; callers apply their own
-   * defaults, which keeps this function's answer honest (no contract is not
-   * the same as a contract with no limits).
+   * `limits` holds the tightest bound in force at any point in
+   * `[startDate, endDate]` — see the module note for why conservative rather
+   * than per-shift. Users with no contract are absent from it; callers apply
+   * their own defaults, which keeps this answer honest (no contract is not the
+   * same as a contract with no limits).
+   *
+   * WHY COVERAGE IS RETURNED. The tightest value among contracts says nothing
+   * about the days NO contract covers. An 8 h-rest contract ending on the 15th
+   * of a month-long schedule used to set the rest for the whole month, so the
+   * 20th — governed by an 11 h organization policy — got a 9 h turnaround that
+   * ComplianceEngine then flagged. A caller holding the organization's limits
+   * needs to know when they also apply for part of the period, and only this
+   * query has the dates to tell it.
    */
-  async resolveLimitsForPeriod(
+  async resolveForPeriod(
     userIds: number[],
     startDate: string,
     endDate: string
-  ): Promise<Map<number, ContractLimits>> {
+  ): Promise<{ limits: Map<number, ContractLimits>; fullyCovered: Set<number> }> {
     const resolved = new Map<number, ContractLimits>();
-    if (userIds.length === 0) return resolved;
+    const fullyCovered = new Set<number>();
+    if (userIds.length === 0) return { limits: resolved, fullyCovered };
 
     // Inlined only after being coerced to integers — these are ids from the
     // caller's own query, and an IN list cannot be a single bound parameter.
     const ids = userIds.map((id) => Number(id)).filter(Number.isInteger);
-    if (ids.length === 0) return resolved;
+    if (ids.length === 0) return { limits: resolved, fullyCovered };
 
     const params: SqlParam[] = [endDate, startDate];
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT uec.user_id, c.*
+      `SELECT uec.user_id, uec.effective_from AS assignment_from, uec.effective_to AS assignment_to, c.*
          FROM user_employment_contracts uec
          JOIN employment_contracts c ON c.id = uec.contract_id
         WHERE uec.user_id IN (${inClause(ids)})
@@ -322,6 +332,39 @@ export class EmploymentContractService {
       );
     }
 
-    return resolved;
+    const spans = new Map<number, Array<[string, string]>>();
+    for (const row of rows) {
+      const userId = row.user_id as number;
+      // An absent end is "still in force"; an absent start cannot come from
+      // the table (NOT NULL) and is read as "from before the period".
+      const from = row.assignment_from ? DateUtils.toDateString(row.assignment_from as Date | string) : startDate;
+      const to = row.assignment_to ? DateUtils.toDateString(row.assignment_to as Date | string) : '9999-12-31';
+      spans.set(userId, [...(spans.get(userId) ?? []), [from, to]]);
+    }
+    for (const [userId, list] of spans) {
+      if (coversPeriod(list, startDate, endDate)) fullyCovered.add(userId);
+    }
+
+    return { limits: resolved, fullyCovered };
   }
 }
+
+/** The day after a `YYYY-MM-DD` date. */
+const nextDay = (date: string): string => {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+};
+
+/** Whether the inclusive date spans, together, cover every day of `[start, end]`. */
+const coversPeriod = (spans: Array<[string, string]>, start: string, end: string): boolean => {
+  let uncovered = start; // first day not yet known to be covered
+  for (const [from, to] of [...spans].sort(([a], [b]) => a.localeCompare(b))) {
+    if (from > uncovered) return false; // a gap before this span
+    // Compared before stepping, so an open end (9999-12-31) never needs a
+    // next day computed.
+    if (to >= end) return true;
+    if (to >= uncovered) uncovered = nextDay(to);
+  }
+  return false;
+};

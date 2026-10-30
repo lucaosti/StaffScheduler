@@ -52,7 +52,7 @@
  */
 
 export type { ValidatedAssignment } from './constraints/hardConstraints';
-export { findConstraintViolations } from './constraints/hardConstraints';
+export { findConstraintViolations, minRestHoursFor } from './constraints/hardConstraints';
 
 export type { OverCommitment } from './constraints/coverage';
 export { coverageShortfalls, findOverCommitments } from './constraints/coverage';

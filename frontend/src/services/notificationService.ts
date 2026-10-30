@@ -76,7 +76,11 @@ export type PushSubscribeData =
 export const subscribePush = (data: PushSubscribeData): Promise<ApiResponse<unknown>> =>
   apiClient.post<unknown, '/notifications/push/subscribe'>('/notifications/push/subscribe', data);
 
-export const unsubscribePush = (endpoint: string): Promise<ApiResponse<unknown>> =>
+export const unsubscribePush = (
+  endpoint: string,
+  options: { signal?: AbortSignal; sessionRecovery?: boolean } = {}
+): Promise<ApiResponse<unknown>> =>
   apiClient.delete<unknown, '/notifications/push/subscribe'>('/notifications/push/subscribe', {
     body: { endpoint },
+    ...options,
   });

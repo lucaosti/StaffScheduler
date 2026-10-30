@@ -25,7 +25,7 @@ import { DateUtils } from '../utils';
 import { inClause } from '../utils/sql';
 import { isWeekendDay, isNightWork } from '../optimization/constraintValidator';
 import { EmployeeLoanService } from './EmployeeLoanService';
-import { EmploymentContractService } from './EmploymentContractService';
+import { WorkingTimeLimitsService } from './WorkingTimeLimitsService';
 import {
   carriedLoads,
   type CategoryLoad,
@@ -309,9 +309,7 @@ export class AutoScheduleInputLoader {
                 DISTINCT CONCAT(sk.name, ':', us.proficiency_level)
                 ORDER BY sk.name
               ) AS skill_levels,
-              COALESCE(up.max_hours_per_week, 40) AS max_hours_per_week,
               COALESCE(up.min_hours_per_week, 0)  AS min_hours_per_week,
-              COALESCE(up.max_consecutive_days, 5) AS max_consecutive_days,
               u.hourly_rate
          FROM users u
          LEFT JOIN user_departments ud ON u.id = ud.user_id AND ud.department_id = ?
@@ -385,11 +383,13 @@ export class AutoScheduleInputLoader {
       employeeIds
     );
 
-    const contractLimits = await new EmploymentContractService(this.pool).resolveLimitsForPeriod(
-      employeeIds,
-      startDate,
-      endDate
-    );
+    // Weekly hours, consecutive days and rest through the chain
+    // ComplianceEngine applies to a manual assignment (contract, preference,
+    // policy, system setting); the contracts read on the way supply the
+    // contract-only limits too.
+    const { limits: workingTimeLimits, contracts: contractLimits } = await new WorkingTimeLimitsService(
+      this.pool
+    ).resolve(employeeIds, startDate, endDate);
 
     // Filtered against `employeeIds`, not a fresh `user_departments` lookup —
     // that set already includes anyone admitted via a loan above, and a
@@ -458,6 +458,7 @@ export class AutoScheduleInputLoader {
         kind: r.kind as 'apart' | 'requires',
       })),
       contractLimits,
+      workingTimeLimits,
       unavailableByUser: expandUnavailability(unavailRows),
       externalAssignmentsByUser: groupAssignmentsByUser(externalRows),
       carried: carriedLoads(

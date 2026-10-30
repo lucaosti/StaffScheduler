@@ -41,7 +41,7 @@ describe('resolveLimitsForPeriod', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[{ user_id: 7, ...contractRow() }], []]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -76,7 +76,7 @@ describe('resolveLimitsForPeriod', () => {
       [],
     ]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -100,7 +100,7 @@ describe('resolveLimitsForPeriod', () => {
       [],
     ]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -124,7 +124,7 @@ describe('resolveLimitsForPeriod', () => {
       [],
     ]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -151,7 +151,7 @@ describe('resolveLimitsForPeriod', () => {
       [],
     ]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -179,7 +179,7 @@ describe('resolveLimitsForPeriod', () => {
       [],
     ]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7],
       '2033-04-01',
       '2033-04-30'
@@ -192,7 +192,7 @@ describe('resolveLimitsForPeriod', () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], []]);
 
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [7, 8],
       '2033-04-01',
       '2033-04-30'
@@ -206,7 +206,7 @@ describe('resolveLimitsForPeriod', () => {
 
   it('does not query at all for an empty user list', async () => {
     const { pool, execute } = makePool();
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [],
       '2033-04-01',
       '2033-04-30'
@@ -218,7 +218,7 @@ describe('resolveLimitsForPeriod', () => {
   it('inlines only integer ids', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], []]);
-    await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    await new EmploymentContractService(pool).resolveForPeriod(
       [7, NaN, 9] as number[],
       '2033-04-01',
       '2033-04-30'
@@ -233,7 +233,7 @@ describe('resolveLimitsForPeriod', () => {
 
   it('does not query when every id is non-integer', async () => {
     const { pool, execute } = makePool();
-    const limits = await new EmploymentContractService(pool).resolveLimitsForPeriod(
+    const { limits } = await new EmploymentContractService(pool).resolveForPeriod(
       [NaN, 1.5] as number[],
       '2033-04-01',
       '2033-04-30'

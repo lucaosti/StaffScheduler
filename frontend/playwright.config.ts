@@ -22,6 +22,8 @@ const SKIP_WEB_SERVER = process.env.E2E_SKIP_WEB_SERVER === '1';
 
 export default defineConfig({
   testDir: './e2e',
+  // One ADMIN login per run, shared through `adminPage` (see the file).
+  globalSetup: './e2e/global-setup.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -43,6 +45,15 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+    // Safari's engine, which the Capacitor iOS app's WKWebView also uses, so
+    // engine differences in layout, events and CSS are caught. Note what it
+    // does not cover: Playwright's WebKit is the Linux build, which focuses a
+    // button on click; the macOS/iOS convention of not doing so (the cause of
+    // the menus' blur bug, #840 review) is emulated in menus.spec.ts.
+    {
+      name: 'webkit',
+      use: { ...devices['Desktop Safari'] },
     },
   ],
   webServer: SKIP_WEB_SERVER

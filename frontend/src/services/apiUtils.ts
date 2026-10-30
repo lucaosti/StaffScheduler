@@ -51,6 +51,19 @@ export class ApiError extends Error {
 }
 
 /**
+ * True when a failed session refresh means the session is OVER (#842 review).
+ *
+ * Only the server refusing the refresh token is that: a 401, or the
+ * REFRESH_SUPERSEDED that `authService` rethrows after revoking a family it
+ * believes stolen. A 5xx during a rolling deploy, or a network error, says
+ * nothing about the session — signing everyone out on one would turn a
+ * deploy blip into a mass logout; the failing request simply reports its
+ * error and the next one tries again.
+ */
+export const isSessionRefusal = (error: unknown): boolean =>
+  error instanceof ApiError && (error.status === 401 || error.code === 'REFRESH_SUPERSEDED');
+
+/**
  * The sentence shown for any server fault (5xx), in the current language,
  * quoting the request id when there is one (#895).
  *

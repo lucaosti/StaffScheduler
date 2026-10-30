@@ -25,7 +25,7 @@
  */
 
 import { ApiResponse, LoginRequest, LoginResponse, User } from '../types';
-import { apiClient } from '../api/client';
+import { apiClient, setSessionRefresher } from '../api/client';
 import { API_BASE_URL, ApiError, getAuthHeaders } from './apiUtils';
 import {
   MOBILE_CLIENT_HEADER,
@@ -157,6 +157,14 @@ export const refreshToken = (): Promise<ApiResponse<LoginResponse>> => {
   return inFlight;
 };
 
+// The client's reactive refresh-and-retry on an expired session (see "SESSION
+// RECOVERY" in api/client.ts) runs this same single-flight refresh. A 2xx
+// that does not report success is a failed refresh too.
+setSessionRefresher(async () => {
+  const response = await refreshToken();
+  if (!response.success) throw new ApiError('Session refresh failed', 401);
+});
+
 /**
  * Logout is intentionally fire-and-forget: the server revokes the session and
  * clears the cookies, but the client should complete its local logout even
@@ -170,15 +178,32 @@ export const refreshToken = (): Promise<ApiResponse<LoginResponse>> => {
  * On the native platform the stored tokens are cleared regardless of whether
  * the network call succeeds — the device should forget the session either way.
  */
+/**
+ * How long the revocation may take before this client stops waiting. `login`
+ * waits for a pending revocation (AuthContext), so one stalled on a dead
+ * connection must not hold the next sign-in forever (#841 re-review). A
+ * timer-driven AbortController rather than `AbortSignal.timeout`: the same
+ * effect, and a timer the tests can drive.
+ */
+const REVOCATION_TIMEOUT_MS = 5000;
+
 export const logout = async (): Promise<void> => {
   const native = isNativePlatform();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REVOCATION_TIMEOUT_MS);
   try {
     await fetch(`${API_BASE_URL}/auth/refresh/logout`, {
       method: 'POST',
+      // The revocation must outlive the page: a user who clicks Logout and
+      // closes the tab would otherwise leave the 30-day refresh cookie live,
+      // signing the next visitor in as them (#841 review).
+      keepalive: true,
+      signal: controller.signal,
       ...getAuthHeaders(clientTypeHeaders()),
       ...(native ? { body: JSON.stringify({ refreshToken: getCachedRefreshToken() ?? undefined }) } : {}),
     });
   } finally {
+    clearTimeout(timer);
     if (isNativePlatform()) await clearTokens();
   }
 };

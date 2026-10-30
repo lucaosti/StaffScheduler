@@ -6,7 +6,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 
 import Layout from './Layout';
@@ -105,11 +105,40 @@ describe('Header', () => {
     await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
   });
 
+  /**
+   * The menu used to rely on Bootstrap's JavaScript (`data-bs-toggle`), which
+   * the app never loads, so clicking the bell did nothing in a browser. jsdom
+   * applies no stylesheet, which is why every test here could still click an
+   * item of a menu no user could open. The menu is now mounted only while
+   * open, so a test that skips opening it fails the way a user would.
+   */
+  it('opens the bell menu on click and closes it on Escape and outside clicks', async () => {
+    render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
+    await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
+    const bell = screen.getByLabelText('Notifications');
+
+    expect(bell).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('No new notifications')).not.toBeInTheDocument();
+
+    fireEvent.click(bell);
+    expect(bell).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('No new notifications')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByText('No new notifications')).not.toBeInTheDocument();
+
+    fireEvent.click(bell);
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByText('No new notifications')).not.toBeInTheDocument();
+    expect(bell).toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('shows no badge and the empty state when there are no notifications', async () => {
     render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
     await waitFor(() =>
       expect(notificationService.getUnreadCount).toHaveBeenCalled()
     );
+    fireEvent.click(screen.getByLabelText('Notifications'));
     expect(screen.getByText('No new notifications')).toBeInTheDocument();
     expect(screen.getByLabelText('Notifications')).toBeInTheDocument();
   });
@@ -128,7 +157,7 @@ describe('Header', () => {
 
     render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
-    expect(await screen.findByLabelText('Notifications (2 unread)')).toBeInTheDocument();
+    fireEvent.click(await screen.findByLabelText('Notifications (2 unread)'));
     const item = await screen.findByText('Shift assigned');
     fireEvent.click(item);
 
@@ -151,13 +180,17 @@ describe('Header', () => {
 
     render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
-    const markAll = await screen.findByRole('button', { name: /mark all read/i });
+    fireEvent.click(await screen.findByLabelText('Notifications (1 unread)'));
+    // A role="menu" holds menuitems only: every <li> is role="none", so none
+    // reads as a plain list item (#840 re-review).
+    const markAll = await screen.findByRole('menuitem', { name: /mark all read/i });
+    expect(within(screen.getByRole('menu')).queryAllByRole('listitem')).toHaveLength(0);
     fireEvent.click(markAll);
 
     await waitFor(() =>
       expect(notificationService.markAllNotificationsRead).toHaveBeenCalled()
     );
-    expect(screen.queryByRole('button', { name: /mark all read/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /mark all read/i })).not.toBeInTheDocument();
   });
 
   it('degrades silently when the notifications API fails', async () => {
@@ -167,6 +200,7 @@ describe('Header', () => {
     render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
     await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
+    fireEvent.click(screen.getByLabelText('Notifications'));
     expect(screen.getByText('No new notifications')).toBeInTheDocument();
   });
 });

@@ -160,6 +160,10 @@ export const generateInstance = (seed: number): OptimizationProblem => {
     };
     if (rng.chance(0.6)) employee.max_hours_per_day = rng.pick(DAILY_CAPS);
     if (rng.chance(0.4)) employee.max_consecutive_days = rng.int(1, 3);
+    // An employee's own rest requirement, as a contract or policy resolves
+    // it (#838): often not the problem-wide figure, so two people on the
+    // same pair of shifts can be held to different gaps.
+    if (rng.chance(0.4)) employee.min_hours_between_shifts = rng.pick(REST_HOURS);
     const levels = Object.fromEntries(skills.filter(() => rng.chance(0.6)).map((s) => [s, rng.int(1, 5)]));
     if (Object.keys(levels).length > 0) employee.skill_levels = levels;
     if (rng.chance(0.4)) {
@@ -234,6 +238,10 @@ function* reductions(problem: OptimizationProblem): Generator<OptimizationProble
     }
     for (let k = 0; k < e.unavailable_dates.length; k++) {
       yield withEmployee(i, { ...e, unavailable_dates: e.unavailable_dates.filter((_, j) => j !== k) });
+    }
+    if (e.min_hours_between_shifts !== undefined) {
+      const { min_hours_between_shifts: _rest, ...withoutRest } = e;
+      yield withEmployee(i, withoutRest);
     }
   }
   for (let i = 0; i < shifts.length; i++) {

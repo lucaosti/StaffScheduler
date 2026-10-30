@@ -24,6 +24,7 @@ import { DateUtils } from '../utils';
 import { isWeekendDay, isNightWork } from '../optimization/constraintValidator';
 import type { OptimizationProblem } from '../optimization/types';
 import type { ContractLimits } from './EmploymentContractService';
+import type { WorkingTimeLimits } from './WorkingTimeLimitsService';
 
 /**
  * A shift row as the loader's `GROUP_CONCAT` query returns it.
@@ -44,14 +45,20 @@ export interface ShiftInputRow {
   qualified_staff?: string | null;
 }
 
-/** An employee row as the candidate-pool query returns it. */
+/**
+ * An employee row as the candidate-pool query returns it.
+ *
+ * Weekly hours, consecutive days and rest are NOT here: they are resolved per
+ * person by WorkingTimeLimitsService (`ScheduleInputs.workingTimeLimits`).
+ * This row used to carry them as `COALESCE(preference, 40)` and
+ * `COALESCE(preference, 5)`, which skipped the organization's policies and
+ * settings that ComplianceEngine applied to the same person (#883).
+ */
 export interface EmployeeInputRow {
   id: number;
   skill_names?: string | null;
   skill_levels?: string | null;
-  max_hours_per_week: number;
   min_hours_per_week: number;
-  max_consecutive_days: number;
   /** DECIMAL, so mysql2 hands it over as a string. */
   hourly_rate?: string | number | null;
 }
@@ -98,6 +105,13 @@ export interface ScheduleInputs {
   pinned: Array<{ employee_id: string; shift_id: string }>;
   pairings: Array<{ employee_id: string; other_id: string; kind: 'apart' | 'requires' }>;
   contractLimits: Map<number, ContractLimits>;
+  /**
+   * Weekly hours, consecutive days and minimum rest per employee, resolved
+   * through the chain ComplianceEngine uses. Required for every employee in
+   * `employees`: the loader resolves the whole candidate pool, and a missing
+   * entry is a fault rather than a reason to invent a limit.
+   */
+  workingTimeLimits: Map<number, WorkingTimeLimits>;
   unavailableByUser: Map<number, string[]>;
   externalAssignmentsByUser: Map<
     number,
@@ -210,26 +224,23 @@ export const carriedLoads = (
 };
 
 /**
- * Baseline limits applied to the problem as a whole.
- *
- * Per-employee contract limits override these individually; these are what the
- * engines fall back on for anyone the overrides do not reach.
- */
-const GLOBAL_CONSTRAINTS = {
-  max_hours_per_week: 40,
-  max_consecutive_days: 5,
-  min_hours_between_shifts: 8,
-} as const;
-
-/**
  * Builds the problem handed to whichever engine runs.
  *
- * WHY WORKING-TIME LIMITS COME FROM THE CONTRACT FIRST. They used to live in
- * `user_preferences`, beside genuine preferences and with no validity period at
- * all, so a person moving to part-time overwrote the old value and a schedule
- * generated before the change appeared to violate a limit that did not apply
- * when it ran. Employees with no contract keep the preference-derived defaults,
- * so an installation that has not set contracts up behaves exactly as before.
+ * WHY THE LIMITS ARE PER EMPLOYEE AND RESOLVED ELSEWHERE. Weekly hours,
+ * consecutive days and rest used to come from a problem-wide constant (8 h of
+ * rest for everyone, `GLOBAL_CONSTRAINTS`) and from the preference row with
+ * hard-coded fallbacks, while ComplianceEngine resolved the same limits
+ * through the contract, the preference, the organization's policies and the
+ * system settings. An 11 h-rest contract, or an organization on the EU preset,
+ * got 8 h from every generated schedule and then saw ComplianceEngine flag it
+ * (#838, #883). They now come from WorkingTimeLimitsService, the resolver
+ * ComplianceEngine itself uses, so the problem carries the same number for
+ * each person that a manual assignment is judged against — and states no
+ * problem-wide limit at all.
+ *
+ * The contract's OTHER limits (minimum weekly hours, daily cap, days off) have
+ * no policy or setting layer, so they still come from the contract directly,
+ * with the preference row for minimum hours.
  */
 export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationProblem => ({
   shifts: inputs.shifts.map((s) => ({
@@ -245,11 +256,14 @@ export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationPr
   })),
   employees: inputs.employees.map((e) => {
     const limits = inputs.contractLimits.get(e.id);
+    const working = inputs.workingTimeLimits.get(e.id);
+    if (!working) throw new Error(`No working-time limits were resolved for employee ${e.id}`);
     return {
       id: String(e.id),
-      max_hours_per_week: limits?.maxHoursPerWeek ?? e.max_hours_per_week,
+      max_hours_per_week: working.maxHoursPerWeek,
       min_hours_per_week: limits?.minHoursPerWeek ?? e.min_hours_per_week,
-      max_consecutive_days: limits?.maxConsecutiveDays ?? e.max_consecutive_days,
+      max_consecutive_days: working.maxConsecutiveDays,
+      min_hours_between_shifts: working.minRestHoursBetweenShifts,
       // Absent when no contract sets one; the engines then fall back to the
       // historical derived formula rather than leaving the day uncapped.
       max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
@@ -275,5 +289,5 @@ export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationPr
   // Python solver defaults the key to `{}` and tests membership, so an empty
   // map and an empty array behaved identically — the type was simply wrong.
   preferences: {},
-  constraints: { ...GLOBAL_CONSTRAINTS },
+  constraints: {},
 });

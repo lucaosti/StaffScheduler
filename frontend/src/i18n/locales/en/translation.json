@@ -1243,5 +1243,13 @@
   "schedule.stats.shiftCount_one": "{{count}} shift",
   "schedule.stats.shiftCount_other": "{{count}} shifts",
   "schedule.stats.employeeCount": "{{count}} employees",
-  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}"
+  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}",
+  "settings.work.title": "Work Preferences",
+  "settings.work.constraints": "Schedule Constraints",
+  "settings.work.limitsNote": "Your working-time limits are set by your manager. They are shown here because they govern what you can be scheduled for.",
+  "settings.work.maxHoursPerWeek": "Max Hours Per Week",
+  "settings.work.maxConsecutiveDays": "Max Consecutive Days",
+  "settings.work.noLimits": "No working-time limits are on record for you.",
+  "settings.work.loading": "Loading your working-time limits…",
+  "dashboard.stats.unavailable": "Unavailable"
 }

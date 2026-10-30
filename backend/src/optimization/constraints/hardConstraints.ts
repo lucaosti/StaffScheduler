@@ -58,6 +58,24 @@ export interface ValidatedAssignment {
 const DEFAULT_MIN_REST_HOURS = 8;
 
 /**
+ * The rest an employee must have between two shifts: their own requirement
+ * when the problem states one (#838), otherwise the problem-wide figure, then
+ * 8 h. One definition, which the greedy engine calls too, so the two cannot
+ * read the precedence differently; schedule_optimizer.py's `_rest_minutes`
+ * is held to it by the parity suite.
+ */
+export const minRestHoursFor = (
+  problem: OptimizationProblem,
+  employee: OptimizationProblem['employees'][number]
+): number => {
+  if (typeof employee.min_hours_between_shifts === 'number') return employee.min_hours_between_shifts;
+  if (typeof problem.constraints?.min_hours_between_shifts === 'number') {
+    return problem.constraints.min_hours_between_shifts;
+  }
+  return DEFAULT_MIN_REST_HOURS;
+};
+
+/**
  * Report every hard-constraint violation in a proposed solution.
  *
  * An empty array means the solution is legal under the canonical model. The
@@ -80,11 +98,6 @@ export function findConstraintViolations(
   const violations: ConstraintViolation[] = [];
   const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
   const employeesById = new Map(problem.employees.map((e) => [e.id, e]));
-
-  const minRestHours =
-    typeof problem.constraints?.min_hours_between_shifts === 'number'
-      ? problem.constraints.min_hours_between_shifts
-      : DEFAULT_MIN_REST_HOURS;
 
   // Group the decision assignments by employee, resolving each to its shift.
   const shiftsByEmployee = new Map<string, IdentifiedShift[]>();
@@ -167,7 +180,10 @@ export function findConstraintViolations(
       }
     }
 
-    // Pairwise rules: double-booking (time overlap) and minimum rest.
+    // Pairwise rules: double-booking (time overlap) and minimum rest. Rest is
+    // the employee's own requirement — their contract can ask for more than
+    // the organization's default (#838) — and only then the problem's.
+    const minRestHours = minRestHoursFor(problem, emp);
     for (let i = 0; i < worked.length; i++) {
       const [aStart, aEnd] = shiftBoundsMs(worked[i]);
       for (let j = i + 1; j < worked.length; j++) {
