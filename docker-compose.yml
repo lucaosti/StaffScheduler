@@ -1,7 +1,13 @@
 services:
   # Database Service
   mysql:
-    image: mysql:8.0.42
+    # The 8.4 LTS line, pinned to an exact release (#849): 8.0 reached end of
+    # life in April 2026, and an exact tag is what makes a build reproducible.
+    # The verification stack, the CI services and the backup sidecar below use
+    # this same tag; scripts/mysql-version.test.mjs fails on any drift. 9.x
+    # innovation releases were rejected: they are supported only until the
+    # next one, which would turn every quarter into a forced upgrade.
+    image: mysql:8.4.11
     container_name: staff_scheduler_mysql
     restart: unless-stopped
     environment:
@@ -17,9 +23,9 @@ services:
       - mysql_data:/var/lib/mysql
       - ./mysql/conf.d:/etc/mysql/conf.d:ro
     # Use MySQL 8's default caching_sha2_password (the legacy
-    # mysql_native_password plugin is deprecated and removed in MySQL 9). mysql2
-    # (backend) and go-sql-driver (dbmate) both support it over the internal
-    # network.
+    # mysql_native_password plugin is disabled by default in 8.4 and removed in
+    # MySQL 9). mysql2 (backend) and go-sql-driver (dbmate) both support it
+    # over the internal network.
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
@@ -203,7 +209,7 @@ services:
   # `ops` profile so the observability bring-up includes backups.
   backup:
     profiles: ["backup", "ops"]
-    image: mysql:8.0.42
+    image: mysql:8.4.11
     container_name: staff_scheduler_backup
     restart: unless-stopped
     depends_on:

@@ -50,7 +50,7 @@ Working on the host instead is possible but not the reference setup:
 |---|---|---|
 | Node.js | 22.12 or newer | everything (CI and both images run Node 22) |
 | npm | 10 or newer | workspace install |
-| MySQL | 8.0 | running the backend, integration tests, e2e |
+| MySQL | 8.4 LTS (the exact tag in `docker-compose.yml`) | running the backend, integration tests, e2e |
 | Python | 3.11 (CI) with a virtual environment | the CP-SAT optimizer and its tests |
 | Redis | 7 | optional; the backend falls back to in-process state without it |
 
@@ -319,7 +319,7 @@ Run this before opening a pull request. It is what CI runs.
 ```
 
 The verification stack (`docker-compose.verify.yml`) is a separate compose
-project with a disposable MySQL 8.0 on tmpfs, Redis, and a toolchain image
+project with a disposable MySQL 8.4 on tmpfs, Redis, and a toolchain image
 (`ops/toolchain/Dockerfile`) holding Node 22, the pinned OR-Tools, ruff and the
 Playwright Chromium. The repository is bind-mounted, so regenerated
 `openapi.json` and `src/api/schema.ts` appear in the working tree; the

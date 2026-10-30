@@ -1660,9 +1660,18 @@ override:
   access goes through the `dev`-profile phpMyAdmin or a temporary, explicit port
   forward — the database is never exposed to the host by default.
 - **`caching_sha2_password`.** MySQL uses its 8.x default authentication plugin;
-  the legacy `mysql_native_password` (deprecated, removed in MySQL 9) is no longer
-  forced. Both the backend driver (`mysql2`) and the migration runner
-  (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+  the legacy `mysql_native_password` (disabled by default in 8.4, removed in
+  MySQL 9) is not used. Both the backend driver (`mysql2`) and the migration
+  runner (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+- **One pinned MySQL release everywhere.** The deployment, its backup sidecar,
+  the verification stack and every CI service run the same exact 8.4 LTS tag
+  (8.0 reached end of life in April 2026). A floating tag in CI meant the
+  migrations, the integration suite and the backup round-trip were proven on
+  whatever the registry served that day rather than on what is deployed;
+  `scripts/mysql-version.test.mjs` fails if any file names a different tag. To
+  upgrade, change every occurrence in one pull request and let CI run the
+  migration round-trip, integration suite and backup-restore job on it. The 9.x
+  innovation line was rejected: each release is supported only until the next.
 
 ### Hardware-aware defaults
 
