@@ -457,7 +457,14 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   revokes the presented refresh token's whole family and blacklists the access
   JTI if the access token is still valid; a native client passes its refresh
   token in the body. Widening the cookie path so `/auth/logout` could receive it
-  was rejected for the exposure reason above.
+  was rejected for the exposure reason above. Before that call the SPA
+  deactivates this device's native push token (`DELETE
+  /notifications/push/device-token`) and drops the browser's Web Push
+  subscription, since both belong to the device rather than the person and
+  would keep delivering the signed-out user's notifications to the next one.
+  The TanStack Query cache is cleared whenever the signed-in user changes —
+  logout, or a refresh that returns a different user — so no page is served
+  from the previous user's cache.
 - **Password changes and deactivation end every session**: `UserService`
   revokes all of the user's refresh tokens, in the same transaction, whenever
   the password is changed (via `/users` or `/employees`) or the account is

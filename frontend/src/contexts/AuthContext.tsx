@@ -13,11 +13,13 @@
  * @author Luca Ostinelli
  */
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
 import { isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
-import { registerForNativePush } from '../services/nativePushService';
+import { registerForNativePush, unregisterNativePush } from '../services/nativePushService';
+import { dropWebPushSubscription } from '../services/webPushSession';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -164,10 +166,40 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
+  /**
+   * Ends the session and everything tied to it (#841).
+   *
+   * The push registrations go first because deactivating them is an
+   * authenticated call and `authService.logout` revokes the session; both are
+   * best-effort (`allSettled`), so a failure there never keeps the user signed
+   * in. The state flips immediately — the network calls finish in the
+   * background, exactly as the logout call alone did before. The query cache
+   * is cleared by the user-change effect below, after the protected pages
+   * have unmounted, so no observer refetches into the emptied cache.
+   */
   const logout = useCallback((): void => {
-    authService.logout().catch(() => {});
+    void (async () => {
+      await Promise.allSettled([unregisterNativePush(), dropWebPushSubscription()]);
+      await authService.logout().catch(() => {});
+    })();
     dispatch({ type: 'LOGOUT' });
   }, []);
+
+  // One user's cached server state must never be shown to the next (#841).
+  // The cache is app-wide and outlives a session, so without this the next
+  // user to sign in in the same tab is served the previous user's pages
+  // until each query happens to refetch. Keyed on the user id, so it covers
+  // both a logout (A → none) and a silent switch (A → B: another tab signed
+  // in as B and this tab's refresh picked up B's cookie). Clearing on login
+  // as well was rejected: after a logout the cache is already empty, and a
+  // refresh for the SAME user must keep it.
+  const queryClient = useQueryClient();
+  const sessionUserId = useRef<number | null>(null);
+  const userId = state.user?.id ?? null;
+  useEffect(() => {
+    if (sessionUserId.current !== null && sessionUserId.current !== userId) queryClient.clear();
+    sessionUserId.current = userId;
+  }, [userId, queryClient]);
 
   const refreshUser = useCallback(async (): Promise<void> => {
     // Deliberately silent on failure: this runs after an action that already

@@ -15,10 +15,15 @@ import * as authService from '../services/authService';
 import * as mobileAuthStorage from '../services/mobileAuthStorage';
 import * as translationOverrideService from '../services/translationOverrideService';
 import * as organizationOverrides from '../i18n/organizationOverrides';
+import * as nativePushService from '../services/nativePushService';
+import * as webPushSession from '../services/webPushSession';
 import i18n from '../i18n';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 jest.mock('../services/authService');
 jest.mock('../services/translationOverrideService');
+jest.mock('../services/nativePushService');
+jest.mock('../services/webPushSession');
 jest.mock('../i18n/organizationOverrides');
 // Only the two startup hooks are replaced: every other export keeps its real
 // (web-platform) behaviour, so the remaining suites run exactly as before.
@@ -33,13 +38,29 @@ const mockedOverrideService = translationOverrideService as jest.Mocked<typeof t
 const mockedIsNativePlatform = mobileAuthStorage.isNativePlatform as jest.Mock;
 const mockedLoadCachedTokens = mobileAuthStorage.loadCachedTokens as jest.Mock;
 const mockedApplyOverrides = organizationOverrides.applyOrganizationOverrides as jest.Mock;
+const mockedUnregisterNativePush = nativePushService.unregisterNativePush as jest.Mock;
+const mockedDropWebPush = webPushSession.dropWebPushSubscription as jest.Mock;
 
+// The provider clears the query cache on logout and on a change of user, so it
+// needs a QueryClient; one per test, reachable as `queryClient` to assert on.
+let queryClient: QueryClient;
 const wrapper = ({ children }: { children: React.ReactNode }) => (
-  <AuthProvider>{children}</AuthProvider>
+  <QueryClientProvider client={queryClient}>
+    <AuthProvider>{children}</AuthProvider>
+  </QueryClientProvider>
 );
+
+const userA = { id: 1, email: 'a@x', firstName: 'A', lastName: 'B', role: 'admin' };
+const userB = { id: 2, email: 'b@x', firstName: 'B', lastName: 'C', role: 'employee' };
 
 beforeEach(() => {
   jest.clearAllMocks();
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  mockedUnregisterNativePush.mockResolvedValue(undefined);
+  mockedDropWebPush.mockResolvedValue(undefined);
+  // clearAllMocks keeps implementations, so a refresh one test resolved would
+  // otherwise sign the next test's "no session" bootstrap in.
+  mockedAuthService.refreshToken.mockRejectedValue(new Error('no session'));
   mockedIsNativePlatform.mockReturnValue(false);
   mockedOverrideService.getMyOverrides.mockResolvedValue({ success: true, data: {} });
 });
@@ -193,6 +214,90 @@ describe('AuthProvider actions', () => {
     expect(result.current.login).toBe(first.login);
     expect(result.current.logout).toBe(first.logout);
     expect(result.current.refreshToken).toBe(first.refreshToken);
+  });
+});
+
+/**
+ * One user's data must not survive into the next session in the same tab
+ * (#841). The query cache is app-wide and outlives the session, so without a
+ * clear the next user to sign in is served the previous user's cached pages
+ * until each query happens to refetch; push registrations belong to the
+ * device or browser, so they keep delivering the previous user's
+ * notifications.
+ */
+describe('session isolation', () => {
+  const warmCache = () => queryClient.setQueryData(['employees'], [{ id: 99, name: 'A-only' }]);
+
+  it('logout empties the query cache', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedAuthService.logout.mockResolvedValue();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    warmCache();
+
+    act(() => result.current.logout());
+
+    await waitFor(() => expect(queryClient.getQueryData(['employees'])).toBeUndefined());
+  });
+
+  it('logout drops the push registrations before ending the session', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    const order: string[] = [];
+    mockedUnregisterNativePush.mockImplementation(async () => { order.push('native'); });
+    mockedDropWebPush.mockImplementation(async () => { order.push('web'); });
+    mockedAuthService.logout.mockImplementation(async () => { order.push('logout'); });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    act(() => result.current.logout());
+
+    // The push calls need the session the logout call revokes, so they go first.
+    await waitFor(() => expect(order).toHaveLength(3));
+    expect(order.slice(0, 2).sort()).toEqual(['native', 'web']);
+    expect(order[2]).toBe('logout');
+  });
+
+  it('a failed push unregistration does not stop the logout', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedDropWebPush.mockRejectedValue(new Error('offline'));
+    mockedAuthService.logout.mockResolvedValue();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    act(() => result.current.logout());
+
+    expect(result.current.isAuthenticated).toBe(false);
+    await waitFor(() => expect(mockedAuthService.logout).toHaveBeenCalled());
+  });
+
+  it('a refresh that returns a different user empties the cache', async () => {
+    // Another tab signed in as B; this tab's next refresh carries B's cookie.
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedAuthService.refreshToken.mockResolvedValue({ success: true, data: { user: userB } as never });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    warmCache();
+
+    await act(async () => {
+      await result.current.refreshToken();
+    });
+
+    expect(result.current.user?.id).toBe(2);
+    expect(queryClient.getQueryData(['employees'])).toBeUndefined();
+  });
+
+  it('a refresh for the same user keeps the cache', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedAuthService.refreshToken.mockResolvedValue({ success: true, data: { user: userA } as never });
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    warmCache();
+
+    await act(async () => {
+      await result.current.refreshToken();
+    });
+
+    expect(queryClient.getQueryData(['employees'])).toEqual([{ id: 99, name: 'A-only' }]);
   });
 });
 

@@ -54,9 +54,18 @@ const isNativePushEnabled = (): boolean => process.env.REACT_APP_NATIVE_PUSH ===
 
 let listenersAttached = false;
 
-/** Test-only: clears the memoised "listeners attached" flag between test cases. */
+/**
+ * The device token this session registered with the backend, so logout can
+ * deactivate exactly that row. Held in memory only: a cold start re-registers
+ * on login anyway (see the file header), and a token from a previous process
+ * whose session ended without a logout is the server's to expire.
+ */
+let registeredToken: string | null = null;
+
+/** Test-only: clears the memoised listener flag and registered token between test cases. */
 export function resetNativePushListeners(): void {
   listenersAttached = false;
+  registeredToken = null;
 }
 
 /**
@@ -82,6 +91,30 @@ export const registerForNativePush = async (): Promise<void> => {
 };
 
 /**
+ * Deactivates this device's token before the session ends (#841).
+ *
+ * The backend delivers a user's notifications to every active token it holds
+ * for them, and a token identifies the device, not the person — so without
+ * this, whoever signs in next on the device receives the previous user's
+ * notifications. Called by `AuthContext.logout` BEFORE the session is
+ * revoked, because the DELETE is an authenticated call. Best-effort like
+ * registration: a failure is logged, never thrown, so logout always finishes.
+ */
+export const unregisterNativePush = async (): Promise<void> => {
+  const token = registeredToken;
+  if (!token) return;
+  registeredToken = null;
+  try {
+    await apiClient.delete<undefined, '/notifications/push/device-token'>(
+      '/notifications/push/device-token',
+      { body: { token } }
+    );
+  } catch (err) {
+    console.error('Failed to deactivate device push token', err);
+  }
+};
+
+/**
  * Attaches the plugin's listeners exactly once per app session — called
  * lazily from `registerForNativePush` rather than at module load, so a web
  * session (which never calls it) never touches the native-only plugin.
@@ -92,6 +125,7 @@ function attachListeners(): void {
 
   PushNotifications.addListener('registration', (token) => {
     const platform = Capacitor.getPlatform() === 'ios' ? 'ios' : 'android';
+    registeredToken = token.value;
     apiClient
       .post<undefined, '/notifications/push/device-token'>('/notifications/push/device-token', {
         platform,
