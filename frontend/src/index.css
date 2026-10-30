@@ -53,6 +53,19 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
+/*
+ * Stacking order — one scale, Bootstrap's own (#892):
+ *   999   sticky header, drawer backdrop
+ *   1000  fixed sidebar
+ *   1020  demo banner (`.sticky-top`)
+ *   1050  modal backdrop / 1055 modal
+ *   1090  toasts
+ * The banner used to sit at 1080, above the modals, and hid every modal's
+ * title and close button. It is sticky in the normal flow, so the fixed shell
+ * starts below it: DemoBanner publishes its height as `--demo-banner-height`
+ * (unset, i.e. 0, outside demo mode or once dismissed).
+ */
+
 /* Layout */
 .app-container {
   display: flex;
@@ -66,9 +79,9 @@ code {
   color: var(--bs-body-color);
   border-right: 1px solid var(--bs-border-color);
   position: fixed;
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-height, 0px));
   left: 0;
-  top: 0;
+  top: var(--demo-banner-height, 0px);
   overflow-y: auto;
   z-index: 1000;
   transition: transform 0.3s ease;
@@ -99,7 +112,7 @@ code {
   align-items: center;
   padding: 0 1rem;
   position: sticky;
-  top: 0;
+  top: var(--demo-banner-height, 0px);
   z-index: 999;
 }
 
