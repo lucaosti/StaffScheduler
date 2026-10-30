@@ -179,7 +179,8 @@ module.exports = [
             // -tag attributes because `Link` is a component, not a DOM tag),
             // `ExportCsvLink`'s `path` (an API route, same reasoning as
             // `to`), `EmptyState`'s `icon` (a Bootstrap Icons class name, not
-            // prose), and Bootstrap's `data-bs-*` hooks.
+            // prose), `Dropdown`'s `toggleClassName` (CSS classes, the same
+            // reasoning as `className`), and Bootstrap's `data-bs-*` hooks.
             exclude: [
               'className',
               'styleName',
@@ -192,6 +193,7 @@ module.exports = [
               'to',
               'path',
               'icon',
+              'toggleClassName',
               'data-bs-.*',
             ],
           },

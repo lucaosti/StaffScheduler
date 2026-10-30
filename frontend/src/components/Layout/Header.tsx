@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ThemeToggle from '../ThemeToggle';
 import LocaleSwitcher from '../LocaleSwitcher';
+import Dropdown from '../Dropdown';
 import * as notificationService from '../../services/notificationService';
 import type { AppNotification } from '../../services/notificationService';
 import { isInternalPath } from '../../utils/internalPath';
@@ -124,57 +125,54 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
       <div className="ms-auto d-flex align-items-center gap-2">
         <LocaleSwitcher />
         <ThemeToggle />
-        <div className="dropdown">
-          <button
-            className="btn btn-link text-body p-0 text-decoration-none position-relative"
-            type="button"
-            data-bs-toggle="dropdown"
-            aria-expanded="false"
-            aria-label={
-              unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'
-            }
-          >
-            <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
-            {unreadCount > 0 && (
-              <span
-                className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
-                style={{ fontSize: '0.6rem' }}
-              >
-                {unreadCount > 99 ? '99+' : unreadCount}
-                <span className="visually-hidden"> unread notifications</span>
-              </span>
-            )}
-          </button>
-          <ul className="dropdown-menu dropdown-menu-end" style={{ minWidth: '20rem' }}>
-            <li className="d-flex align-items-center justify-content-between px-2">
-              <h6 className="dropdown-header mb-0 px-0">Notifications</h6>
+        <Dropdown
+          toggleClassName="btn btn-link text-body p-0 text-decoration-none position-relative"
+          toggleLabel={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'}
+          toggleContent={
+            <>
+              <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
               {unreadCount > 0 && (
-                <button
-                  className="btn btn-link btn-sm text-decoration-none p-0"
-                  type="button"
-                  onClick={handleMarkAllRead}
+                <span
+                  className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+                  style={{ fontSize: '0.6rem' }}
                 >
-                  Mark all read
-                </button>
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                  <span className="visually-hidden"> unread notifications</span>
+                </span>
               )}
-            </li>
-            {recent.length === 0 && (
-              <li><span className="dropdown-item-text text-muted">No new notifications</span></li>
+            </>
+          }
+          alignEnd
+          menuStyle={{ minWidth: '20rem' }}
+        >
+          <li className="d-flex align-items-center justify-content-between px-2">
+            <h6 className="dropdown-header mb-0 px-0">Notifications</h6>
+            {unreadCount > 0 && (
+              <button
+                className="btn btn-link btn-sm text-decoration-none p-0"
+                type="button"
+                onClick={handleMarkAllRead}
+              >
+                Mark all read
+              </button>
             )}
-            {recent.map((n) => (
-              <li key={n.id}>
-                <button
-                  className="dropdown-item"
-                  type="button"
-                  onClick={() => handleSelect(n)}
-                >
-                  <div className={n.isRead ? 'text-muted' : 'fw-semibold'}>{n.title}</div>
-                  {n.body && <div className="small text-muted text-truncate">{n.body}</div>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+          </li>
+          {recent.length === 0 && (
+            <li><span className="dropdown-item-text text-muted">No new notifications</span></li>
+          )}
+          {recent.map((n) => (
+            <li key={n.id}>
+              <button
+                className="dropdown-item"
+                type="button"
+                onClick={() => handleSelect(n)}
+              >
+                <div className={n.isRead ? 'text-muted' : 'fw-semibold'}>{n.title}</div>
+                {n.body && <div className="small text-muted text-truncate">{n.body}</div>}
+              </button>
+            </li>
+          ))}
+        </Dropdown>
       </div>
     </div>
   );

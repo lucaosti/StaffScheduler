@@ -52,6 +52,15 @@ const Shifts = require('./Shifts').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
+/**
+ * Opens the first shift card's ⋯ menu. Its items are mounted only while it
+ * is open — the menu used to depend on Bootstrap's never-loaded JavaScript,
+ * and these tests clicked items no user could reach (#840).
+ */
+const openShiftMenu = async () => {
+  await userEvent.click((await screen.findAllByRole('button', { name: /shift actions/i }))[0]);
+};
+
 describe('<Shifts />', () => {
   beforeEach(() => {
     permissions = ['assignment.manage'];
@@ -138,6 +147,7 @@ describe('<Shifts />', () => {
     await userEvent.clear(screen.getByPlaceholderText(/search shifts/i));
     await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
+    await openShiftMenu();
     await userEvent.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
     await userEvent.clear(screen.getByLabelText(/notes/i));
     await userEvent.type(screen.getByLabelText(/notes/i), 'updated');
@@ -145,6 +155,7 @@ describe('<Shifts />', () => {
     expect(mockUpdateShift).toHaveBeenCalled();
 
     // Delete existing shift — now uses ConfirmModal; click Delete then Confirm
+    await openShiftMenu();
     await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
     const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
     await userEvent.click(confirmBtn);
@@ -155,11 +166,26 @@ describe('<Shifts />', () => {
     render(<Shifts />);
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
     // Click delete to open the ConfirmModal
+    await openShiftMenu();
     await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
     // Click the Cancel button inside the modal instead of Confirm
     const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
     await userEvent.click(cancelBtn);
     expect(mockDeleteShift).not.toHaveBeenCalled();
+  });
+
+  it('keeps the shift actions closed until the ⋯ button opens them, and closes after a choice', async () => {
+    render(<Shifts />);
+    const toggle = (await screen.findAllByRole('button', { name: /shift actions/i }))[0];
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: /^edit$/i })).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
   /**
@@ -170,14 +196,14 @@ describe('<Shifts />', () => {
    */
   it('offers the staffing action only with assignment.manage', async () => {
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
+    await openShiftMenu();
     expect(screen.getByRole('button', { name: /Staff/ })).toBeInTheDocument();
   });
 
   it('omits the staffing action without assignment.manage', async () => {
     permissions = [];
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
+    await openShiftMenu();
     expect(screen.queryByRole('button', { name: /Staff/ })).not.toBeInTheDocument();
     // Editing and deleting are unaffected: they are a different authority and
     // this change must not have narrowed them.
@@ -187,7 +213,7 @@ describe('<Shifts />', () => {
 
   it('opens the staffing panel for the chosen shift', async () => {
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
+    await openShiftMenu();
     await userEvent.click(screen.getByRole('button', { name: /Staff/ }));
 
     const dialog = await screen.findByRole('dialog');

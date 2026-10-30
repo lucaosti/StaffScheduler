@@ -22,7 +22,7 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
@@ -39,6 +39,9 @@ const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
   const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
+  // React state, not Bootstrap's `data-bs-dismiss="alert"`: Bootstrap's
+  // JavaScript is never loaded (see components/Dropdown.tsx for why).
+  const [deniedDismissed, setDeniedDismissed] = useState(false);
 
   // Server state (stats + recent activity) is owned by TanStack Query; the retry
   // button calls refetch() directly instead of a hand-written reload.
@@ -56,14 +59,14 @@ const Dashboard: React.FC = () => {
   return (
     <div className="container-fluid py-4">
       {/* Permission denied banner — shown when redirected from a guarded route */}
-      {permissionDenied && (
-        <div className="alert alert-warning alert-dismissible fade show mb-4" role="alert">
+      {permissionDenied && !deniedDismissed && (
+        <div className="alert alert-warning alert-dismissible mb-4" role="alert">
           <i className="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
           <strong>{t('dashboard.accessDeniedTitle')}</strong> {t('dashboard.accessDeniedBody')}
           <button
             type="button"
             className="btn-close"
-            data-bs-dismiss="alert"
+            onClick={() => setDeniedDismissed(true)}
             aria-label={t('common.close')}
           ></button>
         </div>

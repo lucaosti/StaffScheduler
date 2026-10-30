@@ -104,6 +104,19 @@ describe('<Dashboard />', () => {
     expect(screen.queryByText(/target/i)).not.toBeInTheDocument();
   });
 
+  // The close button used Bootstrap's `data-bs-dismiss`, whose JavaScript is
+  // never loaded, so the notice could not be dismissed (#840).
+  it('dismisses the access-denied notice with its close button', async () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/dashboard', state: { permissionDenied: true } }]}>
+        <Dashboard />
+      </MemoryRouter>
+    );
+    expect(screen.getByText('Access denied.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('Access denied.')).not.toBeInTheDocument();
+  });
+
   it('says nothing about attention items when there are none', async () => {
     render(<MemoryRouter><Dashboard /></MemoryRouter>);
     await waitFor(() =>

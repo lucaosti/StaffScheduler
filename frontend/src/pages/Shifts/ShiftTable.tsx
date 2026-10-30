@@ -8,6 +8,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shift } from '../../types';
 import EmptyState from '../../components/EmptyState';
+import Dropdown from '../../components/Dropdown';
 import { toLocalDateString } from '../../utils/format';
 
 interface Props {
@@ -88,50 +89,45 @@ const ShiftTable: React.FC<Props> = ({
             <div className="card h-100">
               <div className="card-header d-flex justify-content-between align-items-center">
                 <h6 className="mb-0">{`${deptName} ${dateStr}`}</h6>
-                <div className="dropdown">
-                  <button
-                    className="btn btn-sm btn-outline-secondary"
-                    type="button"
-                    aria-label={t('shifts.table.shiftActionsAriaLabel')}
-                    data-bs-toggle="dropdown"
-                  >
-                    <i className="bi bi-three-dots" aria-hidden="true"></i>
-                  </button>
-                  <ul className="dropdown-menu">
+                <Dropdown
+                  toggleClassName="btn btn-sm btn-outline-secondary"
+                  toggleLabel={t('shifts.table.shiftActionsAriaLabel')}
+                  toggleContent={<i className="bi bi-three-dots" aria-hidden="true"></i>}
+                  alignEnd
+                >
+                  <li>
+                    <button
+                      className="dropdown-item"
+                      type="button"
+                      onClick={() => onEdit(shift)}
+                    >
+                      <i className="bi bi-pencil me-2" aria-hidden="true"></i>{t('common.edit')}
+                    </button>
+                  </li>
+                  {onManageStaff && (
                     <li>
                       <button
                         className="dropdown-item"
                         type="button"
-                        onClick={() => onEdit(shift)}
+                        onClick={() => onManageStaff(shift)}
                       >
-                        <i className="bi bi-pencil me-2" aria-hidden="true"></i>{t('common.edit')}
+                        <i className="bi bi-people me-2" aria-hidden="true"></i>{t('shifts.table.staff')}
                       </button>
                     </li>
-                    {onManageStaff && (
-                      <li>
-                        <button
-                          className="dropdown-item"
-                          type="button"
-                          onClick={() => onManageStaff(shift)}
-                        >
-                          <i className="bi bi-people me-2" aria-hidden="true"></i>{t('shifts.table.staff')}
-                        </button>
-                      </li>
-                    )}
-                    <li>
-                      <hr className="dropdown-divider" />
-                    </li>
-                    <li>
-                      <button
-                        className="dropdown-item text-danger"
-                        type="button"
-                        onClick={() => onDelete(shift.id!)}
-                      >
-                        <i className="bi bi-trash me-2" aria-hidden="true"></i>{t('common.delete')}
-                      </button>
-                    </li>
-                  </ul>
-                </div>
+                  )}
+                  <li>
+                    <hr className="dropdown-divider" />
+                  </li>
+                  <li>
+                    <button
+                      className="dropdown-item text-danger"
+                      type="button"
+                      onClick={() => onDelete(shift.id!)}
+                    >
+                      <i className="bi bi-trash me-2" aria-hidden="true"></i>{t('common.delete')}
+                    </button>
+                  </li>
+                </Dropdown>
               </div>
               <div className="card-body">
                 <div className="d-flex justify-content-between align-items-center mb-2">

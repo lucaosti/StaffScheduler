@@ -112,6 +112,12 @@ generated typed client (`api/client`) where the endpoint is in the OpenAPI spec,
 otherwise `handleResponse` + `getAuthHeaders` from `./apiUtils`. The frontend proxies
 all `/api/*` requests to `http://localhost:3001` in development.
 
+**Bootstrap is CSS only.** Bootstrap's JavaScript is not loaded, so `data-bs-toggle`,
+`data-bs-dismiss` and the other plugin attributes do nothing. Menus use
+`components/Dropdown.tsx`; collapses, dismissible alerts and modals are React state.
+Loading `bootstrap.bundle` was rejected because its plugins mutate DOM that React
+renders, and a re-render silently undoes them (#840).
+
 ---
 
 ## 2. Domain model
