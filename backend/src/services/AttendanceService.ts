@@ -25,6 +25,7 @@ import { AuditLogService } from './AuditLogService';
 import { GeofenceService } from './GeofenceService';
 import type { GeoPoint } from '../utils/geo';
 import { SHIFT_ABS_END_SQL } from '../utils/sql';
+import { memberCondition, unitCondition } from './access/AccessPolicy';
 
 type AttendanceStatus = 'pending' | 'approved' | 'rejected';
 
@@ -46,6 +47,8 @@ interface AttendanceRecord {
 }
 
 interface ListAttendanceFilters {
+  /** The approver's org-unit scope over the people punching; absent = unrestricted. */
+  orgUnitIds?: number[];
   userId?: number;
   status?: AttendanceStatus;
   rangeStart?: string;
@@ -56,6 +59,8 @@ interface CostEstimateInput {
   startDate: string;
   endDate: string;
   departmentId?: number;
+  /** The caller's org-unit scope; absent = unrestricted. */
+  orgUnitIds?: number[];
 }
 
 interface CostEstimate {
@@ -273,6 +278,11 @@ export class AttendanceService {
       conditions.push('DATE(clock_in) BETWEEN ? AND ?');
       params.push(filters.rangeStart, filters.rangeEnd);
     }
+    const scope = memberCondition('user_id', filters.orgUnitIds);
+    if (scope) {
+      conditions.push(scope.sql);
+      params.push(...scope.params);
+    }
 
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(
@@ -354,9 +364,13 @@ export class AttendanceService {
    * attendance punches), both priced at `users.hourly_rate`.
    */
   async getCostEstimate(input: CostEstimateInput): Promise<CostEstimate> {
-    const deptCondition = input.departmentId !== undefined ? 'AND s.department_id = ?' : '';
+    const units = unitCondition('org_unit_id', input.orgUnitIds);
+    const deptCondition =
+      (input.departmentId !== undefined ? 'AND s.department_id = ?' : '') +
+      (units ? ` AND s.department_id IN (SELECT id FROM departments WHERE ${units.sql})` : '');
     const plannedParams: Array<string | number> = [input.startDate, input.endDate];
     if (input.departmentId !== undefined) plannedParams.push(input.departmentId);
+    plannedParams.push(...(units?.params ?? []));
 
     const [plannedRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COALESCE(SUM(${HOURS_EXPR}), 0) AS hours,
@@ -370,12 +384,16 @@ export class AttendanceService {
       plannedParams
     );
 
+    // Actual hours are scoped by the person punching: a punch need not be
+    // linked to a shift, and an unlinked one still belongs to someone's unit.
+    const members = memberCondition('ar.user_id', input.orgUnitIds);
     const actualDeptCondition =
-      input.departmentId !== undefined
+      (input.departmentId !== undefined
         ? 'AND EXISTS (SELECT 1 FROM shift_assignments sa2 JOIN shifts s2 ON s2.id = sa2.shift_id WHERE sa2.id = ar.shift_assignment_id AND s2.department_id = ?)'
-        : '';
+        : '') + (members ? ` AND ${members.sql}` : '');
     const actualParams: Array<string | number> = [input.startDate, input.endDate];
     if (input.departmentId !== undefined) actualParams.push(input.departmentId);
+    actualParams.push(...(members?.params ?? []));
 
     const [actualRows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT COALESCE(SUM(TIMESTAMPDIFF(MINUTE, ar.clock_in, ar.clock_out) / 60), 0) AS hours,
@@ -441,8 +459,9 @@ export class AttendanceService {
    * shape `compliance_violations` uses, since a single punch can be both
    * late AND leave early.
    */
-  async detectAnomalies(rangeStart: string, rangeEnd: string): Promise<AttendanceAnomaly[]> {
+  async detectAnomalies(rangeStart: string, rangeEnd: string, orgUnitIds?: number[]): Promise<AttendanceAnomaly[]> {
     const thresholds = await this.resolveAnomalyThresholds();
+    const scope = memberCondition('ar.user_id', orgUnitIds);
 
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT ar.id, ar.user_id, ar.clock_in, ar.clock_out, ar.shift_assignment_id,
@@ -456,8 +475,8 @@ export class AttendanceService {
          FROM attendance_records ar
          LEFT JOIN shift_assignments sa ON sa.id = ar.shift_assignment_id
          LEFT JOIN shifts s ON s.id = sa.shift_id
-        WHERE DATE(ar.clock_in) BETWEEN ? AND ?`,
-      [rangeStart, rangeEnd]
+        WHERE DATE(ar.clock_in) BETWEEN ? AND ?${scope ? ` AND ${scope.sql}` : ''}`,
+      [rangeStart, rangeEnd, ...(scope?.params ?? [])]
     );
 
     const anomalies: AttendanceAnomaly[] = [];

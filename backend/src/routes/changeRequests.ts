@@ -31,12 +31,16 @@ import {
   changeRequestListQuery,
 } from '../schemas';
 import { ChangeRequestService } from '../services/ChangeRequestService';
+import { accessScope } from '../middleware/accessScope';
 import { ConflictError } from '../errors';
 import { User } from '../types';
 
 export const createChangeRequestsRouter = (pool: Pool): Router => {
   const router = Router();
   const svc = new ChangeRequestService(pool);
+  // Deciding or applying a change is the decision of the proposer's units —
+  // the same subject the approval routing resolves (#813 review).
+  const scope = accessScope(pool);
 
   router.use(authenticate);
 
@@ -48,7 +52,9 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Create (any authenticated user with permission)
-  router.post('/', validateBody(createBody), requirePermission('change_request.create'), async (req: Request, res: Response) => {
+  // The gate before the body check: a caller without the permission learns
+  // nothing about the payload this endpoint expects (found by the matrix, #909).
+  router.post('/', requirePermission('change_request.create'), validateBody(createBody), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const cr = await svc.create(res.locals.body, actor.id);
     res.status(201).json({ success: true, data: cr, message: 'Change request submitted' });
@@ -69,7 +75,7 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Approve
-  router.post('/:id/approve', requirePermission('change_request.review'), validateParams(idParam), validateBody(approveBody), async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('change_request.review'), validateParams(idParam), validateBody(approveBody), scope.reach('change_request.review', 'changeRequest', 'params.id'), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.approve(res.locals.params.id, actor.id, res.locals.body.justification);
@@ -85,7 +91,7 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Reject
-  router.post('/:id/reject', requirePermission('change_request.review'), validateParams(idParam), validateBody(rejectBody), async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('change_request.review'), validateParams(idParam), validateBody(rejectBody), scope.reach('change_request.review', 'changeRequest', 'params.id'), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.reject(res.locals.params.id, actor.id, res.locals.body.rejectionReason);
@@ -101,7 +107,7 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Apply (marks applied; caller is responsible for executing the actual business logic)
-  router.post('/:id/apply', requirePermission('change_request.review'), validateParams(idParam), validateBody(applyBody), async (req: Request, res: Response) => {
+  router.post('/:id/apply', requirePermission('change_request.review'), validateParams(idParam), validateBody(applyBody), scope.reach('change_request.review', 'changeRequest', 'params.id'), async (req: Request, res: Response) => {
     try {
       const actor = req.user as User;
       const cr = await svc.apply(res.locals.params.id, actor.id, res.locals.body.justification);

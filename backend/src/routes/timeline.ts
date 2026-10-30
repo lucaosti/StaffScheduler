@@ -23,12 +23,13 @@
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
-import { authenticate, requirePermission } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { validateQuery } from '../middleware/validation';
 import { timelineQuery } from '../schemas';
 import { TimelineService, TIMELINE_SOURCE_KEYS } from '../services/TimelineService';
 import { RbacService } from '../services/RbacService';
 import { resolveVisibleOrgUnits } from '../services/orgScope';
+import { scopeFor } from '../services/access/AccessPolicy';
 
 export const createTimelineRouter = (pool: Pool) => {
   const router = Router();
@@ -54,7 +55,9 @@ export const createTimelineRouter = (pool: Pool) => {
       const orgUnitIds = await resolveVisibleOrgUnits(rbac, {
         userId: user.id,
         permissions: user.permissions ?? [],
-        allowedOrgUnitIds: user.allowedOrgUnitIds ?? null,
+        // Per permission: a delegated read_all for one unit lifts the
+        // membership bound there only, never organization-wide (#814 review).
+        allowedOrgUnitIds: scopeFor(user, userHasPermission(user, 'timeline.read_all') ? 'timeline.read_all' : 'timeline.read'),
         allPermission: 'timeline.read_all',
       });
 

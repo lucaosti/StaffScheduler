@@ -112,7 +112,8 @@ describe('global error middleware', () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 jest.mock('../middleware/auth', () => ({
-  authenticate: (_req: any, _res: any, next: any) => next(),
+  // An unscoped caller: list routes read the caller's scope off req.user.
+  authenticate: (req: any, _res: any, next: any) => { req.user = { id: 1, permissions: [], allowedOrgUnitIds: null }; next(); },
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),

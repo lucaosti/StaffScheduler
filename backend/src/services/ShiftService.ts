@@ -27,6 +27,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
 import { limitOffsetClause } from '../utils/sql';
 import { NotFoundError } from '../errors';
+import { unitCondition } from './access/AccessPolicy';
 import {
   Shift,
   CreateShiftRequest,
@@ -288,11 +289,9 @@ export class ShiftService {
         params.push(filters.status);
       }
 
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`d.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // An empty scope matches nothing — never everything (see AccessPolicy).
+      const scope = unitCondition('d.org_unit_id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
 
       if (conditions.length > 0) {
         query += ' WHERE ' + conditions.join(' AND ');
@@ -353,11 +352,9 @@ export class ShiftService {
       if (filters?.startDate) { conditions.push('s.date >= ?'); params.push(filters.startDate); }
       if (filters?.endDate) { conditions.push('s.date <= ?'); params.push(filters.endDate); }
       if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`d.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // An empty scope matches nothing — never everything (see AccessPolicy).
+      const scope = unitCondition('d.org_unit_id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
 

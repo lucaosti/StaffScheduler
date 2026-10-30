@@ -34,6 +34,7 @@ import { User, CreateUserRequest, UpdateUserRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
 import { config } from '../config';
 import { AuditLogService } from './AuditLogService';
+import { memberCondition } from './access/AccessPolicy';
 import { RefreshTokenService } from './RefreshTokenService';
 import { invalidateAuthContext } from './cacheStore';
 
@@ -202,12 +203,10 @@ export class UserService {
         conditions.push('ur.role_id = ?');
         params.push(filters.roleId);
       }
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        query += ' JOIN user_org_units uou ON u.id = uou.user_id';
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`uou.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // A subquery rather than a join, so a person in two units of the scope is
+      // listed once; and an empty scope matches nobody (see AccessPolicy).
+      const scope = memberCondition('u.id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
       if (filters?.isActive !== undefined) {
         conditions.push('u.is_active = ?');
         params.push(filters.isActive ? 1 : 0);
@@ -276,12 +275,10 @@ export class UserService {
         conditions.push('ur.role_id = ?');
         params.push(filters.roleId);
       }
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        query += ' JOIN user_org_units uou ON u.id = uou.user_id';
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`uou.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // A subquery rather than a join, so a person in two units of the scope is
+      // listed once; and an empty scope matches nobody (see AccessPolicy).
+      const scope = memberCondition('u.id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
       if (filters?.isActive !== undefined) {
         conditions.push('u.is_active = ?');
         params.push(filters.isActive ? 1 : 0);

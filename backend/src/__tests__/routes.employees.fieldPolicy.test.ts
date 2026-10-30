@@ -45,7 +45,7 @@ jest.mock('../services/AuditLogService', () => ({
 
 // Account authority (#809) is a separate rule with its own tests; here it is
 // held open so each case isolates the field policy.
-jest.mock('../services/UserAuthorityService', () => ({
+jest.mock('../services/access/UserAuthorityService', () => ({
   UserAuthorityService: jest.fn().mockImplementation(() => ({
     assertCanAssignRoles: jest.fn().mockResolvedValue(undefined),
     assertCanManageUser: jest.fn().mockResolvedValue(undefined),

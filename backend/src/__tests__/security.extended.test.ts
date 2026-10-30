@@ -72,8 +72,12 @@ import { createAssignmentsRouter } from '../routes/assignments';
 import { createSchedulesRouter } from '../routes/schedules';
 import { createDirectoryRouter } from '../routes/directory';
 import { mountRouter } from './helpers/mountRouter';
+import { policyPool } from './helpers/policyPool';
 
-const fakePool = {} as never;
+// Ownership and org units now come from AccessPolicy, which reads the row from
+// the pool; each test states the row it should find.
+const policy = policyPool();
+const fakePool = policy.pool;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // App factories
@@ -82,12 +86,8 @@ const fakePool = {} as never;
 const assignmentsApp = (): express.Express =>
   mountRouter('/api/assignments', createAssignmentsRouter(fakePool));
 
-const schedulesApp = (): express.Express => {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/schedules', createSchedulesRouter(fakePool));
-  return app;
-};
+const schedulesApp = (): express.Express =>
+  mountRouter('/api/schedules', createSchedulesRouter(fakePool));
 
 const directoryApp = (): express.Express => {
   const app = express();
@@ -175,6 +175,7 @@ describe('insufficient permission', () => {
 describe('IDOR: assignment GET /:id', () => {
   it('employee requesting own assignment returns 200', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(10);
     (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({
       id: 42,
       userId: 10,
@@ -186,6 +187,7 @@ describe('IDOR: assignment GET /:id', () => {
 
   it('employee requesting another users assignment returns 403', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(99);
     (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({
       id: 42,
       userId: 99,
@@ -213,6 +215,7 @@ describe('IDOR: assignment GET /:id', () => {
 describe('IDOR: assignment confirm/decline', () => {
   it('employee can confirm own assignment returns 200', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(10);
     (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({ id: 7, userId: 10 });
     (AssignmentService.prototype.confirmAssignment as jest.Mock).mockResolvedValue({ id: 7, status: 'confirmed' });
     const res = await request(assignmentsApp()).patch('/api/assignments/7/confirm');
@@ -221,6 +224,7 @@ describe('IDOR: assignment confirm/decline', () => {
 
   it('employee cannot confirm another users assignment returns 403', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(99);
     (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({ id: 7, userId: 99 });
     const res = await request(assignmentsApp()).patch('/api/assignments/7/confirm');
     expect(res.status).toBe(403);
@@ -229,6 +233,7 @@ describe('IDOR: assignment confirm/decline', () => {
 
   it('employee cannot decline another users assignment returns 403', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(99);
     (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({ id: 7, userId: 99 });
     const res = await request(assignmentsApp()).patch('/api/assignments/7/decline');
     expect(res.status).toBe(403);
@@ -243,6 +248,7 @@ describe('IDOR: assignment confirm/decline', () => {
 describe('IDOR: assignments GET /user/:userId', () => {
   it('employee can request own assignments returns 200', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(10);
     (AssignmentService.prototype.getAssignmentsByUser as jest.Mock).mockResolvedValue([]);
     const res = await request(assignmentsApp()).get('/api/assignments/user/10');
     expect(res.status).toBe(200);
@@ -250,6 +256,7 @@ describe('IDOR: assignments GET /user/:userId', () => {
 
   it('employee cannot request another users assignments returns 403', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(99);
     const res = await request(assignmentsApp()).get('/api/assignments/user/99');
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
@@ -270,6 +277,7 @@ describe('IDOR: assignments GET /user/:userId', () => {
 describe('IDOR: schedule GET /:id org-unit scope', () => {
   it('scoped user accessing schedule within scope returns 200', async () => {
     resetUser({ id: 3, role: 'manager', allowedOrgUnitIds: [10, 11] });
+    policy.row(null, [10]);
     (ScheduleService.prototype.getScheduleById as jest.Mock).mockResolvedValue({
       id: 1,
       departmentOrgUnitId: 10,
@@ -278,15 +286,16 @@ describe('IDOR: schedule GET /:id org-unit scope', () => {
     expect(res.status).toBe(200);
   });
 
-  it('scoped user accessing schedule outside scope returns 403', async () => {
+  it('scoped user accessing schedule outside scope returns 404, as a missing one would', async () => {
     resetUser({ id: 3, role: 'manager', allowedOrgUnitIds: [10, 11] });
+    policy.row(null, [99]);
     (ScheduleService.prototype.getScheduleById as jest.Mock).mockResolvedValue({
       id: 1,
       departmentOrgUnitId: 99,
     });
     const res = await request(schedulesApp()).get('/api/schedules/1');
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('unscoped user with null allowedOrgUnitIds can access any schedule returns 200', async () => {
@@ -305,20 +314,22 @@ describe('IDOR: schedule GET /:id org-unit scope', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('IDOR: schedule GET /:id/shifts org-unit scope', () => {
-  it('scoped user accessing shifts of schedule outside scope returns 403', async () => {
+  it('scoped user accessing shifts of schedule outside scope returns 404', async () => {
     resetUser({ id: 3, role: 'manager', allowedOrgUnitIds: [10] });
+    policy.row(null, [55]);
     (ScheduleService.prototype.getScheduleWithShifts as jest.Mock).mockResolvedValue({
       id: 1,
       departmentOrgUnitId: 55,
       shifts: [],
     });
     const res = await request(schedulesApp()).get('/api/schedules/1/shifts');
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('scoped user accessing shifts of schedule within scope returns 200', async () => {
     resetUser({ id: 3, role: 'manager', allowedOrgUnitIds: [10] });
+    policy.row(null, [10]);
     (ScheduleService.prototype.getScheduleWithShifts as jest.Mock).mockResolvedValue({
       id: 1,
       departmentOrgUnitId: 10,
@@ -336,6 +347,7 @@ describe('IDOR: schedule GET /:id/shifts org-unit scope', () => {
 describe('IDOR: schedule GET /user/:userId', () => {
   it('employee can request own schedules returns 200', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(10);
     (ScheduleService.prototype.getSchedulesByUser as jest.Mock).mockResolvedValue([]);
     const res = await request(schedulesApp()).get('/api/schedules/user/10');
     expect(res.status).toBe(200);
@@ -343,6 +355,7 @@ describe('IDOR: schedule GET /user/:userId', () => {
 
   it('employee cannot request another users schedules returns 403', async () => {
     resetUser({ id: 10, role: 'employee' });
+    policy.row(99);
     const res = await request(schedulesApp()).get('/api/schedules/user/99');
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');

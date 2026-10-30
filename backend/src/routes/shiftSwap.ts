@@ -22,6 +22,8 @@ import {
 import { ShiftSwapService } from '../services/ShiftSwapService';
 import { ShiftSwapOfferService } from '../services/ShiftSwapOfferService';
 import { RbacService } from '../services/RbacService';
+import { scopeFor } from '../services/access/AccessPolicy';
+import { accessScope } from '../middleware/accessScope';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -32,6 +34,7 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
   const service = new ShiftSwapService(pool);
   const offers = new ShiftSwapOfferService(pool, service);
   const rbac = new RbacService(pool);
+  const scope = accessScope(pool);
 
   router.use(authenticate);
 
@@ -63,7 +66,7 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
     // Same "units this caller may see" scope SwapCandidateService uses for
     // its own candidate search — null means unrestricted, narrowed by a
     // scoped role where one applies.
-    const scoped = actor.allowedOrgUnitIds ?? null;
+    const scoped = scopeFor(actor, 'schedule.read');
     const own = await rbac.getUserOrgUnitSubtreeIds(actor.id);
     const orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
     const listing = await offers.listOpenOffers(actor.id, orgUnitIds, mine);
@@ -125,13 +128,15 @@ export const createShiftSwapRouter = (pool: Pool): Router => {
     res.json({ success: true, data: updated });
   });
 
-  router.post('/:id/approve', requirePermission('shiftswap.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  // Approving or declining rewrites (or settles) BOTH assignments, so the
+  // approver must hold shiftswap.approve over both units (#813 review).
+  router.post('/:id/approve', requirePermission('shiftswap.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('shiftswap.approve', 'shiftSwap', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 
-  router.post('/:id/decline', requirePermission('shiftswap.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/decline', requirePermission('shiftswap.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('shiftswap.approve', 'shiftSwap', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.decline(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });

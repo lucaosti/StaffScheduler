@@ -4087,6 +4087,49 @@
         }
       }
     },
+    "/delegations/delegable-for-unit": {
+      "get": {
+        "tags": [
+          "Delegations"
+        ],
+        "summary": "Codes a delegation scoped to one org unit may carry",
+        "description": "The permission codes a unit can bound. A delegation with `scopeOrgUnitId` set may carry only these; any other code acts organization-wide and is refused (422 DELEGATION_INVALID). The same list for every caller.",
+        "responses": {
+          "200": {
+            "description": "`data.permissionCodes`: the codes, sorted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "permissionCodes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "permissionCodes"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/delegations/{id}": {
       "delete": {
         "tags": [
@@ -5554,7 +5597,7 @@
           "Import"
         ],
         "summary": "Bulk import shifts",
-        "description": "Admin/manager only.",
+        "description": "Requires `shift.manage`. Every row's schedule and department must lie in the caller's org-unit scope; a row naming another unit's id answers 404 for the whole file, before anything is written.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5583,6 +5626,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10804,6 +10850,7 @@
           "Shifts"
         ],
         "summary": "List shifts of a department",
+        "description": "Requires `schedule.read`. A department outside the caller's org-unit scope is answered 404, as a missing one is.",
         "parameters": [
           {
             "name": "departmentId",
@@ -10821,6 +10868,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10831,6 +10884,7 @@
           "Shifts"
         ],
         "summary": "List shifts of a schedule",
+        "description": "Requires `schedule.read`. A schedule outside the caller's org-unit scope is answered 404, as a missing one is.",
         "parameters": [
           {
             "name": "scheduleId",
@@ -10848,6 +10902,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

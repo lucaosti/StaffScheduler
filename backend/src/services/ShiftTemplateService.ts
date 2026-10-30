@@ -23,14 +23,19 @@ import {
   SqlParam,
 } from '../types';
 import { logger } from '../config/logger';
+import { unitCondition } from './access/AccessPolicy';
 
 export class ShiftTemplateService {
   constructor(private pool: Pool) {}
 
-  async getAllShiftTemplates(): Promise<ShiftTemplate[]> {
+  /** `orgUnitIds` bounds the list to templates of those units' departments; absent = unrestricted. */
+  async getAllShiftTemplates(orgUnitIds?: number[]): Promise<ShiftTemplate[]> {
+    const scope = unitCondition('org_unit_id', orgUnitIds);
+    const where = scope ? ` AND department_id IN (SELECT id FROM departments WHERE ${scope.sql})` : '';
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
-        'SELECT * FROM shift_templates WHERE is_active = 1 ORDER BY name ASC LIMIT 1000'
+        `SELECT * FROM shift_templates WHERE is_active = 1${where} ORDER BY name ASC LIMIT 1000`,
+        scope?.params ?? []
       );
       return rows.map((row: any) => ({
         id: row.id,

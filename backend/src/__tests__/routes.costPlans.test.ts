@@ -99,7 +99,7 @@ describe('reading plans', () => {
     const res = await request(mount()).get('/api/cost-plans?departmentId=2');
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([samplePlan]);
-    expect(list).toHaveBeenCalledWith(2);
+    expect(list).toHaveBeenCalledWith(2, undefined);
   });
 
   it('gets a single plan by id', async () => {

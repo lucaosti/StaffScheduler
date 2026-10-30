@@ -5,7 +5,7 @@
  *   1. Unscoped admin (allowedOrgUnitIds = null) gets all records.
  *   2. Scoped manager (allowedOrgUnitIds = [2, 5]) sees only records whose
  *      department org_unit_id falls within the allowed set.
- *   3. Scoped manager is blocked (403) when reading a schedule whose
+ *   3. Scoped manager is refused (404, as for a missing one) a schedule whose
  *      department belongs to a sibling org unit not in the allowed set.
  *   4. Empty scope array (scoped but no valid subtree) returns empty list.
  */
@@ -56,6 +56,8 @@ import { authenticate } from '../middleware/auth';
 import { createSchedulesRouter } from '../routes/schedules';
 import { createEmployeesRouter } from '../routes/employees';
 import { createShiftsRouter } from '../routes/shifts';
+import { errorHandler } from '../middleware/errorHandler';
+import { policyPool } from './helpers/policyPool';
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -81,13 +83,16 @@ const withScope = (allowedOrgUnitIds: number[] | null) => {
   });
 };
 
+// Single-row scope checks read the row's org unit through AccessPolicy, the
+// one query left on the pool; each test states the unit it should find.
+const policy = policyPool();
 const buildApps = () => {
-  const pool = {} as never;
   const app = express();
   app.use(express.json());
-  app.use('/api/schedules', createSchedulesRouter(pool));
-  app.use('/api/employees', createEmployeesRouter(pool));
-  app.use('/api/shifts', createShiftsRouter(pool));
+  app.use('/api/schedules', createSchedulesRouter(policy.pool));
+  app.use('/api/employees', createEmployeesRouter(policy.pool));
+  app.use('/api/shifts', createShiftsRouter(policy.pool));
+  app.use(errorHandler);
   return app;
 };
 
@@ -175,6 +180,7 @@ describe('GET /api/schedules/:id — single-item scope check', () => {
 
   it('scoped manager can read a schedule whose dept is in scope', async () => {
     withScope([2, 5]);
+    policy.row(null, [5]);
     (ScheduleService.prototype.getScheduleById as jest.Mock).mockResolvedValue({
       id: 7,
       name: 'Q3 Ops',
@@ -191,6 +197,7 @@ describe('GET /api/schedules/:id — single-item scope check', () => {
 
   it('scoped manager is blocked when schedule dept is in a sibling branch', async () => {
     withScope([2, 5]);
+    policy.row(null, [9]);
     (ScheduleService.prototype.getScheduleById as jest.Mock).mockResolvedValue({
       id: 8,
       name: 'Finance Q3',
@@ -202,12 +209,14 @@ describe('GET /api/schedules/:id — single-item scope check', () => {
       .get('/api/schedules/8')
       .set('Authorization', `Bearer ${makeToken()}`);
 
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    // 404, exactly as for a schedule that does not exist (AccessPolicy).
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('scoped manager is blocked when schedule dept has no org_unit assignment', async () => {
     withScope([2, 5]);
+    policy.row(null, [null]);
     (ScheduleService.prototype.getScheduleById as jest.Mock).mockResolvedValue({
       id: 9,
       name: 'Unassigned dept schedule',
@@ -219,7 +228,7 @@ describe('GET /api/schedules/:id — single-item scope check', () => {
       .get('/api/schedules/9')
       .set('Authorization', `Bearer ${makeToken()}`);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 });
 

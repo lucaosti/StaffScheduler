@@ -26,6 +26,11 @@ import { z } from 'zod';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { attendanceColumns } from '../services/exportColumns';
+import { accessScope } from '../middleware/accessScope';
+import { scopeFilter } from '../services/access/AccessPolicy';
+
+/** Either code lets a caller read other people's attendance, within its scope. */
+const APPROVER_CODES = ['attendance.read', 'attendance.approve'];
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -37,6 +42,7 @@ export const createAttendanceRouter = (pool: Pool): Router => {
   const service = new AttendanceService(pool);
   const kioskService = new KioskService(pool);
   const exporter = new ExportService(new AuditLogService(pool));
+  const scope = accessScope(pool);
 
   /**
    * Kiosk punch — a shared tablet, not a user session (see
@@ -72,6 +78,8 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     const { userId, status, startDate: rangeStart, endDate: rangeEnd } = query;
     const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
     return {
+      // An approver sees the people inside their scope, not the organization.
+      ...(isApprover ? { orgUnitIds: scopeFilter(req.user!, APPROVER_CODES) } : {}),
       userId: isApprover ? userId : req.user!.id,
       status: status as never,
       rangeStart,
@@ -94,9 +102,14 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     res.json({ success: true, data: updated });
   });
 
-  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), validateQuery(costEstimateQuery), async (_req: Request, res: Response) => {
+  router.get('/cost-estimate', requireModuleForUser('payroll'), requirePermission('attendance.read'), validateQuery(costEstimateQuery), scope.reach('attendance.read', 'department', 'query.departmentId'), async (req: Request, res: Response) => {
     const { startDate, endDate, departmentId } = res.locals.query;
-    const estimate = await service.getCostEstimate({ startDate, endDate, departmentId });
+    const estimate = await service.getCostEstimate({
+      startDate,
+      endDate,
+      departmentId,
+      orgUnitIds: scopeFilter(req.user!, 'attendance.read'),
+    });
     res.json({ success: true, data: estimate });
   });
 
@@ -120,23 +133,19 @@ export const createAttendanceRouter = (pool: Pool): Router => {
     });
   });
 
-  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
-    const { id } = res.locals.params;
-    const item = await service.getById(id);
+  router.get('/:id', validateParams(idParam), scope.ownerOr(APPROVER_CODES, 'attendance', 'params.id'), async (_req: Request, res: Response) => {
+    const item = await service.getById(res.locals.params.id);
     if (!item) return respondError(res, 404, 'NOT_FOUND', 'Attendance record not found');
-    const isOwn = item.userId === req.user!.id;
-    const isApprover = userHasPermission(req.user, 'attendance.read') || userHasPermission(req.user, 'attendance.approve');
-    if (!isOwn && !isApprover) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
     res.json({ success: true, data: item });
   });
 
-  router.post('/:id/approve', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('attendance.approve', 'attendance', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });
   });
 
-  router.post('/:id/reject', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('attendance.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('attendance.approve', 'attendance', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null);
     res.json({ success: true, data: updated });

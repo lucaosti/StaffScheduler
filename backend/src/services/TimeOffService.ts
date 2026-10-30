@@ -31,6 +31,7 @@ import { ApproverResolutionService } from './ApproverResolutionService';
 import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { DateUtils } from '../utils';
+import { memberCondition } from './access/AccessPolicy';
 
 type TimeOffType = 'vacation' | 'sick' | 'personal' | 'other';
 type TimeOffStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
@@ -60,6 +61,8 @@ interface CreateTimeOffInput {
 }
 
 interface ListTimeOffFilters {
+  /** The approver's org-unit scope over requesters; absent = unrestricted. */
+  orgUnitIds?: number[];
   userId?: number;
   status?: TimeOffStatus;
   /** When set, only return requests overlapping this window. */
@@ -191,6 +194,11 @@ export class TimeOffService {
     if (filters.rangeStart && filters.rangeEnd) {
       conditions.push('start_date <= ? AND end_date >= ?');
       params.push(filters.rangeEnd, filters.rangeStart);
+    }
+    const scope = memberCondition('user_id', filters.orgUnitIds);
+    if (scope) {
+      conditions.push(scope.sql);
+      params.push(...scope.params);
     }
 
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';

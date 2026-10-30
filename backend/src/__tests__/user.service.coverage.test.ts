@@ -116,7 +116,7 @@ describe('UserService.getAllUsers additional filters', () => {
     const out = await svc.getAllUsers({ orgUnitIds: [3, 4] });
     expect(out.length).toBe(1);
     const sql = execute.mock.calls[0][0] as string;
-    expect(sql).toMatch(/uou\.org_unit_id IN/);
+    expect(sql).toMatch(/u\.id IN \(SELECT user_id FROM user_org_units WHERE org_unit_id IN/);
   });
 
   it('uses LIMIT/OFFSET when pagination is provided', async () => {
@@ -184,7 +184,7 @@ describe('UserService.countUsers', () => {
     const svc = new UserService(pool);
     expect(await svc.countUsers({ orgUnitIds: [1, 2] })).toBe(7);
     const sql = execute.mock.calls[0][0] as string;
-    expect(sql).toMatch(/uou\.org_unit_id IN/);
+    expect(sql).toMatch(/u\.id IN \(SELECT user_id FROM user_org_units WHERE org_unit_id IN/);
   });
 
   it('applies isActive filter', async () => {
