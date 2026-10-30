@@ -15,7 +15,7 @@
  */
 
 import type { OptimizationProblem } from '../types';
-import { DAY_MS, dateToMs, shiftBoundsMs, shiftHours } from '../shiftTime';
+import { DAY_MS, dateToMs, exceedsHours, formatHours, shiftBoundsMs, shiftMinutes } from '../shiftTime';
 import type { ShiftTimes } from '../shiftTime';
 
 /**
@@ -203,18 +203,21 @@ export function findConstraintViolations(
     // against real people. It stays only so an un-migrated caller keeps its
     // existing behaviour, and should be removed once every problem carries a
     // contract-derived cap.
+    //
+    // Both caps total exact minutes, never hours rounded per shift: three
+    // 2h40 shifts are 8h, which rounded tenths read as 8.1h (see shiftMinutes).
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const hoursByDate = new Map<string, number>();
+    const minutesByDate = new Map<string, number>();
     for (const shift of worked) {
-      hoursByDate.set(shift.date, (hoursByDate.get(shift.date) ?? 0) + shiftHours(shift));
+      minutesByDate.set(shift.date, (minutesByDate.get(shift.date) ?? 0) + shiftMinutes(shift));
     }
-    for (const [date, hours] of hoursByDate) {
-      if (hours > dailyBudget + 1e-9) {
+    for (const [date, minutes] of minutesByDate) {
+      if (exceedsHours(minutes, dailyBudget)) {
         violations.push({
           rule: 'daily-hours',
           employeeId: emp.id,
           shiftIds: worked.filter((s) => s.date === date).map((s) => s.id),
-          detail: `employee ${emp.id} works ${hours}h on ${date}, exceeds daily budget ${dailyBudget}h`,
+          detail: `employee ${emp.id} works ${formatHours(minutes)}h on ${date}, exceeds daily budget ${dailyBudget}h`,
         });
       }
     }
@@ -226,12 +229,12 @@ export function findConstraintViolations(
       const days = [...new Set(worked.map((s) => s.date))].sort();
       for (const anchor of days) {
         const anchorMs = dateToMs(anchor);
-        let total = 0;
+        let totalMinutes = 0;
         for (const shift of worked) {
           const diff = (dateToMs(shift.date) - anchorMs) / DAY_MS;
-          if (diff >= 0 && diff < 7) total += shiftHours(shift);
+          if (diff >= 0 && diff < 7) totalMinutes += shiftMinutes(shift);
         }
-        if (total > emp.max_hours_per_week + 1e-9) {
+        if (exceedsHours(totalMinutes, emp.max_hours_per_week)) {
           violations.push({
             rule: 'weekly-hours',
             employeeId: emp.id,
@@ -241,7 +244,7 @@ export function findConstraintViolations(
                 return diff >= 0 && diff < 7;
               })
               .map((s) => s.id),
-            detail: `employee ${emp.id} works ${total}h in the week starting ${anchor}, exceeds ${emp.max_hours_per_week}h`,
+            detail: `employee ${emp.id} works ${formatHours(totalMinutes)}h in the week starting ${anchor}, exceeds ${emp.max_hours_per_week}h`,
           });
           break; // one weekly violation per employee is enough to fail
         }
