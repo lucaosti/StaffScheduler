@@ -20,7 +20,7 @@
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShiftAssignment } from '../../types';
-import { useSchedulePageData } from '../../hooks/useSchedulePage';
+import { useScheduleAssignments, useSchedulePageData } from '../../hooks/useSchedulePage';
 import { useShiftsInRange } from '../../hooks/useShifts';
 import { ApiError } from '../../services/apiUtils';
 import ScheduleList from '../Schedule/ScheduleList';
@@ -37,9 +37,9 @@ import { useIsNarrowViewport } from '../../hooks/useIsNarrowViewport';
 
 const Schedule: React.FC = () => {
   const { t } = useTranslation();
-  // Server state (the four page lists + first-schedule assignments) is owned by
-  // one TanStack Query hook; `reload` invalidates it after a mutation. Only
-  // genuinely local UI state lives in this component.
+  // Server state is owned by the hooks in hooks/useSchedulePage: the four page
+  // lists here, the visible week's assignments below, and the mutations inside
+  // useScheduleActions. Only genuinely local UI state lives in this component.
   // A week/month grid with a column per day genuinely cannot be reflowed into
   // something usable at phone width by CSS alone — the columns themselves
   // have to go. Below the breakpoint, both views render the same underlying
@@ -54,9 +54,8 @@ const Schedule: React.FC = () => {
   const employees = useMemo(() => pageData?.employees ?? [], [pageData]);
   const shifts = useMemo(() => pageData?.shifts ?? [], [pageData]);
   const departments = useMemo(() => pageData?.departments ?? [], [pageData]);
-  const assignments = useMemo(() => pageData?.assignments ?? [], [pageData]);
 
-  const actions = useScheduleActions(loadData);
+  const actions = useScheduleActions();
 
   const [selectedWeek, setSelectedWeek] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
@@ -103,6 +102,13 @@ const Schedule: React.FC = () => {
   );
 
   const weekDates = generateWeekDates(selectedWeek);
+
+  // Assignments of every schedule overlapping the visible week, not only the
+  // first schedule's (#844) — see useScheduleAssignments.
+  const { assignments } = useScheduleAssignments(schedules, {
+    startDate: toLocalDateString(weekDates[0]),
+    endDate: toLocalDateString(weekDates[weekDates.length - 1]),
+  });
 
   // Pre-index assignments by "dateStr|shiftId" so each cell lookup is O(1)
   // instead of scanning the full assignments array for every shift × date cell.

@@ -54,7 +54,21 @@ const defaultAttentionItems = {
 export const handlers = [
   http.get(`${apiUrl}/dashboard/stats`, ok(defaultDashboardStats)),
   http.get(`${apiUrl}/dashboard/attention-items`, ok(defaultAttentionItems)),
-  http.get(`${apiUrl}/audit-logs`, ok([])),
+  // Shaped as routes/auditLogs.ts answers (#942): the paginated envelope only
+  // for page+pageSize, `{ total, items }` otherwise. A flat `[]` for both let
+  // a caller that sent `?limit=` and expected an array pass its tests.
+  http.get(`${apiUrl}/audit-logs`, ({ request }) => {
+    const url = new URL(request.url);
+    const page = url.searchParams.get('page');
+    const pageSize = url.searchParams.get('pageSize');
+    return page && pageSize
+      ? HttpResponse.json({
+          success: true,
+          data: [],
+          meta: { total: 0, page: Number(page), pageSize: Number(pageSize), pages: 0 },
+        })
+      : HttpResponse.json({ success: true, data: { total: 0, items: [] } });
+  }),
   http.get(`${apiUrl}/system/info`, ok({ mode: 'demo', appVersion: 'test', features: {} })),
   http.get(`${apiUrl}/auth/me`, ok({ id: 1, email: 'admin@demo.staffscheduler.local', role: 'admin' })),
   http.get(`${apiUrl}/employees`, ok([])),

@@ -105,6 +105,27 @@ describe('<CalendarSection />', () => {
     }
   });
 
+  // The accordion used Bootstrap's `data-bs-toggle="collapse"`, whose
+  // JavaScript is never loaded, so a section never opened (#840).
+  it('opens one client section at a time when its trigger is clicked', async () => {
+    render(<CalendarSection />);
+    await screen.findByRole('cell', { name: 'Phone' });
+    const google = screen.getByRole('button', { name: /^Google Calendar/ });
+    const outlook = screen.getByRole('button', { name: /^Outlook/ });
+    expect(google).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(google);
+    expect(google).toHaveAttribute('aria-expanded', 'true');
+    expect(document.getElementById(google.getAttribute('aria-controls')!)).toHaveClass('show');
+
+    await userEvent.click(outlook);
+    expect(outlook).toHaveAttribute('aria-expanded', 'true');
+    expect(google).toHaveAttribute('aria-expanded', 'false');
+
+    await userEvent.click(outlook);
+    expect(outlook).toHaveAttribute('aria-expanded', 'false');
+  });
+
   describe('creating a subscription', () => {
     it('sends the label and shows the URL once', async () => {
       render(<CalendarSection />);

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
@@ -8,14 +8,18 @@ import { defaultDashboardStats } from '../../mocks/handlers';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1';
 
+let permissions: string[] = [];
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { email: 'admin@demo.staffscheduler.local' } }),
+  useAuth: () => ({ user: { email: 'admin@demo.staffscheduler.local', permissions } }),
 }));
 
 import Dashboard from './Dashboard';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  permissions = [];
+});
 afterAll(() => server.close());
 
 describe('<Dashboard />', () => {
@@ -102,6 +106,147 @@ describe('<Dashboard />', () => {
       expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
     );
     expect(screen.queryByText(/target/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * #894: the dashboard misled anyone who was not an administrator. Quick
+   * actions that create or generate were gated on the READ permissions, so a
+   * reader was offered actions the server refuses; the Pending Approvals card
+   * showed the organisation-wide count while the caller's own queue was
+   * empty; and the activity panel turned a 403 into "No recent activity".
+   */
+  describe('per role', () => {
+    const renderLoaded = async () => {
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument());
+    };
+
+    it('offers no create or generate action to a reader', async () => {
+      permissions = ['employee.read', 'schedule.read'];
+      await renderLoaded();
+      expect(screen.queryByRole('link', { name: /add employee/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /generate schedule/i })).not.toBeInTheDocument();
+    });
+
+    it('offers them to whoever holds the permissions the server checks', async () => {
+      permissions = ['employee.manage', 'schedule.optimize'];
+      await renderLoaded();
+      expect(screen.getByRole('link', { name: /add employee/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /generate schedule/i })).toBeInTheDocument();
+    });
+
+    it("counts the caller's own pending approvals, not the organisation's", async () => {
+      // Stats report 2 org-wide; the caller's queue (attention items) is empty.
+      await renderLoaded();
+      const card = screen.getByText('Pending Approvals').closest('.card') as HTMLElement;
+      expect(card).toHaveTextContent('0');
+      expect(card).not.toHaveTextContent(String(defaultDashboardStats.pendingApprovals));
+    });
+
+    it('hides the activity panel, and never asks for it, without audit.read', async () => {
+      let auditRequested = false;
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () => {
+          auditRequested = true;
+          return HttpResponse.json({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }, { status: 403 });
+        })
+      );
+      await renderLoaded();
+      expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument();
+      expect(screen.queryByText(/no recent activity/i)).not.toBeInTheDocument();
+      expect(auditRequested).toBe(false);
+    });
+
+    // Review of #894: the card showed "—" forever when its count failed to load.
+    it('says the pending count is unavailable when it fails to load', async () => {
+      server.use(
+        http.get(`${API_URL}/dashboard/attention-items`, () =>
+          HttpResponse.json({ success: false, error: { code: 'BOOM', message: 'x' } }, { status: 500 })
+        )
+      );
+      await renderLoaded();
+      const card = screen.getByText('Pending Approvals').closest('.card') as HTMLElement;
+      expect(await within(card).findByText('Unavailable')).toBeInTheDocument();
+    });
+
+    // Review of #894: with the audit module off (404) the panel claimed there
+    // was no recent activity.
+    it('hides the activity panel when the audit module is disabled', async () => {
+      permissions = ['audit.read'];
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () =>
+          HttpResponse.json({ success: false, error: { code: 'NOT_FOUND', message: 'Module disabled' } }, { status: 404 })
+        )
+      );
+      await renderLoaded();
+      await waitFor(() => expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument());
+      expect(screen.queryByText(/no recent activity/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the error, not "no recent activity", when the feed fails', async () => {
+      permissions = ['audit.read'];
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () =>
+          HttpResponse.json({ success: false, error: { code: 'BOOM', message: 'x' } }, { status: 500 })
+        )
+      );
+      await renderLoaded();
+      const panel = (await screen.findByText('Recent Activity')).closest('.card') as HTMLElement;
+      expect(await within(panel).findByRole('alert')).toBeInTheDocument();
+      expect(within(panel).queryByText(/no recent activity/i)).not.toBeInTheDocument();
+    });
+
+    /**
+     * #942: the panel was empty for every role. The service asked for
+     * `?limit=5`, which GET /audit-logs answers with `{ total, items }`, and
+     * then looked for an array. This handler answers exactly as
+     * routes/auditLogs.ts does — the paginated envelope only for
+     * page+pageSize, the `{ total, items }` object otherwise.
+     */
+    it('lists the recent entries the audit endpoint returns', async () => {
+      permissions = ['audit.read'];
+      const entry = {
+        id: 41, userId: 1, action: 'update', entityType: 'shift', entityId: 7,
+        description: 'Shift 7 rescheduled', createdAt: '2026-10-30T08:00:00.000Z',
+      };
+      server.use(
+        http.get(`${API_URL}/audit-logs`, ({ request }) => {
+          const url = new URL(request.url);
+          const page = url.searchParams.get('page');
+          const pageSize = url.searchParams.get('pageSize');
+          if (page && pageSize) {
+            return HttpResponse.json({
+              success: true,
+              data: [entry],
+              meta: { total: 1, page: Number(page), pageSize: Number(pageSize), pages: 1 },
+            });
+          }
+          return HttpResponse.json({ success: true, data: { total: 1, items: [entry] } });
+        })
+      );
+      await renderLoaded();
+
+      expect(await screen.findByText('Shift 7 rescheduled')).toBeInTheDocument();
+    });
+
+    it('shows the activity panel with audit.read', async () => {
+      permissions = ['audit.read'];
+      await renderLoaded();
+      expect(await screen.findByText('Recent Activity')).toBeInTheDocument();
+    });
+  });
+
+  // The close button used Bootstrap's `data-bs-dismiss`, whose JavaScript is
+  // never loaded, so the notice could not be dismissed (#840).
+  it('dismisses the access-denied notice with its close button', async () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/dashboard', state: { permissionDenied: true } }]}>
+        <Dashboard />
+      </MemoryRouter>
+    );
+    expect(screen.getByText('Access denied.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByText('Access denied.')).not.toBeInTheDocument();
   });
 
   it('says nothing about attention items when there are none', async () => {

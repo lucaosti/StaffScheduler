@@ -29,6 +29,7 @@ const I18N_ENFORCED_FILES = [
   'src/components/LocaleSwitcher.tsx',
   'src/pages/Auth/Login.tsx',
   'src/pages/Dashboard/Dashboard.tsx',
+  'src/pages/Settings/ProfileSection.tsx',
   'src/pages/Kiosk/Kiosk.tsx',
   'src/pages/Assignments/MyAssignments.tsx',
   'src/pages/Assignments/ShiftAssignmentPanel.tsx',
@@ -179,7 +180,8 @@ module.exports = [
             // -tag attributes because `Link` is a component, not a DOM tag),
             // `ExportCsvLink`'s `path` (an API route, same reasoning as
             // `to`), `EmptyState`'s `icon` (a Bootstrap Icons class name, not
-            // prose), and Bootstrap's `data-bs-*` hooks.
+            // prose), `Dropdown`'s `toggleClassName` (CSS classes, the same
+            // reasoning as `className`), and Bootstrap's `data-bs-*` hooks.
             exclude: [
               'className',
               'styleName',
@@ -192,6 +194,7 @@ module.exports = [
               'to',
               'path',
               'icon',
+              'toggleClassName',
               'data-bs-.*',
             ],
           },

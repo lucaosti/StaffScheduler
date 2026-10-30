@@ -58,10 +58,23 @@ jest.mock('../../services/fieldPolicyService', () => ({
 }));
 
 import Settings from './Settings';
+import { ThemeProvider } from '../../contexts/ThemeContext';
+
+// The Personal tab (the default) drives the real theme, so it needs the
+// provider App.tsx mounts around every page.
+const renderSettings = () =>
+  render(
+    <ThemeProvider>
+      <Settings />
+    </ThemeProvider>
+  );
 
 describe('<Settings />', () => {
   beforeEach(() => {
-    mockGetPreferences.mockResolvedValue({ success: true, data: null });
+    mockGetPreferences.mockResolvedValue({
+      success: true,
+      data: { maxHoursPerWeek: 40, maxConsecutiveDays: 5 },
+    });
     mockUpdatePreferences.mockResolvedValue({ success: true, data: {} });
   });
 
@@ -72,7 +85,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', role: 'admin', permissions: ['settings.manage'] },
     });
 
-    render(<Settings />);
+    renderSettings();
     expect(screen.getByRole('heading', { name: /^settings$/i })).toBeInTheDocument();
     const personalTab = screen.getByRole('button', { name: /^Personal$/ });
     const workTab = screen.getByRole('button', { name: /^Work Preferences$/ });
@@ -83,7 +96,7 @@ describe('<Settings />', () => {
     expect(screen.queryByRole('button', { name: /^Hierarchy Settings$/ })).not.toBeInTheDocument();
 
     await userEvent.click(workTab);
-    expect(screen.getByLabelText(/max hours per week/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/max hours per week/i)).toBeInTheDocument();
 
     await userEvent.click(systemTab);
     await userEvent.click(personalTab);
@@ -97,7 +110,7 @@ describe('<Settings />', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 2, email: 'mgr@x', role: 'manager' },
     });
-    render(<Settings />);
+    renderSettings();
     expect(screen.queryByRole('button', { name: /^System$/ })).not.toBeInTheDocument();
   });
 
@@ -110,44 +123,32 @@ describe('<Settings />', () => {
       data: { maxHoursPerWeek: 35, maxConsecutiveDays: 4 },
     });
 
-    render(<Settings />);
+    renderSettings();
     await userEvent.click(screen.getByRole('button', { name: /^Work Preferences$/ }));
     const hoursInput = (await screen.findByLabelText(/max hours per week/i)) as HTMLInputElement;
     expect(hoursInput.value).toBe('35');
   });
 
-  it('calls updateMyPreferences when Save Personal Settings is submitted', async () => {
-    mockUseAuth.mockReturnValue({
-      user: { id: 1, email: 'admin@x', permissions: [] },
-    });
-
-    render(<Settings />);
-    await userEvent.click(screen.getByRole('button', { name: /save personal settings/i }));
-    expect(mockUpdatePreferences).toHaveBeenCalledWith(
-      expect.objectContaining({ notes: expect.any(String) })
-    );
-  });
-
   /**
-   * This used to assert that saving the Work tab sent `maxHoursPerWeek` and
-   * `maxConsecutiveDays` — that is, it asserted the defect. Those are hard
-   * constraints the optimizer enforces, sent through an endpoint guarded by
-   * authentication alone, so any employee could raise their own limits.
+   * Neither tab writes preferences any more (#843). The Personal tab used to
+   * serialise theme/language/timezone/notifications as JSON into the
+   * scheduling-notes field — overwriting the user's notes, and never read
+   * back — and the Work tab's Save did nothing yet reported success. Earlier
+   * still, the Work tab sent the working-time limits through the
+   * self-service endpoint, letting any employee raise their own.
    */
-  it('does not send working-time limits from the self-service Work tab', async () => {
+  it('writes nothing to the preferences endpoint from either tab', async () => {
     mockUseAuth.mockReturnValue({
       user: { id: 1, email: 'admin@x', permissions: [] },
     });
 
-    render(<Settings />);
+    renderSettings();
+    await userEvent.selectOptions(screen.getByLabelText(/^theme$/i), 'dark');
     await userEvent.click(screen.getByRole('button', { name: /^Work Preferences$/ }));
-    await userEvent.click(screen.getByRole('button', { name: /save work settings/i }));
+    await screen.findByLabelText(/max hours per week/i);
 
-    // Either nothing is sent, or whatever is sent carries no limit field.
-    for (const call of mockUpdatePreferences.mock.calls) {
-      expect(call[0]).not.toHaveProperty('maxHoursPerWeek');
-      expect(call[0]).not.toHaveProperty('maxConsecutiveDays');
-    }
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+    expect(mockUpdatePreferences).not.toHaveBeenCalled();
   });
 
   it('renders the Calendar tab and shows CalendarSection when clicked', async () => {
@@ -155,7 +156,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: [] },
     });
 
-    render(<Settings />);
+    renderSettings();
     await userEvent.click(screen.getByRole('button', { name: /^Calendar$/ }));
     expect(screen.getByText(/Calendar Feed/)).toBeInTheDocument();
   });
@@ -165,7 +166,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
     });
 
-    render(<Settings />);
+    renderSettings();
     await userEvent.click(screen.getByRole('button', { name: /^System$/ }));
     expect(screen.getByText(/System Configuration/)).toBeInTheDocument();
   });
@@ -175,7 +176,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
     });
 
-    render(<Settings />);
+    renderSettings();
     expect(screen.getByRole('button', { name: /^Modules$/ })).toBeInTheDocument();
   });
 
@@ -183,7 +184,7 @@ describe('<Settings />', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 2, email: 'mgr@x', role: 'manager' },
     });
-    render(<Settings />);
+    renderSettings();
     expect(screen.queryByRole('button', { name: /^Modules$/ })).not.toBeInTheDocument();
   });
 
@@ -192,7 +193,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
     });
 
-    render(<Settings />);
+    renderSettings();
     await userEvent.click(screen.getByRole('button', { name: /^Modules$/ }));
     expect(screen.getByText(/Global Modules/i)).toBeInTheDocument();
   });
@@ -202,7 +203,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: ['settings.manage'] },
     });
 
-    render(<Settings />);
+    renderSettings();
     expect(screen.getByRole('button', { name: /^Employee Fields$/ })).toBeInTheDocument();
   });
 
@@ -210,7 +211,7 @@ describe('<Settings />', () => {
     mockUseAuth.mockReturnValue({
       user: { id: 2, email: 'mgr@x', role: 'manager' },
     });
-    render(<Settings />);
+    renderSettings();
     expect(screen.queryByRole('button', { name: /^Employee Fields$/ })).not.toBeInTheDocument();
   });
 
@@ -219,7 +220,7 @@ describe('<Settings />', () => {
       user: { id: 1, email: 'admin@x', permissions: ['settings.manage'], organizationName: 'Acme' },
     });
 
-    render(<Settings />);
+    renderSettings();
     await userEvent.click(screen.getByRole('button', { name: /^Employee Fields$/ }));
     expect(await screen.findByText(/Employee field rules/i)).toBeInTheDocument();
   });

@@ -13,10 +13,11 @@
  * @author Luca Ostinelli
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getSystemInfo, RuntimeMode } from '../services/systemService';
 
 const SESSION_KEY = 'demoBannerDismissed';
+const BANNER_HEIGHT_VAR = '--demo-banner-height';
 
 const DemoBanner: React.FC = () => {
   const [mode, setMode] = useState<RuntimeMode | null>(null);
@@ -39,22 +40,45 @@ const DemoBanner: React.FC = () => {
     };
   }, []);
 
-  if (mode !== 'demo' || dismissed) return null;
+  const visible = mode === 'demo' && !dismissed;
+
+  // Publish the banner's height so the fixed shell (sidebar, sticky header)
+  // can start below it — see "Stacking order" in index.css (#892). Measured
+  // rather than assumed because the text wraps to two or three lines on a
+  // narrow screen; a ResizeObserver keeps it right as it does.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = bannerRef.current;
+    if (!visible || !el) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty(BANNER_HEIGHT_VAR, `${el.offsetHeight}px`);
+    publish();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    observer?.observe(el);
+    return () => {
+      observer?.disconnect();
+      root.style.removeProperty(BANNER_HEIGHT_VAR);
+    };
+  }, [visible]);
+
+  if (!visible) return null;
 
   const handleDismiss = (): void => {
     window.sessionStorage.setItem(SESSION_KEY, '1');
     setDismissed(true);
   };
 
+  // `sticky-top` is Bootstrap's sticky layer (z-index 1020): above the
+  // sidebar (1000), below modal backdrops and modals (1050/1055). It used to
+  // be 1080 — above the modals — and covered every modal's title and close
+  // button, and the sidebar brand (#892).
   return (
     <div
+      ref={bannerRef}
       role="alert"
       aria-label="Demo environment notice"
-      className="alert alert-warning d-flex align-items-center justify-content-between mb-0"
+      className="alert alert-warning d-flex align-items-center justify-content-between mb-0 sticky-top"
       style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 1080,
         borderRadius: 0,
         borderLeft: 0,
         borderRight: 0,

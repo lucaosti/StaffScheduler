@@ -1,16 +1,26 @@
 /**
  * Tests for PreferencesSection (Settings → Personal tab).
  *
+ * The tab used to collect theme, language, timezone and three notification
+ * toggles, report "Personal preferences saved successfully", and store them
+ * as JSON in the scheduling-notes field, where nothing ever read them back
+ * (#843). What remains is what the app actually applies: theme and language,
+ * which take effect at once and are remembered on this device, and the real
+ * Web Push toggle.
+ *
  * @author Luca Ostinelli
  */
 
-import { render, screen } from '../../test-utils/renderWithClient';
+import { render, screen, act } from '../../test-utils/renderWithClient';
 import userEvent from '@testing-library/user-event';
 import PreferencesSection from './PreferencesSection';
+import { ThemeProvider } from '../../contexts/ThemeContext';
+import i18n from '../../i18n';
+import * as preferencesService from '../../services/preferencesService';
 
-// PreferencesSection now renders WebPushToggle (#310), which calls this
-// service via a query hook — mocked here since this suite is about the
-// preferences form, not push subscription mechanics (see WebPushToggle.test.tsx).
+// PreferencesSection renders WebPushToggle (#310), which calls this service
+// via a query hook — mocked here since this suite is about the preferences
+// themselves, not push subscription mechanics (see WebPushToggle.test.tsx).
 jest.mock('../../services/notificationService', () => ({
   __esModule: true,
   getPushPublicKey: jest.fn().mockResolvedValue({ success: true, data: { enabled: false, publicKey: null } }),
@@ -18,160 +28,61 @@ jest.mock('../../services/notificationService', () => ({
   unsubscribePush: jest.fn(),
 }));
 
-const defaultSettings = {
-  theme: 'light' as const,
-  language: 'en' as const,
-  timezone: 'UTC',
-  notifications: { email: true, push: false, sms: false },
-};
+jest.mock('../../services/preferencesService', () => ({
+  __esModule: true,
+  getMyPreferences: jest.fn(),
+  updateMyPreferences: jest.fn(),
+}));
+
+const renderSection = () =>
+  render(
+    <ThemeProvider>
+      <PreferencesSection />
+    </ThemeProvider>
+  );
+
+beforeEach(() => {
+  localStorage.clear();
+  document.documentElement.removeAttribute('data-bs-theme');
+});
+
+afterEach(async () => {
+  await act(async () => {
+    await i18n.changeLanguage('en');
+  });
+});
 
 describe('<PreferencesSection />', () => {
-  it('renders all form fields', () => {
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={jest.fn()}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
-
-    expect(screen.getByLabelText(/^theme$/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^language$/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/^timezone$/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/email notifications/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/push notifications/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/sms notifications/i)).toBeInTheDocument();
-  });
-
-  it('calls onChange when theme is changed', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
+  it('applies the chosen theme at once and still shows it after a reload', async () => {
+    const { unmount } = renderSection();
 
     await userEvent.selectOptions(screen.getByLabelText(/^theme$/i), 'dark');
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ theme: 'dark' })
-    );
+    expect(document.documentElement).toHaveAttribute('data-bs-theme', 'dark');
+
+    unmount();
+    renderSection();
+    expect(screen.getByLabelText(/^theme$/i)).toHaveValue('dark');
   });
 
-  it('calls onChange when language is changed', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
+  it('switches the interface language at once', async () => {
+    renderSection();
 
     await userEvent.selectOptions(screen.getByLabelText(/^language$/i), 'it');
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ language: 'it' })
-    );
+
+    expect(i18n.language).toBe('it');
   });
 
-  it('calls onChange when timezone is changed', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
+  it('offers no control the app does not apply, and claims no save', async () => {
+    renderSection();
 
-    await userEvent.selectOptions(screen.getByLabelText(/^timezone$/i), 'Europe/Rome');
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({ timezone: 'Europe/Rome' })
-    );
-  });
+    expect(screen.queryByLabelText(/timezone/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/email notifications/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/sms notifications/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
 
-  it('calls onChange when email notification is toggled', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
-
-    await userEvent.click(screen.getByLabelText(/email notifications/i));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notifications: expect.objectContaining({ email: false }),
-      })
-    );
-  });
-
-  it('calls onChange when push notification is toggled', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
-
-    await userEvent.click(screen.getByLabelText(/push notifications/i));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notifications: expect.objectContaining({ push: true }),
-      })
-    );
-  });
-
-  it('calls onChange when SMS notification is toggled', async () => {
-    const onChange = jest.fn();
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={onChange}
-        onSave={jest.fn().mockResolvedValue(undefined)}
-      />
-    );
-
-    await userEvent.click(screen.getByLabelText(/sms notifications/i));
-    expect(onChange).toHaveBeenCalledWith(
-      expect.objectContaining({
-        notifications: expect.objectContaining({ sms: true }),
-      })
-    );
-  });
-
-  it('calls onSave and shows success message on successful submit', async () => {
-    const onSave = jest.fn().mockResolvedValue(undefined);
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={jest.fn()}
-        onSave={onSave}
-      />
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: /save personal settings/i }));
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(await screen.findByText(/personal preferences saved successfully/i)).toBeInTheDocument();
-  });
-
-  it('shows an error message when onSave rejects', async () => {
-    const onSave = jest.fn().mockRejectedValue(new Error('Server error'));
-    render(
-      <PreferencesSection
-        settings={defaultSettings}
-        onChange={jest.fn()}
-        onSave={onSave}
-      />
-    );
-
-    await userEvent.click(screen.getByRole('button', { name: /save personal settings/i }));
-    expect(await screen.findByRole('alert')).toBeInTheDocument();
-    expect(await screen.findByText(/server error/i)).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText(/^theme$/i), 'light');
+    expect(screen.queryByText(/saved successfully/i)).not.toBeInTheDocument();
+    // The JSON-in-notes write is gone: it overwrote the user's scheduling notes.
+    expect(preferencesService.updateMyPreferences).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,9 @@
  * @author Luca Ostinelli
  */
 
+import React from 'react';
 import { act, renderHook } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useScheduleActions } from './useScheduleActions';
 import { ApiError } from '../../services/apiUtils';
 
@@ -38,30 +40,40 @@ const CREATE_VALUES = {
 const formEvent = () => ({ preventDefault: jest.fn() }) as unknown as React.FormEvent<HTMLFormElement>;
 
 describe('useScheduleActions', () => {
-  let loadData: jest.Mock;
+  // The actions run through the mutations in hooks/useSchedulePage, so they
+  // need a QueryClient. "Reloads" now means "invalidated the cache", which
+  // is what `loadData` spies on.
+  let client: QueryClient;
+  let loadData: jest.SpyInstance;
+  const renderActions = () =>
+    renderHook(() => useScheduleActions(), {
+      wrapper: ({ children }: { children: React.ReactNode }) =>
+        React.createElement(QueryClientProvider, { client }, children),
+    });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    loadData = jest.fn().mockResolvedValue(undefined);
+    client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    loadData = jest.spyOn(client, 'invalidateQueries');
   });
 
   describe('modal open/close helpers', () => {
     it('openCreateModal clears any previous create error and opens the modal', () => {
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openCreateModal());
       expect(result.current.showCreateModal).toBe(true);
       expect(result.current.createError).toBeNull();
     });
 
     it('openGenerateModal sets the target schedule and opens the modal', () => {
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(7));
       expect(result.current.showGenerateModal).toBe(true);
       expect(result.current.selectedScheduleId).toBe(7);
     });
 
     it('closeCreateModal / closeGenerateModal close without touching other state', () => {
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => { result.current.openCreateModal(); result.current.openGenerateModal(3); });
       act(() => result.current.closeCreateModal());
       expect(result.current.showCreateModal).toBe(false);
@@ -73,7 +85,7 @@ describe('useScheduleActions', () => {
   describe('handleCreateSchedule', () => {
     it('closes the modal, sets the info banner, and reloads on success', async () => {
       mockCreateSchedule.mockResolvedValue({ success: true, data: { id: 1 } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleCreateSchedule(CREATE_VALUES));
 
@@ -86,7 +98,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces an API-level failure without closing the modal', async () => {
       mockCreateSchedule.mockResolvedValue({ success: false, error: { message: 'Name already taken' } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleCreateSchedule(CREATE_VALUES));
 
@@ -97,7 +109,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces a thrown ApiError message', async () => {
       mockCreateSchedule.mockRejectedValue(new ApiError('Conflict', 409, 'CONFLICT'));
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleCreateSchedule(CREATE_VALUES));
 
@@ -106,7 +118,7 @@ describe('useScheduleActions', () => {
 
     it('falls back to a generic message for a non-ApiError throw', async () => {
       mockCreateSchedule.mockRejectedValue(new Error('network down'));
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleCreateSchedule(CREATE_VALUES));
 
@@ -116,7 +128,7 @@ describe('useScheduleActions', () => {
 
   describe('handleGenerateSchedule', () => {
     it('refuses to submit with no schedule selected', async () => {
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
 
@@ -126,7 +138,7 @@ describe('useScheduleActions', () => {
 
     it('sync path (no jobId): closes the modal and shows the optimal-outcome info banner', async () => {
       mockGenerateSchedule.mockResolvedValue({ success: true, data: { engine: 'or-tools', degraded: false } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(5));
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -139,7 +151,7 @@ describe('useScheduleActions', () => {
 
     it('sync path, greedy engine: shows the greedy-outcome info banner (still not an error)', async () => {
       mockGenerateSchedule.mockResolvedValue({ success: true, data: { engine: 'greedy', degraded: false } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(5));
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -153,7 +165,7 @@ describe('useScheduleActions', () => {
         success: true,
         data: { engine: 'greedy', degraded: true, degradedReason: 'OR-Tools unavailable' },
       });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(5));
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -164,7 +176,7 @@ describe('useScheduleActions', () => {
 
     it('API-level failure keeps the modal open and reports the message', async () => {
       mockGenerateSchedule.mockResolvedValue({ success: false, error: { message: 'No shifts to schedule' } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(5));
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -176,7 +188,7 @@ describe('useScheduleActions', () => {
 
     it('a thrown error surfaces as the generate error', async () => {
       mockGenerateSchedule.mockRejectedValue(new ApiError('Locked', 423, 'LOCKED'));
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
       act(() => result.current.openGenerateModal(5));
 
       await act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -195,7 +207,7 @@ describe('useScheduleActions', () => {
           .mockResolvedValueOnce({ data: { state: 'active' } })
           .mockResolvedValueOnce({ data: { state: 'completed', result: { engine: 'or-tools', degraded: false } } });
 
-        const { result } = renderHook(() => useScheduleActions(loadData));
+        const { result } = renderActions();
         act(() => result.current.openGenerateModal(5));
 
         const submit = act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -216,7 +228,7 @@ describe('useScheduleActions', () => {
           data: { state: 'failed', failedReason: 'Solver crashed' },
         });
 
-        const { result } = renderHook(() => useScheduleActions(loadData));
+        const { result } = renderActions();
         act(() => result.current.openGenerateModal(5));
 
         const submit = act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -231,7 +243,7 @@ describe('useScheduleActions', () => {
         mockGenerateSchedule.mockResolvedValue({ success: true, data: { jobId: 'job-3' } });
         mockGetOptimizationStatus.mockResolvedValue({ data: { state: 'waiting' } });
 
-        const { result } = renderHook(() => useScheduleActions(loadData));
+        const { result } = renderActions();
         act(() => result.current.openGenerateModal(5));
 
         const submit = act(() => result.current.handleGenerateSchedule(formEvent()));
@@ -248,7 +260,7 @@ describe('useScheduleActions', () => {
   describe('handlePublish', () => {
     it('shows the success banner and reloads', async () => {
       mockPublishSchedule.mockResolvedValue({ success: true });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handlePublish(3));
 
@@ -258,7 +270,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces an API-level failure', async () => {
       mockPublishSchedule.mockResolvedValue({ success: false, error: { message: 'Coverage gap on Monday' } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handlePublish(3));
 
@@ -268,7 +280,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces a thrown error', async () => {
       mockPublishSchedule.mockRejectedValue(new Error('network down'));
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handlePublish(3));
 
@@ -279,7 +291,7 @@ describe('useScheduleActions', () => {
   describe('handleArchive', () => {
     it('shows the success banner and reloads', async () => {
       mockArchiveSchedule.mockResolvedValue({ success: true });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleArchive(3));
 
@@ -289,7 +301,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces an API-level failure', async () => {
       mockArchiveSchedule.mockResolvedValue({ success: false, error: { message: 'Already archived' } });
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleArchive(3));
 
@@ -298,7 +310,7 @@ describe('useScheduleActions', () => {
 
     it('surfaces a thrown ApiError message', async () => {
       mockArchiveSchedule.mockRejectedValue(new ApiError('Forbidden', 403, 'FORBIDDEN'));
-      const { result } = renderHook(() => useScheduleActions(loadData));
+      const { result } = renderActions();
 
       await act(() => result.current.handleArchive(3));
 
