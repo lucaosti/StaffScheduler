@@ -29,7 +29,7 @@
  */
 
 import type { paths } from './schema';
-import { API_BASE_URL, ApiError, getAuthHeaders, handleResponse } from '../services/apiUtils';
+import { API_BASE_URL, ApiError, getAuthHeaders, handleResponse, isSessionRefusal } from '../services/apiUtils';
 import type { ApiResponse } from '../types';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -145,9 +145,10 @@ const buildQuery = (query?: Record<string, unknown>): string => {
  *
  * The auth endpoints are exempt: a failed login or refresh is an answer, not
  * an expired session, and `/auth/verify` is the bootstrap probe AuthContext
- * already follows with an explicit refresh. When the refresh itself fails the
- * session is over; the listeners (AuthContext) are told so the UI signs out
- * instead of leaving the user on a page whose every request fails.
+ * already follows with an explicit refresh. When the server refuses the
+ * refresh the session is over; the listeners (AuthContext) are told — once —
+ * so the UI signs out instead of leaving the user on a page whose every
+ * request fails. A refresh that fails for any other reason ends nothing.
  */
 const SESSION_ERROR_CODES = new Set(['INVALID_TOKEN', 'MISSING_TOKEN', 'TOKEN_REVOKED']);
 const NO_RECOVERY_PATHS = ['/auth/login', '/auth/refresh', '/auth/verify'];
@@ -165,6 +166,26 @@ export const onSessionExpired = (listener: () => void): (() => void) => {
   sessionExpiredListeners.add(listener);
   return () => sessionExpiredListeners.delete(listener);
 };
+
+/*
+ * One recovery at a time, and one verdict per recovery (#842 review): N
+ * requests that 401 together share this promise, so a refused refresh tells
+ * the listeners ONCE rather than once per waiting request — each of which
+ * used to start its own logout, and each logout's own calls could 401 and
+ * start another. Only a definitive refusal (`isSessionRefusal`) ends the
+ * session; a 5xx or network failure leaves it alone.
+ */
+let recovering: Promise<void> | null = null;
+const recoverSession = (refresher: () => Promise<unknown>): Promise<void> =>
+  (recovering ??= refresher()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      if (isSessionRefusal(error)) sessionExpiredListeners.forEach((listener) => listener());
+      throw error;
+    })
+    .finally(() => {
+      recovering = null;
+    }));
 
 const isExpiredSession = (error: unknown, path: string): boolean =>
   error instanceof ApiError &&
@@ -201,10 +222,12 @@ const request = async <T>(
   } catch (error) {
     if (!refreshSession || !isExpiredSession(error, path)) throw error;
     try {
-      await refreshSession();
-    } catch {
-      sessionExpiredListeners.forEach((listener) => listener());
-      throw error;
+      await recoverSession(refreshSession);
+    } catch (refreshError) {
+      // A refused refresh reports the original 401 (the listeners have been
+      // told the session is over); a transient one reports itself — "server
+      // unavailable" is the truth, "unauthorised" would not be.
+      throw isSessionRefusal(refreshError) ? error : refreshError;
     }
     // Exactly one retry: a 401 after a successful refresh is a real refusal,
     // and looping on it would rotate the refresh token on every request.

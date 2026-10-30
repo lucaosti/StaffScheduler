@@ -183,6 +183,10 @@ export const logout = async (): Promise<void> => {
   try {
     await fetch(`${API_BASE_URL}/auth/refresh/logout`, {
       method: 'POST',
+      // The revocation must outlive the page: a user who clicks Logout and
+      // closes the tab would otherwise leave the 30-day refresh cookie live,
+      // signing the next visitor in as them (#841 review).
+      keepalive: true,
       ...getAuthHeaders(clientTypeHeaders()),
       ...(native ? { body: JSON.stringify({ refreshToken: getCachedRefreshToken() ?? undefined }) } : {}),
     });

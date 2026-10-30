@@ -456,8 +456,13 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   survive sleep or a throttled background tab, so the typed client also answers
   a 401 `INVALID_TOKEN` / `MISSING_TOKEN` / `TOKEN_REVOKED` with one refresh
   (the same single-flight, cross-tab-locked one) and one retry of the request.
-  Concurrent 401s share that refresh. The auth endpoints themselves are exempt,
-  and a failed refresh signs the SPA out.
+  Concurrent 401s share that refresh. The auth endpoints themselves are exempt.
+  Only a refused refresh (401, or `REFRESH_SUPERSEDED` after the retries) signs
+  the SPA out, and once however many requests were waiting; a 5xx or network
+  failure is just the request's error. The native app can read its token, so
+  there the proactive refresh is scheduled at 80% of the remaining lifetime
+  from `exp`, and runs on resume (`visibilitychange`) when the token is within
+  two minutes of expiry.
 - **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
   path, because that is the only place a browser sends the cookie, and not
   behind the auth middleware, so it works with an expired access token. It
@@ -466,12 +471,15 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   token in the body. Widening the cookie path so `/auth/logout` could receive it
   was rejected for the exposure reason above. Before that call the SPA
   deactivates this device's native push token (`DELETE
-  /notifications/push/device-token`) and drops the browser's Web Push
-  subscription, since both belong to the device rather than the person and
-  would keep delivering the signed-out user's notifications to the next one.
-  The TanStack Query cache is cleared whenever the signed-in user changes —
-  logout, or a refresh that returns a different user — so no page is served
-  from the previous user's cache.
+  /notifications/push/device-token`, registered on every sign-in including a
+  restored session) and drops the browser's Web Push subscription, since both
+  belong to the device rather than the person and would keep delivering the
+  signed-out user's notifications to the next one. That cleanup is bounded to
+  1.5 s; the revocation is a `keepalive` request and is sent at once on
+  `pagehide`, so closing the tab after Logout still revokes. A sign-in waits
+  for a pending revocation, so it can never revoke the new session. The
+  TanStack Query cache is cleared whenever the signed-in user changes — before
+  the new user's first render on a switch, after the pages unmount on logout.
 - **Password changes and deactivation end every session**: `UserService`
   revokes all of the user's refresh tokens, in the same transaction, whenever
   the password is changed (via `/users` or `/employees`) or the account is

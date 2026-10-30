@@ -99,6 +99,44 @@ describe('apiClient — an expired access token', () => {
     unsubscribe();
   });
 
+  /**
+   * Review of #842: any refresh failure used to end the session, so a 502
+   * during a rolling deploy or a dropped connection signed everyone out.
+   * Only a definitive refusal ends it; a transient failure is the request's
+   * error, and the next request tries again.
+   */
+  it.each([
+    ['a 503 during a deploy', () => HttpResponse.json({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'x' } }, { status: 503 })],
+    ['a dropped connection', () => HttpResponse.error()],
+  ])('keeps the session when the refresh fails transiently (%s)', async (_label, response) => {
+    withSessionHandlers(response as () => Response);
+    const listener = jest.fn();
+    const unsubscribe = onSessionExpired(listener);
+
+    await expect(apiClient.get('/departments')).rejects.toBeDefined();
+
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('reports a refused refresh once, however many requests were waiting on it', async () => {
+    withSessionHandlers(() =>
+      HttpResponse.json({ success: false, error: { code: 'INVALID_REFRESH_TOKEN', message: 'no' } }, { status: 401 })
+    );
+    const listener = jest.fn();
+    const unsubscribe = onSessionExpired(listener);
+
+    await Promise.allSettled([
+      apiClient.get('/departments'),
+      apiClient.get('/departments'),
+      apiClient.get('/departments'),
+    ]);
+
+    expect(refreshCalls).toBe(1);
+    expect(listener).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
   it('retries only once: a second 401 after a successful refresh is returned as is', async () => {
     server.use(
       http.post(`${API_URL}/auth/refresh`, () => {
