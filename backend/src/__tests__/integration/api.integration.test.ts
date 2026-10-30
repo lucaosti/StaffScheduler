@@ -2424,3 +2424,80 @@ describe('user-management authority (#809, #810)', () => {
     expect(await roleNamesOf((await userByEmail(csvEmail))!)).toEqual(['Employee']);
   });
 });
+
+/**
+ * Regression for #824: every paginated listing bound `LIMIT ? OFFSET ?` through
+ * `execute()`, which MySQL's binary protocol rejects with ER_WRONG_ARGUMENTS —
+ * so each of these routes answered 200 unpaginated and 500 the moment a client
+ * asked for a page. The mocked unit suites asserted the bound parameters and so
+ * certified the bug; only a real server can tell.
+ */
+describe('paginated listings run against the real schema (#824)', () => {
+  const PAGE_SIZE = 2;
+  const ROWS = 5;
+
+  beforeAll(async () => {
+    // Enough rows on every resource that page 2 is full and distinct from
+    // page 1, whatever the earlier suites happened to leave behind.
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active) VALUES ('Itest Paging Dept', 'pagination', 1)`
+    );
+    for (let i = 0; i < ROWS; i++) {
+      const [user] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+         VALUES (?, 'x', 'Paging', ?, 1)`,
+        [`itest-paging-${i}@example.com`, `Person${i}`]
+      );
+      const [sched] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+         VALUES (?, CURDATE() + INTERVAL ? DAY, CURDATE() + INTERVAL ? DAY, ?, 'draft', ?)`,
+        [`Itest Paging ${i}`, i * 7, i * 7 + 6, dept.insertId, userId]
+      );
+      const [shift] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, '08:00:00', '12:00:00', 1, 2, 'open')`,
+        [sched.insertId, dept.insertId, i * 7]
+      );
+      await admin.query(
+        `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
+        [shift.insertId, user.insertId]
+      );
+    }
+  });
+
+  it.each(['employees', 'users', 'assignments', 'schedules', 'shifts'])(
+    'GET /api/v1/%s serves page 1 and page 2',
+    async (resource) => {
+      const cookie = await authCookie();
+      const all = await request(app).get(`/api/v1/${resource}`).set('Cookie', cookie);
+      expect(all.status).toBe(200);
+      const total = all.body.data.length;
+      expect(total).toBeGreaterThanOrEqual(2 * PAGE_SIZE);
+
+      const page = (n: number) =>
+        request(app).get(`/api/v1/${resource}?page=${n}&pageSize=${PAGE_SIZE}`).set('Cookie', cookie);
+      const first = await page(1);
+      const second = await page(2);
+
+      for (const [res, n] of [[first, 1], [second, 2]] as const) {
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data).toHaveLength(PAGE_SIZE);
+        // The count query and the page query apply the same filters, so the
+        // total must agree with the unpaginated listing.
+        expect(res.body.meta).toEqual({
+          total,
+          page: n,
+          pageSize: PAGE_SIZE,
+          pages: Math.ceil(total / PAGE_SIZE),
+        });
+      }
+
+      const ids = (res: request.Response): number[] => res.body.data.map((row: { id: number }) => row.id);
+      // OFFSET is really applied, and the order is total: the two pages are
+      // consecutive slices of the full listing, with no row on both.
+      expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
+      expect([...ids(first), ...ids(second)]).toEqual(ids(all).slice(0, 2 * PAGE_SIZE));
+    }
+  );
+});

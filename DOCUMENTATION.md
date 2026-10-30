@@ -235,6 +235,15 @@ either is present the response carries a `meta` block
 (`{ total, page, pageSize, pages }`) alongside `data`; when neither is present
 the plain `{ success, data }` shape is returned, for backward compatibility.
 
+Every paginated SELECT renders its window with `limitOffsetClause` in
+`backend/src/utils/sql.ts`, never `LIMIT ? OFFSET ?`: under `pool.execute()`
+MySQL's binary protocol rejects a bound LIMIT/OFFSET with ER_WRONG_ARGUMENTS,
+which made the employees, users, assignments, schedules and shifts listings
+answer 500 to any `?page` request (#824). The helper inlines integers it
+derives and clamps itself, so no caller text reaches the SQL. Each paginated
+listing orders by a unique column last (its `id`), so a page boundary never
+repeats or skips a row.
+
 Query filters are validated with `validateQuery(schema)` against a Zod schema
 in `@staff-scheduler/shared`, the same way bodies and path params are, and the
 spec's `parameters` are **generated** from those schemas by
