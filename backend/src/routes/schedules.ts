@@ -159,10 +159,12 @@ router.get('/department/:departmentId', authenticate, requirePermission('schedul
 
 // Allowed when: the caller is querying their own schedules, or holds
 // schedule.manage over a unit the person belongs to.
-router.get('/user/:userId', authenticate, validateParams(userIdParam), scope.ownerOr('schedule.manage', 'user', 'params.userId'), async (_req: Request, res: Response) => {
+// A manager sees, of the person's schedules, only those of their own units.
+router.get('/user/:userId', authenticate, validateParams(userIdParam), scope.ownerOr('schedule.manage', 'user', 'params.userId'), async (req: Request, res: Response) => {
   const { userId } = res.locals.params;
 
-  const schedules = await scheduleService.getSchedulesByUser(userId);
+  const orgUnitIds = req.user!.id === userId ? undefined : scopeFilter(req.user!, 'schedule.manage');
+  const schedules = await scheduleService.getSchedulesByUser(userId, orgUnitIds);
   res.json({ success: true, data: schedules });
 });
 

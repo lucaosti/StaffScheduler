@@ -50,6 +50,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
   it('includes scopeOrgUnitId in the INSERT when provided', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])     // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])  // INSERT delegation
       .mockResolvedValueOnce([{ insertId: 1 }, null])                    // audit_logs INSERT
       .mockResolvedValueOnce([[makeDelegationRow()], null]);               // getDelegationById
@@ -62,14 +63,15 @@ describe('DelegationService.createDelegation — additional paths', () => {
       scopeOrgUnitId: 5,
     });
 
-    // The first execute call is the INSERT; verify scopeOrgUnitId param is present
-    const insertArgs = execute.mock.calls[0][1] as unknown[];
+    // The second execute call is the INSERT (after the role codes); verify scopeOrgUnitId param is present
+    const insertArgs = execute.mock.calls[1][1] as unknown[];
     expect(insertArgs[3]).toBe(5);  // scope_org_unit_id is the 4th value-param
   });
 
   it('writes an audit log entry after successful creation', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])     // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 42, affectedRows: 1 }, null])  // INSERT delegation
       .mockResolvedValueOnce([{ insertId: 1 }, null])                     // audit INSERT
       .mockResolvedValueOnce([[makeDelegationRow({ id: 42 })], null]);     // getDelegationById
@@ -81,15 +83,16 @@ describe('DelegationService.createDelegation — additional paths', () => {
       expiresAt: futureDate.toISOString(),
     });
 
-    // Second execute call should be the audit_logs INSERT
-    expect(execute.mock.calls[1][0]).toContain('INSERT INTO audit_logs');
-    const auditArgs = execute.mock.calls[1][1] as unknown[];
+    // The third execute call is the audit_logs INSERT (after the role codes and the INSERT)
+    expect(execute.mock.calls[2][0]).toContain('INSERT INTO audit_logs');
+    const auditArgs = execute.mock.calls[2][1] as unknown[];
     expect(auditArgs[2]).toBe('delegation.grant');
   });
 
   it('still resolves even if audit log INSERT fails (silent error)', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])     // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 1, affectedRows: 1 }, null])   // INSERT delegation
       .mockRejectedValueOnce(new Error('audit table locked'))             // audit log fails
       .mockResolvedValueOnce([[makeDelegationRow()], null]);               // getDelegationById

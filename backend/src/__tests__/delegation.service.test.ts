@@ -31,6 +31,7 @@ describe('DelegationService.createDelegation', () => {
   it('creates a delegation when all requested codes are held by the delegator', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])      // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 42, affectedRows: 1 }, null]) // INSERT
       .mockResolvedValueOnce([[]])                                       // writeAuditLog audit insert
       .mockResolvedValueOnce([                                           // getDelegationById
@@ -101,6 +102,24 @@ describe('DelegationService.createDelegation', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it('refuses a scoped delegation of a code that acts organization-wide', async () => {
+    const { pool, execute } = makePool();
+    const admin = { id: 1, permissions: ['role.manage', 'timeoff.approve'] };
+    await expect(
+      new DelegationService(pool).createDelegation(admin, { ...input(5), permissionCodes: ['timeoff.approve', 'role.manage'] })
+    ).rejects.toThrow(/role.manage act organization-wide/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('refuses re-delegating a code held only through someone else\'s delegation', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ code: 'schedule.read' }], null]); // own role codes lack timeoff.approve
+    await expect(
+      new DelegationService(pool).createDelegation({ id: 1, permissions: delegatorPerms }, input(null))
+    ).rejects.toThrow(/held only through a delegation/);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a delegation scoped outside the delegator\'s units', async () => {
     const { pool } = makePool();
     await expect(new DelegationService(pool).createDelegation(scoped, input(9))).rejects.toThrow(/outside the delegator's scope/);
@@ -115,6 +134,7 @@ describe('DelegationService.createDelegation', () => {
   it('accepts a delegation inside the delegator\'s scope', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])
       .mockResolvedValueOnce([{ insertId: 42 }, null])
       .mockResolvedValueOnce([{ insertId: 1 }, null])
       .mockResolvedValueOnce([[{

@@ -5554,7 +5554,7 @@
           "Import"
         ],
         "summary": "Bulk import shifts",
-        "description": "Admin/manager only.",
+        "description": "Requires `shift.manage`. Every row's schedule and department must lie in the caller's org-unit scope; a row naming another unit's id answers 404 for the whole file, before anything is written.",
         "requestBody": {
           "required": true,
           "content": {
@@ -5583,6 +5583,9 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

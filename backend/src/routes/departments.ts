@@ -34,7 +34,9 @@ import { DepartmentService } from '../services/DepartmentService';
 import { UserService } from '../services/UserService';
 import { GeofenceService } from '../services/GeofenceService';
 import { KioskService } from '../services/KioskService';
-import { authenticate, userHasPermission } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
+import { assertInScope } from '../services/access/AccessPolicy';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -57,6 +59,13 @@ export const createDepartmentsRouter = (pool: Pool) => {
   const geofenceService = new GeofenceService(pool);
   const userService = new UserService(pool);
   const kioskService = new KioskService(pool);
+  // Creating, moving, deleting or staffing a department changes which unit its
+  // schedules, shifts and assignments belong to (#813 review), so these writes
+  // are held to scope: the department, the unit it moves to, and the person.
+  // The checks run after each route's own permission check, so a caller with
+  // neither code still gets 403 rather than a scope answer.
+  const scope = accessScope(pool);
+  const MANAGE_CODES = ['department.manage', 'settings.manage'];
 
   // The isActive/orgUnitId filters were documented but never read; they now
   // apply to the unrestricted listing. The scoped listing stays unfiltered:
@@ -101,17 +110,10 @@ export const createDepartmentsRouter = (pool: Pool) => {
     res.json({ success: true, data: department });
   });
 
-  router.post('/', authenticate, validateBody(createDepartmentBody), async (req, res) => {
-    const user = req.user!;
-
-    if (!userHasPermission(user, 'department.manage')) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-      });
-    }
-
+  router.post('/', authenticate, requirePermission('department.manage'), validateBody(createDepartmentBody), scope.reach('department.manage', 'orgUnit', 'body.orgUnitId'), async (req, res) => {
     const departmentData = res.locals.body;
+    // A department in no unit is one a scoped manager could never reach again.
+    if (departmentData.orgUnitId === undefined) assertInScope(req.user!, 'department.manage', null, 'Org unit');
 
     if (departmentData.managerId) {
       const manager = await userService.getUserById(departmentData.managerId);
@@ -152,6 +154,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
       });
     }
 
+    await scope.policy.assertReach(user, MANAGE_CODES, 'department', departmentId);
+    if (departmentData.orgUnitId !== undefined) await scope.policy.assertReach(user, MANAGE_CODES, 'orgUnit', departmentData.orgUnitId);
+
     if (departmentData.managerId) {
       const manager = await userService.getUserById(departmentData.managerId);
       if (!manager) {
@@ -177,6 +182,7 @@ export const createDepartmentsRouter = (pool: Pool) => {
         error: { code: 'FORBIDDEN', message: 'Only administrators can delete departments' }
       });
     }
+    await scope.policy.assertReach(user, 'settings.manage', 'department', departmentId);
 
     await departmentService.deleteDepartment(departmentId);
 
@@ -206,6 +212,9 @@ export const createDepartmentsRouter = (pool: Pool) => {
         error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
       });
     }
+
+    await scope.policy.assertReach(user, MANAGE_CODES, 'department', departmentId);
+    await scope.policy.assertReach(user, MANAGE_CODES, 'user', userId);
 
     const targetUser = await userService.getUserById(userId);
     if (!targetUser) {
@@ -252,6 +261,8 @@ export const createDepartmentsRouter = (pool: Pool) => {
       });
     }
 
+    await scope.policy.assertReach(user, MANAGE_CODES, 'department', departmentId);
+    await scope.policy.assertReach(user, MANAGE_CODES, 'user', targetUserId);
     await departmentService.removeUserFromDepartment(departmentId, targetUserId);
 
     res.json({ success: true, data: { message: 'User removed from department successfully' } });

@@ -71,7 +71,8 @@ export type ScopedKind =
   | 'attendance'
   | 'loan'
   | 'costPlan'
-  | 'orgUnit';
+  | 'orgUnit'
+  | 'shiftSwap';
 
 /**
  * The caller's scope for one permission: the delegation override for that code
@@ -146,73 +147,153 @@ export const memberCondition = (userColumn: string, orgUnitIds: number[] | undef
   return { sql: `${userColumn} IN (SELECT user_id FROM user_org_units WHERE ${units.sql})`, params: units.params };
 };
 
-/** One query per kind; each yields `unit` rows (and `owner` where ownership applies). */
-const RESOLVERS: Record<ScopedKind, { label: string; sql: string }> = {
-  department: { label: 'Department', sql: 'SELECT org_unit_id AS unit, NULL AS owner FROM departments WHERE id = ?' },
+
+/**
+ * The codes a unit scope can bound: every operation they admit either touches a
+ * unit-owned row, lists by scope, or is shared reference data. A delegation
+ * scoped to a unit may carry only these (DelegationService) — a scoped
+ * `role.manage` would still assign any role to anyone, because nothing about
+ * role administration belongs to a unit.
+ *
+ * Not maintained by hand in isolation: the authorization matrix suite derives
+ * this set from the declared table (codes of `unit`/`filtered` operations,
+ * minus any code that also admits an `org` one) and fails when it differs.
+ */
+export const UNIT_SCOPED_PERMISSIONS: ReadonlySet<string> = new Set([
+  'assignment.manage',
+  'attendance.approve',
+  'attendance.read',
+  'department.manage',
+  'employee.manage',
+  'employee.read',
+  'loan.approve',
+  'loan.request',
+  'org_unit.read',
+  'report.manage',
+  'report.read',
+  'schedule.manage',
+  'schedule.optimize',
+  'schedule.publish',
+  'schedule.read',
+  'shift.manage',
+  'shiftswap.approve',
+  'timeline.read',
+  'timeline.read_all',
+  'timeoff.approve',
+  'user.manage',
+  'user.read',
+]);
+
+/**
+ * One query per kind, over a list of ids; each row yields `id`, `unit` and,
+ * where ownership applies, `owner`. `all` marks a row that spans units and is
+ * reachable only when EVERY unit is: approving a swap rewrites both
+ * assignments, so a manager of one side alone must not decide it.
+ */
+const RESOLVERS: Record<ScopedKind, { label: string; sql: (ids: string) => string; all?: boolean }> = {
+  department: { label: 'Department', sql: (ids) => `SELECT id, org_unit_id AS unit, NULL AS owner FROM departments WHERE id IN (${ids})` },
   schedule: {
     label: 'Schedule',
-    sql: `SELECT d.org_unit_id AS unit, NULL AS owner FROM schedules s
-            LEFT JOIN departments d ON d.id = s.department_id WHERE s.id = ?`,
+    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner FROM schedules s
+            LEFT JOIN departments d ON d.id = s.department_id WHERE s.id IN (${ids})`,
   },
   shift: {
     label: 'Shift',
-    sql: `SELECT d.org_unit_id AS unit, NULL AS owner FROM shifts s
-            LEFT JOIN departments d ON d.id = s.department_id WHERE s.id = ?`,
+    sql: (ids) => `SELECT s.id, d.org_unit_id AS unit, NULL AS owner FROM shifts s
+            LEFT JOIN departments d ON d.id = s.department_id WHERE s.id IN (${ids})`,
   },
   assignment: {
     label: 'Assignment',
-    sql: `SELECT d.org_unit_id AS unit, sa.user_id AS owner FROM shift_assignments sa
+    sql: (ids) => `SELECT sa.id, d.org_unit_id AS unit, sa.user_id AS owner FROM shift_assignments sa
             JOIN shifts s ON s.id = sa.shift_id
-            LEFT JOIN departments d ON d.id = s.department_id WHERE sa.id = ?`,
+            LEFT JOIN departments d ON d.id = s.department_id WHERE sa.id IN (${ids})`,
   },
   costPlan: {
     label: 'Cost plan',
-    sql: `SELECT d.org_unit_id AS unit, NULL AS owner FROM cost_plans c
-            LEFT JOIN departments d ON d.id = c.department_id WHERE c.id = ?`,
+    sql: (ids) => `SELECT c.id, d.org_unit_id AS unit, NULL AS owner FROM cost_plans c
+            LEFT JOIN departments d ON d.id = c.department_id WHERE c.id IN (${ids})`,
   },
   user: {
     label: 'User',
-    sql: `SELECT uou.org_unit_id AS unit, u.id AS owner FROM users u
-            LEFT JOIN user_org_units uou ON uou.user_id = u.id WHERE u.id = ?`,
+    sql: (ids) => `SELECT u.id, uou.org_unit_id AS unit, u.id AS owner FROM users u
+            LEFT JOIN user_org_units uou ON uou.user_id = u.id WHERE u.id IN (${ids})`,
   },
   timeOff: {
     label: 'Time-off request',
-    sql: `SELECT uou.org_unit_id AS unit, t.user_id AS owner FROM time_off_requests t
-            LEFT JOIN user_org_units uou ON uou.user_id = t.user_id WHERE t.id = ?`,
+    sql: (ids) => `SELECT t.id, uou.org_unit_id AS unit, t.user_id AS owner FROM time_off_requests t
+            LEFT JOIN user_org_units uou ON uou.user_id = t.user_id WHERE t.id IN (${ids})`,
   },
   attendance: {
     label: 'Attendance record',
-    sql: `SELECT uou.org_unit_id AS unit, a.user_id AS owner FROM attendance_records a
-            LEFT JOIN user_org_units uou ON uou.user_id = a.user_id WHERE a.id = ?`,
+    sql: (ids) => `SELECT a.id, uou.org_unit_id AS unit, a.user_id AS owner FROM attendance_records a
+            LEFT JOIN user_org_units uou ON uou.user_id = a.user_id WHERE a.id IN (${ids})`,
   },
   // A loan is decided by the unit receiving the person — the same unit the
   // approval workflow resolves its approvers from (EmployeeLoanService).
-  loan: { label: 'Loan', sql: 'SELECT to_org_unit_id AS unit, NULL AS owner FROM employee_loans WHERE id = ?' },
-  orgUnit: { label: 'Org unit', sql: 'SELECT id AS unit, NULL AS owner FROM org_units WHERE id = ?' },
+  loan: { label: 'Loan', sql: (ids) => `SELECT id, to_org_unit_id AS unit, NULL AS owner FROM employee_loans WHERE id IN (${ids})` },
+  orgUnit: { label: 'Org unit', sql: (ids) => `SELECT id, id AS unit, NULL AS owner FROM org_units WHERE id IN (${ids})` },
+  shiftSwap: {
+    label: 'Shift swap request',
+    all: true,
+    sql: (ids) => `SELECT r.id, d.org_unit_id AS unit, NULL AS owner FROM shift_swap_requests r
+            JOIN shift_assignments sa ON sa.id IN (r.requester_assignment_id, r.target_assignment_id)
+            JOIN shifts s ON s.id = sa.shift_id
+            LEFT JOIN departments d ON d.id = s.department_id WHERE r.id IN (${ids})`,
+  },
 };
+
+interface ResolvedRow {
+  units: Array<number | null>;
+  owner: number | null;
+}
+
+/** Whether a row of `kind` with these units lies inside `scope`. */
+const rowInScope = (kind: ScopedKind, scope: Scope, units: Array<number | null>): boolean =>
+  RESOLVERS[kind].all ? scope === null || units.every((u) => u !== null && scope.includes(u)) : inScope(scope, units);
 
 export class AccessPolicy {
   constructor(private readonly pool: Pool) {}
 
-  /** The row's org units and owner, or `null` when it does not exist. */
-  private async resolve(kind: ScopedKind, id: number): Promise<{ units: Array<number | null>; owner: number | null } | null> {
-    const [rows] = await this.pool.execute<RowDataPacket[]>(RESOLVERS[kind].sql, [id]);
-    if (rows.length === 0) return null;
-    return {
-      units: rows.map((r) => (r.unit ?? null) as number | null),
-      owner: (rows[0].owner ?? null) as number | null,
+  /** The org units and owner of each existing row among `ids`, in one query. */
+  private async resolve(kind: ScopedKind, ids: number[]): Promise<Map<number, ResolvedRow>> {
+    const distinct = [...new Set(ids)];
+    const found = new Map<number, ResolvedRow>();
+    if (distinct.length === 0) return found;
+    const [rows] = await this.pool.execute<RowDataPacket[]>(RESOLVERS[kind].sql(distinct.map(() => '?').join(', ')), distinct);
+    for (const r of rows) {
+      const id = r.id as number;
+      const row = found.get(id) ?? { units: [], owner: (r.owner ?? null) as number | null };
+      row.units.push((r.unit ?? null) as number | null);
+      found.set(id, row);
+    }
+    return found;
+  }
+
+  /**
+   * A per-id check for a batch whose rows succeed or fail one by one: the rows
+   * are resolved up front in one query, and the returned function throws the
+   * 404 for an id that is missing or out of scope, without a query of its own.
+   * Unrestricted callers get a check that passes everything, at no cost.
+   */
+  async reachChecker(user: User, permissions: string | string[], kind: ScopedKind, ids: number[]): Promise<(id: number) => void> {
+    const scopes = heldScopes(user, permissions);
+    if (scopes.some((s) => s === null)) return () => undefined;
+    const rows = await this.resolve(kind, ids);
+    return (id: number) => {
+      const row = rows.get(id);
+      if (!row || !scopes.some((s) => rowInScope(kind, s, row.units))) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     };
   }
 
   /**
-   * Refuses (404) a row of `kind` that is missing or outside the caller's scope
-   * for any of `permissions`. Unrestricted callers pass without a query.
+   * Refuses (404) any of `ids` of `kind` that is missing or outside the
+   * caller's scope for one of `permissions`. Unrestricted callers pass without
+   * a query; any number of ids costs one.
    */
-  async assertReach(user: User, permissions: string | string[], kind: ScopedKind, id: number): Promise<void> {
-    const scopes = heldScopes(user, permissions);
-    if (scopes.some((s) => s === null)) return;
-    const row = await this.resolve(kind, id);
-    if (!row || !scopes.some((s) => inScope(s, row.units))) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
+  async assertReach(user: User, permissions: string | string[], kind: ScopedKind, ids: number | number[]): Promise<void> {
+    const list = Array.isArray(ids) ? ids : [ids];
+    const check = await this.reachChecker(user, permissions, kind, list);
+    list.forEach(check);
   }
 
   /**
@@ -224,10 +305,10 @@ export class AccessPolicy {
   async assertOwnerOrReach(user: User, permissions: string | string[], kind: ScopedKind, id: number): Promise<void> {
     const scopes = heldScopes(user, permissions);
     if (scopes.some((s) => s === null)) return;
-    const row = await this.resolve(kind, id);
+    const row = (await this.resolve(kind, [id])).get(id);
     if (!row) throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     if (assertOwnerOr(user, row.owner, permissions)) return;
-    if (!scopes.some((s) => inScope(s, row.units))) {
+    if (!scopes.some((s) => rowInScope(kind, s, row.units))) {
       throw new NotFoundError(`${RESOLVERS[kind].label} not found`);
     }
   }

@@ -7,6 +7,10 @@
 
 import { BulkImportService } from '../services/BulkImportService';
 import { ADMIN_ACTOR } from './helpers/permissions';
+import { NotFoundError } from '../errors';
+
+/** An unscoped importer: the scope check passes without a query. */
+const UNSCOPED = { id: 1, permissions: ['shift.manage'], allowedOrgUnitIds: null } as never;
 
 const makePool = () => {
   const conn = {
@@ -42,7 +46,7 @@ describe('BulkImportService.importShifts', () => {
   it('returns parse errors without touching the DB when the CSV is invalid', async () => {
     const { pool, conn } = makePool();
     const service = new BulkImportService(pool);
-    const out = await service.importShifts('garbage');
+    const out = await service.importShifts('garbage', UNSCOPED);
     expect(out.inserted).toBe(0);
     expect(out.errors.length).toBeGreaterThan(0);
     expect(conn.beginTransaction).not.toHaveBeenCalled();
@@ -59,7 +63,7 @@ describe('BulkImportService.importShifts', () => {
       .mockResolvedValueOnce([{ insertId: 11, affectedRows: 1 }, null]);
 
     const service = new BulkImportService(pool);
-    const out = await service.importShifts(csv);
+    const out = await service.importShifts(csv, UNSCOPED);
     expect(out.inserted).toBe(2);
     expect(out.errors).toHaveLength(0);
     expect(conn.commit).toHaveBeenCalled();
@@ -74,7 +78,7 @@ describe('BulkImportService.importShifts', () => {
     conn.execute.mockRejectedValueOnce(dbErr);
 
     const service = new BulkImportService(pool);
-    await expect(service.importShifts(csv)).rejects.toThrow('FK constraint');
+    await expect(service.importShifts(csv, UNSCOPED)).rejects.toThrow('FK constraint');
     expect(conn.rollback).toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalled();
   });
@@ -84,9 +88,20 @@ describe('BulkImportService.importShifts', () => {
       'scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n' + '1,2,not-a-date,08:00,16:00,2,4\n';
     const { pool, conn } = makePool();
     const service = new BulkImportService(pool);
-    const out = await service.importShifts(csv);
+    const out = await service.importShifts(csv, UNSCOPED);
     expect(out.inserted).toBe(0);
     expect(out.errors.length).toBeGreaterThan(0);
+    expect(conn.beginTransaction).not.toHaveBeenCalled();
+  });
+
+  it('refuses the whole file, before writing anything, when a row names another unit', async () => {
+    const csv =
+      'scheduleId,departmentId,date,startTime,endTime,minStaff,maxStaff\n' + '1,2,2031-03-03,08:00,16:00,2,4\n';
+    const { pool, execute, conn } = makePool();
+    // The schedule resolves to org unit 9; the importer is scoped to unit 5.
+    execute.mockResolvedValue([[{ id: 1, unit: 9, owner: null }], null]);
+    const scoped = { id: 1, permissions: ['shift.manage'], allowedOrgUnitIds: [5] } as never;
+    await expect(new BulkImportService(pool).importShifts(csv, scoped)).rejects.toThrow(NotFoundError);
     expect(conn.beginTransaction).not.toHaveBeenCalled();
   });
 });

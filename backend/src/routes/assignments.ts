@@ -42,7 +42,7 @@ import { ExportService } from '../services/ExportService';
 import { assignmentColumns } from '../services/exportColumns';
 import { SwapCandidateService } from '../services/SwapCandidateService';
 import { RbacService } from '../services/RbacService';
-import { scopeFilter } from '../services/access/AccessPolicy';
+import { scopeFilter, scopeFor } from '../services/access/AccessPolicy';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
 import { accessScope } from '../middleware/accessScope';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
@@ -187,7 +187,7 @@ router.get('/:id/swap-candidates', authenticate, validateParams(idParam), async 
   if (userHasPermission(actor, 'assignment.manage')) {
     orgUnitIds = scopeFilter(actor, 'assignment.manage') ?? null;
   } else {
-    const scoped = actor.allowedOrgUnitIds ?? null;
+    const scoped = scopeFor(actor, 'schedule.read');
     const own = await new RbacService(pool).getUserOrgUnitSubtreeIds(actor.id);
     orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
   }
@@ -237,9 +237,12 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
 router.post('/batch', authenticate, requirePermission('assignment.manage'), validateBody(batchCreateAssignmentsBody), async (req: Request, res: Response) => {
   const { assignments } = res.locals.body as z.infer<typeof batchCreateAssignmentsBody>;
   const actor = req.user!;
+  // Resolved once for the whole batch (one query per kind), checked per row.
+  const shiftInScope = await scope.policy.reachChecker(actor, 'assignment.manage', 'shift', assignments.map((a) => a.shiftId));
+  const userInScope = await scope.policy.reachChecker(actor, 'assignment.manage', 'user', assignments.map((a) => a.userId));
   const result = await runBatch(assignments, async (assignmentData) => {
-    await scope.policy.assertReach(actor, 'assignment.manage', 'shift', assignmentData.shiftId);
-    await scope.policy.assertReach(actor, 'assignment.manage', 'user', assignmentData.userId);
+    shiftInScope(assignmentData.shiftId);
+    userInScope(assignmentData.userId);
     return assignmentService.createAssignment({ ...assignmentData, actorId: actor.id });
   });
 

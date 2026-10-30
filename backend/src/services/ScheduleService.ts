@@ -661,8 +661,8 @@ export class ScheduleService {
     return this.getAllSchedules({ departmentId });
   }
 
-  async getSchedulesByUser(userId: number): Promise<Schedule[]> {
-    return this.orchestrator.getSchedulesByUser(userId);
+  async getSchedulesByUser(userId: number, orgUnitIds?: number[]): Promise<Schedule[]> {
+    return this.orchestrator.getSchedulesByUser(userId, orgUnitIds);
   }
 
   async getScheduleStatistics(id: number): Promise<{

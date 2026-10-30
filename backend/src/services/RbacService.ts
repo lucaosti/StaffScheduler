@@ -458,7 +458,9 @@ export class RbacService {
    * nothing (an empty list, which matches no row).
    *
    * Returns an empty array — no overrides, no extra queries — when the user has
-   * no active delegations, which is the common case.
+   * no active delegations, which is the common case. Otherwise the cost does not
+   * grow with the number of delegations: every delegator's codes and grants are
+   * read in one query each, and each distinct subtree is expanded once.
    */
   async getEffectiveDelegationScopes(
     userId: number,
@@ -473,18 +475,52 @@ export class RbacService {
     );
     if (rows.length === 0) return [];
 
+    const delegatorIds = [...new Set(rows.map((r) => r.delegator_id as number))];
+    const inList = delegatorIds.map(() => '?').join(',');
+    const [codeRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT ur.user_id, p.code
+         FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE ur.user_id IN (${inList})
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+      delegatorIds
+    );
+    const [grantRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT ur.user_id, ur.scope_org_unit_id
+         FROM user_roles ur
+        WHERE ur.user_id IN (${inList})
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+      delegatorIds
+    );
+    const subtrees = new Map<number, Promise<number[]>>();
+    const subtree = (root: number) => {
+      if (!subtrees.has(root)) subtrees.set(root, this.getDescendantOrgUnitIds(root));
+      return subtrees.get(root)!;
+    };
+    const codesOf = new Map<number, Set<string>>();
+    for (const r of codeRows) {
+      const set = codesOf.get(r.user_id as number) ?? new Set<string>();
+      codesOf.set(r.user_id as number, set.add(r.code as string));
+    }
+    // A delegator's role scope, as computeAllowedOrgUnitIds derives it.
+    const scopeOf = async (delegatorId: number): Promise<number[] | null> => {
+      const roots = grantRows
+        .filter((g) => g.user_id === delegatorId && g.scope_org_unit_id != null)
+        .map((g) => g.scope_org_unit_id as number);
+      if (roots.length === 0) return null;
+      return [...new Set((await Promise.all(roots.map(subtree))).flat())];
+    };
+
     // code → reach through delegations; null means unrestricted.
     const delegated = new Map<string, Set<number> | null>();
     for (const row of rows) {
       const delegatorId = row.delegator_id as number;
-      const [delegatorCodes, delegatorScope] = await Promise.all([
-        this.getRolePermissions(delegatorId),
-        this.getUserRoles(delegatorId).then((roles) => this.computeAllowedOrgUnitIds(roles)),
-      ]);
-      const own = row.scope_org_unit_id == null ? null : await this.getDescendantOrgUnitIds(row.scope_org_unit_id as number);
-      const reach = intersectScopes(own, delegatorScope);
+      const delegatorCodes = codesOf.get(delegatorId) ?? new Set<string>();
+      const own = row.scope_org_unit_id == null ? null : await subtree(row.scope_org_unit_id as number);
+      const reach = intersectScopes(own, await scopeOf(delegatorId));
       for (const code of ValidationUtils.parseStringArray(row.permission_codes)) {
-        if (!delegatorCodes.includes(code)) continue;
+        if (!delegatorCodes.has(code)) continue;
         const current = delegated.get(code);
         if (current === null) continue;
         if (reach === null) delegated.set(code, null);

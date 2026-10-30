@@ -23,6 +23,8 @@ import { NotFoundError } from '../errors';
 import { CalendarService } from '../services/CalendarService';
 import { RbacService } from '../services/RbacService';
 import { resolveVisibleOrgUnits } from '../services/orgScope';
+import { scopeFor } from '../services/access/AccessPolicy';
+import { User } from '../types';
 
 const writeIcsResponse = (
   res: Response,
@@ -127,11 +129,21 @@ export const createCalendarRouter = (pool: Pool, readPool: Pool = pool): Router 
       return;
     }
 
+    // The owner's authority, resolved exactly as `authenticate` resolves a
+    // session's — delegation scopes included — so a delegated read_all for one
+    // unit does not publish the whole organization through a feed (#814 review).
     const roles = await rbac.getUserRoles(ownerId);
+    const allowedOrgUnitIds = await rbac.computeAllowedOrgUnitIds(roles);
+    const owner = {
+      id: ownerId,
+      permissions,
+      allowedOrgUnitIds,
+      delegationScopes: await rbac.getEffectiveDelegationScopes(ownerId, allowedOrgUnitIds),
+    } as User;
     const visibleOrgUnitIds = await resolveVisibleOrgUnits(rbac, {
       userId: ownerId,
       permissions,
-      allowedOrgUnitIds: await rbac.computeAllowedOrgUnitIds(roles),
+      allowedOrgUnitIds: scopeFor(owner, permissions.includes('timeline.read_all') ? 'timeline.read_all' : 'timeline.read'),
       allPermission: 'timeline.read_all',
     });
 

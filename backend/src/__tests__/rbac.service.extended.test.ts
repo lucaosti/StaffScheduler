@@ -893,9 +893,11 @@ describe('RbacService.getEffectiveDelegationScopes', () => {
   }) => {
     const execute = jest.fn(async (sql: string, params: number[]) => {
       if (sql.includes('FROM delegations d')) return [cfg.delegations, null];
-      if (sql.includes('JOIN role_permissions')) return [(cfg.rolePerms?.[params[0]] ?? []).map((code) => ({ code })), null];
-      if (sql.includes('AS role_name')) {
-        return [(cfg.roleScopes?.[params[0]] ?? [null]).map((scope) => ({ role_id: 1, role_name: 'R', scope_org_unit_id: scope })), null];
+      if (sql.includes('JOIN role_permissions')) {
+        return [params.flatMap((id) => (cfg.rolePerms?.[id] ?? []).map((code) => ({ user_id: id, code }))), null];
+      }
+      if (sql.includes('SELECT ur.user_id, ur.scope_org_unit_id')) {
+        return [params.flatMap((id) => (cfg.roleScopes?.[id] ?? [null]).map((scope) => ({ user_id: id, scope_org_unit_id: scope }))), null];
       }
       if (sql.includes('WITH RECURSIVE')) return [(cfg.subtrees?.[params[0]] ?? [params[0]]).map((id) => ({ id })), null];
       throw new Error(`unexpected query: ${sql}`);
@@ -944,14 +946,17 @@ describe('RbacService.getEffectiveDelegationScopes', () => {
     ]);
   });
 
-  it('merges delegations of one code; an unrestricted one wins', async () => {
-    const { pool } = makeScopedPool({
+  it('merges delegations of one code; an unrestricted one wins, at a cost that does not grow per delegation', async () => {
+    const { pool, execute } = makeScopedPool({
       delegations: [row(['a'], 5), row(['a'], 20), row(['b'], 5), row(['b'], null), row(['b'], 20)],
       rolePerms: { 1: ['a', 'b'] },
     });
     const scopes = await new RbacService(pool).getEffectiveDelegationScopes(10, null);
     expect(scopes.find((s) => s.permissionCode === 'a')!.allowedOrgUnitIds).toEqual([5, 20]);
     expect(scopes.find((s) => s.permissionCode === 'b')!.allowedOrgUnitIds).toBeNull();
+    // Five delegations: the delegations, the delegators' codes and grants, two
+    // distinct subtrees and the delegatee's own codes — not five of each.
+    expect(execute).toHaveBeenCalledTimes(6);
   });
 
   it('adds the role scope for a code the user also holds through a role', async () => {

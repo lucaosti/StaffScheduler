@@ -27,7 +27,8 @@ import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
 import { UserAuthorityService } from '../services/access/UserAuthorityService';
-import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
+import { authenticate, requirePermission, userHasPermission, invalidateAuthContext } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import { idParam, createUserBody, updateUserBody, userListQuery } from '../schemas';
@@ -39,6 +40,7 @@ export const createUsersRouter = (pool: Pool) => {
   // Who may write which account and grant which role is decided in one place
   // for every surface that writes accounts — see UserAuthorityService.
   const authority = new UserAuthorityService(pool, 'user.manage');
+  const scope = accessScope(pool);
 
   // Get all users (scoped by the caller's permissions)
   router.get('/', authenticate, validateQuery(userListQuery), async (req, res) => {
@@ -81,17 +83,11 @@ export const createUsersRouter = (pool: Pool) => {
     res.json({ success: true, data: users });
   });
 
-  // Create new user
-  router.post('/', authenticate, validateBody(createUserBody), async (req, res) => {
+  // Create new user. The departments the account is placed in are named in the
+  // body and held to the caller's scope, exactly as on POST /employees — this
+  // is the same write behind a different permission.
+  router.post('/', authenticate, requirePermission('user.manage'), validateBody(createUserBody), scope.reach('user.manage', 'department', 'body.departmentIds[]'), async (req, res) => {
     const user = req.user as User;
-
-    if (!userHasPermission(user, 'user.manage')) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
-      });
-    }
-
     const userData = res.locals.body;
 
     await authority.assertCanAssignRoles(user, userData.roleIds);
@@ -101,25 +97,14 @@ export const createUsersRouter = (pool: Pool) => {
     res.status(201).json({ success: true, data: createdUser });
   });
 
-  // Get user by ID
-  router.get('/:id', authenticate, validateParams(idParam), async (req, res) => {
-    const user = req.user as User;
-    const userId = res.locals.params.id;
-
-    const targetUser = await userService.getUserById(userId);
+  // Get user by ID: one's own record, or user.read over a unit they belong to.
+  router.get('/:id', authenticate, validateParams(idParam), scope.ownerOr('user.read', 'user', 'params.id'), async (_req, res) => {
+    const targetUser = await userService.getUserById(res.locals.params.id);
 
     if (!targetUser) {
       return res.status(404).json({
         success: false,
         error: { code: 'NOT_FOUND', message: 'User not found' }
-      });
-    }
-
-    // Users without directory read access may only view their own record.
-    if (!userHasPermission(user, 'user.read') && user.id !== userId) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Insufficient permissions' }
       });
     }
 

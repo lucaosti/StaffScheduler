@@ -175,10 +175,12 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
 // not the batch, so one row failing it must not fail its neighbors.
 router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), async (req: Request, res: Response) => {
   const { employees } = res.locals.body as z.infer<typeof batchCreateEmployeesBody>;
+  // Resolved once for the whole batch, checked per row.
+  const departmentInScope = await scope.policy.reachChecker(
+    req.user!, 'employee.manage', 'department', employees.flatMap((e) => e.departmentIds ?? [])
+  );
   const result = await runBatch(employees, async (employeeData) => {
-    for (const departmentId of employeeData.departmentIds ?? []) {
-      await scope.policy.assertReach(req.user!, 'employee.manage', 'department', departmentId);
-    }
+    (employeeData.departmentIds ?? []).forEach(departmentInScope);
     await authority.assertCanAssignRoles(req.user!, employeeData.roleIds);
     await enforceFieldPolicy(req, employeeData, false);
     return employeeService.createEmployee(employeeData);

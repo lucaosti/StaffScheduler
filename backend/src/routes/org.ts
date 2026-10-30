@@ -110,12 +110,14 @@ export const createOrgRouter = (pool: Pool): Router => {
 
   // ------------- Memberships -------------
 
-  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+  // Members are people: listing a unit's is held to the caller's scope, while the
+  // tree itself stays visible to everyone who holds org_unit.read.
+  router.get('/units/:id/members', requirePermission('org_unit.read'), validateParams(idParam), scope.reach('org_unit.read', 'orgUnit', 'params.id'), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await units.listMembers(res.locals.params.id) });
   });
 
   // Display-ready member list (name/email/position) for the "browse offices" view.
-  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+  router.get('/units/:id/members/detailed', requirePermission('org_unit.read'), validateParams(idParam), scope.reach('org_unit.read', 'orgUnit', 'params.id'), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await units.listMembersDetailed(res.locals.params.id) });
   });
 

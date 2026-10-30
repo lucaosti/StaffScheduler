@@ -138,6 +138,39 @@ describe('AccessPolicy', () => {
     await expect(policy.assertOwnerOrReach(employee, 'assignment.manage', 'loan', 9)).rejects.toThrow('Loan not found');
   });
 
+  it('resolves many ids of a kind in one query', async () => {
+    const p = policyPool();
+    p.row(null, [1]);
+    await new AccessPolicy(p.pool).assertReach(scoped, 'schedule.read', 'schedule', [4, 5, 4]);
+    expect(p.execute).toHaveBeenCalledTimes(1);
+    expect(p.execute.mock.calls[0][1]).toEqual([4, 5]);
+  });
+
+  it('checks a batch row by row after resolving it once', async () => {
+    const p = policyPool();
+    p.execute.mockResolvedValue([[{ id: 4, unit: 1, owner: null }, { id: 5, unit: 2, owner: null }], null]);
+    const check = await new AccessPolicy(p.pool).reachChecker(scoped, 'schedule.read', 'shift', [4, 5, 6]);
+    expect(() => check(4)).not.toThrow();
+    expect(() => check(5)).toThrow('Shift not found');
+    expect(() => check(6)).toThrow('Shift not found');
+    expect(p.execute).toHaveBeenCalledTimes(1);
+    const unscoped = await new AccessPolicy(p.pool).reachChecker(user(), 'schedule.read', 'shift', [9]);
+    expect(() => unscoped(9)).not.toThrow();
+    expect(p.execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('reaches a swap only when both of its assignments are in scope', async () => {
+    const p = policyPool();
+    const policy = new AccessPolicy(p.pool);
+    const approver = user({ permissions: ['shiftswap.approve'], allowedOrgUnitIds: [1] });
+    p.row(null, [1, 1]);
+    await expect(policy.assertReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).resolves.toBeUndefined();
+    p.row(null, [1, 2]);
+    await expect(policy.assertReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).rejects.toThrow('Shift swap request not found');
+    p.row(null, [1, null]);
+    await expect(policy.assertOwnerOrReach(approver, 'shiftswap.approve', 'shiftSwap', 3)).rejects.toThrow(NotFoundError);
+  });
+
   it('knows every kind of row', async () => {
     const p = policyPool();
     const policy = new AccessPolicy(p.pool);
@@ -154,13 +187,30 @@ describe('AccessPolicy', () => {
 
 describe('accessScope guards', () => {
   it('reads ids from params, body and arrays, ignoring absent values', () => {
-    const locals = { params: { id: 3 }, body: { rows: [{ shiftId: 1 }, { shiftId: 2 }, {}], ids: [4, 'x'] }, query: {} };
+    const locals = { params: { id: 3 }, body: { rows: [{ shiftId: 1 }, { shiftId: 2 }, {}], ids: [4], none: null }, query: {} };
     expect(idsAt(locals, 'params.id')).toEqual([3]);
     expect(idsAt(locals, 'body.rows[].shiftId')).toEqual([1, 2]);
     expect(idsAt(locals, 'body.ids[]')).toEqual([4]);
     expect(idsAt(locals, 'body.missing[]')).toEqual([]);
+    expect(idsAt(locals, 'body.none[]')).toEqual([]);
     expect(idsAt(locals, 'query.departmentId')).toEqual([]);
-    expect(idsAt({}, 'body.x.y')).toEqual([]);
+  });
+
+  // Fail closed: a mis-ordered guard or a non-id value must not check nothing.
+  it('throws when the source is not parsed yet or a value is not an id', () => {
+    expect(() => idsAt({}, 'body.x')).toThrow(/runs before its validate\* middleware/);
+    expect(() => idsAt({ body: { ids: [4, 'x'] } }, 'body.ids[]')).toThrow(/not an id/);
+    expect(() => idsAt({ body: { id: '4' } }, 'body.id')).toThrow(/not an id/);
+    expect(() => idsAt({ body: { id: 1.5 } }, 'body.id')).toThrow(/not an id/);
+    expect(() => idsAt({ body: { ids: 4 } }, 'body.ids[]')).toThrow(/expects an array/);
+  });
+
+  it('answers a guard placed before its validation with an internal fault', async () => {
+    const scope = accessScope({} as never);
+    const app = express();
+    app.post('/x', (req, _res, next) => { req.user = user(); next(); }, scope.reach('schedule.read', 'schedule', 'body.id'), (_req, res) => res.json({}));
+    app.use(errorHandler);
+    expect((await request(app).post('/x')).status).toBe(500);
   });
 
   const appWith = (pool: never, caller: User, guard: 'reach' | 'ownerOr') => {

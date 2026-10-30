@@ -31,12 +31,14 @@ jest.mock('../services/CalendarService', () => ({
 const getEffectivePermissions = jest.fn();
 const getUserRoles = jest.fn();
 const computeAllowedOrgUnitIds = jest.fn();
+const getEffectiveDelegationScopes = jest.fn();
 const getUserOrgUnitSubtreeIds = jest.fn();
 jest.mock('../services/RbacService', () => ({
   RbacService: jest.fn().mockImplementation(() => ({
     getEffectivePermissions,
     getUserRoles,
     computeAllowedOrgUnitIds,
+    getEffectiveDelegationScopes,
     getUserOrgUnitSubtreeIds,
   })),
 }));
@@ -61,6 +63,7 @@ beforeEach(() => {
   getEffectivePermissions.mockResolvedValue(['timeline.read']);
   getUserRoles.mockResolvedValue([]);
   computeAllowedOrgUnitIds.mockResolvedValue(null);
+  getEffectiveDelegationScopes.mockResolvedValue([]);
   getUserOrgUnitSubtreeIds.mockResolvedValue([3, 4]);
   buildAggregateFeed.mockResolvedValue({ body: 'BEGIN:VCALENDAR\r\nEND:VCALENDAR', etag: '"abc"' });
 });
@@ -107,6 +110,16 @@ describe('the scope, resolved per fetch', () => {
     expect(buildAggregateFeed).toHaveBeenCalledWith(
       expect.objectContaining({ visibleOrgUnitIds: null })
     );
+  });
+
+  it('bounds a delegated read_all by the delegation\'s scope, not the owner\'s unscoped roles', async () => {
+    getEffectivePermissions.mockResolvedValue(['timeline.read_all']);
+    computeAllowedOrgUnitIds.mockResolvedValue(null);
+    getEffectiveDelegationScopes.mockResolvedValue([{ permissionCode: 'timeline.read_all', allowedOrgUnitIds: [7] }]);
+    await get('?token=t');
+
+    expect(getEffectiveDelegationScopes).toHaveBeenCalledWith(42, null);
+    expect(buildAggregateFeed).toHaveBeenCalledWith(expect.objectContaining({ visibleOrgUnitIds: [7] }));
   });
 
   it('keeps the ROLE scope binding even with read_all', async () => {

@@ -15,7 +15,8 @@
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
 import { Delegation, CreateDelegationRequest, User } from '../types';
-import { scopeFor } from './access/AccessPolicy';
+import { scopeFor, UNIT_SCOPED_PERMISSIONS } from './access/AccessPolicy';
+import { RbacService } from './RbacService';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ValidationUtils } from '../utils';
@@ -57,6 +58,19 @@ export class DelegationService {
     }
 
     const requested = input.scopeOrgUnitId ?? null;
+    // A unit cannot bound a code whose operations are organization-wide: a
+    // `role.manage` delegated "for ward A" still assigns any role to anyone, so
+    // the scope on it would be decoration over an organization-wide grant. The
+    // codes a unit can bound are derived from the authorization matrix
+    // (AccessPolicy.UNIT_SCOPED_PERMISSIONS); the others delegate unscoped or
+    // not at all. Rejected: making every org-wide route honour a delegation's
+    // scope — those routes have no unit to compare it with.
+    if (requested !== null) {
+      const unbounded = input.permissionCodes.filter((c) => !UNIT_SCOPED_PERMISSIONS.has(c));
+      if (unbounded.length > 0) {
+        throw new ConflictError(`Delegation escalation: ${unbounded.join(', ')} act organization-wide and cannot be delegated for one org unit`);
+      }
+    }
     for (const code of input.permissionCodes) {
       const own = scopeFor(delegator as User, code);
       if (own === null) continue;
@@ -66,6 +80,16 @@ export class DelegationService {
       if (!own.includes(requested)) {
         throw new ConflictError(`Delegation escalation: org unit ${requested} is outside the delegator's scope for ${code}`);
       }
+    }
+
+    // Only one's own authority passes on. A code held through someone else's
+    // delegation would be dropped at resolution anyway (RbacService caps each
+    // delegation at the delegator's ROLE codes), so creating it would store a
+    // grant that reads as real in every listing and does nothing.
+    const ownCodes = new Set(await new RbacService(this.pool).getRolePermissions(delegatorId));
+    const borrowed = input.permissionCodes.filter((c) => !ownCodes.has(c));
+    if (borrowed.length > 0) {
+      throw new ConflictError(`Delegation escalation: ${borrowed.join(', ')} held only through a delegation cannot be delegated again`);
     }
 
     const [result] = await this.pool.execute<ResultSetHeader>(
