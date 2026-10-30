@@ -279,6 +279,14 @@ code {
     transform: translateX(0);
   }
 
+  /* Dims the page behind the open drawer and closes it on tap (Layout.tsx). */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background-color: rgba(0, 0, 0, 0.4);
+  }
+
   .main-content {
     margin-left: 0;
   }
