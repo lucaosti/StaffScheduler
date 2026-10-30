@@ -230,7 +230,12 @@ services:
         done
     volumes:
       - ./ops/backup:/scripts:ro
-      - backup_data:/backups
+      # A host directory, not a named volume (#847): a named volume belongs to
+      # this compose project, so the `down -v` that deletes mysql_data deleted
+      # the backups in the same command. Point BACKUP_HOST_DIR at a different
+      # disk (or a mount synced off-host) for backups that also survive the
+      # machine; the default keeps them beside the checkout, gitignored.
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
     networks:
       - staff_scheduler_network
     mem_limit: 256m
@@ -332,8 +337,6 @@ volumes:
   grafana_data:
     driver: local
   loki_data:
-    driver: local
-  backup_data:
     driver: local
 
 # Network configuration

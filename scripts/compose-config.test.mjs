@@ -120,6 +120,22 @@ test('admin consoles are published on the loopback interface only (#823)', () =>
   }
 });
 
+test('backups live on a host path, out of reach of `down -v` (#847)', () => {
+  // A named volume belongs to the compose project, so `down -v` deleted the
+  // backups in the same command that deleted the database they protect.
+  const { services, volumes = {} } = resolved({ profiles: ['backup'] });
+  const mount = services.backup.volumes.find((volume) => volume.target === '/backups');
+  assert.equal(mount.type, 'bind', JSON.stringify(mount));
+  assert.equal(mount.source, path.join(root, 'backups'));
+  assert.equal(volumes.backup_data, undefined);
+});
+
+test('the backup directory is configurable (#847)', () => {
+  const { services } = resolved({ profiles: ['backup'], env: { ...REQUIRED_ENV, BACKUP_HOST_DIR: '/srv/backups' } });
+  const mount = services.backup.volumes.find((volume) => volume.target === '/backups');
+  assert.equal(mount.source, '/srv/backups');
+});
+
 test('phpMyAdmin asks for credentials instead of logging every visitor in (#823)', () => {
   const { environment } = resolved({ profiles: ['dev'] }).services.phpmyadmin;
   assert.equal(environment.PMA_USER, undefined);

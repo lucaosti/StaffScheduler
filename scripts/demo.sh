@@ -4,8 +4,11 @@
 # Usage:
 #   ./scripts/demo.sh up        Start docker stack, wait for MySQL, init schema, seed demo data.
 #   ./scripts/demo.sh reset     Truncate every app table and re-seed. Stack stays up.
-#   ./scripts/demo.sh down      Stop and remove the stack and its volumes (clean slate).
+#   ./scripts/demo.sh down      Stop and remove the demo stack and its volumes (clean slate).
 #   ./scripts/demo.sh status    Show whether the stack is up and whether mode=demo is set.
+#
+# Runs as the separate compose project "staffscheduler-demo": nothing here
+# touches the deployment started by start.sh or `docker compose up`.
 #
 # Author: Luca Ostinelli
 
@@ -14,6 +17,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="${ROOT_DIR}/docker-compose.yml"
 BACKEND_DIR="${ROOT_DIR}/backend"
+
+# The demo is its own compose project (#847). Under the deployment's default
+# project, `down -v` deleted the production database volume — the demo and
+# the deployment were the same containers and volumes. With a separate name
+# the demo gets its own volumes and `down -v` can only remove those. Same file,
+# not a copy: the demo should run exactly what is deployed. The services' fixed
+# container_names still collide, so the demo refuses to start while the
+# deployment runs on the same host, rather than sharing anything with it.
+DEMO_PROJECT="staffscheduler-demo"
+compose() { docker compose -p "${DEMO_PROJECT}" -f "${COMPOSE_FILE}" "$@"; }
 
 # docker compose loads ROOT_DIR/.env on its own for variable substitution
 # inside docker-compose.yml, but this script's own `${MYSQL_ROOT_PASSWORD}`
@@ -44,7 +57,7 @@ wait_for_mysql() {
   echo "Waiting for MySQL to accept connections…"
   local i
   for i in $(seq 1 60); do
-    if docker compose -f "${COMPOSE_FILE}" exec -T mysql mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1; then
+    if compose exec -T mysql mysqladmin ping -h 127.0.0.1 --silent >/dev/null 2>&1; then
       echo "MySQL is up."
       return 0
     fi
@@ -57,7 +70,7 @@ wait_for_mysql() {
 cmd_up() {
   require_compose
   echo "Starting Docker stack…"
-  docker compose -f "${COMPOSE_FILE}" up -d
+  compose up -d
   wait_for_mysql
 
   echo "Initializing database schema…"
@@ -83,18 +96,18 @@ cmd_reset() {
 
 cmd_down() {
   require_compose
-  echo "Tearing down stack and dropping volumes…"
-  docker compose -f "${COMPOSE_FILE}" down -v
+  echo "Tearing down the ${DEMO_PROJECT} stack and dropping its volumes…"
+  compose down -v
   echo "Stack down."
 }
 
 cmd_status() {
   require_compose
   echo "Containers:"
-  docker compose -f "${COMPOSE_FILE}" ps || true
+  compose ps || true
   echo
   echo "Demo mode marker:"
-  if docker compose -f "${COMPOSE_FILE}" exec -T mysql \
+  if compose exec -T mysql \
       mysql -uroot -p"${MYSQL_ROOT_PASSWORD:-}" -N -e \
       "SELECT category, \`key\`, value FROM \
        ${MYSQL_DATABASE:-staff_scheduler}.system_settings \
@@ -106,7 +119,7 @@ cmd_status() {
 }
 
 usage() {
-  sed -n '2,11p' "$0"
+  sed -n '2,12p' "$0"
   exit "${1:-0}"
 }
 

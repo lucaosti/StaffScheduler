@@ -1585,8 +1585,21 @@ docker compose --profile backup up -d
 ```
 
 It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
-`backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
-dumps older than `BACKUP_RETENTION_DAYS` (default 14).
+host directory `BACKUP_HOST_DIR` (default `./backups`, gitignored) every
+`BACKUP_INTERVAL_SECONDS` (default daily) and prunes dumps older than
+`BACKUP_RETENTION_DAYS` (default 14).
+
+The backups are deliberately **not** a named volume. A named volume belongs to
+the compose project, so the `docker compose down -v` that deletes `mysql_data`
+used to delete the backups in the same command. A host directory survives
+`down -v`; for backups that also survive the machine, point `BACKUP_HOST_DIR` at
+another disk or a mount that is synced off-host. The same incident shaped the
+two scripts that remove things: `scripts/demo.sh` runs as its own compose
+project (`staffscheduler-demo`), so `demo.sh down` can delete only the demo's
+volumes, and `./stop.sh -c` removes containers and networks but keeps volumes —
+only `./stop.sh -p` deletes volumes, and only after `DELETE` is typed.
+`scripts/stack-scripts.test.mjs` runs both scripts against a recording `docker`
+stub to pin this.
 
 A dump is kept only once it is proven complete. Each run writes to a
 `*.sql.gz.tmp` file under `pipefail`, so a `mysqldump` that dies mid-stream fails
