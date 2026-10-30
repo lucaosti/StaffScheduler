@@ -116,8 +116,20 @@ services:
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
       DB_QUEUE_LIMIT: ${DB_QUEUE_LIMIT:-100}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Every request from the network reaches the backend through exactly one
+      # nginx: the frontend's /api proxy here, or backend-lb in the scale
+      # overlay. Without this Express sees that nginx as the client, so the
+      # IP-keyed limiters (login included) become one bucket shared by every
+      # caller and audit-log IPs are all the proxy's (#822). The backend's own
+      # default stays 0 for a process run without a proxy in front.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    # Loopback only, because of the trusted hop above: a client reaching this
+    # port directly could write its own X-Forwarded-For and choose the address
+    # it is rate-limited under. The network-facing path is the frontend's /api
+    # proxy; this port is for local tooling and health checks. Not dropped
+    # outright: the API docs and curl-based runbooks use it from the host.
     ports:
-      - "${BACKEND_PORT:-3001}:3001"
+      - "127.0.0.1:${BACKEND_PORT:-3001}:3001"
     volumes:
       # Under /app/backend, not /app: the image's WORKDIR is /app/backend and
       # LOG_FILE defaults to the relative ./logs/app.log, so the process writes
