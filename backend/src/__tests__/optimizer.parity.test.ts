@@ -722,6 +722,31 @@ describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
  *   - 1e12: a coefficient itself leaves int64, and ortools silently switches
  *     to a floating-point objective, which Validate() accepts.
  */
+// The parity blocks above run the script directly. This one goes through
+// optimize(), the path production takes, so the mapping of the script's
+// snake_case output onto ScheduleAssignment is exercised against the real
+// solver: it was missing and every CP-SAT plan reached the planner with
+// undefined ids (#919).
+describeOrtools('CP-SAT results through optimize()', () => {
+  it('returns camelCase assignments the persistence layer can read', async () => {
+    const fixture = feasibleFixtures[0];
+    const result = await new ScheduleOptimizer().optimize(fixture.problem);
+
+    expect(['OPTIMAL', 'FEASIBLE']).toContain(result.status);
+    expect(result.assignments.length).toBeGreaterThan(0);
+    const shiftIds = new Set(fixture.problem.shifts.map((s) => s.id));
+    const employeeIds = new Set(fixture.problem.employees.map((e) => e.id));
+    for (const a of result.assignments) {
+      expect(shiftIds.has(a.shiftId)).toBe(true);
+      expect(employeeIds.has(a.employeeId)).toBe(true);
+      expect(a).toEqual(
+        expect.objectContaining({ date: expect.any(String), startTime: expect.any(String), endTime: expect.any(String), hours: expect.any(Number) })
+      );
+      expect(a).not.toHaveProperty('employee_id');
+    }
+  });
+});
+
 describeOrtools('CP-SAT objective overflow guard', () => {
   const overflowingProblem = (hourlyRate: number) => {
     const employee = (id: string) => ({
