@@ -12,6 +12,7 @@
  */
 
 import { ApiResponse } from '../types';
+import i18n from '../i18n';
 import { getCachedAccessToken, isNativePlatform } from './mobileAuthStorage';
 
 // Default to the same-origin relative path, on the canonical /api/v1 prefix
@@ -36,7 +37,10 @@ export class ApiError extends Error {
     // The response envelope's top-level `data`, when a non-2xx response carries
     // one alongside `error` — e.g. TWO_FACTOR_REQUIRED's `{ methods: [...] }`,
     // which the caller needs to render without a second round trip.
-    public data?: unknown
+    public data?: unknown,
+    // The id the backend logged a 5xx under (`error.requestId`, or the
+    // X-Request-Id header) — what a user quotes to support.
+    public requestId?: string
   ) {
     super(message);
     this.name = 'ApiError';
@@ -45,6 +49,23 @@ export class ApiError extends Error {
     Object.setPrototypeOf(this, ApiError.prototype);
   }
 }
+
+/**
+ * The sentence shown for any server fault (5xx), in the current language,
+ * quoting the request id when there is one (#895).
+ *
+ * WHY THE SERVER'S 5xx TEXT IS NEVER SHOWN. A 5xx is the server's failure,
+ * not something the user can act on, and its message was historically raw
+ * driver text ("Incorrect arguments to mysqld_stmt_execute"). The backend
+ * now always sends a generic English sentence, but rendering a fixed,
+ * translated one here also covers what the backend does not control — an
+ * nginx 502 page, an older backend during a rolling deploy — and the request
+ * id turns "it broke" into a log line support can find.
+ */
+export const serverErrorMessage = (requestId?: string): string =>
+  requestId
+    ? i18n.t('common.serverErrorWithReference', { requestId })
+    : i18n.t('common.serverError');
 
 /**
  * Parses a fetch Response into an ApiResponse<T>.
@@ -65,6 +86,7 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
     let errorMessage = `HTTP error! status: ${response.status}`;
     let errorCode: string | undefined;
     let errorData: unknown;
+    let requestId = response.headers.get('X-Request-Id') ?? undefined;
     if (data !== null && typeof data === 'object') {
       const dataObj = data as Record<string, unknown>;
       const errField = dataObj['error'];
@@ -73,12 +95,17 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
         if (typeof msg === 'string') errorMessage = msg;
         const code = (errField as Record<string, unknown>)['code'];
         if (typeof code === 'string') errorCode = code;
+        const bodyRequestId = (errField as Record<string, unknown>)['requestId'];
+        if (typeof bodyRequestId === 'string') requestId = bodyRequestId;
         errorData = dataObj['data'];
       } else if (typeof dataObj['message'] === 'string') {
         errorMessage = dataObj['message'];
       }
     }
-    throw new ApiError(errorMessage, response.status, errorCode, errorData);
+    // Replaced here, at the one place every API error is built, so the many
+    // call sites that render `err.message` directly get the friendly text too.
+    if (response.status >= 500) errorMessage = serverErrorMessage(requestId);
+    throw new ApiError(errorMessage, response.status, errorCode, errorData, requestId);
   }
 
   return data as ApiResponse<T>;

@@ -28,12 +28,54 @@ describe('handleResponse', () => {
     await expect(promise).rejects.toMatchObject({ status: 404, message: 'Schedule missing' });
   });
 
-  it('falls back to a generic message when the body has no error details', async () => {
-    const res = new Response('', { status: 500 });
+  it('falls back to a generic message when a 4xx body has no error details', async () => {
+    const res = new Response('', { status: 400 });
     await expect(handleResponse(res)).rejects.toMatchObject({
-      status: 500,
-      message: expect.stringContaining('500'),
+      status: 400,
+      message: expect.stringContaining('400'),
     });
+  });
+
+  // #895: whatever a 5xx body says, the message every call site shows is the
+  // friendly fallback; the request id is kept so the UI can quote it.
+  it('replaces a 5xx message with the friendly fallback and keeps the request id', async () => {
+    const promise = handleResponse(
+      jsonResponse(500, {
+        success: false,
+        error: { code: 'INTERNAL_ERROR', message: 'Incorrect arguments to mysqld_stmt_execute', requestId: 'req-123' },
+      })
+    );
+    await expect(promise).rejects.toMatchObject({
+      status: 500,
+      code: 'INTERNAL_ERROR',
+      requestId: 'req-123',
+      message: expect.stringContaining('req-123'),
+    });
+    await expect(promise).rejects.toHaveProperty(
+      'message',
+      expect.not.stringContaining('mysqld')
+    );
+  });
+
+  it('takes the request id from the X-Request-Id header when the body has none', async () => {
+    const res = new Response('<html>Bad Gateway</html>', {
+      status: 502,
+      headers: { 'Content-Type': 'text/html', 'X-Request-Id': 'hdr-456' },
+    });
+    await expect(handleResponse(res)).rejects.toMatchObject({
+      status: 502,
+      requestId: 'hdr-456',
+      message: expect.stringMatching(/Something went wrong on our side.*hdr-456/),
+    });
+  });
+
+  it('gives a 5xx with no request id the fallback without a reference', async () => {
+    const err = await handleResponse(new Response('', { status: 503 })).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).requestId).toBeUndefined();
+    expect((err as ApiError).message).toBe(
+      'Something went wrong on our side. Please try again in a moment.'
+    );
   });
 });
 

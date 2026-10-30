@@ -76,6 +76,10 @@
               "message": {
                 "type": "string"
               },
+              "requestId": {
+                "type": "string",
+                "description": "Present on INTERNAL_ERROR (500): the request id, also sent as the X-Request-Id header, under which the fault's details are logged. The message of a 500 is always generic; quote this id to find the cause."
+              },
               "details": {
                 "type": "array",
                 "description": "Field-level validation errors (present on VALIDATION_ERROR).",

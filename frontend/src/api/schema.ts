@@ -13170,6 +13170,8 @@ export interface components {
                 /** @description Machine-readable error code, e.g. VALIDATION_ERROR, NOT_FOUND, UNAUTHORIZED. */
                 code: string;
                 message: string;
+                /** @description Present on INTERNAL_ERROR (500): the request id, also sent as the X-Request-Id header, under which the fault's details are logged. The message of a 500 is always generic; quote this id to find the cause. */
+                requestId?: string;
                 /** @description Field-level validation errors (present on VALIDATION_ERROR). */
                 details?: {
                     field?: string;

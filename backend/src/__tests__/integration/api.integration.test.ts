@@ -2251,6 +2251,43 @@ describe('TOTP two-factor authentication against the real schema (#899)', () => 
   });
 });
 
+describe('internal faults are not disclosed to the client (#895)', () => {
+  it('renders a real MySQL driver error as the generic 500 with the request id', async () => {
+    // Force a genuine driver failure on one statement rather than mounting a
+    // throwing route (which production code must not carry): the skills list
+    // query is swapped for one naming a column that does not exist, so MySQL
+    // itself answers ER_BAD_FIELD_ERROR with schema detail in the message —
+    // the class of text #895 saw on screen.
+    // The marker is a column alias only SkillService.list selects, so the
+    // statements `authenticate` issues (the user's own skills among them)
+    // pass through untouched.
+    const marker = 'AS shift_requirement_count';
+    const cookie = await authCookie();
+    const { database } = require('../../config/database');
+    const pool = database.getPool();
+    const original = pool.execute.bind(pool);
+    const spy = jest.spyOn(pool, 'execute').mockImplementation(((...args: unknown[]) =>
+      typeof args[0] === 'string' && args[0].includes(marker)
+        ? original('SELECT s.no_such_column FROM skills s')
+        : original(...args)) as never);
+    try {
+      const res = await request(app).get('/api/v1/skills').set('Cookie', cookie);
+
+      expect(res.status).toBe(500);
+      expectErrorEnvelope(res.body);
+      expect(res.body.error).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'An internal error occurred',
+        requestId: res.headers['x-request-id'],
+      });
+      expect(JSON.stringify(res.body)).not.toMatch(/no_such_column|ER_|field list|skills/);
+      expect(spy.mock.calls.some(([sql]) => String(sql).includes(marker))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('user-management authority (#809, #810)', () => {
   const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
   const PASSWORD = 'itest-authority-1';

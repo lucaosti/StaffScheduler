@@ -184,6 +184,8 @@ Every endpoint returns:
 
 The `code` field is always present in error responses. `message` is safe for display in production.
 
+An internal fault (anything that is not a typed `AppError`) is always rendered as `500 { "code": "INTERNAL_ERROR", "message": "An internal error occurred", "requestId": "<uuid>" }`, in every `NODE_ENV` (#895): the driver/library message and any driver `code` (`ER_…`) are logged, never sent. `requestId` is the same value as the `X-Request-Id` header and the `requestId` on the server's log entry, so a user can quote it and support can find the cause. A malformed JSON body or an oversized payload (body-parser's exposed 4xx errors) answers with its own status and `code: "BAD_REQUEST"`. The frontend never shows a 5xx's text: `handleResponse` and `ErrorAlert` render a translated "something went wrong on our side" sentence with the request id instead.
+
 ### Authoritative contract
 
 The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi/openapi.json), served live at `http://localhost:3001/api/docs` (Swagger UI). When this file conflicts with the spec, the spec wins.
