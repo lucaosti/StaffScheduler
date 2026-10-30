@@ -174,6 +174,30 @@ describe('<Shifts />', () => {
     expect(mockDeleteShift).not.toHaveBeenCalled();
   });
 
+  // The API sends `HH:MM:SS`; the card used to show "07:00:00 - 15:00:00" and
+  // "Duration: NaNh" for it (#891).
+  it('shows API times without seconds and the real duration', async () => {
+    mockGetShifts.mockResolvedValue(
+      ok([
+        {
+          id: 6,
+          date: '2026-04-02',
+          startTime: '07:00:00',
+          endTime: '15:00:00',
+          scheduleId: 1,
+          departmentId: 10,
+          minStaff: 1,
+          status: 'open',
+        },
+      ])
+    );
+    render(<Shifts />);
+
+    expect(await screen.findByText('07:00 - 15:00')).toBeInTheDocument();
+    expect(screen.getByText('8h')).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
   it('keeps the shift actions closed until the ⋯ button opens them, and closes after a choice', async () => {
     render(<Shifts />);
     const toggle = (await screen.findAllByRole('button', { name: /shift actions/i }))[0];

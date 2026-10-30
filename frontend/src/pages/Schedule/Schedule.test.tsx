@@ -261,6 +261,14 @@ describe('<Schedule />', () => {
     expect(mockGetScheduleWithShifts).not.toHaveBeenCalledWith(1);
   });
 
+  // #891: the API's `HH:MM:SS` times were printed as-is ("07:00:00 - 15:00:00").
+  it('shows shift times without seconds in the week view', async () => {
+    mockGetShifts.mockResolvedValue(ok([{ ...monthShiftFixture, startTime: '07:00:00', endTime: '15:00:00' }]));
+    render(<Schedule />);
+    expect(await screen.findByText('07:00 - 15:00')).toBeInTheDocument();
+    expect(screen.queryByText(/07:00:00/)).not.toBeInTheDocument();
+  });
+
   const findChevron = (className: string): HTMLElement => {
     const icon = document.querySelector(className);
     if (!icon) throw new Error(`icon ${className} not found`);
