@@ -20,9 +20,15 @@
  * WHY CONFIRM/DECLINE ARE NOT GATED ON `assignment.manage`. An employee
  * confirming or declining their OWN assignment is self-service; requiring the
  * management permission would mean only managers could respond on an
- * employee's behalf, which defeats the purpose. The handlers check ownership
- * in-line instead. `complete` is management-gated because it asserts that work
- * actually happened.
+ * employee's behalf, which defeats the purpose. Those routes declare
+ * `scope.ownerOr` instead: the owner passes, anyone else needs
+ * `assignment.manage` over the shift's unit. `complete` is management-gated
+ * because it asserts that work actually happened.
+ *
+ * ORG-UNIT SCOPE (#813). An assignment is in scope through its shift's
+ * department. Creating one names a shift AND a person, and both are checked: a
+ * shift in another unit would put work there, and a person from another unit
+ * would pull them into the caller's schedule without that unit's say.
  *
  * @author Luca Ostinelli
  */
@@ -36,7 +42,9 @@ import { ExportService } from '../services/ExportService';
 import { assignmentColumns } from '../services/exportColumns';
 import { SwapCandidateService } from '../services/SwapCandidateService';
 import { RbacService } from '../services/RbacService';
+import { scopeFilter } from '../services/access/AccessPolicy';
 import { authenticate, requirePermission, userHasPermission } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
   idParam,
@@ -52,7 +60,7 @@ import {
   updateAssignmentBody,
 } from '../schemas';
 import { User } from '../types';
-import { ForbiddenError, NotFoundError } from '../errors';
+import { NotFoundError } from '../errors';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { runBatch } from '../utils/batch';
 
@@ -60,6 +68,7 @@ export const createAssignmentsRouter = (pool: Pool) => {
   const router = Router();
   const assignmentService = new AssignmentService(pool);
 const exporter = new ExportService(new AuditLogService(pool));
+const scope = accessScope(pool);
 
 // Get all assignments.
 //
@@ -70,7 +79,8 @@ const exporter = new ExportService(new AuditLogService(pool));
 // oversized unpaginated request is refused rather than truncated.
 router.get('/', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), async (req: Request, res: Response) => {
   // page/pageSize belong to the pagination envelope, not to the SQL filters.
-  const { page: _page, pageSize: _pageSize, ...filters } = res.locals.query;
+  const { page: _page, pageSize: _pageSize, ...query } = res.locals.query;
+  const filters = { ...query, orgUnitIds: scopeFilter(req.user!, 'assignment.manage') };
   const pagination = parsePagination(req);
 
   if (pagination) {
@@ -87,7 +97,8 @@ router.get('/', authenticate, requirePermission('assignment.manage'), validateQu
 
 // Before `/:id`, so "export" is not read as an assignment id.
 router.get('/export', authenticate, requirePermission('assignment.manage'), validateQuery(assignmentListQuery), async (req: Request, res: Response) => {
-  const { page: _page, pageSize: _pageSize, format, ...filters } = res.locals.query;
+  const { page: _page, pageSize: _pageSize, format, ...query } = res.locals.query;
+  const filters = { ...query, orgUnitIds: scopeFilter(req.user!, 'assignment.manage') };
   // The unpaginated listing refuses an oversized result rather than truncating
   // it (see AssignmentService); the export inherits that, which is the right
   // failure — a silently truncated file is a wrong answer that looks complete.
@@ -102,22 +113,15 @@ router.get('/export', authenticate, requirePermission('assignment.manage'), vali
   });
 });
 
-// Allowed when: the caller holds assignment.manage OR the assignment belongs to the caller.
-router.get('/:id', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
-  const { id } = res.locals.params;
-  const actor = req.user as User;
-
-  const assignment = await assignmentService.getAssignmentById(id);
+// Allowed when: the assignment belongs to the caller, or they hold
+// assignment.manage over its unit.
+router.get('/:id', authenticate, validateParams(idParam), scope.ownerOr('assignment.manage', 'assignment', 'params.id'), async (_req: Request, res: Response) => {
+  const assignment = await assignmentService.getAssignmentById(res.locals.params.id);
   if (!assignment) throw new NotFoundError('Assignment not found');
-
-  const canManage = userHasPermission(actor, 'assignment.manage');
-  const isOwn = (assignment as any).userId === actor.id;
-  if (!canManage && !isOwn) throw new ForbiddenError();
-
   res.json({ success: true, data: assignment });
 });
 
-router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), async (req: Request, res: Response) => {
+router.post('/', authenticate, requirePermission('assignment.manage'), validateBody(createAssignmentBody), scope.reach('assignment.manage', 'shift', 'body.shiftId'), scope.reach('assignment.manage', 'user', 'body.userId'), async (req: Request, res: Response) => {
   const assignment = await assignmentService.createAssignment({
     ...res.locals.body,
     actorId: req.user?.id,
@@ -130,7 +134,7 @@ router.post('/', authenticate, requirePermission('assignment.manage'), validateB
   });
 });
 
-router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), async (req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(updateAssignmentBody), scope.reach('assignment.manage', 'assignment', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const assignment = await assignmentService.updateAssignment(id, {
@@ -144,7 +148,7 @@ router.put('/:id', authenticate, requirePermission('assignment.manage'), validat
   });
 });
 
-router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('assignment.manage'), validateParams(idParam), validateBody(auditReasonBody), scope.reach('assignment.manage', 'assignment', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const reason = res.locals.body.reason;
 
@@ -155,15 +159,10 @@ router.delete('/:id', authenticate, requirePermission('assignment.manage'), vali
   });
 });
 
-// Allowed when: the caller holds assignment.manage OR is requesting their own assignments.
-router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
-  const { userId } = res.locals.params;
-  const actor = req.user as User;
-
-  const canManage = userHasPermission(actor, 'assignment.manage');
-  if (!canManage && actor.id !== userId) throw new ForbiddenError();
-
-  const assignments = await assignmentService.getAssignmentsByUser(userId);
+// Allowed when: the caller is requesting their own assignments, or holds
+// assignment.manage over a unit the person belongs to.
+router.get('/user/:userId', authenticate, validateParams(userIdParam), scope.ownerOr('assignment.manage', 'user', 'params.userId'), async (_req: Request, res: Response) => {
+  const assignments = await assignmentService.getAssignmentsByUser(res.locals.params.userId);
   res.json({ success: true, data: assignments });
 });
 
@@ -180,15 +179,15 @@ router.get('/:id/swap-candidates', authenticate, validateParams(idParam), async 
   const { id } = res.locals.params;
   const actor = req.user as User;
 
-  // `allowedOrgUnitIds` is NULL for anyone whose roles carry no scope, and
-  // NULL means unrestricted — so membership is the bound, narrowed further by
-  // a scoped role where there is one. The same reasoning as the timeline, and
-  // for the same reason: this is a question about seeing people.
-  const scoped = actor.allowedOrgUnitIds ?? null;
+  // A manager is bounded by their scope for `assignment.manage`; anyone else by
+  // the units they belong to, narrowed further by a scoped role where there is
+  // one. The same reasoning as the timeline, and for the same reason: this is a
+  // question about seeing people.
   let orgUnitIds: number[] | null;
   if (userHasPermission(actor, 'assignment.manage')) {
-    orgUnitIds = scoped;
+    orgUnitIds = scopeFilter(actor, 'assignment.manage') ?? null;
   } else {
+    const scoped = actor.allowedOrgUnitIds ?? null;
     const own = await new RbacService(pool).getUserOrgUnitSubtreeIds(actor.id);
     orgUnitIds = scoped === null ? own : own.filter((unit) => scoped.includes(unit));
   }
@@ -197,14 +196,14 @@ router.get('/:id/swap-candidates', authenticate, validateParams(idParam), async 
   res.json({ success: true, data: result });
 });
 
-router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), scope.reach('assignment.manage', 'shift', 'params.shiftId'), async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
   const assignments = await assignmentService.getAssignmentsByShift(shiftId);
   res.json({ success: true, data: assignments });
 });
 
-router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('assignment.manage'), validateParams(departmentIdParam), validateQuery(assignmentsByDepartmentQuery), scope.reach('assignment.manage', 'department', 'params.departmentId'), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
   // The allowed statuses used to be a literal array checked inline here; the
   // schema now owns them, so the enum cannot drift from the documented one.
@@ -215,7 +214,9 @@ router.get('/department/:departmentId', authenticate, requirePermission('assignm
   res.json({ success: true, data: assignments });
 });
 
-router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), async (_req: Request, res: Response) => {
+// Every row's shift and person are checked before anything is created: this
+// endpoint's callers accept partial creation, but not into another unit.
+router.post('/bulk', authenticate, requirePermission('assignment.manage'), validateBody(bulkCreateAssignmentsBody), scope.reach('assignment.manage', 'shift', 'body.assignments[].shiftId'), scope.reach('assignment.manage', 'user', 'body.assignments[].userId'), async (_req: Request, res: Response) => {
   const { assignments } = res.locals.body;
 
   const createdAssignments = await assignmentService.bulkCreateAssignments(assignments);
@@ -231,12 +232,16 @@ router.post('/bulk', authenticate, requirePermission('assignment.manage'), valid
 // exists for internal callers that create what they can and discard the rest
 // (see `AssignmentService.bulkCreateAssignments`'s header). A high-volume
 // integration needs the opposite — one outcome per input row, so it can tell
-// exactly which of 200 rows failed and retry only those.
+// exactly which of 200 rows failed and retry only those. The scope check runs
+// per row for the same reason: one out-of-scope row is that row's failure.
 router.post('/batch', authenticate, requirePermission('assignment.manage'), validateBody(batchCreateAssignmentsBody), async (req: Request, res: Response) => {
   const { assignments } = res.locals.body as z.infer<typeof batchCreateAssignmentsBody>;
-  const result = await runBatch(assignments, (assignmentData) =>
-    assignmentService.createAssignment({ ...assignmentData, actorId: req.user?.id })
-  );
+  const actor = req.user!;
+  const result = await runBatch(assignments, async (assignmentData) => {
+    await scope.policy.assertReach(actor, 'assignment.manage', 'shift', assignmentData.shiftId);
+    await scope.policy.assertReach(actor, 'assignment.manage', 'user', assignmentData.userId);
+    return assignmentService.createAssignment({ ...assignmentData, actorId: actor.id });
+  });
 
   res.status(207).json({
     success: true,
@@ -245,19 +250,9 @@ router.post('/batch', authenticate, requirePermission('assignment.manage'), vali
   });
 });
 
-// Only the assigned user or a manager (assignment.manage) may confirm.
-router.patch('/:id/confirm', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
-  const { id } = res.locals.params;
-  const actor = req.user as User;
-
-  const existing = await assignmentService.getAssignmentById(id);
-  if (!existing) throw new NotFoundError('Assignment not found');
-
-  const canManage = userHasPermission(actor, 'assignment.manage');
-  const isOwn = (existing as any).userId === actor.id;
-  if (!canManage && !isOwn) throw new ForbiddenError();
-
-  const assignment = await assignmentService.confirmAssignment(id, actor.id);
+// Only the assigned user or a manager (assignment.manage over its unit) may confirm.
+router.patch('/:id/confirm', authenticate, validateParams(idParam), scope.ownerOr('assignment.manage', 'assignment', 'params.id'), async (req: Request, res: Response) => {
+  const assignment = await assignmentService.confirmAssignment(res.locals.params.id, req.user!.id);
   res.json({
     success: true,
     data: assignment,
@@ -265,19 +260,9 @@ router.patch('/:id/confirm', authenticate, validateParams(idParam), async (req: 
   });
 });
 
-// Only the assigned user or a manager (assignment.manage) may decline.
-router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: Request, res: Response) => {
-  const { id } = res.locals.params;
-  const actor = req.user as User;
-
-  const existing = await assignmentService.getAssignmentById(id);
-  if (!existing) throw new NotFoundError('Assignment not found');
-
-  const canManage = userHasPermission(actor, 'assignment.manage');
-  const isOwn = (existing as any).userId === actor.id;
-  if (!canManage && !isOwn) throw new ForbiddenError();
-
-  const assignment = await assignmentService.declineAssignment(id, actor.id);
+// Only the assigned user or a manager (assignment.manage over its unit) may decline.
+router.patch('/:id/decline', authenticate, validateParams(idParam), scope.ownerOr('assignment.manage', 'assignment', 'params.id'), async (req: Request, res: Response) => {
+  const assignment = await assignmentService.declineAssignment(res.locals.params.id, req.user!.id);
 
   res.json({
     success: true,
@@ -287,7 +272,7 @@ router.patch('/:id/decline', authenticate, validateParams(idParam), async (req: 
 });
 
 // Only a manager (assignment.manage) may mark an assignment complete.
-router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.patch('/:id/complete', authenticate, requirePermission('assignment.manage'), validateParams(idParam), scope.reach('assignment.manage', 'assignment', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const assignment = await assignmentService.completeAssignment(id, req.user?.id);
@@ -298,7 +283,7 @@ router.patch('/:id/complete', authenticate, requirePermission('assignment.manage
   });
 });
 
-router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), async (_req: Request, res: Response) => {
+router.get('/shift/:shiftId/available-employees', authenticate, requirePermission('assignment.manage'), validateParams(shiftIdParam), scope.reach('assignment.manage', 'shift', 'params.shiftId'), async (_req: Request, res: Response) => {
   const { shiftId } = res.locals.params;
 
   const employees = await assignmentService.getAvailableEmployeesForShift(shiftId);

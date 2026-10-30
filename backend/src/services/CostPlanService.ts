@@ -23,6 +23,7 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { NotFoundError, ConflictError } from '../errors';
 import { DateUtils } from '../utils';
+import { unitCondition } from './access/AccessPolicy';
 
 export interface CostPlan {
   id: number;
@@ -61,12 +62,23 @@ const mapRow = (row: RowDataPacket): CostPlan => ({
 export class CostPlanService {
   constructor(private readonly pool: Pool) {}
 
-  async list(departmentId?: number): Promise<CostPlan[]> {
+  /** `orgUnitIds` is the caller's scope (AccessPolicy.scopeFilter); absent = unrestricted. */
+  async list(departmentId?: number, orgUnitIds?: number[]): Promise<CostPlan[]> {
+    const conditions: string[] = [];
+    const params: number[] = [];
+    if (departmentId !== undefined) {
+      conditions.push('department_id = ?');
+      params.push(departmentId);
+    }
+    const scope = unitCondition('org_unit_id', orgUnitIds);
+    if (scope) {
+      conditions.push(`department_id IN (SELECT id FROM departments WHERE ${scope.sql})`);
+      params.push(...scope.params);
+    }
+    const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.query<RowDataPacket[]>(
-      departmentId === undefined
-        ? 'SELECT * FROM cost_plans ORDER BY start_date DESC, department_id ASC'
-        : 'SELECT * FROM cost_plans WHERE department_id = ? ORDER BY start_date DESC',
-      departmentId === undefined ? [] : [departmentId]
+      `SELECT * FROM cost_plans${where} ORDER BY start_date DESC, department_id ASC`,
+      params
     );
     return rows.map(mapRow);
   }

@@ -50,9 +50,12 @@ import { AssignmentOrchestrator } from './AssignmentOrchestrator';
 import { AuditLogService } from './AuditLogService';
 import { WebhookService } from './WebhookService';
 import { DateUtils } from '../utils';
+import { unitCondition } from './access/AccessPolicy';
 
 /** Filters accepted by the assignment listing, mirrored by the route's query schema. */
 export interface AssignmentFilters {
+  /** The caller's org-unit scope (AccessPolicy.scopeFilter); absent = unrestricted. */
+  orgUnitIds?: number[];
   shiftId?: number;
   userId?: number;
   scheduleId?: number;
@@ -89,6 +92,13 @@ const buildAssignmentFilters = (
   if (filters?.status) { conditions.push('sa.status = ?'); params.push(filters.status); }
   if (filters?.startDate) { conditions.push('s.date >= ?'); params.push(filters.startDate); }
   if (filters?.endDate) { conditions.push('s.date <= ?'); params.push(filters.endDate); }
+  // Org-unit scope through the shift's department; a subquery because the
+  // count query does not join `departments`. An empty scope matches nothing.
+  const scope = unitCondition('org_unit_id', filters?.orgUnitIds);
+  if (scope) {
+    conditions.push(`s.department_id IN (SELECT id FROM departments WHERE ${scope.sql})`);
+    params.push(...scope.params);
+  }
 
   return { where: conditions.length > 0 ? ' WHERE ' + conditions.join(' AND ') : '', params };
 };

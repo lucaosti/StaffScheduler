@@ -241,8 +241,7 @@ describe('delegations router POST /', () => {
       .send({ ...validBody, scopeOrgUnitId: 5 });
 
     expect(createFn).toHaveBeenCalledWith(
-      1,
-      expect.any(Array),
+      expect.objectContaining({ id: 1, permissions: expect.any(Array) }),
       expect.objectContaining({ scopeOrgUnitId: 5 }),
       null
     );
@@ -255,8 +254,7 @@ describe('delegations router POST /', () => {
     await request(mountApp()).post('/api/delegations').send(validBody);
 
     expect(createFn).toHaveBeenCalledWith(
-      1,
-      expect.any(Array),
+      expect.objectContaining({ id: 1, permissions: expect.any(Array) }),
       expect.objectContaining({ scopeOrgUnitId: null }),
       null
     );

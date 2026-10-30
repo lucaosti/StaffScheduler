@@ -44,8 +44,7 @@ export const createDelegationsRouter = (pool: Pool): Router => {
       const { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId, justification } = res.locals.body;
 
       const delegation = await delegationService.createDelegation(
-        actor.id,
-        actor.permissions ?? [],
+        actor,
         { delegateeId, permissionCodes, expiresAt, scopeOrgUnitId: scopeOrgUnitId ?? null },
         justification ?? null
       );

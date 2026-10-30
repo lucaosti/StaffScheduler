@@ -21,6 +21,8 @@ import { z } from 'zod';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { timeOffColumns } from '../services/exportColumns';
+import { accessScope } from '../middleware/accessScope';
+import { scopeFilter } from '../services/access/AccessPolicy';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -30,6 +32,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new TimeOffService(pool);
   const exporter = new ExportService(new AuditLogService(pool));
+  const scope = accessScope(pool);
 
   /**
    * The listing filters. A non-approver is pinned to their own requests, so a
@@ -42,7 +45,7 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     const { userId, status } = query;
     const isManager = userHasPermission(req.user, 'timeoff.approve');
     return isManager
-      ? { userId, status: status as never }
+      ? { userId, status: status as never, orgUnitIds: scopeFilter(req.user!, 'timeoff.approve') }
       : { userId: req.user!.id, status: status as never };
   };
 
@@ -79,23 +82,19 @@ export const createTimeOffRouter = (pool: Pool): Router => {
     });
   });
 
-  router.get('/:id', validateParams(idParam), async (req: Request, res: Response) => {
-    const { id } = res.locals.params;
-    const item = await service.getById(id);
+  router.get('/:id', validateParams(idParam), scope.ownerOr('timeoff.approve', 'timeOff', 'params.id'), async (_req: Request, res: Response) => {
+    const item = await service.getById(res.locals.params.id);
     if (!item) return respondError(res, 404, 'NOT_FOUND', 'Time-off request not found');
-    const isOwn = item.userId === req.user!.id;
-    const isManager = userHasPermission(req.user, 'timeoff.approve');
-    if (!isOwn && !isManager) return respondError(res, 403, 'FORBIDDEN', 'Forbidden');
     res.json({ success: true, data: item });
   });
 
-  router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/approve', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('timeoff.approve', 'timeOff', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.approve(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 
-  router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/:id/reject', requirePermission('timeoff.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('timeoff.approve', 'timeOff', 'params.id'), async (req: Request, res: Response) => {
     const { id } = res.locals.params;
     const updated = await service.reject(id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });

@@ -10794,6 +10794,7 @@
           "Shifts"
         ],
         "summary": "List shifts of a department",
+        "description": "Requires `schedule.read`. A department outside the caller's org-unit scope is answered 404, as a missing one is.",
         "parameters": [
           {
             "name": "departmentId",
@@ -10811,6 +10812,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -10821,6 +10828,7 @@
           "Shifts"
         ],
         "summary": "List shifts of a schedule",
+        "description": "Requires `schedule.read`. A schedule outside the caller's org-unit scope is answered 404, as a missing one is.",
         "parameters": [
           {
             "name": "scheduleId",
@@ -10838,6 +10846,12 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }

@@ -27,7 +27,7 @@ import {
   vcardQuery,
 } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
-import { UserAuthorityService } from '../services/UserAuthorityService';
+import { UserAuthorityService } from '../services/access/UserAuthorityService';
 import { config } from '../config';
 
 const error = (res: Response, status: number, code: string, message: string): void => {
@@ -39,7 +39,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
   const service = new UserDirectoryService(pool);
   // Directory fields are part of another person's account, so writing them is
   // held to the same authority rule as the account itself (#810).
-  const authority = new UserAuthorityService(pool);
+  const authority = new UserAuthorityService(pool, 'user.manage');
 
   router.use(authenticate);
 

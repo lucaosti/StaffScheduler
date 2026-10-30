@@ -571,13 +571,24 @@ if (!userHasPermission(req.user, 'schedule.publish')) { ... }
 3. Calls `RbacService.getEffectivePermissions(userId)` — union of all non-expired role grants + active delegations
 4. Calls `RbacService.getUserRoles(userId)` — role assignments with scope
 5. Calls `RbacService.computeAllowedOrgUnitIds(roles)` — `null` (full access) or subtree IDs
-6. Attaches `user.permissions`, `user.roles`, `user.allowedOrgUnitIds` to `req.user`
+6. Calls `RbacService.getEffectiveDelegationScopes(userId, allowedOrgUnitIds)` — the org-unit scope of each delegated code (empty, after one query, when the user has no active delegations)
+7. Attaches `user.permissions`, `user.roles`, `user.allowedOrgUnitIds`, `user.delegationScopes` to `req.user`
 
 By default this resolution runs on **every request**, so grants and revocations apply immediately. Deployments that accept a bounded staleness window can set `AUTH_PERMISSION_CACHE_TTL_MS` (default `0` = off) to cache the resolved auth context per user for that many milliseconds; role-grant endpoints call `invalidateAuthContext(userId)` so changes made through the API still apply immediately on the serving instance.
 
 ### Org-unit scoping
 
-A role granted with `user_roles.scope_org_unit_id = X` limits the user to data within org unit X and its descendants. Affected list endpoints: `GET /employees`, `GET /schedules`, `GET /shifts`. `GET /schedules/:id` returns 403 for out-of-scope resources.
+A role granted with `user_roles.scope_org_unit_id = X` limits the user to data within org unit X and its descendants. A delegation carrying `scope_org_unit_id` limits the codes it grants the same way (§8).
+
+**Scope is per permission.** `AccessPolicy.scopeFor(user, code)` (`services/access/AccessPolicy.ts`) is the caller's scope for one code: the delegation override for that code when there is one (`user.delegationScopes`), otherwise the role scope (`user.allowedOrgUnitIds`; `null` = unrestricted). Nothing else reads those two fields, so a delegated code can never act outside its delegation's scope.
+
+**Where a row lives.** Departments and org units are separate hierarchies bridged by `departments.org_unit_id`: a schedule, shift, assignment (through its shift) or cost plan is in scope when its department's org unit is; a person, their time-off requests and attendance records are in scope when any org unit they belong to (`user_org_units`) is; a loan is decided by its receiving unit. A row whose unit is `NULL` is reachable only by unscoped callers.
+
+**How routes declare it.** Routes keep `requirePermission` and add a declaration from `middleware/accessScope.ts` after their `validate*` middleware — `scope.reach('schedule.manage', 'schedule', 'params.id')` for a row, `scope.ownerOr('assignment.manage', 'assignment', 'params.id')` where the owner passes without the permission. Ids named in request bodies are declared the same way (`body.shiftId`, `body.userId`, `body.departmentId`, `body.assignments[].shiftId`), so a record cannot be created in, or moved into, another unit. List and aggregate endpoints (schedules, shifts, assignments, employees, time-off, attendance, loans, cost plans, reports) pass `scopeFilter(user, code)` to the service, and an empty scope matches no rows. Batch endpoints with one outcome per row check each row inside the batch.
+
+**Out of scope is `404`, not `403`.** An out-of-scope row — in the path or in the body — gets exactly the response a missing one gets, so a scoped caller cannot enumerate other units' ids or learn which unit owns them. `403` stays for what the caller already knows about themselves: lacking the permission, or acting on someone else's record without the authority to.
+
+Every mounted operation's permission, ownership and scope rule is declared in `backend/src/__tests__/integration/authorizationMatrix.ts`, and `authorization.integration.test.ts` holds the real app to it for an Administrator, a scoped and an unscoped Manager, an Employee, a delegatee and an unauthenticated caller — including other units' ids in paths and bodies. A route without an entry fails that suite; operations whose scope is not enforced yet are declared `gap` there, with the reason.
 
 `RbacService.getDescendantOrgUnitIds(rootId)` uses a single `WITH RECURSIVE` CTE. No N+1 queries.
 
@@ -618,9 +629,10 @@ A role granted with `user_roles.scope_org_unit_id = X` limits the user to data w
 One rule, enforced by `UserAuthorityService` on every surface that writes accounts — `/users`, `/employees` (single and batch), `POST /import/employees`, `POST /directory/import-vcard` and the directory-field writes under `/directory/users/:id/fields`:
 
 - **Granting roles**: an actor cannot assign a role containing a permission they do not hold. Imports name roles (`role` column, `X-ROLE` field); the names are resolved and checked for the whole file before anything is written. Changing one's own roles is always refused. Grants made through these surfaces are organization-wide, so an actor whose own roles are scoped to part of the organization cannot grant roles here at all.
-- **Writing accounts**: an actor cannot update, deactivate or delete another account whose effective permissions are not a subset of their own (so a Manager cannot reset an Administrator's password or strip their roles), and a scoped actor can only write accounts belonging to an org unit inside their scope. Nobody can deactivate their own account (`400`).
-- Holders of `role.manage` are exempt from both, except the self-role and self-deactivation rules. Refusals are `403 FORBIDDEN`.
-- Not covered by this rule yet: comparing the *breadth* of a target's scope with the actor's, and who may change org-unit membership (#813, #814).
+- **Writing accounts**: an actor cannot update, deactivate or delete another account whose effective permissions are not a subset of their own (so a Manager cannot reset an Administrator's password or strip their roles), and a scoped actor can only write accounts belonging to an org unit inside their scope for the surface's permission (`user.manage` or `employee.manage`, delegation scopes included). Nobody can deactivate their own account (`400`).
+- **Org-unit membership** (`/org/units/:id/members`): the unit must be inside the actor's `employee.manage` scope, and so must the person — except a person who belongs to no unit yet, whom a scoped manager may place in their own unit (the permission-subset rule still applies).
+- Holders of `role.manage` are exempt from both, except the self-role and self-deactivation rules — scope included, since `role.manage` already admits `/roles/users/:id`, which assigns any role organization-wide. Refusals are `403 FORBIDDEN`; an account outside the actor's scope is `404`, as for any out-of-scope row.
+- Not covered yet: comparing the *breadth* of a target's own scope with the actor's. The sound form compares per permission, and under the default roles (the Employee role is unscoped) it would refuse every scoped manager every employee; it needs a decision about the default roles first.
 
 ---
 
@@ -1347,6 +1359,8 @@ DELETE /api/delegations/:id       revoke (delegator only)
 Rules:
 - Creating requires `delegation.manage` or `delegation.self`; revoking one's own delegation and listing one's own delegations only require authentication.
 - `permissionCodes` must be a subset of the delegator's current permissions.
+- The delegation's scope must lie inside the delegator's own scope for every delegated code: a delegator scoped to part of the organization cannot create an organization-wide (`scopeOrgUnitId` null) delegation, nor one scoped to a unit outside their scope (`422 DELEGATION_INVALID`).
+- Delegated codes apply only inside the delegation's scope (`AccessPolicy.scopeFor`, §5): a delegatee holding `schedule.manage` for unit A through a delegation gets `404` on unit B's schedules. A code the delegatee also holds through a role reaches the union of both scopes. At resolution time each delegation is capped by what the delegator still holds — their codes and their scope — so a delegator whose authority narrowed cannot keep handing out the wider one.
 - Self-delegation is rejected.
 - Expired delegations are excluded automatically from `getEffectivePermissions`.
 - Every grant/revoke writes an `audit_logs` entry.

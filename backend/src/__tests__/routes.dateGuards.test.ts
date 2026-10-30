@@ -91,7 +91,7 @@ describe('reports — date guards', () => {
       '/api/reports/cost-by-department?start=2026-07-01&end=2026-07-31'
     );
     expect(res.status).toBe(200);
-    expect(ReportsService.prototype.costByDepartment).toHaveBeenCalledWith('2026-07-01', '2026-07-31');
+    expect(ReportsService.prototype.costByDepartment).toHaveBeenCalledWith('2026-07-01', '2026-07-31', undefined);
   });
 });
 

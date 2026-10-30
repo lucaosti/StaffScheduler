@@ -21,20 +21,35 @@
  * WHY `role.manage` IS THE EXCEPTION. It is the explicit authority to assign
  * any role, held by Administrators. Without the bypass an Administrator could
  * not manage another Administrator, nor grant a role carrying a permission
- * they lack (e.g. a custom role with a newly added code).
+ * they lack (e.g. a custom role with a newly added code). The bypass covers
+ * scope too, deliberately: `role.manage` already admits `/roles/users/:id`,
+ * which assigns any role to anyone organization-wide, so holding it scoped
+ * would bound nothing it does not already reach.
+ *
+ * WHY IT IS BUILT WITH A PERMISSION. Each surface is admitted by a different
+ * code — `user.manage` for `/users` and the directory, `employee.manage` for
+ * `/employees` and the imports — and the org-unit scope that bounds the actor
+ * is the scope of THAT code (`AccessPolicy.scopeFor`). A delegatee holding
+ * `user.manage` for one unit through a delegation, with unscoped roles, has
+ * `allowedOrgUnitIds === null`; reading that field alone let them manage any
+ * account in the organization (#814).
  *
  * WHY ORG-UNIT SCOPE APPLIES TO TARGETS AND GRANTS. A scoped actor reaching an
  * account outside their subtree is the cross-unit access scoping exists to
- * prevent; a target belonging to no unit is reachable only by unscoped actors.
- * Grants made here are always organization-wide (`scope_org_unit_id NULL`), so
- * a scoped actor granting any role would hand out authority wider than their
- * own — e.g. create an org-wide Manager with a password they chose and log in
- * as it. Scoped actors therefore create accounts without roles and leave role
- * assignment to role administration.
+ * prevent; such a target is answered 404, like every out-of-scope row (see
+ * AccessPolicy for why). A target belonging to no unit is reachable only by
+ * unscoped actors. Grants made here are always organization-wide
+ * (`scope_org_unit_id NULL`), so a scoped actor granting any role would hand
+ * out authority wider than their own — e.g. create an org-wide Manager with a
+ * password they chose and log in as it. Scoped actors therefore create
+ * accounts without roles and leave role assignment to role administration.
  *
- * NOT DECIDED HERE: whether a target's own scope is wider than the actor's, and
- * who may change org-unit membership. Scope is unenforced across most of the
- * API today; it is fixed as one rule in #813/#814 rather than piecemeal here.
+ * NOT DECIDED HERE: whether a target's own scope is wider than the actor's. A
+ * per-permission comparison is the only sound form of that rule, and under the
+ * default roles it refuses every scoped manager every employee — the Employee
+ * role is unscoped, so each employee's `schedule.read` is organization-wide.
+ * The permission-subset test above bounds what such a write can reach; the
+ * breadth question needs a decision about the default roles first.
  *
  * Rejected: putting the check inside `UserService.createUser/updateUser`. Those
  * are also called by seeding and SSO provisioning, which have no actor, so the
@@ -45,14 +60,16 @@
  */
 
 import { Pool, RowDataPacket } from 'mysql2/promise';
-import { RbacService } from './RbacService';
-import { ForbiddenError, ValidationError } from '../errors';
-import { User } from '../types';
+import { RbacService } from '../RbacService';
+import { ForbiddenError, ValidationError } from '../../errors';
+import { User } from '../../types';
+import { assertInScope, scopeFor } from './AccessPolicy';
 
 export class UserAuthorityService {
   private readonly rbac: RbacService;
 
-  constructor(private readonly pool: Pool) {
+  /** `permission` is the code admitting the calling surface; its scope bounds the actor. */
+  constructor(private readonly pool: Pool, private readonly permission: string) {
     this.rbac = new RbacService(pool);
   }
 
@@ -66,7 +83,7 @@ export class UserAuthorityService {
     if (targetUserId === actor.id) throw new ForbiddenError('You cannot change your own roles');
     const held = new Set(actor.permissions ?? []);
     if (held.has('role.manage')) return;
-    if (roleIds.length > 0 && actor.allowedOrgUnitIds !== null && actor.allowedOrgUnitIds !== undefined) {
+    if (roleIds.length > 0 && scopeFor(actor, this.permission) !== null) {
       throw new ForbiddenError('An account scoped to part of the organization cannot grant organization-wide roles');
     }
     for (const roleId of roleIds) {
@@ -99,8 +116,16 @@ export class UserAuthorityService {
    * org-unit scope. Writing one's own account is otherwise decided by the
    * caller's self-service rules — except deactivating it, which is refused for
    * everyone: it would lock the actor out, possibly the last Administrator.
+   *
+   * `allowUnassigned` admits a target belonging to no org unit even for a
+   * scoped actor — the one case where that is right is placing such an account
+   * INTO the actor's unit (org membership writes); the subset test still holds.
    */
-  async assertCanManageUser(actor: User, targetUserId: number, change: { deactivate?: boolean } = {}): Promise<void> {
+  async assertCanManageUser(
+    actor: User,
+    targetUserId: number,
+    change: { deactivate?: boolean; allowUnassigned?: boolean } = {}
+  ): Promise<void> {
     if (targetUserId === actor.id) {
       if (change.deactivate) throw new ValidationError('You cannot deactivate your own account');
       return;
@@ -108,20 +133,23 @@ export class UserAuthorityService {
     const held = new Set(actor.permissions ?? []);
     if (held.has('role.manage')) return;
 
+    // Scope before the subset test, so an account outside the actor's units
+    // is answered 404 — exactly like one that does not exist — without first
+    // disclosing, through a 403, what it holds.
+    const scope = scopeFor(actor, this.permission);
+    if (scope !== null) {
+      const [rows] = await this.pool.execute<RowDataPacket[]>(
+        'SELECT org_unit_id FROM user_org_units WHERE user_id = ?',
+        [targetUserId]
+      );
+      const units = rows.map((r) => r.org_unit_id as number);
+      const unassigned = units.length === 0 && change.allowUnassigned === true;
+      if (!unassigned) assertInScope(actor, this.permission, units, 'User');
+    }
+
     const targetPermissions = await this.rbac.getEffectivePermissions(targetUserId);
     if (targetPermissions.some((code) => !held.has(code))) {
       throw new ForbiddenError('You cannot modify an account with permissions you do not hold');
-    }
-
-    const scope = actor.allowedOrgUnitIds;
-    if (scope === null || scope === undefined) return;
-    const [rows] = await this.pool.execute<RowDataPacket[]>(
-      'SELECT org_unit_id FROM user_org_units WHERE user_id = ?',
-      [targetUserId]
-    );
-    const allowed = new Set(scope);
-    if (!rows.some((r) => allowed.has(r.org_unit_id as number))) {
-      throw new ForbiddenError('This account is outside your organizational scope');
     }
   }
 }

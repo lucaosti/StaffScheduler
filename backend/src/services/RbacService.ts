@@ -45,16 +45,7 @@ export class RbacService {
    * delegation was created, the delegatee no longer benefits from that code.
    */
   async getEffectivePermissions(userId: number): Promise<string[]> {
-    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT DISTINCT p.code
-         FROM user_roles ur
-         JOIN role_permissions rp ON rp.role_id = ur.role_id
-         JOIN permissions p ON p.id = rp.permission_id
-        WHERE ur.user_id = ?
-          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
-      [userId]
-    );
-    const fromRoles = roleRows.map((r: any) => r.code as string);
+    const fromRoles = await this.getRolePermissions(userId);
 
     // Merge active delegations received by this user, capped to what the
     // delegator currently holds to prevent privilege retention after revocation.
@@ -448,43 +439,81 @@ export class RbacService {
   }
 
   /**
-   * Returns the per-permission org-unit restrictions that apply to this user
-   * through their active, scoped delegations. Entries are merged by permission
-   * code so callers receive one entry per code with the union of allowed org
-   * units across all matching delegations.
+   * The org-unit scope of every code this user holds through an active
+   * delegation — the per-permission override of `allowedOrgUnitIds` that
+   * `AccessPolicy.scopeFor` reads (#814).
    *
-   * Returns an empty array when the user has no scoped delegations.
+   * WHY PER CODE, AND WHY MERGED WITH THE ROLE SCOPE. A delegation of
+   * `schedule.manage` for ward A gives that code in ward A, not everywhere: the
+   * old resolution merged delegated codes into the permission list and never
+   * consulted the scope again, so it gave the code organization-wide. A code
+   * the user ALSO holds through their roles reaches the union of both, which is
+   * what "cover a colleague's ward while they are away" needs from a manager
+   * who already runs another one.
+   *
+   * WHY CAPPED BY THE DELEGATOR'S CURRENT SCOPE. Like the codes themselves
+   * (`getEffectivePermissions`), the reach is capped at resolution time: a
+   * delegator whose own scope narrowed after delegating cannot keep handing out
+   * the wider one, and a delegation that no longer intersects it reaches
+   * nothing (an empty list, which matches no row).
+   *
+   * Returns an empty array — no overrides, no extra queries — when the user has
+   * no active delegations, which is the common case.
    */
   async getEffectiveDelegationScopes(
-    userId: number
-  ): Promise<Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>> {
+    userId: number,
+    roleScope: number[] | null
+  ): Promise<Array<{ permissionCode: string; allowedOrgUnitIds: number[] | null }>> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT d.permission_codes, d.scope_org_unit_id
+      `SELECT d.delegator_id, d.permission_codes, d.scope_org_unit_id
          FROM delegations d
         WHERE d.delegatee_id = ? AND d.is_active = TRUE
-          AND d.starts_at <= NOW() AND d.expires_at > NOW()
-          AND d.scope_org_unit_id IS NOT NULL`,
+          AND d.starts_at <= NOW() AND d.expires_at > NOW()`,
       [userId]
     );
-    if ((rows as any[]).length === 0) return [];
+    if (rows.length === 0) return [];
 
-    // Build { permissionCode → Set<orgUnitId> } by expanding each delegation's
-    // scope_org_unit_id to include all descendants.
-    const merged = new Map<string, Set<number>>();
-    for (const row of rows as any[]) {
-      const codes = ValidationUtils.parseStringArray(row.permission_codes);
-      const scopeId: number = row.scope_org_unit_id as number;
-      const allowed = await this.getDescendantOrgUnitIds(scopeId);
-      for (const code of codes) {
-        if (!merged.has(code)) merged.set(code, new Set());
-        for (const id of allowed) merged.get(code)!.add(id);
+    // code → reach through delegations; null means unrestricted.
+    const delegated = new Map<string, Set<number> | null>();
+    for (const row of rows) {
+      const delegatorId = row.delegator_id as number;
+      const [delegatorCodes, delegatorScope] = await Promise.all([
+        this.getRolePermissions(delegatorId),
+        this.getUserRoles(delegatorId).then((roles) => this.computeAllowedOrgUnitIds(roles)),
+      ]);
+      const own = row.scope_org_unit_id == null ? null : await this.getDescendantOrgUnitIds(row.scope_org_unit_id as number);
+      const reach = intersectScopes(own, delegatorScope);
+      for (const code of ValidationUtils.parseStringArray(row.permission_codes)) {
+        if (!delegatorCodes.includes(code)) continue;
+        const current = delegated.get(code);
+        if (current === null) continue;
+        if (reach === null) delegated.set(code, null);
+        else delegated.set(code, new Set([...(current ?? []), ...reach]));
       }
     }
 
-    return Array.from(merged.entries()).map(([permissionCode, ids]) => ({
-      permissionCode,
-      allowedOrgUnitIds: Array.from(ids),
-    }));
+    const roleCodes = new Set(await this.getRolePermissions(userId));
+    return Array.from(delegated.entries()).map(([permissionCode, reach]) => {
+      const viaRole = roleCodes.has(permissionCode);
+      let allowed: number[] | null;
+      if (reach === null || (viaRole && roleScope === null)) allowed = null;
+      else allowed = [...new Set([...(viaRole ? roleScope ?? [] : []), ...reach])];
+      return { permissionCode, allowedOrgUnitIds: allowed };
+    });
+  }
+
+  /** Permission codes granted by the user's own (unexpired) roles — delegations excluded. */
+  async getRolePermissions(userId: number): Promise<string[]> {
+    const [roleRows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT DISTINCT p.code
+         FROM user_roles ur
+         JOIN role_permissions rp ON rp.role_id = ur.role_id
+         JOIN permissions p ON p.id = rp.permission_id
+        WHERE ur.user_id = ?
+          AND (ur.expires_at IS NULL OR ur.expires_at > NOW())`,
+      [userId]
+    );
+    return roleRows.map((r) => r.code as string);
   }
 
   /** Resolves a role id from its (unique) name. Useful for seeding/import. */
@@ -527,3 +556,10 @@ export class RbacService {
     };
   }
 }
+
+/** Intersection of two scopes where `null` is unrestricted. */
+const intersectScopes = (a: number[] | null, b: number[] | null): number[] | null => {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a.filter((id) => b.includes(id));
+};

@@ -20,7 +20,7 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
-import { UserAuthorityService } from './UserAuthorityService';
+import { UserAuthorityService } from './access/UserAuthorityService';
 import { User } from '../types';
 
 interface ImportRowError {
@@ -214,7 +214,7 @@ export class BulkImportService {
     // Rows name their role, so an import is a role grant like any other and is
     // held to the same anti-escalation rule — checked for the whole file before
     // anything is written, consistent with the all-or-nothing import (#809).
-    await new UserAuthorityService(this.pool).assertCanAssignRoleNames(actor, rows.map((r) => r.roleName));
+    await new UserAuthorityService(this.pool, 'employee.manage').assertCanAssignRoleNames(actor, rows.map((r) => r.roleName));
 
     return usingConnection(this.pool, async (conn) => {
       try {

@@ -10,8 +10,8 @@
 jest.mock('../services/RbacService');
 
 import { RbacService } from '../services/RbacService';
-import { UserAuthorityService } from '../services/UserAuthorityService';
-import { ForbiddenError, ValidationError } from '../errors';
+import { UserAuthorityService } from '../services/access/UserAuthorityService';
+import { ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { User } from '../types';
 
 const actor = (permissions: string[], allowedOrgUnitIds: number[] | null = null): User =>
@@ -19,7 +19,7 @@ const actor = (permissions: string[], allowedOrgUnitIds: number[] | null = null)
 
 const makeService = (orgUnitRows: Array<{ org_unit_id: number }> = []) => {
   const execute = jest.fn().mockResolvedValue([orgUnitRows, null]);
-  return { service: new UserAuthorityService({ execute } as never), execute };
+  return { service: new UserAuthorityService({ execute } as never, 'user.manage'), execute };
 };
 
 const getRoleById = RbacService.prototype.getRoleById as jest.Mock;
@@ -134,9 +134,11 @@ describe('assertCanManageUser', () => {
 
   it('refuses a scoped actor an account outside their units, or in no unit at all', async () => {
     const outside = makeService([{ org_unit_id: 9 }]);
-    await expect(outside.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow('outside your organizational scope');
+    await expect(outside.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(NotFoundError);
     const nowhere = makeService([]);
-    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(ForbiddenError);
+    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20)).rejects.toThrow(NotFoundError);
+    // Placing an account that belongs nowhere into one's unit is the one exception.
+    await expect(nowhere.service.assertCanManageUser(actor(['user.manage'], [5]), 20, { allowUnassigned: true })).resolves.toBeUndefined();
   });
 });
 

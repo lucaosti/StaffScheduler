@@ -14,12 +14,17 @@
  * read-only gate for both the comparison on `/dashboard/stats` and listing
  * plans here; `report.manage` is required to create, update or delete one.
  *
+ * A plan belongs to its department, so every route is held to the caller's
+ * org-unit scope through it (#813) — including the department named when
+ * creating one.
+ *
  * @author Luca Ostinelli
  */
 
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
 import { validateBody, validateParams, validateQuery } from '../middleware/validation';
 import {
   costPlanBody,
@@ -28,24 +33,26 @@ import {
   costPlanListQuery,
 } from '../schemas';
 import { CostPlanService } from '../services/CostPlanService';
+import { scopeFilter } from '../services/access/AccessPolicy';
 
 export const createCostPlansRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new CostPlanService(pool);
+  const scope = accessScope(pool);
 
   router.use(authenticate);
 
-  router.get('/', requirePermission('report.read'), validateQuery(costPlanListQuery), async (_req: Request, res: Response) => {
-    const plans = await service.list(res.locals.query.departmentId);
+  router.get('/', requirePermission('report.read'), validateQuery(costPlanListQuery), async (req: Request, res: Response) => {
+    const plans = await service.list(res.locals.query.departmentId, scopeFilter(req.user!, 'report.read'));
     res.json({ success: true, data: plans });
   });
 
-  router.get('/:id', requirePermission('report.read'), validateParams(costPlanIdParam), async (_req: Request, res: Response) => {
+  router.get('/:id', requirePermission('report.read'), validateParams(costPlanIdParam), scope.reach('report.read', 'costPlan', 'params.id'), async (_req: Request, res: Response) => {
     const plan = await service.getById(res.locals.params.id);
     res.json({ success: true, data: plan });
   });
 
-  router.post('/', requirePermission('report.manage'), validateBody(costPlanBody), async (req: Request, res: Response) => {
+  router.post('/', requirePermission('report.manage'), validateBody(costPlanBody), scope.reach('report.manage', 'department', 'body.departmentId'), async (req: Request, res: Response) => {
     const body = res.locals.body;
     const plan = await service.create({
       departmentId: body.departmentId,
@@ -62,13 +69,14 @@ export const createCostPlansRouter = (pool: Pool): Router => {
     requirePermission('report.manage'),
     validateParams(costPlanIdParam),
     validateBody(costPlanUpdateBody),
+    scope.reach('report.manage', 'costPlan', 'params.id'),
     async (_req: Request, res: Response) => {
       const plan = await service.update(res.locals.params.id, res.locals.body.targetAmount);
       res.json({ success: true, data: plan, message: 'Cost plan updated' });
     }
   );
 
-  router.delete('/:id', requirePermission('report.manage'), validateParams(costPlanIdParam), async (_req: Request, res: Response) => {
+  router.delete('/:id', requirePermission('report.manage'), validateParams(costPlanIdParam), scope.reach('report.manage', 'costPlan', 'params.id'), async (_req: Request, res: Response) => {
     await service.remove(res.locals.params.id);
     res.json({ success: true, message: 'Cost plan deleted' });
   });

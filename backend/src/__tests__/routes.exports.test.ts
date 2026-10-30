@@ -31,7 +31,7 @@ jest.mock('../services/AuditLogService', () => ({
 }));
 
 /** The authenticated caller each case runs as; reassigned per test. */
-let currentUser: Record<string, unknown> = { id: 9, email: 'm@x.y', allowedOrgUnitIds: null };
+let currentUser: Record<string, unknown> = { id: 9, email: 'm@x.y', allowedOrgUnitIds: null, permissions: ['report.read'] };
 /** What `userHasPermission` answers; the approver/non-approver switch. */
 let hasPermission = true;
 
@@ -90,7 +90,7 @@ const mount = (factoryName: string, modulePath: string, base: string) => {
 
 beforeEach(() => {
   jest.clearAllMocks();
-  currentUser = { id: 9, email: 'm@x.y', allowedOrgUnitIds: null };
+  currentUser = { id: 9, email: 'm@x.y', allowedOrgUnitIds: null, permissions: ['report.read'] };
   hasPermission = true;
   reports.hoursWorkedByUser.mockResolvedValue([{ userId: 1, fullName: 'Rossi', hours: 8 }]);
   reports.costByDepartment.mockResolvedValue([
@@ -145,7 +145,7 @@ describe('report exports', () => {
     const res = await request(app()).get('/api/reports/hours-worked/export?startDate=2026-07-01&endDate=2026-07-31');
 
     expectCsvAttachment(res, 'hours-worked');
-    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', undefined);
+    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', undefined, undefined);
     expect(res.text).toContain('Employee ID,Employee,Hours');
     expect(res.text).toContain('Rossi');
   });
@@ -154,7 +154,7 @@ describe('report exports', () => {
     // An export that only understood the documented pair would hand a caller
     // still using the old names a different window — worse than refusing them.
     await request(app()).get('/api/reports/hours-worked/export?start=2026-07-01&end=2026-07-31');
-    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', undefined);
+    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', undefined, undefined);
   });
 
   it('refuses without a range rather than exporting everything', async () => {
@@ -167,7 +167,7 @@ describe('report exports', () => {
     await request(app()).get(
       '/api/reports/hours-worked/export?startDate=2026-07-01&endDate=2026-07-31&departmentId=4'
     );
-    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', 4);
+    expect(reports.hoursWorkedByUser).toHaveBeenCalledWith('2026-07-01', '2026-07-31', 4, undefined);
   });
 
   it('exports cost by department', async () => {

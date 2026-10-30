@@ -48,7 +48,9 @@ export const createChangeRequestsRouter = (pool: Pool): Router => {
   });
 
   // Create (any authenticated user with permission)
-  router.post('/', validateBody(createBody), requirePermission('change_request.create'), async (req: Request, res: Response) => {
+  // The gate before the body check: a caller without the permission learns
+  // nothing about the payload this endpoint expects (found by the matrix, #909).
+  router.post('/', requirePermission('change_request.create'), validateBody(createBody), async (req: Request, res: Response) => {
     const actor = req.user as User;
     const cr = await svc.create(res.locals.body, actor.id);
     res.status(201).json({ success: true, data: cr, message: 'Change request submitted' });

@@ -39,7 +39,9 @@ import {
 } from '../services/EmployeeFieldPolicyService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
-import { UserAuthorityService } from '../services/UserAuthorityService';
+import { UserAuthorityService } from '../services/access/UserAuthorityService';
+import { scopeFilter } from '../services/access/AccessPolicy';
+import { accessScope } from '../middleware/accessScope';
 import { employeeColumns } from '../services/exportColumns';
 import { idParam, departmentIdParam, idAndSkillIdParam, createUserBody, updateUserBody, addEmployeeSkillBody, employeeListQuery, batchCreateEmployeesBody } from '../schemas';
 import { runBatch } from '../utils/batch';
@@ -51,7 +53,8 @@ export const createEmployeesRouter = (pool: Pool) => {
   const fieldPolicies = new EmployeeFieldPolicyService(pool);
   // These endpoints write accounts and role grants exactly like `/users`, so
   // they are held to the same authority rules (#809, #810).
-  const authority = new UserAuthorityService(pool);
+  const authority = new UserAuthorityService(pool, 'employee.manage');
+  const scope = accessScope(pool);
 
 /**
  * The per-organization field rules, applied AFTER the Zod schema.
@@ -91,10 +94,10 @@ const enforceFieldPolicy = async (
  * subtree, which is precisely the decision that must not exist twice.
  */
 const listFilters = (req: Request, query: z.infer<typeof employeeListQuery>) => {
-  const scope = req.user?.allowedOrgUnitIds;
+  const orgUnitIds = scopeFilter(req.user!, 'employee.read');
   const { search, department, isActive } = query;
   const filters: { orgUnitIds?: number[]; search?: string; departmentId?: number; departmentName?: string; isActive?: boolean } = {};
-  if (scope !== null && scope !== undefined) filters.orgUnitIds = scope;
+  if (orgUnitIds !== undefined) filters.orgUnitIds = orgUnitIds;
   if (isActive !== undefined) filters.isActive = isActive;
   if (typeof search === 'string' && search.length > 0) filters.search = search;
   if (typeof department === 'string' && department.length > 0) {
@@ -138,7 +141,7 @@ router.get('/export', authenticate, requirePermission('employee.read'), validate
   });
 });
 
-router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('employee.read'), validateParams(idParam), scope.reach('employee.read', 'user', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const employee = await employeeService.getEmployeeById(id);
@@ -152,7 +155,9 @@ router.get('/:id', authenticate, requirePermission('employee.read'), validatePar
   res.json({ success: true, data: employee });
 });
 
-router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), async (req: Request, res: Response) => {
+// The new account belongs nowhere yet, but the departments it is placed in are
+// named in the body and must be the caller's to staff.
+router.post('/', authenticate, requirePermission('employee.manage'), validateBody(createUserBody), scope.reach('employee.manage', 'department', 'body.departmentIds[]'), async (req: Request, res: Response) => {
   await authority.assertCanAssignRoles(req.user!, res.locals.body.roleIds);
   await enforceFieldPolicy(req, res.locals.body, false);
   const employee = await employeeService.createEmployee(res.locals.body);
@@ -171,6 +176,9 @@ router.post('/', authenticate, requirePermission('employee.manage'), validateBod
 router.post('/batch', authenticate, requirePermission('employee.manage'), validateBody(batchCreateEmployeesBody), async (req: Request, res: Response) => {
   const { employees } = res.locals.body as z.infer<typeof batchCreateEmployeesBody>;
   const result = await runBatch(employees, async (employeeData) => {
+    for (const departmentId of employeeData.departmentIds ?? []) {
+      await scope.policy.assertReach(req.user!, 'employee.manage', 'department', departmentId);
+    }
     await authority.assertCanAssignRoles(req.user!, employeeData.roleIds);
     await enforceFieldPolicy(req, employeeData, false);
     return employeeService.createEmployee(employeeData);
@@ -213,21 +221,21 @@ router.delete('/:id', authenticate, requirePermission('employee.manage'), valida
   });
 });
 
-router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('employee.read'), validateParams(departmentIdParam), scope.reach('employee.read', 'department', 'params.departmentId'), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
   const employees = await employeeService.getEmployeesByDepartment(departmentId);
   res.json({ success: true, data: employees });
 });
 
-router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/skills', authenticate, requirePermission('employee.read'), validateParams(idParam), scope.reach('employee.read', 'user', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const skills = await employeeService.getEmployeeSkills(id);
   res.json({ success: true, data: skills });
 });
 
-router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), async (_req: Request, res: Response) => {
+router.post('/:id/skills', authenticate, requirePermission('employee.manage'), validateParams(idParam), validateBody(addEmployeeSkillBody), scope.reach('employee.manage', 'user', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const { skillId, proficiencyLevel } = res.locals.body;
 
@@ -239,7 +247,7 @@ router.post('/:id/skills', authenticate, requirePermission('employee.manage'), v
   });
 });
 
-router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), async (_req: Request, res: Response) => {
+router.delete('/:id/skills/:skillId', authenticate, requirePermission('employee.manage'), validateParams(idAndSkillIdParam), scope.reach('employee.manage', 'user', 'params.id'), async (_req: Request, res: Response) => {
   const { id, skillId } = res.locals.params;
 
   await employeeService.removeEmployeeSkill(id, skillId);

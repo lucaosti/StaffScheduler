@@ -18,6 +18,7 @@
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import { SHIFT_HOURS_SQL } from '../utils/sql';
 import { DateUtils } from '../utils';
+import { memberCondition, unitCondition } from './access/AccessPolicy';
 
 export interface HoursWorkedRow {
   userId: number;
@@ -63,7 +64,8 @@ export class ReportsService {
   async hoursWorkedByUser(
     rangeStart: string,
     rangeEnd: string,
-    departmentId?: number
+    departmentId?: number,
+    orgUnitIds?: number[]
   ): Promise<HoursWorkedRow[]> {
     const conditions: string[] = [
       'sa.status IN (\'pending\', \'confirmed\', \'completed\')',
@@ -73,6 +75,11 @@ export class ReportsService {
     if (departmentId !== undefined) {
       conditions.push('s.department_id = ?');
       params.push(departmentId);
+    }
+    const scope = unitCondition('org_unit_id', orgUnitIds);
+    if (scope) {
+      conditions.push(`s.department_id IN (SELECT id FROM departments WHERE ${scope.sql})`);
+      params.push(...scope.params);
     }
     const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT u.id AS user_id,
@@ -95,8 +102,10 @@ export class ReportsService {
 
   async costByDepartment(
     rangeStart: string,
-    rangeEnd: string
+    rangeEnd: string,
+    orgUnitIds?: number[]
   ): Promise<CostByDepartmentRow[]> {
+    const scope = unitCondition('d.org_unit_id', orgUnitIds);
     const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT d.id AS department_id, d.name AS department_name,
               COALESCE(SUM(${HOURS_EXPR}), 0) AS hours,
@@ -105,10 +114,11 @@ export class ReportsService {
          LEFT JOIN shifts s ON s.department_id = d.id AND s.date BETWEEN ? AND ?
          LEFT JOIN shift_assignments sa ON sa.shift_id = s.id
               AND sa.status IN ('pending', 'confirmed', 'completed')
-         LEFT JOIN users u ON sa.user_id = u.id
+         LEFT JOIN users u ON sa.user_id = u.id${scope ? `
+        WHERE ${scope.sql}` : ''}
         GROUP BY d.id, d.name
         ORDER BY cost DESC`,
-      [rangeStart, rangeEnd]
+      [rangeStart, rangeEnd, ...(scope?.params ?? [])]
     );
     return rows.map((r: any) => ({
       departmentId: r.department_id,
@@ -163,15 +173,18 @@ export class ReportsService {
    */
   async complianceViolationsTrend(
     rangeStart: string,
-    rangeEnd: string
+    rangeEnd: string,
+    orgUnitIds?: number[]
   ): Promise<ComplianceViolationTrendRow[]> {
+    // A violation belongs to the person it was detected for.
+    const scope = memberCondition('user_id', orgUnitIds);
     const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT DATE(detected_at) AS date, code, COUNT(*) AS count
          FROM compliance_violations
-        WHERE detected_at >= ? AND detected_at < DATE_ADD(?, INTERVAL 1 DAY)
+        WHERE detected_at >= ? AND detected_at < DATE_ADD(?, INTERVAL 1 DAY)${scope ? ` AND ${scope.sql}` : ''}
         GROUP BY DATE(detected_at), code
         ORDER BY date ASC, code ASC`,
-      [rangeStart, rangeEnd]
+      [rangeStart, rangeEnd, ...(scope?.params ?? [])]
     );
     return rows.map((r: any) => ({
       // `DATE(...)` comes back as a Date at LOCAL midnight; `toISOString()`

@@ -18,6 +18,16 @@
  * - POST   /api/org/loans/:id/reject         reject (approver)
  * - POST   /api/org/loans/:id/cancel         cancel (requester)
  *
+ * MEMBERSHIP AND LOAN WRITES ARE SCOPED (#813). Membership is what org-unit
+ * scope is computed from, so an unscoped membership write was a way around
+ * every other scope check: a manager scoped to unit X could pull any account
+ * into X and then manage it. The unit must be the caller's, and so must the
+ * person — except a person who belongs nowhere yet, whom a scoped manager must
+ * be able to place in their own unit (the permission-subset rule of
+ * UserAuthorityService still bounds whom). A loan is approved by the
+ * receiving unit and requested by the lending one, so each side is held to
+ * the scope of its own permission.
+ *
  * @author Luca Ostinelli
  */
 
@@ -31,6 +41,9 @@ import { AuthorityService } from '../services/AuthorityService';
 import { PersonHistoryService } from '../services/PersonHistoryService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { AuditLogService } from '../services/AuditLogService';
+import { UserAuthorityService } from '../services/access/UserAuthorityService';
+import { scopeFilter } from '../services/access/AccessPolicy';
+import { accessScope } from '../middleware/accessScope';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -43,6 +56,8 @@ export const createOrgRouter = (pool: Pool): Router => {
   const history = new PersonHistoryService(pool);
   const loans = new EmployeeLoanService(pool);
   const audit = new AuditLogService(pool);
+  const scope = accessScope(pool);
+  const memberAuthority = new UserAuthorityService(pool, 'employee.manage');
 
   router.use(authenticate);
 
@@ -167,7 +182,8 @@ export const createOrgRouter = (pool: Pool): Router => {
     res.json({ success: true, data: snapshot });
   });
 
-  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), async (_req: Request, res: Response) => {
+  router.post('/units/:id/members', requirePermission('employee.manage'), validateParams(idParam), validateBody(addOrgMemberBody), scope.reach('employee.manage', 'orgUnit', 'params.id'), async (req: Request, res: Response) => {
+    await memberAuthority.assertCanManageUser(req.user!, res.locals.body.userId, { allowUnassigned: true });
     const created = await units.addMember(
       res.locals.body.userId,
       res.locals.params.id,
@@ -180,6 +196,8 @@ export const createOrgRouter = (pool: Pool): Router => {
     '/units/:id/members/:userId/primary',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
+    scope.reach('employee.manage', 'orgUnit', 'params.id'),
+    scope.reach('employee.manage', 'user', 'params.userId'),
     async (_req: Request, res: Response) => {
       const { id, userId } = res.locals.params;
       await units.setPrimary(userId, id);
@@ -191,6 +209,8 @@ export const createOrgRouter = (pool: Pool): Router => {
     '/units/:id/members/:userId',
     requirePermission('employee.manage'),
     validateParams(idAndUserIdParam),
+    scope.reach('employee.manage', 'orgUnit', 'params.id'),
+    scope.reach('employee.manage', 'user', 'params.userId'),
     async (_req: Request, res: Response) => {
       const { id, userId } = res.locals.params;
       await units.removeMember(userId, id);
@@ -206,12 +226,12 @@ export const createOrgRouter = (pool: Pool): Router => {
     // org-unit and userId filters are dropped rather than obeyed for them.
     const isManager = userHasPermission(req.user, 'loan.approve');
     const filters = isManager
-      ? { userId, toOrgUnitId, fromOrgUnitId, status: status as never }
+      ? { userId, toOrgUnitId, fromOrgUnitId, status: status as never, orgUnitIds: scopeFilter(req.user!, 'loan.approve') }
       : { userId: req.user!.id, status: status as never };
     res.json({ success: true, data: await loans.list(filters) });
   });
 
-  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), async (req: Request, res: Response) => {
+  router.post('/loans', requirePermission('loan.request'), validateBody(createLoanBody), scope.reach('loan.request', 'orgUnit', 'body.fromOrgUnitId'), scope.reach('loan.request', 'user', 'body.userId'), async (req: Request, res: Response) => {
     const created = await loans.create({
       userId: res.locals.body.userId,
       fromOrgUnitId: res.locals.body.fromOrgUnitId,
@@ -224,12 +244,12 @@ export const createOrgRouter = (pool: Pool): Router => {
     res.status(201).json({ success: true, data: created });
   });
 
-  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/loans/:id/approve', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('loan.approve', 'loan', 'params.id'), async (req: Request, res: Response) => {
     const updated = await loans.approve(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });
 
-  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/loans/:id/reject', requirePermission('loan.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('loan.approve', 'loan', 'params.id'), async (req: Request, res: Response) => {
     const updated = await loans.reject(res.locals.params.id, req.user!.id, (res.locals.body.notes as string | null | undefined) ?? null, req.user!.organizationName ?? null);
     res.json({ success: true, data: updated });
   });

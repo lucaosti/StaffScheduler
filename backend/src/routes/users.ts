@@ -26,7 +26,7 @@
 import { Router } from 'express';
 import { Pool } from 'mysql2/promise';
 import { UserService } from '../services/UserService';
-import { UserAuthorityService } from '../services/UserAuthorityService';
+import { UserAuthorityService } from '../services/access/UserAuthorityService';
 import { authenticate, userHasPermission, invalidateAuthContext } from '../middleware/auth';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
@@ -38,7 +38,7 @@ export const createUsersRouter = (pool: Pool) => {
   const userService = new UserService(pool);
   // Who may write which account and grant which role is decided in one place
   // for every surface that writes accounts — see UserAuthorityService.
-  const authority = new UserAuthorityService(pool);
+  const authority = new UserAuthorityService(pool, 'user.manage');
 
   // Get all users (scoped by the caller's permissions)
   router.get('/', authenticate, validateQuery(userListQuery), async (req, res) => {

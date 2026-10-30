@@ -30,6 +30,7 @@ import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
+import { unitCondition } from './access/AccessPolicy';
 
 type LoanStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'ended';
 
@@ -61,6 +62,8 @@ interface CreateLoanInput {
 }
 
 interface ListLoanFilters {
+  /** The approver's org-unit scope; a loan is visible from either end. Absent = unrestricted. */
+  orgUnitIds?: number[];
   userId?: number;
   toOrgUnitId?: number;
   fromOrgUnitId?: number;
@@ -215,6 +218,12 @@ export class EmployeeLoanService {
     if (filters.status) {
       conditions.push('status = ?');
       params.push(filters.status);
+    }
+    const to = unitCondition('to_org_unit_id', filters.orgUnitIds);
+    const from = unitCondition('from_org_unit_id', filters.orgUnitIds);
+    if (to && from) {
+      conditions.push(`(${to.sql} OR ${from.sql})`);
+      params.push(...to.params, ...from.params);
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(

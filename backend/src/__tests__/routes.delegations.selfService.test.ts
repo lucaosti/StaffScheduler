@@ -97,16 +97,16 @@ describe('creating a delegation', () => {
 
     // This is why `self` grants nothing new: there is no way to delegate on
     // somebody else's behalf, and there never was.
-    expect(createDelegation).toHaveBeenCalledWith(7, heldCodes, expect.anything(), null);
+    expect(createDelegation).toHaveBeenCalledWith(expect.objectContaining({ id: 7, permissions: heldCodes }), expect.anything(), null);
   });
 
   it('hands the service the caller\'s own codes, which is what caps the grant', async () => {
     heldCodes = ['delegation.self', 'schedule.manage', 'report.read'];
     await request(mount()).post('/api/delegations').send(body);
 
-    // The service refuses anything outside this list; passing a wider set here
-    // would be the escalation the whole design prevents.
-    expect(createDelegation.mock.calls[0][1]).toEqual(heldCodes);
+    // The service refuses anything outside the caller's own codes (and scope);
+    // passing anyone else's would be the escalation the whole design prevents.
+    expect(createDelegation.mock.calls[0][0].permissions).toEqual(heldCodes);
   });
 
   it('keeps the historical 422 for a rule violation', async () => {

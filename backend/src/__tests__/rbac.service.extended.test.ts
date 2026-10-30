@@ -881,67 +881,90 @@ describe('RbacService.getRoleIdByName', () => {
 // ---------------------------------------------------------------------------
 
 describe('RbacService.getEffectiveDelegationScopes', () => {
-  it('returns empty array when user has no scoped delegations', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null]); // delegations query → none
+  /**
+   * Answers each query by its shape: delegations, role permissions per user,
+   * role grants per user (for the delegator's scope) and org-unit subtrees.
+   */
+  const makeScopedPool = (cfg: {
+    delegations: Array<{ delegator_id: number; permission_codes: string; scope_org_unit_id: number | null }>;
+    rolePerms?: Record<number, string[]>;
+    roleScopes?: Record<number, Array<number | null>>;
+    subtrees?: Record<number, number[]>;
+  }) => {
+    const execute = jest.fn(async (sql: string, params: number[]) => {
+      if (sql.includes('FROM delegations d')) return [cfg.delegations, null];
+      if (sql.includes('JOIN role_permissions')) return [(cfg.rolePerms?.[params[0]] ?? []).map((code) => ({ code })), null];
+      if (sql.includes('AS role_name')) {
+        return [(cfg.roleScopes?.[params[0]] ?? [null]).map((scope) => ({ role_id: 1, role_name: 'R', scope_org_unit_id: scope })), null];
+      }
+      if (sql.includes('WITH RECURSIVE')) return [(cfg.subtrees?.[params[0]] ?? [params[0]]).map((id) => ({ id })), null];
+      throw new Error(`unexpected query: ${sql}`);
+    });
+    return { pool: { execute } as never, execute };
+  };
+  const row = (codes: string[], scope: number | null, delegator = 1) => ({
+    delegator_id: delegator,
+    permission_codes: JSON.stringify(codes),
+    scope_org_unit_id: scope,
+  });
 
-    const svc = new RbacService(pool);
-    const scopes = await svc.getEffectiveDelegationScopes(10);
-    expect(scopes).toEqual([]);
+  it('returns no overrides, after one query, when the user has no active delegations', async () => {
+    const { pool, execute } = makeScopedPool({ delegations: [] });
+    expect(await new RbacService(pool).getEffectiveDelegationScopes(10, null)).toEqual([]);
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it('resolves org-unit subtree for each scoped delegation', async () => {
-    const { pool, execute } = makePool();
-    execute
-      // Delegations query — one row with scope_org_unit_id = 5
-      .mockResolvedValueOnce([
-        [{ permission_codes: JSON.stringify(['schedule.manage', 'timeoff.approve']), scope_org_unit_id: 5 }],
-        null,
-      ])
-      // getDescendantOrgUnitIds(5) — CTE returns [5, 10, 11]
-      .mockResolvedValueOnce([[{ id: 5 }, { id: 10 }, { id: 11 }], null]);
-
-    const svc = new RbacService(pool);
-    const scopes = await svc.getEffectiveDelegationScopes(10);
-
-    expect(scopes).toHaveLength(2);
-    const scheduleScope = scopes.find((s) => s.permissionCode === 'schedule.manage')!;
-    expect(scheduleScope.allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 10, 11]));
-    const timeoffScope = scopes.find((s) => s.permissionCode === 'timeoff.approve')!;
-    expect(timeoffScope.allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 10, 11]));
+  it('scopes a delegated code to the delegation\'s subtree', async () => {
+    const { pool } = makeScopedPool({
+      delegations: [row(['schedule.manage'], 5)],
+      rolePerms: { 1: ['schedule.manage'] },
+      subtrees: { 5: [5, 10, 11] },
+    });
+    expect(await new RbacService(pool).getEffectiveDelegationScopes(10, null)).toEqual([
+      { permissionCode: 'schedule.manage', allowedOrgUnitIds: [5, 10, 11] },
+    ]);
   });
 
-  it('merges allowedOrgUnitIds for the same permissionCode across multiple delegations', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([
-        [
-          { permission_codes: JSON.stringify(['schedule.manage']), scope_org_unit_id: 5 },
-          { permission_codes: JSON.stringify(['schedule.manage']), scope_org_unit_id: 20 },
-        ],
-        null,
-      ])
-      .mockResolvedValueOnce([[{ id: 5 }], null])   // subtree for org 5
-      .mockResolvedValueOnce([[{ id: 20 }], null]);  // subtree for org 20
-
-    const svc = new RbacService(pool);
-    const scopes = await svc.getEffectiveDelegationScopes(7);
-
-    expect(scopes).toHaveLength(1); // merged into one entry
-    expect(scopes[0].permissionCode).toBe('schedule.manage');
-    expect(scopes[0].allowedOrgUnitIds).toEqual(expect.arrayContaining([5, 20]));
+  it('drops codes the delegator no longer holds through their roles', async () => {
+    const { pool } = makeScopedPool({ delegations: [row(['schedule.manage', 'settings.manage'], 5)], rolePerms: { 1: ['schedule.manage'] } });
+    const scopes = await new RbacService(pool).getEffectiveDelegationScopes(10, null);
+    expect(scopes.map((s) => s.permissionCode)).toEqual(['schedule.manage']);
   });
 
-  it('only queries delegations with scope_org_unit_id IS NOT NULL', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null]);
+  it('caps the reach at the delegator\'s current scope', async () => {
+    const { pool } = makeScopedPool({
+      delegations: [row(['schedule.manage'], 20), row(['timeoff.approve'], null)],
+      rolePerms: { 1: ['schedule.manage', 'timeoff.approve'] },
+      roleScopes: { 1: [5] },
+      subtrees: { 5: [5, 6], 20: [20] },
+    });
+    expect(await new RbacService(pool).getEffectiveDelegationScopes(10, null)).toEqual([
+      { permissionCode: 'schedule.manage', allowedOrgUnitIds: [] },
+      { permissionCode: 'timeoff.approve', allowedOrgUnitIds: [5, 6] },
+    ]);
+  });
 
+  it('merges delegations of one code; an unrestricted one wins', async () => {
+    const { pool } = makeScopedPool({
+      delegations: [row(['a'], 5), row(['a'], 20), row(['b'], 5), row(['b'], null), row(['b'], 20)],
+      rolePerms: { 1: ['a', 'b'] },
+    });
+    const scopes = await new RbacService(pool).getEffectiveDelegationScopes(10, null);
+    expect(scopes.find((s) => s.permissionCode === 'a')!.allowedOrgUnitIds).toEqual([5, 20]);
+    expect(scopes.find((s) => s.permissionCode === 'b')!.allowedOrgUnitIds).toBeNull();
+  });
+
+  it('adds the role scope for a code the user also holds through a role', async () => {
+    const { pool } = makeScopedPool({
+      delegations: [row(['schedule.manage', 'timeoff.approve'], 5)],
+      rolePerms: { 1: ['schedule.manage', 'timeoff.approve'], 10: ['schedule.manage'] },
+    });
     const svc = new RbacService(pool);
-    await svc.getEffectiveDelegationScopes(99);
-
-    const [sql] = execute.mock.calls[0];
-    expect(sql).toContain('scope_org_unit_id IS NOT NULL');
+    expect(await svc.getEffectiveDelegationScopes(10, [3])).toEqual([
+      { permissionCode: 'schedule.manage', allowedOrgUnitIds: [3, 5] },
+      { permissionCode: 'timeoff.approve', allowedOrgUnitIds: [5] },
+    ]);
+    expect((await svc.getEffectiveDelegationScopes(10, null))[0]).toEqual({ permissionCode: 'schedule.manage', allowedOrgUnitIds: null });
   });
 });
 

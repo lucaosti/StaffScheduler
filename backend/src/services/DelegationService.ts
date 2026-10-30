@@ -14,7 +14,8 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
-import { Delegation, CreateDelegationRequest } from '../types';
+import { Delegation, CreateDelegationRequest, User } from '../types';
+import { scopeFor } from './access/AccessPolicy';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
 import { ValidationUtils } from '../utils';
@@ -27,21 +28,44 @@ export class DelegationService {
 
   /**
    * Creates a new delegation. Throws if any requested permission code is not
-   * held by the delegator, or if the delegatee is the same user.
+   * held by the delegator, if the delegatee is the same user, or if the
+   * delegation's org-unit scope is wider than the delegator's own scope for
+   * any delegated code.
+   *
+   * WHY THE SCOPE IS CHECKED HERE AS WELL AS AT RESOLUTION. Resolution caps a
+   * delegation at the delegator's current scope (RbacService), so a wider one
+   * could never act wider. Refusing it at creation is still right: a
+   * delegation stored as "organization-wide" by a manager of one ward reads, in
+   * every listing and audit entry, as authority that was never theirs to give
+   * (#814). A scope is a subtree, so "inside the delegator's scope" is decided
+   * by its root alone.
    */
   async createDelegation(
-    delegatorId: number,
-    delegatorPermissions: string[],
+    delegator: Pick<User, 'id' | 'permissions' | 'allowedOrgUnitIds' | 'delegationScopes'>,
     input: CreateDelegationRequest,
     justification?: string | null
   ): Promise<Delegation> {
+    const delegatorId = delegator.id;
     if (input.delegateeId === delegatorId) {
       throw new ConflictError('Cannot delegate to yourself');
     }
 
+    const delegatorPermissions = delegator.permissions ?? [];
     const invalid = input.permissionCodes.filter((c) => !delegatorPermissions.includes(c));
     if (invalid.length > 0) {
       throw new ConflictError(`Delegation escalation: codes not held by delegator: ${invalid.join(', ')}`);
+    }
+
+    const requested = input.scopeOrgUnitId ?? null;
+    for (const code of input.permissionCodes) {
+      const own = scopeFor(delegator as User, code);
+      if (own === null) continue;
+      if (requested === null) {
+        throw new ConflictError(`Delegation escalation: ${code} is held for part of the organization and cannot be delegated organization-wide`);
+      }
+      if (!own.includes(requested)) {
+        throw new ConflictError(`Delegation escalation: org unit ${requested} is outside the delegator's scope for ${code}`);
+      }
     }
 
     const [result] = await this.pool.execute<ResultSetHeader>(

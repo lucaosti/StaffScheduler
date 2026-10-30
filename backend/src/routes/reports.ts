@@ -1,6 +1,13 @@
 /**
  * Reports routes (F08). Manager only.
  *
+ * Every report is bounded by the caller's org-unit scope for `report.read`
+ * (#813): aggregates are computed over the caller's units only, and a named
+ * department or schedule outside them is answered 404 like any other
+ * out-of-scope row (see services/access/AccessPolicy.ts). Filtering the
+ * aggregate, rather than refusing a scoped caller who names no department,
+ * keeps the report pages working unchanged for them.
+ *
  * @author Luca Ostinelli
  */
 
@@ -14,6 +21,8 @@ import { AttendanceService } from '../services/AttendanceService';
 import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { costByDepartmentColumns, hoursWorkedColumns } from '../services/exportColumns';
+import { accessScope } from '../middleware/accessScope';
+import { scopeFilter } from '../services/access/AccessPolicy';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -27,6 +36,10 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
   // replica is the right pool even though the class also has write methods.
   const attendance = new AttendanceService(readPool);
   const exporter = new ExportService(new AuditLogService(pool));
+  const scope = accessScope(pool);
+  const units = (req: Request) => scopeFilter(req.user!, 'report.read');
+  const inScopeDepartment = scope.reach('report.read', 'department', 'query.departmentId');
+  const inScopeSchedule = scope.reach('report.read', 'schedule', 'params.scheduleId');
 
   /**
    * The range both report endpoints take, resolved once.
@@ -46,17 +59,17 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
   // The spec published startDate/endDate while the code read start/end, so a
   // client following the documentation got a 400. Both names are accepted; the
   // documented pair wins.
-  router.get('/hours-worked', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+  router.get('/hours-worked', validateQuery(reportRangeQuery), inScopeDepartment, async (req: Request, res: Response) => {
     const { start, end } = resolveRange(res.locals.query);
     const { departmentId } = res.locals.query;
     if (!start || !end) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
-    const data = await service.hoursWorkedByUser(start, end, departmentId);
+    const data = await service.hoursWorkedByUser(start, end, departmentId, units(req));
     res.json({ success: true, data });
   });
 
-  router.get('/hours-worked/export', validateQuery(reportRangeQuery), async (req: Request, res: Response) => {
+  router.get('/hours-worked/export', validateQuery(reportRangeQuery), inScopeDepartment, async (req: Request, res: Response) => {
     const { start, end } = resolveRange(res.locals.query);
     const { departmentId, format } = res.locals.query;
     if (!start || !end) {
@@ -64,7 +77,7 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
     }
     // The same service call as the JSON endpoint above, so the two can never
     // disagree about what the report contains.
-    const rows = await service.hoursWorkedByUser(start, end, departmentId);
+    const rows = await service.hoursWorkedByUser(start, end, departmentId, units(req));
     await exporter.send(res, {
       actorId: req.user?.id ?? null,
       dataset: 'hours-worked',
@@ -75,12 +88,12 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
     });
   });
 
-  router.get('/cost-by-department', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+  router.get('/cost-by-department', validateQuery(reportRangeQuery), async (req: Request, res: Response) => {
     const { start, end } = resolveRange(res.locals.query);
     if (!start || !end) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
-    const data = await service.costByDepartment(start, end);
+    const data = await service.costByDepartment(start, end, units(req));
     res.json({ success: true, data });
   });
 
@@ -89,7 +102,7 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
     if (!start || !end) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
-    const rows = await service.costByDepartment(start, end);
+    const rows = await service.costByDepartment(start, end, units(req));
     await exporter.send(res, {
       actorId: req.user?.id ?? null,
       dataset: 'cost-by-department',
@@ -105,6 +118,7 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
   router.get(
     '/fairness/:scheduleId/export',
     validateParams(scheduleIdParam),
+    inScopeSchedule,
     validateQuery(fairnessExportQuery),
     async (req: Request, res: Response) => {
       const scheduleId = res.locals.params.scheduleId;
@@ -124,7 +138,7 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
     }
   );
 
-  router.get('/fairness/:scheduleId', validateParams(scheduleIdParam), async (_req: Request, res: Response) => {
+  router.get('/fairness/:scheduleId', validateParams(scheduleIdParam), inScopeSchedule, async (_req: Request, res: Response) => {
     const data = await service.fairnessForSchedule(res.locals.params.scheduleId);
     res.json({ success: true, data });
   });
@@ -132,23 +146,23 @@ export const createReportsRouter = (pool: Pool, readPool: Pool = pool): Router =
   // No `/export` sibling yet and no frontend chart: this is the backend shape
   // for the decision-support dashboard's compliance-trend slice, landing on
   // its own before anything is built to consume it.
-  router.get('/compliance-violations-trend', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+  router.get('/compliance-violations-trend', validateQuery(reportRangeQuery), async (req: Request, res: Response) => {
     const { start, end } = resolveRange(res.locals.query);
     if (!start || !end) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
-    const data = await service.complianceViolationsTrend(start, end);
+    const data = await service.complianceViolationsTrend(start, end, units(req));
     res.json({ success: true, data });
   });
 
   // Same shape as compliance-violations-trend: backend aggregation first, no
   // frontend surface until this is settled.
-  router.get('/attendance-anomalies', validateQuery(reportRangeQuery), async (_req: Request, res: Response) => {
+  router.get('/attendance-anomalies', validateQuery(reportRangeQuery), async (req: Request, res: Response) => {
     const { start, end } = resolveRange(res.locals.query);
     if (!start || !end) {
       return respondError(res, 400, 'VALIDATION_ERROR', 'startDate and endDate are required');
     }
-    const data = await attendance.detectAnomalies(start, end);
+    const data = await attendance.detectAnomalies(start, end, units(req));
     res.json({ success: true, data });
   });
 

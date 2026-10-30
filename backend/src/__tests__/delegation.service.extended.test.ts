@@ -55,7 +55,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
       .mockResolvedValueOnce([[makeDelegationRow()], null]);               // getDelegationById
 
     const svc = new DelegationService(pool);
-    await svc.createDelegation(10, ['timeoff.approve'], {
+    await svc.createDelegation({ id: 10, permissions: ['timeoff.approve'] }, {
       delegateeId: 20,
       permissionCodes: ['timeoff.approve'],
       expiresAt: futureDate.toISOString(),
@@ -75,7 +75,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
       .mockResolvedValueOnce([[makeDelegationRow({ id: 42 })], null]);     // getDelegationById
 
     const svc = new DelegationService(pool);
-    await svc.createDelegation(10, ['timeoff.approve'], {
+    await svc.createDelegation({ id: 10, permissions: ['timeoff.approve'] }, {
       delegateeId: 20,
       permissionCodes: ['timeoff.approve'],
       expiresAt: futureDate.toISOString(),
@@ -97,7 +97,7 @@ describe('DelegationService.createDelegation — additional paths', () => {
     const svc = new DelegationService(pool);
     // Should not throw — audit errors are swallowed
     await expect(
-      svc.createDelegation(10, ['timeoff.approve'], {
+      svc.createDelegation({ id: 10, permissions: ['timeoff.approve'] }, {
         delegateeId: 20,
         permissionCodes: ['timeoff.approve'],
         expiresAt: futureDate.toISOString(),

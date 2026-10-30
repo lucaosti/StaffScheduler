@@ -29,6 +29,7 @@ import {
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import { AuditLogService } from './AuditLogService';
+import { unitCondition } from './access/AccessPolicy';
 import { ScheduleOptimizationOrchestrator } from './ScheduleOptimizationOrchestrator';
 import { NotificationService } from './NotificationService';
 import { WebhookService } from './WebhookService';
@@ -208,11 +209,9 @@ export class ScheduleService {
       if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
       if (filters?.startDate) { conditions.push('s.end_date >= ?'); params.push(filters.startDate); }
       if (filters?.endDate) { conditions.push('s.start_date <= ?'); params.push(filters.endDate); }
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`d.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // An empty scope matches nothing — never everything (see AccessPolicy).
+      const scope = unitCondition('d.org_unit_id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
       query += ' GROUP BY s.id ORDER BY s.start_date DESC';
@@ -262,11 +261,9 @@ export class ScheduleService {
       if (filters?.status) { conditions.push('s.status = ?'); params.push(filters.status); }
       if (filters?.startDate) { conditions.push('s.end_date >= ?'); params.push(filters.startDate); }
       if (filters?.endDate) { conditions.push('s.start_date <= ?'); params.push(filters.endDate); }
-      if (filters?.orgUnitIds && filters.orgUnitIds.length > 0) {
-        const placeholders = filters.orgUnitIds.map(() => '?').join(', ');
-        conditions.push(`d.org_unit_id IN (${placeholders})`);
-        params.push(...filters.orgUnitIds);
-      }
+      // An empty scope matches nothing — never everything (see AccessPolicy).
+      const scope = unitCondition('d.org_unit_id', filters?.orgUnitIds);
+      if (scope) { conditions.push(scope.sql); params.push(...scope.params); }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
 
