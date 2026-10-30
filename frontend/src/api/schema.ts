@@ -1137,7 +1137,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Invalid code or 2FA not in setup state. */
+                /** @description Invalid code (`TWO_FACTOR_ENABLE_FAILED`). */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1145,6 +1145,20 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description User not found (`TWO_FACTOR_ENABLE_FAILED`). */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Setup has not been started, or the method is already enabled (`TWO_FACTOR_ENABLE_FAILED`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;
@@ -1225,6 +1239,13 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description The method is already enabled — disable it with a valid code before setting it up again — or is not available (`CONFLICT`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;
@@ -13175,6 +13196,8 @@ export interface components {
                 /** @description Machine-readable error code, e.g. VALIDATION_ERROR, NOT_FOUND, UNAUTHORIZED. */
                 code: string;
                 message: string;
+                /** @description Present on INTERNAL_ERROR (500): the request id, also sent as the X-Request-Id header, under which the fault's details are logged. The message of a 500 is always generic; quote this id to find the cause. */
+                requestId?: string;
                 /** @description Field-level validation errors (present on VALIDATION_ERROR). */
                 details?: {
                     field?: string;

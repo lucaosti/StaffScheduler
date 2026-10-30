@@ -98,10 +98,12 @@ export class SmsCodeProvider implements TwoFactorMethodProvider {
       expiresAt: new Date(Date.now() + CODE_TTL_MS).toISOString(),
     };
     await this.sendCode(userId, code);
+    // Leaves an enabled row untouched — the race backstop behind the
+    // already-enabled check in TwoFactorService.beginSetup (#817).
     await this.pool.execute(
       `INSERT INTO two_factor_methods (user_id, method_type, enabled, secret_data)
        VALUES (?, 'sms', 0, ?)
-       ON DUPLICATE KEY UPDATE enabled = 0, secret_data = VALUES(secret_data)`,
+       ON DUPLICATE KEY UPDATE secret_data = IF(enabled = 1, secret_data, VALUES(secret_data))`,
       [userId, JSON.stringify(secretData)]
     );
     logger.info(`2FA (sms) setup started for user ${userId}`);

@@ -20,15 +20,64 @@ const makePool = () => {
 describe('TwoFactorService.beginSetup', () => {
   it('persists a fresh secret and returns a provisioning URI', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    execute
+      .mockResolvedValueOnce([[], null]) // dispatcher: no enabled method of this type
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // TotpProvider upsert
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]); // dispatcher: still pending after the upsert
 
     const service = new TwoFactorService(pool);
     const out = await service.beginSetup(7, 'jane@example.com');
 
     expect(out.secret).toMatch(/^[A-Z2-7]{32}$/);
     expect(out.otpauthUri).toContain('otpauth://totp/Staff%20Scheduler:jane%40example.com');
-    expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO two_factor_methods/);
-    expect(execute.mock.calls[0][1][0]).toBe(7);
+    expect(execute.mock.calls[1][0]).toMatch(/INSERT INTO two_factor_methods/);
+    expect(execute.mock.calls[1][1][0]).toBe(7);
+  });
+
+  // #817: setup used to upsert `enabled = 0`, so calling it on an enabled
+  // method turned 2FA off without the code that /2fa/disable requires.
+  it.each(['totp', 'email', 'webauthn', 'sms'] as const)(
+    'refuses with 409 when %s is already enabled, before the provider runs',
+    async (methodType) => {
+      const { pool, execute } = makePool();
+      execute.mockResolvedValueOnce([[{ enabled: 1 }], null]);
+
+      const service = new TwoFactorService(pool);
+      await expect(service.beginSetup(7, 'jane@example.com', methodType)).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringMatching(/already enabled/),
+      });
+      // Only the guard's SELECT ran: no upsert, and for email/SMS no code sent.
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0][0]).toMatch(/SELECT .* FROM two_factor_methods/);
+      expect(execute.mock.calls[0][1]).toEqual([7, methodType]);
+    }
+  );
+
+  it('answers 409, not a secret, when a concurrent enable wins the race past the check', async () => {
+    // The upsert leaves the now-enabled row untouched, so the freshly generated
+    // secret was never stored: returning it would hand the client a QR code
+    // that can never be confirmed.
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]) // guard: still pending
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // provider upsert (no-op on the enabled row)
+      .mockResolvedValueOnce([[{ enabled: 1 }], null]); // re-check: enabled meanwhile
+
+    const service = new TwoFactorService(pool);
+    await expect(service.beginSetup(7, 'jane@example.com', 'totp')).rejects.toMatchObject({ status: 409 });
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('lets setup restart while the method is still pending', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 0 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null])
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]);
+
+    const service = new TwoFactorService(pool);
+    await expect(service.beginSetup(7, 'jane@example.com', 'totp')).resolves.toHaveProperty('secret');
   });
 });
 

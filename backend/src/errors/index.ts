@@ -11,7 +11,7 @@
  *   { success: false, error: { code, message } }
  *
  * Non-AppError exceptions remain internal faults: logged and rendered as a
- * generic 500 (message hidden in production).
+ * generic 500 carrying the request id, in every environment (#895).
  *
  * @author Luca Ostinelli
  */
