@@ -63,8 +63,10 @@ describe('ScheduleService.getAllSchedules orgUnitIds and pagination', () => {
     execute.mockResolvedValueOnce([[scheduleRow], null] as Tuple);
     const svc = new ScheduleService(pool);
     await svc.getAllSchedules({}, { limit: 20, offset: 40 });
-    const params = execute.mock.calls[0][1] as unknown[];
-    expect(params.slice(-2)).toEqual([20, 40]);
+    // Inlined, never bound: MySQL rejects a bound LIMIT/OFFSET under execute() (#824).
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/LIMIT 20 OFFSET 40$/);
+    expect(params).toEqual([]);
   });
 });
 
