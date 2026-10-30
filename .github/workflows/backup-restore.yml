@@ -81,7 +81,7 @@ jobs:
             -e DB_HOST=127.0.0.1 -e DB_PORT=3306 -e DB_USER=root -e DB_PASSWORD=demo1234 \
             -e DB_NAME=staff_scheduler -e BACKUP_DIR=/backups \
             -v "$BACKUP_DIR:/backups" -v "${{ github.workspace }}/ops/backup:/scripts:ro" \
-            mysql:8.0 sh /scripts/backup.sh
+            mysql:8.0 bash /scripts/backup.sh
 
       - name: Drop the database (simulate loss)
         run: |
@@ -94,7 +94,7 @@ jobs:
             -e DB_HOST=127.0.0.1 -e DB_PORT=3306 -e DB_USER=root -e DB_PASSWORD=demo1234 \
             -e DB_NAME=staff_scheduler -e BACKUP_DIR=/backups \
             -v "$BACKUP_DIR:/backups" -v "${{ github.workspace }}/ops/backup:/scripts:ro" \
-            mysql:8.0 sh /scripts/restore.sh --latest
+            mysql:8.0 bash /scripts/restore.sh --latest
 
       - name: Smoke query — the marker must have survived the round-trip
         run: |

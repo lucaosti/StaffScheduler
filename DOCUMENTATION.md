@@ -1586,9 +1586,20 @@ docker compose --profile backup up -d
 
 It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
 `backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
-dumps older than `BACKUP_RETENTION_DAYS` (default 14). A dump smaller than 1 KB
-is treated as a failure and removed, so an empty/failed dump never masquerades as
-a good backup.
+dumps older than `BACKUP_RETENTION_DAYS` (default 14).
+
+A dump is kept only once it is proven complete. Each run writes to a
+`*.sql.gz.tmp` file under `pipefail`, so a `mysqldump` that dies mid-stream fails
+the run instead of being hidden behind gzip's success; the file must then end in
+mysqldump's own `-- Dump completed` trailer, which only a finished dump writes;
+only then is it renamed to its final `*.sql.gz` name, and **only after that** are
+old dumps pruned. A failed run therefore leaves no file behind and deletes
+nothing, and `restore.sh --latest` (which matches `*.sql.gz` only) can never pick
+a partial dump. `restore.sh` applies the same check before it touches the
+database — a corrupt or truncated archive is refused while the target is still
+intact — and fails if the replay itself fails. Watch the sidecar's log for
+`[backup] run failed`: the loop keeps its schedule after a failure, so a run of
+failures is visible only there and in the age of the newest dump.
 
 **Restore runbook** (recovering into the running stack):
 
@@ -1620,7 +1631,10 @@ job runs weekly (and whenever the backup scripts or migrations change): it appli
 the migrations, seeds a marker row, runs the real `backup.sh`, DROPs the database,
 runs the real `restore.sh --latest`, and asserts the marker survived the
 round-trip. A broken restore path is therefore a red CI check, not a discovery
-made during an incident.
+made during an incident. The failure paths, which a healthy server never
+produces, are covered by `scripts/backup-scripts.test.mjs` (part of
+`npm run test:scripts`): both scripts run against stub `mysqldump`/`mysql`
+clients that die mid-dump, truncate silently, or reject the replay.
 
 ### Deployment hardening and scaling
 
