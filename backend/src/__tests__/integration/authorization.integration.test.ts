@@ -71,6 +71,8 @@ interface Fixtures {
   empA: number; empB: number; unassigned: number;
   toA: number; toB: number;
   attB: number; loanB: number; cpB: number; skill: number; swapAB: number;
+  onCallA: number; onCallB: number; templateA: number; templateB: number; pairingAB: number; exceptionB: number; changeB: number;
+  unassigned2: number;
   users: Record<Principal, number>;
 }
 
@@ -242,6 +244,37 @@ const crossUnitProbes = (f: Fixtures): Record<string, Probe[]> => {
     'GET /directory/users/{id}/vcard': [{ params: { id: f.empB } }],
     'GET /org/units/{id}/members': [{ params: { id: f.unitB } }],
     'GET /org/units/{id}/members/detailed': [{ params: { id: f.unitB } }],
+
+    // On-call periods, templates, contracts, preferences and pairings belong to
+    // a department or a person, and their writes are scoped (#813 review).
+    'POST /on-call/periods': [
+      { body: { departmentId: f.deptB, date: D1, startTime: '20:00', endTime: '23:00' } },
+      { body: { departmentId: f.deptA, scheduleId: f.schedB, date: D1, startTime: '20:00', endTime: '23:00' } },
+    ],
+    'GET /on-call/periods/{id}': [{ params: { id: f.onCallB } }],
+    'PUT /on-call/periods/{id}': [{ params: { id: f.onCallB }, body: { notes: 'x' } }],
+    'DELETE /on-call/periods/{id}': [{ params: { id: f.onCallB } }],
+    'GET /on-call/periods/{id}/assignments': [{ params: { id: f.onCallB } }],
+    'POST /on-call/periods/{id}/assign': [{ params: { id: f.onCallB }, body: { userId: f.empA } }],
+    'DELETE /on-call/periods/{id}/assign/{userId}': [{ params: { id: f.onCallB, userId: f.empB } }],
+    'POST /shifts/templates': [{ body: { name: 'T', departmentId: f.deptB, startTime: '09:00', endTime: '17:00', minStaff: 1, maxStaff: 2 } }],
+    'GET /shifts/templates/{id}': [{ params: { id: f.templateB } }],
+    'PUT /shifts/templates/{id}': [{ params: { id: f.templateB }, body: { name: 'Renamed' } }],
+    'DELETE /shifts/templates/{id}': [{ params: { id: f.templateB } }],
+    'GET /employment-contracts/users/{userId}': [{ params: { userId: f.empB } }],
+    'POST /employment-contracts/users/{userId}': [{ params: { userId: f.empB }, body: { contractId: 1, effectiveFrom: D1 } }],
+    'GET /preferences/{userId}': [{ params: { userId: f.empB } }],
+    'PUT /preferences/{userId}': [{ params: { userId: f.empB }, body: { maxHoursPerWeek: 10 } }],
+    'POST /employee-pairings': [{ body: { userId: f.empA, otherUserId: f.empB, kind: 'apart' } }],
+    // A pairing with one side in unit A is still not unit A's alone.
+    'GET /employee-pairings/{id}': [{ params: { id: f.pairingAB } }],
+    'PUT /employee-pairings/{id}': [{ params: { id: f.pairingAB }, body: { reason: 'x' } }],
+    'DELETE /employee-pairings/{id}': [{ params: { id: f.pairingAB } }],
+    'POST /policies/exceptions/{id}/approve': [{ params: { id: f.exceptionB }, body: {} }],
+    'POST /policies/exceptions/{id}/reject': [{ params: { id: f.exceptionB }, body: {} }],
+    'POST /change-requests/{id}/approve': [{ params: { id: f.changeB }, body: {} }],
+    'POST /change-requests/{id}/reject': [{ params: { id: f.changeB }, body: { rejectionReason: 'no' } }],
+    'POST /change-requests/{id}/apply': [{ params: { id: f.changeB }, body: {} }],
   };
 };
 
@@ -257,7 +290,6 @@ const delegateeProbes = (f: Fixtures): Array<[string, Probe]> => [
   ['GET /schedules/{id}', { params: { id: f.schedB } }],
   ['PUT /shifts/{id}', { params: { id: f.shiftB }, body: { notes: 'x' } }],
   ['POST /assignments', { body: { shiftId: f.shiftB, userId: f.empA } }],
-  ['GET /employees/{id}', { params: { id: f.empB } }],
   ['POST /time-off/{id}/approve', { params: { id: f.toB }, body: {} }],
   ['GET /schedules/{id}', { params: { id: f.schedA }, status: 200 }],
   ['GET /shifts/{id}', { params: { id: f.shiftA }, status: 200 }],
@@ -279,6 +311,11 @@ const inUnitProbes = (f: Fixtures): Array<[string, Probe]> => [
   ['POST /users', { body: { email: 'authz-new4@example.com', password: 'longenough1', firstName: 'N', lastName: 'U', departmentIds: [f.deptA] }, status: 201 }],
   ['PUT /departments/{id}', { params: { id: f.deptA }, body: { description: 'in unit' }, status: 200 }],
   ['GET /users/{id}', { params: { id: f.empA }, status: 200 }],
+  // An account in no unit — the one just created — is a scoped manager's to staff.
+  ['POST /departments/{id}/users', { params: { id: f.deptA }, body: { userId: f.unassigned2 }, status: 201 }],
+  ['PUT /employees/{id}', { params: { id: f.unassigned2 }, body: { position: 'Nurse' }, status: 200 }],
+  ['PUT /on-call/periods/{id}', { params: { id: f.onCallA }, body: { notes: 'in unit' }, status: 200 }],
+  ['PUT /shifts/templates/{id}', { params: { id: f.templateA }, body: { name: 'In unit' }, status: 200 }],
 ];
 
 interface ListProbe {
@@ -325,6 +362,8 @@ const listProbes = (f: Fixtures): Record<string, ListProbe[]> => {
     }],
     'GET /reports/cost-by-department/export': [{ query: range, leaks: textLeaks }],
     'GET /reports/attendance-anomalies': [{ query: range, leaks: (r) => idsOf(r, 'attendanceRecordId').includes(f.attB) }],
+    'GET /on-call/periods': [{ leaks: (r) => idsOf(r).includes(f.onCallB), has: (r) => idsOf(r).includes(f.onCallA) }],
+    'GET /shifts/templates': [{ leaks: (r) => idsOf(r).includes(f.templateB), has: (r) => idsOf(r).includes(f.templateA) }],
     'GET /reports/compliance-violations-trend': [{ query: { startDate: '2031-03-01', endDate: '2031-03-31' }, leaks: textLeaks }],
     'GET /timeline': [
       { query: { from: '2031-03-01', to: '2031-03-31' }, leaks: textLeaks },
@@ -412,6 +451,7 @@ beforeAll(async () => {
   const empA = users.employee;
   const empB = await createUser('authz-emp-b@example.com', unitB, 'Employee');
   const unassigned = await createUser('authz-unassigned@example.com', null, null);
+  const unassigned2 = await createUser('authz-unassigned2@example.com', null, null);
   await admin.query('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?), (?, ?)', [empA, deptA, empB, deptB]);
   // The scoped manager runs department A, so the department routes' own
   // manager-of-this-department check passes and only scope is left to refuse.
@@ -463,6 +503,32 @@ beforeAll(async () => {
   );
   const skill = await insert(`INSERT INTO skills (name) VALUES ('Authz skill')`);
   // A swap between unit A's and unit B's assignment, and a violation only B has.
+  const onCall = (dept: number) => insert(
+    `INSERT INTO on_call_periods (department_id, date, start_time, end_time) VALUES (?, ?, '20:00:00', '23:00:00')`,
+    [dept, D1]
+  );
+  const onCallA = await onCall(deptA);
+  const onCallB = await onCall(deptB);
+  const template = (dept: number, name: string) => insert(
+    `INSERT INTO shift_templates (name, department_id, start_time, end_time) VALUES (?, ?, '09:00:00', '17:00:00')`,
+    [name, dept]
+  );
+  const templateA = await template(deptA, 'Authz template A');
+  const templateB = await template(deptB, 'Authz template B');
+  const pairingAB = await insert(`INSERT INTO employee_pairings (user_id, other_user_id, kind) VALUES (?, ?, 'apart')`, [empA, empB]);
+  const policyId = await insert(
+    `INSERT INTO policies (scope_type, policy_key, policy_value, imposed_by_user_id) VALUES ('global', 'authz_policy', '{}', ?)`,
+    [users.admin]
+  );
+  const exceptionB = await insert(
+    `INSERT INTO policy_exception_requests (policy_id, target_type, target_id, requested_by_user_id) VALUES (?, 'shift_assignment', ?, ?)`,
+    [policyId, shiftB, empB]
+  );
+  const changeB = await insert(
+    `INSERT INTO change_requests (change_type, proposer_user_id, target_entity_type, target_entity_id, proposed_payload, status)
+     VALUES ('authz', ?, 'user', ?, '{}', 'approved')`,
+    [empB, empB]
+  );
   const swapAB = await insert(
     `INSERT INTO shift_swap_requests (requester_user_id, requester_assignment_id, target_user_id, target_assignment_id, status)
      VALUES (?, ?, ?, ?, 'pending')`,
@@ -473,7 +539,8 @@ beforeAll(async () => {
 
   f = {
     unitA, unitA1, unitB, deptA, deptB, schedA, schedB, shiftA, shiftA2, shiftB, asgA, asgB,
-    empA, empB, unassigned, toA, toB, attB, loanB, cpB, skill, swapAB, users,
+    empA, empB, unassigned, toA, toB, attB, loanB, cpB, skill, swapAB,
+    onCallA, onCallB, templateA, templateB, pairingAB, exceptionB, changeB, unassigned2, users,
   };
 
   const { database } = require('../../config/database');
@@ -497,7 +564,7 @@ beforeAll(async () => {
   // The unscoped Manager delegates Manager codes to the delegatee for unit A only.
   const delegation = await request(app).post(`${API}/delegations`).set('Cookie', cookies.unscopedManager!).send({
     delegateeId: users.delegatee,
-    permissionCodes: ['schedule.read', 'schedule.manage', 'shift.manage', 'assignment.manage', 'employee.read', 'timeoff.approve', 'timeline.read', 'timeline.read_all'],
+    permissionCodes: ['schedule.read', 'schedule.manage', 'shift.manage', 'assignment.manage', 'timeoff.approve', 'timeline.read', 'timeline.read_all'],
     expiresAt: '2037-12-31 00:00:00',
     scopeOrgUnitId: unitA,
   });
@@ -602,10 +669,33 @@ describe('each operation carries exactly its declared gate', () => {
   /**
    * Which codes a unit scope can bound, derived from this table rather than
    * kept by hand: a code is bounded when it admits unit-scoped or filtered
-   * operations and admits no `org` one. DelegationService refuses a scoped
-   * delegation of any other code (#814 review), so the production list must be
-   * exactly this — a new org-wide operation behind a bounded code removes it.
+   * operations and admits nothing organization-wide — no `org`, `shared` or
+   * `gap` operation, counting the codes the route chain enforces, the codes
+   * its scope guards name and the codes its handler checks. A gap is unscoped
+   * data, and a shared read is organization-wide data, so either would let a
+   * delegation "for ward A" reach beyond ward A. DelegationService refuses a
+   * scoped delegation of any other code (#814 review), so the production list
+   * must be exactly this: classifying an operation can only remove a code.
    */
+  // `shared` is read-only reference data: a write to it is organization-wide authority.
+  it('allows shared only on reads', () => {
+    const wrong = Object.entries(AUTHORIZATION_MATRIX)
+      .filter(([op, rule]) => rule.scope === 'shared' && !op.startsWith('GET '))
+      .map(([op]) => op);
+    expect(wrong).toEqual([]);
+  });
+
+  // Every code an operation uses must be visible to the derivation: an empty
+  // `requires` on a signed-in operation that is neither self-service nor
+  // owner-decided must say what its handler checks, `[]` included.
+  it('declares the handler codes of every signed-in operation without a route gate', () => {
+    const wrong = Object.entries(AUTHORIZATION_MATRIX)
+      .filter(([, rule]) => Array.isArray(rule.requires) && rule.requires.length === 0)
+      .filter(([, rule]) => rule.scope !== 'self' && rule.owner === undefined && rule.handler === undefined)
+      .map(([op]) => op);
+    expect(wrong).toEqual([]);
+  });
+
   it('derives the codes a scoped delegation may carry from the table', () => {
     const { UNIT_SCOPED_PERMISSIONS } = require('../../services/access/AccessPolicy') as { UNIT_SCOPED_PERMISSIONS?: ReadonlySet<string> };
     const bounded = new Set<string>(HANDLER_SCOPED_CODES);
@@ -613,10 +703,11 @@ describe('each operation carries exactly its declared gate', () => {
     for (const [op, rule] of Object.entries(AUTHORIZATION_MATRIX)) {
       const codes = [
         ...(rule.requires === 'public' ? [] : rule.requires),
+        ...(rule.handler ?? []),
         ...chainOf(op).flatMap((h) => ((h.accessRule as { permissions?: string[] } | undefined)?.permissions ?? [])),
       ];
       if (rule.scope === 'unit' || rule.scope === 'filtered') codes.forEach((c) => bounded.add(c));
-      if (rule.scope === 'org') codes.forEach((c) => orgWide.add(c));
+      if (rule.scope === 'org' || rule.scope === 'shared' || rule.scope === 'gap') codes.forEach((c) => orgWide.add(c));
     }
     const derived = [...bounded].filter((c) => !orgWide.has(c)).sort();
     expect([...(UNIT_SCOPED_PERMISSIONS ?? [])].sort()).toEqual(derived);

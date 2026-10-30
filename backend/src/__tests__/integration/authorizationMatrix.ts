@@ -34,6 +34,12 @@
  *     follow-up issue #926.
  * `note` — required for `org`, `shared` and `gap`: the reason, asserted
  *   non-empty, so classifying an operation out of scope is a stated decision.
+ * `handler` — permission codes the handler (not the route chain) checks. It
+ *   must be declared, `[]` included, for every signed-in operation that is
+ *   neither `self` nor owner-decided with an empty `requires`, so the suite's
+ *   derivation of unit-boundable codes sees every code an operation uses.
+ * `shared` is read-only by definition: the suite refuses it on anything but
+ *   GET, since a write to organization-wide data is organization-wide authority.
  *
  * @author Luca Ostinelli
  */
@@ -45,6 +51,7 @@ export interface AuthzRule {
   owner?: string;
   scope: ScopeRule;
   note?: string;
+  handler?: string[];
 }
 
 const pub = (note: string): AuthzRule => ({ requires: 'public', scope: 'org', note });
@@ -55,6 +62,8 @@ const unit = (...requires: string[]): AuthzRule => ({ requires, scope: 'unit' })
 const owned = (owner: string, ...requires: string[]): AuthzRule => ({ requires, owner, scope: 'unit' });
 const filtered = (...requires: string[]): AuthzRule => ({ requires, scope: 'filtered' });
 const gap = (requires: string[], note: string): AuthzRule => ({ requires, scope: 'gap', note: `${note} (#926)` });
+/** The same rule, declaring the codes its handler checks. */
+const h = (rule: AuthzRule, ...handler: string[]): AuthzRule => ({ ...rule, handler });
 
 const CONFIG = 'organization-wide configuration; no unit owns it';
 const APPROVAL_CONFIG = 'approval workflows and routing are configured for the whole organization';
@@ -65,9 +74,6 @@ const RESPONSIBILITY = 'responsibility rules are organization-wide routing confi
 const POLICY = 'policies are organization-wide configuration';
 const PUBLIC = 'outside authenticate: answers before any session exists';
 const DEPARTMENTS = 'department routes gate on department.* in the handler and are not scoped yet';
-const ONCALL = 'on-call periods are department-owned but not scoped yet';
-const TEMPLATES = 'shift templates are department-owned but not scoped yet';
-const CONTRACTS = 'employment contracts of any unit';
 const PAIRINGS = 'pairings name people of any unit';
 
 export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
@@ -95,8 +101,8 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /assignments/shift/{shiftId}/available-employees': unit('assignment.manage'),
   'GET /assignments/user/{userId}': owned('the user themselves, or assignment.manage over a unit they belong to'),
 
-  'GET /attendance': { requires: [], owner: 'own records; attendance.read/approve see their scope', scope: 'filtered' },
-  'GET /attendance/export': { requires: [], owner: 'own records; attendance.read/approve see their scope', scope: 'filtered' },
+  'GET /attendance': h({ requires: [], owner: 'own records; attendance.read/approve see their scope', scope: 'filtered' }, 'attendance.read', 'attendance.approve'),
+  'GET /attendance/export': h({ requires: [], owner: 'own records; attendance.read/approve see their scope', scope: 'filtered' }, 'attendance.read', 'attendance.approve'),
   'GET /attendance/{id}': owned('the punching user, or attendance.read/approve over their unit'),
   'POST /attendance/{id}/approve': unit('attendance.approve'),
   'POST /attendance/{id}/reject': unit('attendance.approve'),
@@ -133,11 +139,11 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 
   'GET /change-requests': gap(['change_request.review'], 'reviewers see every unit'),
   'POST /change-requests': gap(['change_request.create'], 'target ids are not scope-checked'),
-  'GET /change-requests/{id}': gap([], 'proposer or reviewer, any unit'),
-  'POST /change-requests/{id}/apply': gap(['change_request.review'], 'any unit'),
-  'POST /change-requests/{id}/approve': gap(['change_request.review'], 'any unit'),
+  'GET /change-requests/{id}': h(gap([], 'proposer or reviewer, any unit'), 'change_request.review'),
+  'POST /change-requests/{id}/apply': unit('change_request.review'),
+  'POST /change-requests/{id}/approve': unit('change_request.review'),
   'POST /change-requests/{id}/cancel': self('proposer only'),
-  'POST /change-requests/{id}/reject': gap(['change_request.review'], 'any unit'),
+  'POST /change-requests/{id}/reject': unit('change_request.review'),
 
   'GET /cost-plans': filtered('report.read'),
   'POST /cost-plans': unit('report.manage'),
@@ -145,8 +151,8 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'PUT /cost-plans/{id}': unit('report.manage'),
   'DELETE /cost-plans/{id}': unit('report.manage'),
 
-  'GET /dashboard/attention-items': gap([], 'organization-wide counts behind in-handler permission checks'),
-  'GET /dashboard/stats': gap([], 'organization-wide counts behind in-handler permission checks'),
+  'GET /dashboard/attention-items': h(gap([], 'organization-wide counts behind in-handler permission checks'), 'report.read'),
+  'GET /dashboard/stats': h(gap([], 'organization-wide counts behind in-handler permission checks'), 'report.read'),
 
   'GET /delegations': self(),
   'POST /delegations': self('delegation.manage or delegation.self; codes and scope must be the delegator\'s own (#814)'),
@@ -154,24 +160,24 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 
   // Creating, moving, deleting and staffing a department change which unit its
   // schedules, shifts and assignments belong to, so both ends are scoped.
-  'GET /departments': gap([], DEPARTMENTS),
+  'GET /departments': h(gap([], DEPARTMENTS), 'settings.manage'),
   'POST /departments': owned('the department must be placed in one of the caller\'s units', 'department.manage'),
-  'GET /departments/{id}': gap([], DEPARTMENTS),
-  'PUT /departments/{id}': owned('settings.manage, or department.manage as its manager; the department and any new unit must be in scope'),
-  'DELETE /departments/{id}': owned('settings.manage over its unit'),
-  'GET /departments/{id}/geofences': gap([], DEPARTMENTS),
-  'POST /departments/{id}/geofences': gap([], DEPARTMENTS),
-  'PUT /departments/{id}/geofences/{geofenceId}': gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`),
-  'DELETE /departments/{id}/geofences/{geofenceId}': gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`),
-  'GET /departments/{id}/kiosks': gap([], DEPARTMENTS),
-  'POST /departments/{id}/kiosks': gap([], DEPARTMENTS),
-  'DELETE /departments/{id}/kiosks/{kioskId}': gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`),
-  'GET /departments/{id}/stats': gap([], DEPARTMENTS),
-  'POST /departments/{id}/users': owned('settings.manage, or department.manage as its manager; department and person in scope'),
-  'DELETE /departments/{id}/users/{userId}': owned('settings.manage, or department.manage as its manager; department and person in scope'),
+  'GET /departments/{id}': h(gap([], DEPARTMENTS), 'settings.manage'),
+  'PUT /departments/{id}': h(owned('settings.manage, or department.manage as its manager; the department and any new unit must be in scope'), 'department.manage', 'settings.manage'),
+  'DELETE /departments/{id}': h(owned('settings.manage over its unit'), 'settings.manage'),
+  'GET /departments/{id}/geofences': h(gap([], DEPARTMENTS), 'department.manage', 'settings.manage'),
+  'POST /departments/{id}/geofences': h(gap([], DEPARTMENTS), 'department.manage', 'settings.manage'),
+  'PUT /departments/{id}/geofences/{geofenceId}': h(gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`), 'department.manage', 'settings.manage'),
+  'DELETE /departments/{id}/geofences/{geofenceId}': h(gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`), 'department.manage', 'settings.manage'),
+  'GET /departments/{id}/kiosks': h(gap([], DEPARTMENTS), 'department.manage', 'settings.manage'),
+  'POST /departments/{id}/kiosks': h(gap([], DEPARTMENTS), 'department.manage', 'settings.manage'),
+  'DELETE /departments/{id}/kiosks/{kioskId}': h(gap([], `${DEPARTMENTS}; child id not bound to the department (#850)`), 'department.manage', 'settings.manage'),
+  'GET /departments/{id}/stats': h(gap([], DEPARTMENTS), 'department.manage', 'settings.manage'),
+  'POST /departments/{id}/users': h(owned('settings.manage, or department.manage as its manager; department and person in scope'), 'department.manage', 'settings.manage'),
+  'DELETE /departments/{id}/users/{userId}': h(owned('settings.manage, or department.manage as its manager; department and person in scope'), 'department.manage', 'settings.manage'),
 
-  'POST /directory/import-vcard': shared('creates accounts in no unit; role names are held to UserAuthorityService', 'user.manage'),
-  'POST /directory/import-vcard/preview': shared('parses a file and writes nothing', 'user.manage'),
+  'POST /directory/import-vcard': org('creates accounts organization-wide, in no unit; role names are held to UserAuthorityService', 'user.manage'),
+  'POST /directory/import-vcard/preview': org('parses a file of accounts for the whole organization; writes nothing', 'user.manage'),
   'GET /directory/me': self(),
   'GET /directory/users/{id}': unit('user.read'),
   'PUT /directory/users/{id}/fields': unit('user.manage'),
@@ -179,15 +185,15 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /directory/users/{id}/vcard': unit('user.read'),
   'GET /directory/vcard.vcf': gap(['user.read'], 'the whole-directory export is not filtered by unit'),
 
-  'GET /employee-field-policies': org('the caller\'s organization field rules'),
+  'GET /employee-field-policies': h(org('the caller\'s organization field rules')),
   'PUT /employee-field-policies': org(CONFIG, 'settings.manage'),
   'DELETE /employee-field-policies': org(CONFIG, 'settings.manage'),
 
   'GET /employee-pairings': gap(['employee.manage'], PAIRINGS),
-  'POST /employee-pairings': gap(['employee.manage'], PAIRINGS),
-  'GET /employee-pairings/{id}': gap(['employee.manage'], PAIRINGS),
-  'PUT /employee-pairings/{id}': gap(['employee.manage'], PAIRINGS),
-  'DELETE /employee-pairings/{id}': gap(['employee.manage'], PAIRINGS),
+  'POST /employee-pairings': unit('employee.manage'),
+  'GET /employee-pairings/{id}': unit('employee.manage'),
+  'PUT /employee-pairings/{id}': unit('employee.manage'),
+  'DELETE /employee-pairings/{id}': unit('employee.manage'),
 
   'GET /employees': filtered('employee.read'),
   'GET /employees/export': filtered('employee.read'),
@@ -201,14 +207,14 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'DELETE /employees/{id}/skills/{skillId}': unit('employee.manage'),
   'GET /employees/department/{departmentId}': unit('employee.read'),
 
-  'GET /employment-contracts': gap(['employee.read'], CONTRACTS),
-  'POST /employment-contracts': gap(['preferences.manage'], CONTRACTS),
-  'GET /employment-contracts/{id}': gap(['employee.read'], CONTRACTS),
-  'PUT /employment-contracts/{id}': gap(['preferences.manage'], CONTRACTS),
-  'GET /employment-contracts/users/{userId}': gap(['employee.read'], CONTRACTS),
-  'POST /employment-contracts/users/{userId}': gap(['preferences.manage'], CONTRACTS),
+  'GET /employment-contracts': shared('the catalog of contract types, owned by no unit', 'employee.read'),
+  'POST /employment-contracts': org('a contract type is organization-wide; editing it changes every unit\'s limits', 'preferences.manage'),
+  'GET /employment-contracts/{id}': shared('one contract type of the catalog', 'employee.read'),
+  'PUT /employment-contracts/{id}': org('a contract type is organization-wide; editing it changes every unit\'s limits', 'preferences.manage'),
+  'GET /employment-contracts/users/{userId}': unit('employee.read'),
+  'POST /employment-contracts/users/{userId}': unit('preferences.manage'),
 
-  'GET /events/stream': gap([], 'events are fanned out to every subscriber'),
+  'GET /events/stream': h(gap([], 'events are fanned out to every subscriber')),
   'GET /health': pub('liveness probe'),
   'GET /health/ready': pub('readiness probe'),
 
@@ -222,7 +228,7 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   // CSV rows of employees name no unit (accounts are created in none, roles go
   // through UserAuthorityService); CSV rows of shifts name a schedule and a
   // department, each checked against the importer's scope.
-  'POST /import/employees': shared('creates accounts in no unit; role names are held to UserAuthorityService', 'employee.manage'),
+  'POST /import/employees': org('creates accounts organization-wide, in no unit; role names are held to UserAuthorityService', 'employee.manage'),
   'POST /import/shifts': unit('shift.manage'),
 
   'GET /integrations/payroll/export': org(PAYROLL, 'payroll.manage'),
@@ -246,22 +252,22 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /notifications/unread-count': self(),
 
   'GET /on-call/me': self(),
-  'GET /on-call/periods': gap(['schedule.read'], ONCALL),
-  'POST /on-call/periods': gap(['oncall.manage'], ONCALL),
-  'GET /on-call/periods/{id}': gap(['schedule.read'], ONCALL),
-  'PUT /on-call/periods/{id}': gap(['oncall.manage'], ONCALL),
-  'DELETE /on-call/periods/{id}': gap(['oncall.manage'], ONCALL),
-  'POST /on-call/periods/{id}/assign': gap(['oncall.manage'], ONCALL),
-  'DELETE /on-call/periods/{id}/assign/{userId}': gap(['oncall.manage'], ONCALL),
-  'GET /on-call/periods/{id}/assignments': gap(['schedule.read'], ONCALL),
+  'GET /on-call/periods': filtered('schedule.read'),
+  'POST /on-call/periods': unit('oncall.manage'),
+  'GET /on-call/periods/{id}': unit('schedule.read'),
+  'PUT /on-call/periods/{id}': unit('oncall.manage'),
+  'DELETE /on-call/periods/{id}': unit('oncall.manage'),
+  'POST /on-call/periods/{id}/assign': unit('oncall.manage'),
+  'DELETE /on-call/periods/{id}/assign/{userId}': unit('oncall.manage'),
+  'GET /on-call/periods/{id}/assignments': unit('schedule.read'),
 
   'GET /org/authority': self(),
-  'GET /org/authority/{userId}': gap([], 'self, or org_unit.read for anyone in any unit'),
+  'GET /org/authority/{userId}': h(gap([], 'self, or org_unit.read for anyone in any unit'), 'org_unit.read'),
   'GET /org/history': self(),
-  'GET /org/history/{userId}': gap([], 'self, or org_unit.read for anyone in any unit'),
+  'GET /org/history/{userId}': h(gap([], 'self, or org_unit.read for anyone in any unit'), 'org_unit.read'),
   'GET /org/manager-chain': self(),
-  'GET /org/manager-chain/{userId}': gap([], 'no permission check (#850)'),
-  'GET /org/loans': { requires: [], owner: 'own loans; loan.approve sees loans touching their scope', scope: 'filtered' },
+  'GET /org/manager-chain/{userId}': h(gap([], 'no permission check (#850)')),
+  'GET /org/loans': h({ requires: [], owner: 'own loans; loan.approve sees loans touching their scope', scope: 'filtered' }, 'loan.approve'),
   'POST /org/loans': unit('loan.request'),
   'POST /org/loans/{id}/approve': unit('loan.approve'),
   'POST /org/loans/{id}/reject': unit('loan.approve'),
@@ -291,23 +297,23 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /policies': org(POLICY, 'policy.read'),
   'POST /policies': org(POLICY, 'policy.manage'),
   'GET /policies/{id}': org(POLICY, 'policy.read'),
-  'PUT /policies/{id}': org(POLICY, 'policy.manage'),
-  'DELETE /policies/{id}': org(POLICY, 'policy.manage'),
-  'GET /policies/approval-matrix': org(APPROVAL_CONFIG),
+  'PUT /policies/{id}': h(org(POLICY, 'policy.manage'), 'settings.manage'),
+  'DELETE /policies/{id}': h(org(POLICY, 'policy.manage'), 'settings.manage'),
+  'GET /policies/approval-matrix': h(org(APPROVAL_CONFIG)),
   'PUT /policies/approval-matrix/{changeType}': org(APPROVAL_CONFIG, 'approval.manage'),
-  'GET /policies/exceptions': gap([], 'exceptions of any unit'),
-  'POST /policies/exceptions': gap([], 'target ids are not scope-checked'),
-  'POST /policies/exceptions/{id}/approve': gap(['policy.approve'], 'any unit'),
+  'GET /policies/exceptions': h(gap([], 'exceptions of any unit'), 'policy.approve'),
+  'POST /policies/exceptions': h(gap([], 'requesting needs no permission and the target is not scope-checked; deciding is scoped')),
+  'POST /policies/exceptions/{id}/approve': unit('policy.approve'),
   'POST /policies/exceptions/{id}/cancel': self('the requester only'),
-  'POST /policies/exceptions/{id}/reject': gap(['policy.approve'], 'any unit'),
+  'POST /policies/exceptions/{id}/reject': unit('policy.approve'),
   'GET /policies/presets': org(POLICY, 'policy.read'),
   'POST /policies/presets/{code}/apply': org(POLICY, 'policy.manage'),
-  'POST /policies/validate/assignment': org('evaluates organization-wide policies against a candidate; writes nothing'),
+  'POST /policies/validate/assignment': h(gap([], 'any signed-in caller evaluates the policies for any person and shift')),
 
   'GET /preferences/me': self(),
   'PUT /preferences/me': self(),
-  'GET /preferences/{userId}': gap(['preferences.manage'], 'preferences of anyone in any unit'),
-  'PUT /preferences/{userId}': gap(['preferences.manage'], 'preferences of anyone in any unit'),
+  'GET /preferences/{userId}': unit('preferences.manage'),
+  'PUT /preferences/{userId}': unit('preferences.manage'),
 
   'GET /reports/attendance-anomalies': filtered('report.read'),
   'GET /reports/compliance-violations-trend': filtered('report.read'),
@@ -362,13 +368,13 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 
   'GET /settings': org(CONFIG, 'settings.manage'),
   'GET /settings/{category}/{key}': org(CONFIG, 'settings.manage'),
-  'PUT /settings/{category}/{key}': org(CONFIG),
-  'POST /settings/{category}/{key}/reset': org(CONFIG),
+  'PUT /settings/{category}/{key}': h(org(CONFIG), 'settings.manage'),
+  'POST /settings/{category}/{key}/reset': h(org(CONFIG), 'settings.manage'),
   'GET /settings/category/{category}': org(CONFIG, 'settings.manage'),
-  'GET /settings/currency': org(CONFIG),
-  'PUT /settings/currency': org(CONFIG),
-  'GET /settings/time-period': org(CONFIG),
-  'PUT /settings/time-period': org(CONFIG),
+  'GET /settings/currency': h(org(CONFIG)),
+  'PUT /settings/currency': h(org(CONFIG), 'settings.manage'),
+  'GET /settings/time-period': h(org(CONFIG)),
+  'PUT /settings/time-period': h(org(CONFIG), 'settings.manage'),
 
   'GET /shift-swap': self('own swaps; approvers see every unit'),
   'POST /shift-swap': self('the caller must own the offered assignment'),
@@ -391,18 +397,18 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /shifts/department/{departmentId}': unit('schedule.read'),
   'GET /shifts/schedule/{scheduleId}': unit('schedule.read'),
   'GET /shifts/staffing-suggestion': unit('schedule.read'),
-  'GET /shifts/templates': gap(['schedule.read'], TEMPLATES),
-  'POST /shifts/templates': gap(['shift.manage'], TEMPLATES),
-  'GET /shifts/templates/{id}': gap(['schedule.read'], TEMPLATES),
-  'PUT /shifts/templates/{id}': gap(['shift.manage'], TEMPLATES),
-  'DELETE /shifts/templates/{id}': gap(['shift.manage'], TEMPLATES),
+  'GET /shifts/templates': filtered('schedule.read'),
+  'POST /shifts/templates': unit('shift.manage'),
+  'GET /shifts/templates/{id}': unit('schedule.read'),
+  'PUT /shifts/templates/{id}': unit('shift.manage'),
+  'DELETE /shifts/templates/{id}': unit('shift.manage'),
 
   'GET /skill-gap': gap(['report.read'], 'organization-wide aggregate'),
   'GET /skills': shared('the skills catalog is reference data for every unit', 'employee.read'),
-  'POST /skills': shared('the skills catalog is reference data for every unit', 'employee.manage'),
+  'POST /skills': org('the skills catalog is organization-wide; writing it changes every unit\'s vocabulary', 'employee.manage'),
   'GET /skills/{id}': shared('the skills catalog is reference data for every unit', 'employee.read'),
-  'PUT /skills/{id}': shared('the skills catalog is reference data for every unit', 'employee.manage'),
-  'DELETE /skills/{id}': shared('the skills catalog is reference data for every unit', 'employee.manage'),
+  'PUT /skills/{id}': org('the skills catalog is organization-wide; writing it changes every unit\'s vocabulary', 'employee.manage'),
+  'DELETE /skills/{id}': org('the skills catalog is organization-wide; writing it changes every unit\'s vocabulary', 'employee.manage'),
 
   'GET /sso/providers': org(CONFIG, 'settings.manage'),
   'POST /sso/providers': org(CONFIG, 'settings.manage'),
@@ -420,13 +426,13 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'POST /time-off/{id}/cancel': self('the requester only'),
 
   'GET /timeline': filtered('timeline.read'),
-  'GET /timeline/sources': shared('the list of event sources, no data', 'timeline.read'),
+  'GET /timeline/sources': { requires: ['timeline.read'], scope: 'self', note: 'returns the fixed list of event sources: constants, no data about anyone' },
 
-  'GET /users': gap([], 'user.read in the handler; account administration lists every unit'),
+  'GET /users': h(gap([], 'user.read in the handler; account administration lists every unit'), 'user.read', 'user.read_all'),
   'POST /users': unit('user.manage'),
   'GET /users/{id}': owned('the user themselves, or user.read over a unit they belong to'),
-  'PUT /users/{id}': unit(),
-  'DELETE /users/{id}': unit(),
+  'PUT /users/{id}': h(unit(), 'user.manage'),
+  'DELETE /users/{id}': h(unit(), 'user.manage'),
 
   'GET /webhooks': org(CONFIG, 'settings.manage'),
   'POST /webhooks': org(CONFIG, 'settings.manage'),
