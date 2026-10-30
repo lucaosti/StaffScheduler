@@ -1,41 +1,35 @@
 /**
  * PreferencesSection — Personal preferences tab for the Settings page.
  *
- * Persists theme, language, timezone, and notification toggles via
- * PUT /api/preferences/me (serialised into the `notes` field as JSON until
- * a dedicated column is added to user_preferences).
+ * Only what the app actually applies (#843). The tab used to collect theme,
+ * language, timezone and email/push/SMS toggles, report "Personal
+ * preferences saved successfully", and serialise them as JSON into the
+ * `user_preferences.notes` field — overwriting the user's scheduling notes,
+ * and never read back by anything. Timezone and the email/SMS toggles had no
+ * consumer at all, so they are gone rather than faked.
+ *
+ * Theme and language are bound to the same state the header controls use
+ * (`ThemeContext`, i18next): they apply at once and are remembered on this
+ * device (localStorage), so there is no Save button to claim a save that a
+ * server never received. Persisting them per account would need columns
+ * and an endpoint that do not exist; that is a backend feature, not
+ * something to approximate here. Web Push is the real toggle below.
  *
  * @author Luca Ostinelli
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import WebPushToggle from './WebPushToggle';
-import { useSettingsSectionSave } from '../../hooks/useSettingsSectionSave';
+import { useTheme } from '../../contexts/ThemeContext';
+import { SUPPORTED_LOCALES, isSupportedLocale } from '../../i18n';
 
-interface PersonalSettings {
-  theme: 'light' | 'dark' | 'auto';
-  language: 'it' | 'en';
-  timezone: string;
-  notifications: {
-    email: boolean;
-    push: boolean;
-    sms: boolean;
-  };
-}
+type ThemeChoice = 'light' | 'dark' | 'system';
 
-interface Props {
-  settings: PersonalSettings;
-  onChange: (updated: PersonalSettings) => void;
-  onSave: () => Promise<void>;
-}
-
-const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => {
-  const { success, error, saving, run } = useSettingsSectionSave();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await run(onSave, 'Personal preferences saved successfully.', 'Failed to save preferences.');
-  };
+const PreferencesSection: React.FC = () => {
+  const { t, i18n } = useTranslation();
+  const { choice, setChoice } = useTheme();
+  const language = isSupportedLocale(i18n.language) ? i18n.language : 'en';
 
   return (
     <div className="row">
@@ -45,158 +39,45 @@ const PreferencesSection: React.FC<Props> = ({ settings, onChange, onSave }) => 
             <h5 className="mb-0">Personal Preferences</h5>
           </div>
           <div className="card-body">
-            {success && (
-              <div className="alert alert-success" role="status">
-                <i className="bi bi-check-circle me-2" aria-hidden="true"></i>
-                {success}
-              </div>
-            )}
-            {error && (
-              <div className="alert alert-danger" role="alert">
-                <i className="bi bi-exclamation-triangle me-2" aria-hidden="true"></i>
-                {error}
-              </div>
-            )}
-            <form onSubmit={handleSubmit}>
-              <div className="row">
-                <div className="col-md-6 mb-3">
-                  <label htmlFor="theme" className="form-label">Theme</label>
-                  <select
-                    className="form-select"
-                    id="theme"
-                    value={settings.theme}
-                    onChange={(e) =>
-                      onChange({
-                        ...settings,
-                        theme: e.target.value as 'light' | 'dark' | 'auto',
-                      })
-                    }
-                  >
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                    <option value="auto">Auto (System)</option>
-                  </select>
-                </div>
-                <div className="col-md-6 mb-3">
-                  <label htmlFor="language" className="form-label">Language</label>
-                  <select
-                    className="form-select"
-                    id="language"
-                    value={settings.language}
-                    onChange={(e) =>
-                      onChange({
-                        ...settings,
-                        language: e.target.value as 'it' | 'en',
-                      })
-                    }
-                  >
-                    <option value="it">Italiano</option>
-                    <option value="en">English</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="mb-3">
-                <label htmlFor="timezone" className="form-label">Timezone</label>
+            <p className="text-muted small" id="appliesOnThisDevice">
+              Changes apply immediately and are remembered on this device.
+            </p>
+            <div className="row">
+              <div className="col-md-6 mb-3">
+                <label htmlFor="theme" className="form-label">Theme</label>
                 <select
                   className="form-select"
-                  id="timezone"
-                  value={settings.timezone}
-                  onChange={(e) => onChange({ ...settings, timezone: e.target.value })}
+                  id="theme"
+                  aria-describedby="appliesOnThisDevice"
+                  value={choice}
+                  onChange={(e) => setChoice(e.target.value as ThemeChoice)}
                 >
-                  <option value="Europe/Rome">Europe/Rome (GMT+1)</option>
-                  <option value="UTC">UTC (GMT+0)</option>
-                  <option value="Europe/London">Europe/London (GMT+0)</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="system">Auto (System)</option>
                 </select>
               </div>
-
-              <h6 className="mb-3">Notification Preferences</h6>
-              <div className="row">
-                <div className="col-md-4">
-                  <div className="form-check">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="emailNotifications"
-                      checked={settings.notifications.email}
-                      onChange={(e) =>
-                        onChange({
-                          ...settings,
-                          notifications: { ...settings.notifications, email: e.target.checked },
-                        })
-                      }
-                    />
-                    <label className="form-check-label" htmlFor="emailNotifications">
-                      Email Notifications
-                    </label>
-                  </div>
-                </div>
-                <div className="col-md-4">
-                  <div className="form-check">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="pushNotifications"
-                      checked={settings.notifications.push}
-                      onChange={(e) =>
-                        onChange({
-                          ...settings,
-                          notifications: { ...settings.notifications, push: e.target.checked },
-                        })
-                      }
-                    />
-                    <label className="form-check-label" htmlFor="pushNotifications">
-                      Push Notifications
-                    </label>
-                  </div>
-                </div>
-                <div className="col-md-4">
-                  <div className="form-check">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="smsNotifications"
-                      checked={settings.notifications.sms}
-                      onChange={(e) =>
-                        onChange({
-                          ...settings,
-                          notifications: { ...settings.notifications, sms: e.target.checked },
-                        })
-                      }
-                    />
-                    <label className="form-check-label" htmlFor="smsNotifications">
-                      SMS Notifications
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <WebPushToggle />
-
-              <div className="mt-4">
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={saving}
+              <div className="col-md-6 mb-3">
+                <label htmlFor="language" className="form-label">Language</label>
+                <select
+                  className="form-select"
+                  id="language"
+                  aria-describedby="appliesOnThisDevice"
+                  value={language}
+                  onChange={(e) => {
+                    if (isSupportedLocale(e.target.value)) void i18n.changeLanguage(e.target.value);
+                  }}
                 >
-                  {saving ? (
-                    <>
-                      <span
-                        className="spinner-border spinner-border-sm me-2"
-                        role="status"
-                        aria-hidden="true"
-                      ></span>
-                      Saving…
-                    </>
-                  ) : (
-                    <>
-                      <i className="bi bi-check me-2"></i>
-                      Save Personal Settings
-                    </>
-                  )}
-                </button>
+                  {SUPPORTED_LOCALES.map((locale) => (
+                    <option key={locale} value={locale}>
+                      {t(`locale.${locale}`)}
+                    </option>
+                  ))}
+                </select>
               </div>
-            </form>
+            </div>
+
+            <WebPushToggle />
           </div>
         </div>
       </div>
