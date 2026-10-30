@@ -147,6 +147,34 @@ describe('checkCompliance — MAX_WEEKLY_HOURS', () => {
     });
     expect(result.ok).toBe(true);
   });
+
+  // Totals in exact minutes, as the validator and both engines count them
+  // (#922). Three 2h40 shifts are exactly 8 h; hours rounded to a tenth per
+  // shift read them as 3 x 2.7 = 8.1 h, so a manual assignment was refused
+  // that auto-scheduling, counting minutes, would have made.
+  const twoForty = (id: number, date: string) => makeExisting(id, date, '06:00', '08:40');
+
+  it('accepts exactly the cap when per-shift rounding would overshoot it', () => {
+    const result = checkCompliance({
+      candidate: makeShift('2026-05-06', '06:00', '08:40'),
+      existing: [twoForty(1, '2026-05-04'), twoForty(2, '2026-05-05')],
+      policy: { ...tightPolicy, maxHoursPerWeek: 8 },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects one minute over the cap and reports the exact total', () => {
+    const result = checkCompliance({
+      candidate: makeShift('2026-05-06', '06:00', '08:41'),
+      existing: [twoForty(1, '2026-05-04'), twoForty(2, '2026-05-05')],
+      policy: { ...tightPolicy, maxHoursPerWeek: 8 },
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      const weekly = result.violations.find((v) => v.code === 'MAX_WEEKLY_HOURS')!;
+      expect(weekly.details).toMatchObject({ totalHours: 8.02, limit: 8 });
+    }
+  });
 });
 
 describe('checkCompliance — multiple violations are surfaced together', () => {

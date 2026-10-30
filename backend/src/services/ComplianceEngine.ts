@@ -27,7 +27,15 @@ import {
   WorkingTimeLimitsService,
   type WorkingTimeLimits,
 } from './WorkingTimeLimitsService';
-import { shiftBoundsMs, shiftHours, dateToMs, DAY_MS, ShiftTimes } from '../optimization/shiftTime';
+import {
+  DAY_MS,
+  dateToMs,
+  exceedsHours,
+  formatHours,
+  shiftBoundsMs,
+  shiftMinutes,
+  type ShiftTimes,
+} from '../optimization/shiftTime';
 
 /** A shift represented in the form the engine needs (no DB-row fields). */
 export interface CandidateShift {
@@ -182,9 +190,14 @@ const checkMinRest = (input: ComplianceInput): ComplianceViolation | null => {
 const checkMaxWeeklyHours = (input: ComplianceInput): ComplianceViolation | null => {
   const { candidate, existing, policy } = input;
 
+  // Exact minutes, not shiftHours: hours rounded to a tenth per shift drift
+  // when summed — three 2h40 shifts are exactly 8 h but read as 8.1 h — and
+  // the validator and both engines count minutes, so a manual assignment was
+  // judged differently from the same assignment made by auto-scheduling
+  // (#922). See shiftMinutes.
   const all = [
-    { date: candidate.date, hours: shiftHours(toShiftTimes(candidate)) },
-    ...existing.map((s) => ({ date: s.date, hours: shiftHours(toShiftTimes(s)) })),
+    { date: candidate.date, minutes: shiftMinutes(toShiftTimes(candidate)) },
+    ...existing.map((s) => ({ date: s.date, minutes: shiftMinutes(toShiftTimes(s)) })),
   ];
 
   // "No more than maxHoursPerWeek in any 7-day window" means checking every
@@ -197,7 +210,7 @@ const checkMaxWeeklyHours = (input: ComplianceInput): ComplianceViolation | null
   // normal, spread-out schedules as violations. Instead, slide a true 7-day
   // window (by calendar day) across every offset that still contains the
   // candidate's day and take the worst one.
-  let worstTotalHours = 0;
+  let worstTotalMinutes = 0;
   let worstWindowStart = candidate.date;
   for (let offsetDays = -6; offsetDays <= 0; offsetDays++) {
     const total = all
@@ -205,19 +218,19 @@ const checkMaxWeeklyHours = (input: ComplianceInput): ComplianceViolation | null
         const diff = dayDiff(s.date, candidate.date);
         return diff >= offsetDays && diff <= offsetDays + 6;
       })
-      .reduce((sum, s) => sum + s.hours, 0);
-    if (total > worstTotalHours) {
-      worstTotalHours = total;
+      .reduce((sum, s) => sum + s.minutes, 0);
+    if (total > worstTotalMinutes) {
+      worstTotalMinutes = total;
       worstWindowStart = addIsoDays(candidate.date, offsetDays);
     }
   }
 
-  if (worstTotalHours > policy.maxHoursPerWeek) {
+  if (exceedsHours(worstTotalMinutes, policy.maxHoursPerWeek)) {
     return {
       code: 'MAX_WEEKLY_HOURS',
-      message: `Assignment would result in ${worstTotalHours.toFixed(1)}h in a rolling 7-day window, exceeding the maximum of ${policy.maxHoursPerWeek}h.`,
+      message: `Assignment would result in ${formatHours(worstTotalMinutes)}h in a rolling 7-day window, exceeding the maximum of ${policy.maxHoursPerWeek}h.`,
       details: {
-        totalHours: Number(worstTotalHours.toFixed(2)),
+        totalHours: Number((worstTotalMinutes / 60).toFixed(2)),
         limit: policy.maxHoursPerWeek,
         anchorDate: worstWindowStart,
       },
