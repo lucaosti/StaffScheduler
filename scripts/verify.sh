@@ -35,11 +35,15 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 dbmate() { (cd "$ROOT/backend" && npx --no-install dbmate --no-dump-schema "$@"); }
 
-# A fresh database per gate that needs one: the server is shared by the run,
-# and a gate must not depend on what an earlier gate left behind.
+# A fresh database AND an empty Redis per gate that needs them: both servers
+# outlive a single run, and a gate must not depend on what an earlier gate or
+# run left behind. Redis matters as much as MySQL here: the login limiter keeps
+# its counters there, so repeated e2e runs inside its window failed with 429
+# "Too many login attempts" until the cache was cleared.
 reset_database() {
   mysql -h"$DB_HOST" -uroot -p"$DB_PASSWORD" -e \
     'DROP DATABASE IF EXISTS staff_scheduler; CREATE DATABASE staff_scheduler CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+  node -e "const R = require('ioredis'); const r = new R(process.env.REDIS_URL); r.flushall().then(() => r.quit())"
 }
 
 gate_install() {
@@ -129,8 +133,23 @@ gate_seed() {
   seed_demo
 }
 
+BACKEND_PID=
+# Stops the backend a gate started. Without it the server outlived the gate and
+# kept the caller's output pipe open, so `verify.sh e2e | grep ...` never ended.
+stop_backend() {
+  [ -n "$BACKEND_PID" ] || return 0
+  pkill -P "$BACKEND_PID" 2>/dev/null || true
+  kill "$BACKEND_PID" 2>/dev/null || true
+  pkill -f 'ts-node src/index.ts' 2>/dev/null || true
+  BACKEND_PID=
+}
+trap stop_backend EXIT
+
 start_backend() {
-  (cd backend && DB_NAME=staff_scheduler NODE_ENV=development PORT=3001 nohup npm run dev >"$ROOT/backend/logs/verify-backend.log" 2>&1 &)
+  cd "$ROOT/backend"
+  DB_NAME=staff_scheduler NODE_ENV=development PORT=3001 nohup npm run dev >"$ROOT/backend/logs/verify-backend.log" 2>&1 </dev/null &
+  BACKEND_PID=$!
+  cd "$ROOT"
   local i
   for i in $(seq 1 60); do
     if curl -fsS http://127.0.0.1:3001/api/v1/health | grep -q '"redis":"connected"'; then return 0; fi
@@ -147,7 +166,10 @@ gate_e2e() {
   seed_demo
   step "Playwright e2e"
   start_backend
-  (cd frontend && REACT_APP_API_URL=http://127.0.0.1:3001/api/v1 E2E_BASE_URL=http://127.0.0.1:3000 npm run test:e2e)
+  local rc=0
+  (cd frontend && REACT_APP_API_URL=http://127.0.0.1:3001/api/v1 E2E_BASE_URL=http://127.0.0.1:3000 npm run test:e2e) || rc=$?
+  stop_backend
+  return "$rc"
 }
 
 gate_serve() {
