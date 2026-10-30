@@ -300,6 +300,7 @@ npm run api:generate          # regenerate the typed client from the OpenAPI spe
 ### Mobile (`cd mobile`)
 
 ```bash
+REACT_APP_API_URL=https://api.example.com/api/v1 \
 npm run build                 # build the SPA, copy it, sync native projects
 npm run open:ios
 npm run open:android
@@ -309,7 +310,7 @@ npm run open:android
 
 ```bash
 npm run audit:deps            # dependency audit gate
-npm run test:scripts          # tests of the audit gate
+npm run test:scripts          # tests of the audit gate and the mobile build checks
 ```
 
 ### Docker
@@ -351,7 +352,7 @@ Defaults worth knowing:
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS` | `60000` / `200` | per-caller request budget |
 | `RATE_LIMIT_ORG_MAX_REQUESTS` | `2000` | per-organization budget |
 | `REDIS_ENABLED` | `true` | shared caches, SSE fan-out and the job queue; in-process fallback when Redis is unreachable |
-| `CORS_ORIGIN` | `http://localhost:3000` | allowed SPA origin |
+| `CORS_ORIGIN` | `http://localhost:3000` | comma-separated allowed origins, the SPA first (append `capacitor://localhost,https://localhost` for the mobile app) |
 
 Email, push, SSO, payroll, tracing, metrics authentication and the read
 replica are off until their variables are set; each is described where it is
@@ -359,7 +360,9 @@ documented in [`DOCUMENTATION.md`](./DOCUMENTATION.md).
 
 The SPA reads its API base from `REACT_APP_API_URL` at **build time** (default
 `/api/v1`, served through the dev proxy or nginx). Set it in the build
-environment only when the API lives on a different origin.
+environment only when the API lives on a different origin — which the mobile
+app always does, so its build requires an absolute URL (see
+[`DOCUMENTATION.md` §7g](./DOCUMENTATION.md#7g-mobile-app-capacitor)).
 
 ## Project layout
 

@@ -5,12 +5,14 @@
  *   - login success / failure
  *   - refresh success / failure
  *   - logout calls server and clears state
+ *   - a native secure-storage failure at startup still ends loading
  */
 
 import React from 'react';
 import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuth } from './AuthContext';
 import * as authService from '../services/authService';
+import * as mobileAuthStorage from '../services/mobileAuthStorage';
 import * as translationOverrideService from '../services/translationOverrideService';
 import * as organizationOverrides from '../i18n/organizationOverrides';
 import i18n from '../i18n';
@@ -18,9 +20,18 @@ import i18n from '../i18n';
 jest.mock('../services/authService');
 jest.mock('../services/translationOverrideService');
 jest.mock('../i18n/organizationOverrides');
+// Only the two startup hooks are replaced: every other export keeps its real
+// (web-platform) behaviour, so the remaining suites run exactly as before.
+jest.mock('../services/mobileAuthStorage', () => ({
+  ...jest.requireActual('../services/mobileAuthStorage'),
+  isNativePlatform: jest.fn(() => false),
+  loadCachedTokens: jest.fn(),
+}));
 
 const mockedAuthService = authService as jest.Mocked<typeof authService>;
 const mockedOverrideService = translationOverrideService as jest.Mocked<typeof translationOverrideService>;
+const mockedIsNativePlatform = mobileAuthStorage.isNativePlatform as jest.Mock;
+const mockedLoadCachedTokens = mobileAuthStorage.loadCachedTokens as jest.Mock;
 const mockedApplyOverrides = organizationOverrides.applyOrganizationOverrides as jest.Mock;
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -29,6 +40,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockedIsNativePlatform.mockReturnValue(false);
   mockedOverrideService.getMyOverrides.mockResolvedValue({ success: true, data: {} });
 });
 
@@ -70,6 +82,18 @@ describe('AuthProvider bootstrap', () => {
 
   it('sets loading=false when verify rejects', async () => {
     mockedAuthService.verifyToken.mockRejectedValue(new Error('boom'));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.isAuthenticated).toBe(false);
+  });
+
+  it('sets loading=false when the native token cache fails to load', async () => {
+    // Preferences can reject (storage unavailable, corrupted entry). The app
+    // must land on the login screen, not spin on the loading guard forever.
+    mockedIsNativePlatform.mockReturnValue(true);
+    mockedLoadCachedTokens.mockRejectedValue(new Error('storage unavailable'));
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
+    mockedAuthService.refreshToken.mockRejectedValue(new Error('no session'));
     const { result } = renderHook(() => useAuth(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current.isAuthenticated).toBe(false);

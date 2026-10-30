@@ -163,12 +163,19 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
             /* fall through to the exact-origin check */
           }
         }
-        if (origin === config.cors.origin) return callback(null, true);
+        // Exact string membership, never a prefix or pattern match: an origin
+        // is scheme + host + port, and anything looser would let
+        // "https://localhost.evil.com" ride on "https://localhost".
+        if (config.cors.allowedOrigins.includes(origin)) return callback(null, true);
         return callback(new Error('Not allowed by CORS'));
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      // X-Client-Type is how the mobile app opts into the token-in-body auth
+      // responses (see routes/auth.ts). It is not a CORS-safelisted header, so
+      // leaving it out made the browser fail every mobile login and refresh
+      // preflight before the request was ever sent.
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Type'],
     })
   );
 

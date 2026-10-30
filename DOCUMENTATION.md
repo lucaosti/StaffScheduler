@@ -226,7 +226,7 @@ JWT payload: `{ userId, jti }` — no role. Permissions are resolved from the DB
 
 To wire in a real vendor: add its config fields under `config.sms` in `backend/src/config/index.ts` (mirroring `config.email`'s host/auth/from shape); change `isSmsConfigured()` in `SmsService.ts` to the same `Boolean(config.notifications.smsEnabled && config.sms.provider && ...)` shape `isEmailConfigured()` uses, over the new fields; implement `SmsProvider` in a new class wrapping the vendor's SDK (`send(toNumber, body)`); and construct that class into `SmsCodeProvider`'s second constructor argument where `TwoFactorService` builds its provider map. No route, schema, or dispatcher change is needed for any of this.
 
-**WebAuthn/passkeys (#587, part of #331)**: `WebAuthnProvider` wraps `@simplewebauthn/server`. The relying party ID is derived from `CORS_ORIGIN`'s bare hostname (`new URL(config.cors.origin).hostname`) — WebAuthn ties every credential to a specific RP ID, so this must match the frontend's real origin in every environment, not a hardcoded value. `beginSetup` calls `generateRegistrationOptions` and returns the whole options object as the setup payload (the browser passes it straight to its passkey-creation call); `confirmEnable`'s `code` parameter is a JSON-stringified `RegistrationResponseJSON` rather than a short code — the interface's `code: string` is reused as-is (not widened) so no other layer needs to know WebAuthn's payload is richer. The credential's public key (`Uint8Array`) is base64-encoded for JSON storage in `secret_data` and decoded back whenever a credential needs reconstructing for `verifyAuthenticationResponse`. The counter `@simplewebauthn` returns after a successful authentication is persisted (clone-detection bookkeeping the library's own docs recommend keeping) but not independently re-validated — the library's `verified` boolean is treated as authoritative, and the challenge-based compare-and-set is what actually prevents replay.
+**WebAuthn/passkeys (#587, part of #331)**: `WebAuthnProvider` wraps `@simplewebauthn/server`. The relying party ID is derived from the bare hostname of `CORS_ORIGIN`'s first entry, the web app (`new URL(config.cors.origin).hostname`) — WebAuthn ties every credential to a specific RP ID, so this must match the frontend's real origin in every environment, not a hardcoded value. `beginSetup` calls `generateRegistrationOptions` and returns the whole options object as the setup payload (the browser passes it straight to its passkey-creation call); `confirmEnable`'s `code` parameter is a JSON-stringified `RegistrationResponseJSON` rather than a short code — the interface's `code: string` is reused as-is (not widened) so no other layer needs to know WebAuthn's payload is richer. The credential's public key (`Uint8Array`) is base64-encoded for JSON storage in `secret_data` and decoded back whenever a credential needs reconstructing for `verifyAuthenticationResponse`. The counter `@simplewebauthn` returns after a successful authentication is persisted (clone-detection bookkeeping the library's own docs recommend keeping) but not independently re-validated — the library's `verified` boolean is treated as authoritative, and the challenge-based compare-and-set is what actually prevents replay.
 
 ### List endpoints: filtering and pagination
 
@@ -932,7 +932,7 @@ A genuinely separate transport from Web Push above, not a reuse: `PushService`/`
 
 **Delivery**: `NativePushWorker` polls `native_push_outbox` with the same shape as `PushWorker` (interval poll, `FOR UPDATE SKIP LOCKED`, 5 retries). The one real difference from the Web Push worker: a `NativePushGoneError` (FCM reporting `NotRegistered`/`InvalidRegistration`, or APNs reporting `Unregistered`/`BadDeviceToken`) deactivates the device token immediately instead of retrying — each vendor signals "this token is permanently invalid" in its own response shape rather than a shared 404/410, so the worker relies on a typed error the provider throws instead of an HTTP status code.
 
-**Mobile client**: `frontend/src/services/nativePushService.ts` runs only under `Capacitor.isNativePlatform()`. `registerForNativePush()` is called once, right after a successful login (`AuthContext.tsx`) — the same lifecycle point the mobile auth flow's token persistence hooks into (§5 "Mobile client:
+**Mobile client**: `frontend/src/services/nativePushService.ts` runs only under `Capacitor.isNativePlatform()`, and only in a build made with `REACT_APP_NATIVE_PUSH=true` (§7g "Native push"). `registerForNativePush()` is called once, right after a successful login (`AuthContext.tsx`) — the same lifecycle point the mobile auth flow's token persistence hooks into (§5 "Mobile client:
 token-based variant"). It requests push permission, calls `PushNotifications.register()`, and on the plugin's `registration` event POSTs the token to `/api/notifications/push/device-token`. A `pushNotificationActionPerformed` tap navigates to the notifications list; deep-linking to the specific notification's target is out of scope for this first version (a fast-follow), matching the design decision that motivated this feature.
 
 ---
@@ -1079,16 +1079,64 @@ reading `webDir` from outside its own project.
 **Scripts** (`mobile/package.json`):
 
 ```bash
-npm run build --workspace=mobile   # frontend build -> copy into mobile/www -> cap sync
+REACT_APP_API_URL=https://api.example.com/api/v1 \
+npm run build --workspace=mobile   # API-URL check -> frontend build -> copy into mobile/www -> cap sync
 npm run sync --workspace=mobile    # cap sync only (both platforms)
 npm run open:ios --workspace=mobile      # open the Xcode project
 npm run open:android --workspace=mobile  # open the Android Studio project
 ```
 
-`build` runs `npm --prefix ../frontend run build` (not `npm run build --workspace=frontend`,
+`build` first runs `mobile/scripts/check-api-url.mjs`, then `npm --prefix ../frontend run build` (not `npm run build --workspace=frontend`,
 which only resolves from a workspace-aware root context, not from inside a package
 directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` over
 `mobile/www`), then `npx cap sync`.
+
+**Configuration** — two settings are required for the app to reach the API at all:
+
+- **`REACT_APP_API_URL`** must be the backend's absolute `https` API base, including the
+  version prefix (e.g. `https://api.example.com/api/v1`), in the environment of the mobile
+  build. The API must be served over https for the app, development included: the Android
+  WebView runs the app at `https://localhost` with no cleartext or mixed-content allowance,
+  so it blocks every request to an `http` API.
+  The frontend's default is the relative `/api/v1`, which inside a WebView resolves
+  against the app's own bundled asset server, so every call would miss the backend. The
+  value is baked into the bundle at build time, so `check-api-url.mjs` makes
+  `npm run build --workspace=mobile` fail before building when the variable is unset or
+  not an absolute `https` URL.
+- **`CORS_ORIGIN`** on the backend is a comma-separated list of exact origins. The
+  WebViews call the API from their own origins — `capacitor://localhost` on iOS and
+  `https://localhost` on Android — so both must be appended after the web app's origin,
+  which stays first (SSO redirects there and WebAuthn derives its relying-party ID from
+  it): `CORS_ORIGIN=https://app.example.com,capacitor://localhost,https://localhost`.
+  The CORS policy allows the `X-Client-Type` request header that selects the mobile
+  token-in-body auth mode (§5 "Mobile client: token-based variant"); without it the
+  browser would fail the login and refresh preflights.
+
+**Native push** is off unless the build sets `REACT_APP_NATIVE_PUSH=true` (baked in at
+build time like `REACT_APP_API_URL`); without it the app never calls the push plugin and
+simply receives no native notifications (Web Push in the browser is unaffected). It is
+opt-in because the plugin's native `register()` needs the platform's push configuration:
+on Android it calls Firebase Messaging unconditionally, and without Firebase configured
+that exception escapes the native bridge and crashes the app right after login — a
+JavaScript `try` cannot catch it. Enable it only in a build that has:
+
+- **Android**: the Firebase project's `google-services.json` in `mobile/android/app/`
+  (the Gradle build applies the Google services plugin only when that file exists).
+- **iOS**: the Push Notifications capability on the App target, which adds the
+  `aps-environment` entitlement, and an APNs key configured on the backend (§7c).
+
+```bash
+REACT_APP_API_URL=https://api.example.com/api/v1 REACT_APP_NATIVE_PUSH=true \
+npm run build --workspace=mobile
+```
+
+**Native plugins**: `cap sync` registers native plugins from `mobile/package.json` only,
+never from the frontend workspace that imports them. Every `@capacitor/*` package the
+frontend imports (`@capacitor/preferences`, `@capacitor/push-notifications`) is therefore
+also a dependency of `mobile/`, which is what puts it into
+`android/capacitor.settings.gradle`, `android/app/capacitor.build.gradle` and
+`ios/App/CapApp-SPM/Package.swift`. `mobile/scripts/capacitor-plugins.test.mjs` (run by
+the root `npm run test:scripts`) fails when the two lists drift apart.
 
 **Current state (honest, as of this workspace's introduction)**:
 
@@ -1117,9 +1165,10 @@ directory), then `mobile/scripts/copy-web-assets.mjs` (copies `frontend/build` o
   needs a human with real Apple Developer / Google Play Console accounts.
 
 **CI**: `mobile/` is covered by the root `npm install`/`npm ci` step (it is a workspace
-member like `backend`, `frontend`, and `packages/*`), but has no lint/test CI job — there
-is no application logic here yet to verify beyond the frontend's own build, which the
-frontend CI job already covers. The `backend` and `frontend` CI jobs stay scoped to their
+member like `backend`, `frontend`, and `packages/*`), but has no lint/test CI job of its
+own — its build scripts' tests (`mobile/scripts/*.test.mjs`) run with the root
+`npm run test:scripts` in the backend job, and there is no application logic here to
+verify beyond the frontend's own build, which the frontend CI job already covers. The `backend` and `frontend` CI jobs stay scoped to their
 own `working-directory` and never touch `mobile/`. A separate, manually-triggered
 `mobile-android-build` workflow (`.github/workflows/mobile-android-build.yml`) exists to
 build an unsigned Android debug APK on demand — see **Release process** below.
@@ -1162,7 +1211,8 @@ scripts already documented above):
 
 1. Bump the version (`npm run version:bump --workspace=mobile -- <version>`), commit the
    result as its own commit.
-2. `npm run build --workspace=mobile` — builds the frontend, copies it into `mobile/www`,
+2. `npm run build --workspace=mobile`, with `REACT_APP_API_URL` set to the production
+   API base (see **Configuration** above) — builds the frontend, copies it into `mobile/www`,
    runs `cap sync` for both platforms.
 3. **iOS**: `npm run open:ios --workspace=mobile` opens the Xcode project. From there, a
    human with the Apple Developer account:
