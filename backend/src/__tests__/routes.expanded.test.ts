@@ -2006,6 +2006,30 @@ describe('bulk-import router (extended)', () => {
     const res = await request(app()).post('/api/import/shifts').send({ csv: 'x' });
     expect(res.status).toBe(500);
   });
+
+  // #895: IMPORT_FAILED used to carry the raw message of whatever was thrown.
+  it.each(['employees', 'shifts'] as const)(
+    'POST /%s renders an unexpected fault as the generic 500, without the driver text',
+    async (kind) => {
+      const fault = Object.assign(new Error("Duplicate entry 'x' for key 'users.email'"), { code: 'ER_DUP_ENTRY' });
+      (BulkImportService.prototype.importEmployees as jest.Mock) = jest.fn().mockRejectedValue(fault);
+      (BulkImportService.prototype.importShifts as jest.Mock) = jest.fn().mockRejectedValue(fault);
+      const res = await request(app())
+        .post(`/api/import/${kind}`)
+        .send({ csv: 'x', defaultPassword: 'Pass123!' });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: 'An internal error occurred' });
+    }
+  );
+
+  it('POST /shifts renders an AppError with its own status, not IMPORT_FAILED', async () => {
+    (BulkImportService.prototype.importShifts as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new ForbiddenError('Not allowed'));
+    const res = await request(app()).post('/api/import/shifts').send({ csv: 'x' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
 });
 
 /* ---------------------------------------------------------------------------

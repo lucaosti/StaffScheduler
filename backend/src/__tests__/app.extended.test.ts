@@ -206,6 +206,17 @@ describe('buildApp CORS origin list', () => {
     });
   });
 
+  it('exposes X-Request-Id to a cross-origin client (#895)', async () => {
+    // The SPA quotes the request id of a 5xx; without this header in
+    // Access-Control-Expose-Headers a cross-origin build cannot read it.
+    await withCors([webOrigin], async () => {
+      const res = await request(buildApp(fakePool, { silent: true }))
+        .get('/api/v1/no-such-route')
+        .set('Origin', webOrigin);
+      expect(res.headers['access-control-expose-headers']).toMatch(/x-request-id/i);
+    });
+  });
+
   it('still serves a single-origin configuration', async () => {
     await withCors([webOrigin], async () => {
       const res = await preflight(webOrigin);

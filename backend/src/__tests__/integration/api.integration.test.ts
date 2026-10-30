@@ -2209,6 +2209,93 @@ describe('TOTP two-factor authentication against the real schema (#899)', () => 
     );
     expect(rows[0].n).toBe(0);
   });
+
+  it('refuses setup on an enabled method with 409 and leaves 2FA enabled (#817)', async () => {
+    // Setup used to upsert `enabled = 0` with a fresh secret, so a stolen
+    // session could turn 2FA off without the code /2fa/disable demands — and
+    // lock the owner out by enrolling its own authenticator.
+    const email = `itest-totp-resetup-${Date.now()}@example.com`;
+    await admin.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, ?, 'Totp', 'Resetup', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    const cookie = await loginCookie(email, PASSWORD);
+
+    const setup = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    const secret = setup.body.data.secret as string;
+    const enable = await request(app)
+      .post('/api/v1/auth/2fa/enable')
+      .set('Cookie', cookie)
+      .send({ methodType: 'totp', code: totp(secret, { nowSeconds: Math.floor(Date.now() / 1000) }) });
+    expect(enable.status).toBe(200);
+    const [before] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+
+    const again = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    expect(again.status).toBe(409);
+    expectErrorEnvelope(again.body);
+    expect(again.body.data).toBeUndefined();
+
+    const [after] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.enabled, tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0].enabled).toBe(1);
+    expect(after[0].secret_data).toEqual(before[0].secret_data);
+
+    // Backstop: even a provider call that slips past the dispatcher's check
+    // (a race with a concurrent enable) cannot disable or re-key the row.
+    const { TotpProvider } = require('../../services/TotpProvider');
+    const { database } = require('../../config/database');
+    const [[owner]] = await admin.query<mysql.RowDataPacket[]>('SELECT id FROM users WHERE email = ?', [email]);
+    await new TotpProvider(database.getPool()).beginSetup(owner.id, email);
+    const [raced] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT enabled, secret_data FROM two_factor_methods WHERE user_id = ?`,
+      [owner.id]
+    );
+    expect(raced[0].enabled).toBe(1);
+    expect(raced[0].secret_data).toEqual(before[0].secret_data);
+  });
+});
+
+describe('internal faults are not disclosed to the client (#895)', () => {
+  it('renders a real MySQL driver error as the generic 500 with the request id', async () => {
+    // Force a genuine driver failure on one statement rather than mounting a
+    // throwing route (which production code must not carry): the skills list
+    // query is swapped for one naming a column that does not exist, so MySQL
+    // itself answers ER_BAD_FIELD_ERROR with schema detail in the message —
+    // the class of text #895 saw on screen.
+    // The marker is a column alias only SkillService.list selects, so the
+    // statements `authenticate` issues (the user's own skills among them)
+    // pass through untouched.
+    const marker = 'AS shift_requirement_count';
+    const cookie = await authCookie();
+    const { database } = require('../../config/database');
+    const pool = database.getPool();
+    const original = pool.execute.bind(pool);
+    const spy = jest.spyOn(pool, 'execute').mockImplementation(((...args: unknown[]) =>
+      typeof args[0] === 'string' && args[0].includes(marker)
+        ? original('SELECT s.no_such_column FROM skills s')
+        : original(...args)) as never);
+    try {
+      const res = await request(app).get('/api/v1/skills').set('Cookie', cookie);
+
+      expect(res.status).toBe(500);
+      expectErrorEnvelope(res.body);
+      expect(res.body.error).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'An internal error occurred',
+        requestId: res.headers['x-request-id'],
+      });
+      expect(JSON.stringify(res.body)).not.toMatch(/no_such_column|ER_|field list|skills/);
+      expect(spy.mock.calls.some(([sql]) => String(sql).includes(marker))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('user-management authority (#809, #810)', () => {

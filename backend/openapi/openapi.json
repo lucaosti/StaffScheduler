@@ -76,6 +76,10 @@
               "message": {
                 "type": "string"
               },
+              "requestId": {
+                "type": "string",
+                "description": "Present on INTERNAL_ERROR (500): the request id, also sent as the X-Request-Id header, under which the fault's details are logged. The message of a 500 is always generic; quote this id to find the cause."
+              },
               "details": {
                 "type": "array",
                 "description": "Field-level validation errors (present on VALIDATION_ERROR).",
@@ -2868,10 +2872,16 @@
             "description": "2FA enabled. Recovery codes returned."
           },
           "400": {
-            "description": "Invalid code or 2FA not in setup state."
+            "description": "Invalid code (`TWO_FACTOR_ENABLE_FAILED`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "User not found (`TWO_FACTOR_ENABLE_FAILED`)."
+          },
+          "409": {
+            "description": "Setup has not been started, or the method is already enabled (`TWO_FACTOR_ENABLE_FAILED`)."
           }
         }
       }
@@ -2905,6 +2915,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The method is already enabled — disable it with a valid code before setting it up again — or is not available (`CONFLICT`)."
           }
         },
         "requestBody": {

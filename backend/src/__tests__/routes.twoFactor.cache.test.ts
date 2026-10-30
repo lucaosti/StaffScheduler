@@ -73,7 +73,8 @@ describe('two-factor cache invalidation', () => {
   });
 
   it('leaves the cache alone when enabling is refused', async () => {
-    service.confirmEnable.mockRejectedValue(new Error('Invalid code'));
+    const { ValidationError } = require('../errors');
+    service.confirmEnable.mockRejectedValue(new ValidationError('Invalid code'));
 
     const res = await request(mountApp()).post('/api/auth/2fa/enable').send({ code: '000000' });
 
