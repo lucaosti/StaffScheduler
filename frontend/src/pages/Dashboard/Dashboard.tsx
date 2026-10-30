@@ -27,8 +27,11 @@ import { useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
-import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
+import { useDashboardData, useAttentionItems, useRecentActivity } from '../../hooks/useDashboard';
 import QueryState from '../../components/QueryState';
+
+/** Shown in a count's place until the count it stands for has loaded. */
+const NOT_LOADED = '—';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -43,11 +46,22 @@ const Dashboard: React.FC = () => {
   // JavaScript is never loaded (see components/Dropdown.tsx for why).
   const [deniedDismissed, setDeniedDismissed] = useState(false);
 
-  // Server state (stats + recent activity) is owned by TanStack Query; the retry
-  // button calls refetch() directly instead of a hand-written reload.
+  // Server state is owned by TanStack Query; the retry button calls refetch()
+  // directly instead of a hand-written reload.
   const dashboardQuery = useDashboardData();
-  const stats = dashboardQuery.data?.stats ?? null;
-  const recentActivity = dashboardQuery.data?.recentActivity ?? [];
+  const stats = dashboardQuery.data ?? null;
+
+  // Gating follows the permissions the server checks for the action itself,
+  // not the matching read permission (#894): a reader offered "Add Employee"
+  // or "Generate Schedule" is offered a button the server then refuses.
+  const can = (code: string) => user?.permissions?.includes(code) ?? false;
+  const canCreateShift = can('shift.manage');
+  const canAddEmployee = can('employee.manage');
+  const canGenerateSchedule = can('schedule.optimize');
+  const canViewReports = can('report.read');
+  const canReadAudit = can('audit.read');
+  const activityQuery = useRecentActivity(canReadAudit);
+  const recentActivity = activityQuery.data ?? [];
 
   // Kept off the main loading/error gate above: a slow or failed attention-items
   // fetch should not block the stat cards, which is what one combined query would do.
@@ -166,7 +180,12 @@ const Dashboard: React.FC = () => {
                   </div>
                   <div className="flex-grow-1 ms-3">
                     <h6 className="card-title text-muted mb-1">{t('dashboard.stats.pendingApprovals')}</h6>
-                    <h3 className="mb-0">{stats.pendingApprovals}</h3>
+                    {/* The caller's own queue (#894). `stats.pendingApprovals`
+                        is organisation-wide: it read 248 to a manager whose
+                        queue was empty. The attention items carry the count of
+                        what this caller can decide; until they load, a dash
+                        rather than a number that may be wrong. */}
+                    <h3 className="mb-0">{attention ? attention.pendingApprovalsAging.count : NOT_LOADED}</h3>
                   </div>
                 </div>
               </div>
@@ -322,25 +341,25 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="card-body">
               <div className="d-grid gap-3">
-                {user?.permissions?.includes('shift.manage') && (
+                {canCreateShift && (
                   <Link to="/shifts" className="btn btn-outline-primary text-start">
                     <i className="bi bi-plus-circle me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.createShift')}
                   </Link>
                 )}
-                {user?.permissions?.includes('employee.read') && (
+                {canAddEmployee && (
                   <Link to="/employees" className="btn btn-outline-success text-start">
                     <i className="bi bi-person-plus me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.addEmployee')}
                   </Link>
                 )}
-                {user?.permissions?.includes('schedule.read') && (
+                {canGenerateSchedule && (
                   <Link to="/schedule" className="btn btn-outline-info text-start">
                     <i className="bi bi-calendar-plus me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.generateSchedule')}
                   </Link>
                 )}
-                {user?.permissions?.includes('report.read') && (
+                {canViewReports && (
                   <Link to="/reports" className="btn btn-outline-warning text-start">
                     <i className="bi bi-graph-up me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.viewReports')}
@@ -351,6 +370,9 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Hidden without audit.read: "No recent activity" would be a false
+            statement about the organisation, not "you cannot see this" (#894). */}
+        {canReadAudit && (
         <div className="col-md-6">
           <div className="card border-0 shadow-sm h-100">
             <div className="card-header bg-transparent border-bottom">
@@ -384,6 +406,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
       </div>
       </QueryState>
     </div>

@@ -8,14 +8,18 @@ import { defaultDashboardStats } from '../../mocks/handlers';
 
 const API_URL = process.env.REACT_APP_API_URL ?? 'http://localhost:3001/api/v1';
 
+let permissions: string[] = [];
 jest.mock('../../contexts/AuthContext', () => ({
-  useAuth: () => ({ user: { email: 'admin@demo.staffscheduler.local' } }),
+  useAuth: () => ({ user: { email: 'admin@demo.staffscheduler.local', permissions } }),
 }));
 
 import Dashboard from './Dashboard';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  permissions = [];
+});
 afterAll(() => server.close());
 
 describe('<Dashboard />', () => {
@@ -102,6 +106,62 @@ describe('<Dashboard />', () => {
       expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument()
     );
     expect(screen.queryByText(/target/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * #894: the dashboard misled anyone who was not an administrator. Quick
+   * actions that create or generate were gated on the READ permissions, so a
+   * reader was offered actions the server refuses; the Pending Approvals card
+   * showed the organisation-wide count while the caller's own queue was
+   * empty; and the activity panel turned a 403 into "No recent activity".
+   */
+  describe('per role', () => {
+    const renderLoaded = async () => {
+      render(<MemoryRouter><Dashboard /></MemoryRouter>);
+      await waitFor(() => expect(screen.queryByText(/loading dashboard/i)).not.toBeInTheDocument());
+    };
+
+    it('offers no create or generate action to a reader', async () => {
+      permissions = ['employee.read', 'schedule.read'];
+      await renderLoaded();
+      expect(screen.queryByRole('link', { name: /add employee/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: /generate schedule/i })).not.toBeInTheDocument();
+    });
+
+    it('offers them to whoever holds the permissions the server checks', async () => {
+      permissions = ['employee.manage', 'schedule.optimize'];
+      await renderLoaded();
+      expect(screen.getByRole('link', { name: /add employee/i })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /generate schedule/i })).toBeInTheDocument();
+    });
+
+    it("counts the caller's own pending approvals, not the organisation's", async () => {
+      // Stats report 2 org-wide; the caller's queue (attention items) is empty.
+      await renderLoaded();
+      const card = screen.getByText('Pending Approvals').closest('.card') as HTMLElement;
+      expect(card).toHaveTextContent('0');
+      expect(card).not.toHaveTextContent(String(defaultDashboardStats.pendingApprovals));
+    });
+
+    it('hides the activity panel, and never asks for it, without audit.read', async () => {
+      let auditRequested = false;
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () => {
+          auditRequested = true;
+          return HttpResponse.json({ success: false, error: { code: 'FORBIDDEN', message: 'no' } }, { status: 403 });
+        })
+      );
+      await renderLoaded();
+      expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument();
+      expect(screen.queryByText(/no recent activity/i)).not.toBeInTheDocument();
+      expect(auditRequested).toBe(false);
+    });
+
+    it('shows the activity panel with audit.read', async () => {
+      permissions = ['audit.read'];
+      await renderLoaded();
+      expect(await screen.findByText('Recent Activity')).toBeInTheDocument();
+    });
   });
 
   // The close button used Bootstrap's `data-bs-dismiss`, whose JavaScript is
