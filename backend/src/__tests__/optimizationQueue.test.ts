@@ -77,12 +77,12 @@ describe('enqueueOptimization', () => {
   it('adds a job with a per-schedule id when none exists', async () => {
     const q = load();
     queueGetJob.mockResolvedValue(null);
-    queueAdd.mockResolvedValue({ id: 'schedule:5' });
+    queueAdd.mockResolvedValue({ id: 'schedule-5' });
 
     const id = await q.enqueueOptimization({ scheduleId: 5, createdBy: 9 });
 
-    expect(id).toBe('schedule:5');
-    expect(queueAdd).toHaveBeenCalledWith('optimize', { scheduleId: 5, createdBy: 9 }, { jobId: 'schedule:5' });
+    expect(id).toBe('schedule-5');
+    expect(queueAdd).toHaveBeenCalledWith('optimize', { scheduleId: 5, createdBy: 9 }, { jobId: 'schedule-5' });
   });
 
   it('returns the existing job without adding when one is in flight', async () => {
@@ -91,7 +91,7 @@ describe('enqueueOptimization', () => {
 
     const id = await q.enqueueOptimization({ scheduleId: 5, createdBy: 9 });
 
-    expect(id).toBe('schedule:5');
+    expect(id).toBe('schedule-5');
     expect(queueAdd).not.toHaveBeenCalled();
   });
 
@@ -99,7 +99,7 @@ describe('enqueueOptimization', () => {
     const q = load();
     const remove = jest.fn();
     queueGetJob.mockResolvedValue({ getState: jest.fn().mockResolvedValue('completed'), remove });
-    queueAdd.mockResolvedValue({ id: 'schedule:5' });
+    queueAdd.mockResolvedValue({ id: 'schedule-5' });
 
     await q.enqueueOptimization({ scheduleId: 5, createdBy: 9 });
 
@@ -118,7 +118,7 @@ describe('getOptimizationStatus', () => {
   it('maps state, progress, result and failedReason', async () => {
     const q = load();
     queueGetJob.mockResolvedValue({
-      id: 'schedule:5',
+      id: 'schedule-5',
       getState: jest.fn().mockResolvedValue('completed'),
       progress: 100,
       returnvalue: { scheduleId: 5, assignmentsCreated: 3, totalShifts: 4, coveragePercentage: 75, status: 'OK' },
@@ -126,14 +126,14 @@ describe('getOptimizationStatus', () => {
     });
 
     const status = await q.getOptimizationStatus(5);
-    expect(status).toMatchObject({ jobId: 'schedule:5', state: 'completed', progress: 100 });
+    expect(status).toMatchObject({ jobId: 'schedule-5', state: 'completed', progress: 100 });
     expect(status!.result?.assignmentsCreated).toBe(3);
   });
 
   it('defaults progress to 0 and state to unknown when the job reports neither', async () => {
     const q = load();
     queueGetJob.mockResolvedValue({
-      id: 'schedule:5',
+      id: 'schedule-5',
       getState: jest.fn().mockResolvedValue(undefined),
       progress: undefined,
       returnvalue: undefined,
@@ -141,7 +141,7 @@ describe('getOptimizationStatus', () => {
     });
 
     const status = await q.getOptimizationStatus(5);
-    expect(status).toMatchObject({ jobId: 'schedule:5', state: 'unknown', progress: 0 });
+    expect(status).toMatchObject({ jobId: 'schedule-5', state: 'unknown', progress: 0 });
   });
 });
 
@@ -198,7 +198,7 @@ describe('worker processor', () => {
     q.initOptimizationWorker({} as never);
     const failedHandler = workerOn.mock.calls.find(([evt]) => evt === 'failed')![1];
 
-    failedHandler({ id: 'schedule:5', data: { scheduleId: 5, createdBy: 9 } }, new Error('solver blew up'));
+    failedHandler({ id: 'schedule-5', data: { scheduleId: 5, createdBy: 9 } }, new Error('solver blew up'));
 
     expect(publishMock).toHaveBeenCalledWith(9, expect.objectContaining({ type: 'optimization.failed' }));
   });
