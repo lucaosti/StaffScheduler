@@ -30,12 +30,15 @@ import { findConstraintViolations, findOverCommitments } from '../../optimizatio
 import { DAY_MS, dateToMs } from '../../optimization/shiftTime';
 import type { Employee, OptimizationProblem, Shift } from '../../optimization/types';
 
-/** The default base seed: fixed so CI is deterministic. Override with TEST_SEED. */
+/**
+ * The default base seed: fixed so CI is deterministic. Override with TEST_SEED.
+ * Other seeded suites (the API fuzzer, #908) pass their own fixed default.
+ */
 const DEFAULT_SEED = 907;
 
-export const baseSeed = (): number => {
+export const baseSeed = (fallback: number = DEFAULT_SEED): number => {
   const raw = process.env.TEST_SEED;
-  if (raw === undefined || raw === '') return DEFAULT_SEED;
+  if (raw === undefined || raw === '') return fallback;
   const parsed = Number(raw);
   if (!Number.isInteger(parsed)) throw new Error(`TEST_SEED must be an integer, got "${raw}"`);
   return parsed >>> 0;

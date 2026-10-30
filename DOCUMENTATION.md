@@ -2332,6 +2332,66 @@ Bodies in the mutation sweep are thunks rather than literals, because
 inserts the fixtures — so a literal capturing a fixture id would send
 `undefined` and be rejected before reaching the database.
 
+### API contract fuzzing (every operation)
+
+`backend/src/__tests__/integration/apiFuzz.integration.test.ts` (#908) fuzzes
+every operation in `openapi.json` against the real app, a throwaway
+`staff_scheduler_fuzz` database loaded with the demo seed, and a real Redis
+(`REDIS_URL` is required). It runs in the `integration` gate like the suite
+above. Requests are drawn from the spec's JSON Schemas with the seeded
+mulberry32 stream of the property tests, in three classes per operation —
+valid (real ids from the seeded database), boundary (length and numeric
+limits, empty arrays, unicode, leap-day and DST dates) and malformed (one
+mutation: wrong type, missing required field, out of range, oversized, wrong
+root type, broken JSON, malformed path id) — sent as the demo Administrator
+and as a low-privilege demo employee, both with real login cookies. Each
+request is judged valid or invalid by the Zod schema the route actually
+enforces (the operation → schema mapping comes from the same route scan
+`npm run openapi:generate` uses), not by the generator, so Zod refinements the
+JSON Schema cannot express never count as server defects.
+
+Every response must: not be an undocumented 5xx; carry the envelope
+(`{ success: true, data }` on JSON 2xx, `ApiError` on every error); match the
+documented response schema where the spec declares one; use a documented
+status; never accept an invalid request with a 2xx; never refuse a valid one
+with an undocumented 400; never put a stack trace, SQL or a driver error in an
+error body. The suite collects every failing response, prints one entry per
+distinct signature (`METHOD /path | oracle | status`) with the smallest
+reproducing request and its seed, and only then asserts.
+
+Defects found but not yet fixed are listed in `KNOWN_FAILURES` in the test,
+each signature against its open issue. An unlisted signature fails the run;
+in the default configuration a listed one that no longer fires fails it as
+well, so the entry is deleted in the PR that fixes it.
+
+The default run (seed 908, one request per class, operation and actor) is
+sized for CI. A larger campaign, inside `./scripts/verify-in-docker.sh shell`:
+
+```bash
+cd backend
+TEST_SEED=42 FUZZ_ITERATIONS=20 FUZZ_REPORT=/tmp/fuzz.json \
+  npm run test:integration -- apiFuzz
+```
+
+| Variable | Effect |
+|---|---|
+| `TEST_SEED` | Base seed (default `908`). Each case derives its own seed from it and its identity, which the report prints. |
+| `FUZZ_ITERATIONS` | Requests per class, operation and actor (default `1`). |
+| `FUZZ_OPERATIONS` | Regex over `"METHOD /path"`: fuzz only matching operations (the report's replay line uses it). |
+| `FUZZ_REPORT` | Also write every failure signature, as JSON, to this file. |
+| `FUZZ_NOW` | The instant the run happens at (default `2026-11-02T09:00:00Z`). |
+
+The run happens at a frozen instant: the demo seed dates its rows relative to
+"today" and the app compares them against "now", so with a real clock the
+same seed would reach different outcomes on different days and the
+"no stale entry" rule would fail builds by the calendar. JavaScript's `Date`
+is faked (timers stay real) and every MySQL session of the seed and the app is
+pinned with `SET TIMESTAMP`, which fixes `NOW()`, `CURDATE()` and column
+defaults — all from the test, with no clock hook in application code.
+
+`GET /events/stream` is the one operation not fuzzed: a server-sent-events
+response never ends, so there is no status and body to judge.
+
 ### Finding code kept alive only by its tests
 
 ```bash

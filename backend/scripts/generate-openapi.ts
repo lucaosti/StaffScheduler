@@ -172,7 +172,7 @@ const assertEveryRouterIsMounted = (): void => {
   }
 };
 
-interface FoundOp {
+export interface FoundOp {
   method: string;
   specPath: string;
   /** Schema enforced by validateBody, if any. */
@@ -196,7 +196,13 @@ const parseSchemaAliases = (source: string): Map<string, string> => {
   return aliases;
 };
 
-const scanRoutes = (): FoundOp[] => {
+/*
+ * Exported for the API fuzzing suite (#908), which needs the same
+ * operation → Zod schema mapping to judge whether a generated request is
+ * valid. Reusing the scan rather than keeping a second table means the fuzzer
+ * can never disagree with the generator about which schema a route enforces.
+ */
+export const scanRoutes = (): FoundOp[] => {
   assertEveryRouterIsMounted();
   const found: FoundOp[] = [];
   for (const { file, variable, prefix } of ROUTE_MOUNTS) {
@@ -500,4 +506,7 @@ const main = (): void => {
   }
 };
 
-main();
+// Guarded so importing scanRoutes (the fuzzing suite) does not rewrite the spec.
+if (require.main === module) {
+  main();
+}
