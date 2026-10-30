@@ -19,6 +19,27 @@
  *   leak to one rotation window instead of the full 30-day lifetime.
  * - Verification is constant-work (hash + indexed lookup) and never reveals
  *   why a token failed, so it cannot be used as an oracle.
+ * - Rotation CLAIMS the presented token before issuing anything (#820): one
+ *   conditional UPDATE (`... WHERE revoked_at IS NULL`) inside a transaction,
+ *   and a successor only when it affected exactly one row. Reading first and
+ *   revoking afterwards let two concurrent requests with the same token both
+ *   pass the read and both receive a live successor — a forked family that
+ *   reuse detection never saw. The row lock the claim takes serialises the
+ *   race: the loser's UPDATE waits for the winner's commit, then matches
+ *   nothing.
+ * - A token re-presented within CONCURRENT_REFRESH_GRACE_SECONDS of being
+ *   rotated is answered `superseded`: no successor (so no fork) and no family
+ *   revocation. Two tabs refreshing at once — opening several after the
+ *   access token expired, a browser restoring a session — is the ordinary
+ *   case, and treating its loser as reuse would sign the user out of every
+ *   tab. The window costs little: a replay inside it obtains nothing, and
+ *   any replay after it still revokes the family. Rejected alternatives:
+ *   handing the loser the SAME successor (impossible without storing the
+ *   plaintext successor, which defeats hash-only storage) and minting the
+ *   loser a sibling token (exactly the fork this fixes).
+ * - Logout, a password change and deactivation revoke server-side (#816,
+ *   #818): logout the presented token's whole family, the other two every
+ *   family the user has.
  *
  * Alternatives considered: (a) stateless refresh JWTs — rejected because they
  * cannot be revoked server-side, which defeats the point of a refresh layer;
@@ -32,20 +53,35 @@ import { createHash, randomBytes } from 'crypto';
 import { randomUUID } from 'crypto';
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { config } from '../config';
+import { usingConnection } from '../utils/transaction';
 
-interface RefreshTokenRow extends RowDataPacket {
-  id: number;
-  user_id: number;
-  family_id: string;
-  expires_at: Date;
-  revoked_at: Date | null;
-}
+type SqlExecutor = Pick<Pool, 'execute'>;
+
+/**
+ * How long after a rotation the rotated token is still recognised as a
+ * concurrent refresh rather than reuse (see the header). Long enough to cover
+ * parallel requests on a slow mobile link, short enough that a stolen copy
+ * replayed any later still trips reuse detection.
+ */
+export const CONCURRENT_REFRESH_GRACE_SECONDS = 10;
 
 /** The raw token the client holds plus the row id, returned when issuing/rotating. */
 export interface IssuedRefreshToken {
   token: string;
   expiresAt: Date;
 }
+
+/**
+ * - `rotated`: the token was valid and claimed by this call; `issued` is its successor.
+ * - `superseded`: a concurrent (or just-finished) rotation claimed it first.
+ *   Nothing was issued or revoked; the client should retry with the
+ *   successor it now holds.
+ * - `invalid`: unknown, expired, revoked or reused — the session is over.
+ */
+export type RotationResult =
+  | { status: 'rotated'; userId: number; issued: IssuedRefreshToken }
+  | { status: 'superseded' }
+  | { status: 'invalid' };
 
 const hashToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 
@@ -66,82 +102,105 @@ export class RefreshTokenService {
     return this.create(userId, familyId);
   }
 
-  /** Inserts a token row for the given family and returns the raw token. */
-  private async create(userId: number, familyId: string): Promise<IssuedRefreshToken> {
+  /** Inserts a token row for the given family and returns the raw token and its row id. */
+  private async create(
+    userId: number,
+    familyId: string,
+    executor: SqlExecutor = this.pool
+  ): Promise<IssuedRefreshToken & { id: number }> {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + this.ttlMs());
-    await this.pool.execute(
+    const [res] = await executor.execute<ResultSetHeader>(
       `INSERT INTO refresh_tokens (user_id, family_id, token_hash, expires_at)
        VALUES (?, ?, ?, ?)`,
       [userId, familyId, hashToken(token), expiresAt]
     );
-    return { token, expiresAt };
+    return { token, expiresAt, id: res.insertId };
   }
 
   /**
-   * Rotates a presented refresh token. Returns the userId and a fresh token on
-   * success, or null when the token is unknown/expired/reused — the caller maps
-   * null to a 401 and clears the cookie. Reuse of an already-rotated token
-   * revokes the whole family as a side effect.
+   * Rotates a presented refresh token (see `RotationResult`). Reuse of a token
+   * rotated outside the grace window revokes its whole family as a side effect.
    */
-  async rotate(presentedToken: string): Promise<{ userId: number; issued: IssuedRefreshToken } | null> {
-    const [rows] = await this.pool.execute<RefreshTokenRow[]>(
-      `SELECT id, user_id, family_id, expires_at, revoked_at
-         FROM refresh_tokens WHERE token_hash = ? LIMIT 1`,
-      [hashToken(presentedToken)]
-    );
-    const row = rows[0];
-    if (!row) return null; // unknown token
+  async rotate(presentedToken: string): Promise<RotationResult> {
+    const tokenHash = hashToken(presentedToken);
+    return usingConnection(this.pool, async (connection) => {
+      try {
+        await connection.beginTransaction();
+        // The claim. Expiry is compared against a parameter, not the server
+        // clock, because `expires_at` was written from this process's clock.
+        const [claim] = await connection.execute<ResultSetHeader>(
+          `UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP
+            WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > ?`,
+          [tokenHash, new Date()]
+        );
+        // A locking read: it sees the winner's committed row even when this
+        // transaction's claim waited for it, which a snapshot read need not.
+        const [rows] = await connection.execute<RowDataPacket[]>(
+          `SELECT id, user_id, family_id,
+                  revoked_at IS NOT NULL AS revoked,
+                  replaced_by IS NOT NULL
+                    AND revoked_at > CURRENT_TIMESTAMP - INTERVAL ? SECOND AS within_grace
+             FROM refresh_tokens WHERE token_hash = ? FOR UPDATE`,
+          [CONCURRENT_REFRESH_GRACE_SECONDS, tokenHash]
+        );
+        const row = rows[0];
 
-    if (row.revoked_at !== null) {
-      // Reuse of a spent token → a stolen copy is being replayed. Revoke the
-      // entire family so neither the attacker's nor the victim's chain works.
-      await this.revokeFamily(row.family_id);
-      return null;
-    }
-
-    if (row.expires_at.getTime() <= Date.now()) {
-      return null; // expired
-    }
-
-    // Valid: mark this token revoked, issue a successor in the same family, and
-    // link them for auditability.
-    const issued = await this.create(row.user_id, row.family_id);
-    const [successor] = await this.pool.execute<RefreshTokenRow[]>(
-      `SELECT id FROM refresh_tokens WHERE token_hash = ? LIMIT 1`,
-      [hashToken(issued.token)]
-    );
-    await this.pool.execute(
-      `UPDATE refresh_tokens
-          SET revoked_at = CURRENT_TIMESTAMP, replaced_by = ?
-        WHERE id = ? AND revoked_at IS NULL`,
-      [successor[0]?.id ?? null, row.id]
-    );
-
-    return { userId: row.user_id, issued };
+        let result: RotationResult;
+        if (claim.affectedRows === 1) {
+          const issued = await this.create(row.user_id, row.family_id, connection);
+          // Link predecessor to successor: the chain stays auditable, and the
+          // grace check needs to tell a rotation from a logout's revocation.
+          await connection.execute('UPDATE refresh_tokens SET replaced_by = ? WHERE id = ?', [issued.id, row.id]);
+          result = { status: 'rotated', userId: row.user_id, issued: { token: issued.token, expiresAt: issued.expiresAt } };
+        } else if (!row || !Number(row.revoked)) {
+          result = { status: 'invalid' }; // unknown, or expired before it was ever spent
+        } else if (Number(row.within_grace)) {
+          result = { status: 'superseded' };
+        } else {
+          // Reuse of a spent token → a stolen copy is being replayed. Revoke the
+          // entire family so neither the attacker's nor the victim's chain works.
+          await this.revokeFamily(row.family_id, connection);
+          result = { status: 'invalid' };
+        }
+        await connection.commit();
+        return result;
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      }
+    });
   }
 
-  /** Revokes a single token (e.g. on logout). Silent when the token is unknown. */
-  async revoke(presentedToken: string): Promise<void> {
-    await this.pool.execute<ResultSetHeader>(
-      `UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP
-        WHERE token_hash = ? AND revoked_at IS NULL`,
+  /**
+   * Ends the session a presented token belongs to — its whole family, not just
+   * the one token, so a successor already issued to another tab dies with it.
+   * Silent when the token is unknown: logout must succeed regardless.
+   */
+  async revokeFamilyOf(presentedToken: string): Promise<void> {
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT family_id FROM refresh_tokens WHERE token_hash = ?',
       [hashToken(presentedToken)]
     );
+    if (rows[0]) await this.revokeFamily(rows[0].family_id);
   }
 
-  /** Revokes every still-active token in a family (reuse response / global sign-out). */
-  async revokeFamily(familyId: string): Promise<void> {
-    await this.pool.execute<ResultSetHeader>(
+  /** Revokes every still-active token in a family (reuse response / logout). */
+  async revokeFamily(familyId: string, executor: SqlExecutor = this.pool): Promise<void> {
+    await executor.execute<ResultSetHeader>(
       `UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP
         WHERE family_id = ? AND revoked_at IS NULL`,
       [familyId]
     );
   }
 
-  /** Revokes every active token for a user (e.g. "sign out everywhere"). */
-  async revokeAllForUser(userId: number): Promise<void> {
-    await this.pool.execute<ResultSetHeader>(
+  /**
+   * Revokes every active token for a user — on a password change and on
+   * deactivation (#818). Pass the transaction `connection` as `executor` so
+   * the revocation commits or rolls back with the change that warrants it.
+   */
+  async revokeAllForUser(userId: number, executor: SqlExecutor = this.pool): Promise<void> {
+    await executor.execute<ResultSetHeader>(
       `UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP
         WHERE user_id = ? AND revoked_at IS NULL`,
       [userId]

@@ -23,6 +23,7 @@ jest.mock('../middleware/auth', () => ({
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
+  revokePresentedAccessToken: jest.fn(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
@@ -2219,6 +2220,7 @@ describe('auth router (extended)', () => {
 
   it('POST /refresh 200 rotates the session', async () => {
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 1,
       issued: { token: 'rotated', expiresAt: new Date(Date.now() + 1000) },
     });
@@ -2237,8 +2239,8 @@ describe('auth router (extended)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('POST /logout 200', async () => {
-    const res = await request(app()).post('/api/auth/logout');
+  it('POST /refresh/logout 200', async () => {
+    const res = await request(app()).post('/api/auth/refresh/logout');
     expect(res.status).toBe(200);
   });
 });

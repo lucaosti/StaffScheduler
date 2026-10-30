@@ -169,7 +169,7 @@ describe('auth (real DB)', () => {
     expect(me.body.data.email).toBe(ADMIN_EMAIL);
     expect(me.body.data.permissions).toContain('assignment.manage');
 
-    const out = await request(app).post('/api/v1/auth/logout').set('Cookie', cookie);
+    const out = await request(app).post('/api/v1/auth/refresh/logout').set('Cookie', cookie);
     expect(out.status).toBe(200);
 
     const afterLogout = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
@@ -200,8 +200,18 @@ describe('auth (real DB)', () => {
     expect(secondRefresh).toBeDefined();
     expect(secondRefresh).not.toBe(firstRefresh);
 
-    // Replaying the now-spent first token is reuse: it is rejected AND revokes
+    // Replayed at once, the spent token is indistinguishable from a second tab
+    // refreshing concurrently (#820): answered 409, nothing issued or revoked.
+    const immediate = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
+    expect(immediate.status).toBe(409);
+    expect(immediate.body.error.code).toBe('REFRESH_SUPERSEDED');
+
+    // Past the grace window, replaying it is reuse: it is rejected AND revokes
     // the whole family, so the legitimately-rotated second token stops working.
+    await admin.query(
+      'UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 1 MINUTE WHERE user_id = ? AND revoked_at IS NOT NULL',
+      [userId]
+    );
     const reuse = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
     expect(reuse.status).toBe(401);
     expect(reuse.body.error.code).toBe('REFRESH_INVALID');
@@ -2422,5 +2432,240 @@ describe('user-management authority (#809, #810)', () => {
       .send({ csv: `email,firstName,lastName,role\n${csvEmail},O,K,Employee`, defaultPassword: 'Password1!' });
     expect(csv.status).toBe(200);
     expect(await roleNamesOf((await userByEmail(csvEmail))!)).toEqual(['Employee']);
+  });
+});
+
+// Session lifecycle against the real refresh_tokens table, with REAL cookie
+// handling: a supertest agent keeps a cookie jar that honours each cookie's
+// Path, exactly as a browser does. The earlier logout test set the Cookie
+// header by hand, sending the refresh cookie to an endpoint a browser never
+// sends it to — which is how a logout that revoked nothing passed (#816).
+describe('session lifecycle (#816, #818, #820)', () => {
+  const LOGOUT = '/api/v1/auth/refresh/logout';
+  const REFRESH = '/api/v1/auth/refresh';
+  const PASSWORD = 'itest-session-1';
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  type Jar = { setCookie(cookie: string, domain: string, path: string): void };
+  const jarOf = (agent: ReturnType<typeof request.agent>): Jar => (agent as unknown as { jar: Jar }).jar;
+
+  const makeUser = async (): Promise<{ id: number; email: string }> => {
+    const email = `session-${tag()}@example.com`;
+    const [res] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, ?, 'Session', 'User', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    await admin.query(
+      `INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE name = 'Employee'`,
+      [res.insertId]
+    );
+    return { id: res.insertId, email };
+  };
+
+  /** The raw value of a cookie a response set, if it set one. */
+  const setCookieValue = (res: request.Response, name: string): string | undefined => {
+    const raw = res.headers['set-cookie'];
+    const all = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    return all
+      .map((c: string) => c.split(';')[0])
+      .find((c) => c.startsWith(`${name}=`))
+      ?.slice(name.length + 1);
+  };
+
+  /** Logs in through a cookie-jar agent; returns the agent and the refresh token it was given. */
+  const browserLogin = async (email: string) => {
+    const agent = request.agent(app);
+    const login = await agent.post('/api/v1/auth/login').send({ email, password: PASSWORD });
+    expect(login.status).toBe(200);
+    const refreshToken = setCookieValue(login, 'refresh_token');
+    expect(refreshToken).toBeDefined();
+    return { agent, refreshToken: refreshToken! };
+  };
+
+  // Presenting a captured token on /refresh by header is faithful: /refresh is
+  // the one path a browser does send the refresh cookie to. It models the
+  // token surviving somewhere the logout did not reach (another tab's jar, a
+  // copy an attacker took) — the case revocation exists for.
+  const refreshWith = (token: string) => request(app).post(REFRESH).set('Cookie', `refresh_token=${token}`);
+
+  const liveTokens = async (userId: number): Promise<number> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      'SELECT COUNT(*) AS n FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL',
+      [userId]
+    );
+    return Number(rows[0].n);
+  };
+
+  describe('logout revokes the refresh token', () => {
+    it('with a valid access token', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+
+      const out = await agent.post(LOGOUT);
+      expect(out.status).toBe(200);
+
+      expect((await agent.get('/api/v1/auth/verify')).status).toBe(401);
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('with an expired access token', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+      // The jar now holds an access token past its expiry — what a browser
+      // presents after the 15-minute window — next to the real refresh cookie.
+      const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
+      const { config } = require('../../config') as typeof import('../../config');
+      const expired = jwt.sign(
+        { userId: user.id, jti: `expired-${tag()}`, exp: Math.floor(Date.now() / 1000) - 60 },
+        config.jwt.secret
+      );
+      jarOf(agent).setCookie(`token=${expired}; Path=/`, '127.0.0.1', '/');
+
+      const out = await agent.post(LOGOUT);
+      expect(out.status).toBe(200);
+
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('for a native client presenting its tokens by value', async () => {
+      const user = await makeUser();
+      const login = await request(app)
+        .post('/api/v1/auth/login')
+        .set('X-Client-Type', 'mobile')
+        .send({ email: user.email, password: PASSWORD });
+      expect(login.status).toBe(200);
+      const { accessToken, refreshToken } = login.body.data as { accessToken: string; refreshToken: string };
+
+      // No cookies at all: a native WebView cannot rely on its jar.
+      const out = await request(app)
+        .post(LOGOUT)
+        .set('X-Client-Type', 'mobile')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ refreshToken });
+      expect(out.status).toBe(200);
+
+      const verify = await request(app).get('/api/v1/auth/verify').set('Authorization', `Bearer ${accessToken}`);
+      expect(verify.status).toBe(401);
+      const refresh = await request(app).post(REFRESH).set('X-Client-Type', 'mobile').send({ refreshToken });
+      expect(refresh.status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+  });
+
+  describe('changing the password or deactivating ends every session', () => {
+    it('an administrator resetting the password via /users', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/users/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ password: 'a-brand-new-password' });
+      expect(res.status).toBe(200);
+
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('an administrator resetting the password via /employees', async () => {
+      const user = await makeUser();
+      const { agent } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/employees/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ password: 'a-brand-new-password' });
+      expect(res.status).toBe(200);
+
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('deactivating the account, so reactivating it does not resurrect the old session', async () => {
+      const user = await makeUser();
+      const { refreshToken } = await browserLogin(user.email);
+      const cookie = await authCookie();
+      const off = await request(app).put(`/api/v1/users/${user.id}`).set('Cookie', cookie).send({ isActive: false });
+      expect(off.status).toBe(200);
+      expect(await liveTokens(user.id)).toBe(0);
+
+      const on = await request(app).put(`/api/v1/users/${user.id}`).set('Cookie', cookie).send({ isActive: true });
+      expect(on.status).toBe(200);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+    });
+
+    it('deleting (soft-deleting) the account', async () => {
+      const user = await makeUser();
+      await browserLogin(user.email);
+      const del = await request(app).delete(`/api/v1/users/${user.id}`).set('Cookie', await authCookie());
+      expect(del.status).toBe(200);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('leaves sessions alone on an edit that changes neither', async () => {
+      const user = await makeUser();
+      const { agent } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/users/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ firstName: 'Renamed' });
+      expect(res.status).toBe(200);
+      expect((await agent.post(REFRESH)).status).toBe(200);
+    });
+  });
+
+  describe('concurrent rotation of one refresh token', () => {
+    const service = () => {
+      const { RefreshTokenService } = require('../../services/RefreshTokenService') as typeof import('../../services/RefreshTokenService');
+      const { database } = require('../../config/database');
+      return new RefreshTokenService(database.getPool());
+    };
+
+    it('lets exactly one of two parallel rotate() calls succeed, without forking the family', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+
+      const results = await Promise.all([tokens.rotate(token), tokens.rotate(token)]);
+
+      expect(results.filter((r) => r.status === 'rotated')).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'superseded')).toHaveLength(1);
+      // One live token in the family — the winner's successor — not two.
+      expect(await liveTokens(user.id)).toBe(1);
+    });
+
+    it('answers the loser of a parallel HTTP refresh with 409 and leaves the winner usable', async () => {
+      const user = await makeUser();
+      const { refreshToken } = await browserLogin(user.email);
+
+      const [a, b] = await Promise.all([refreshWith(refreshToken), refreshWith(refreshToken)]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      const loser = a.status === 409 ? a : b;
+      const winner = a.status === 200 ? a : b;
+      expect(loser.body.error.code).toBe('REFRESH_SUPERSEDED');
+      // The loser must not clear the cookie: in a browser the jar is shared,
+      // and it may already hold the winner's successor.
+      expect(setCookieValue(loser, 'refresh_token')).toBeUndefined();
+
+      const successor = setCookieValue(winner, 'refresh_token')!;
+      expect((await refreshWith(successor)).status).toBe(200);
+    });
+
+    it('still treats a replay outside the grace window as reuse and revokes the family', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+      expect((await tokens.rotate(token)).status).toBe('rotated');
+      await admin.query(
+        'UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 1 MINUTE WHERE user_id = ? AND revoked_at IS NOT NULL',
+        [user.id]
+      );
+
+      expect((await tokens.rotate(token)).status).toBe('invalid');
+      expect(await liveTokens(user.id)).toBe(0);
+    });
   });
 });

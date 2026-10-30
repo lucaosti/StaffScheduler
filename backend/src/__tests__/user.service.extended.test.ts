@@ -16,8 +16,10 @@
 
 import bcrypt from 'bcrypt';
 import { UserService } from '../services/UserService';
+import { invalidateAuthContext } from '../services/cacheStore';
 
 jest.mock('bcrypt');
+jest.mock('../services/cacheStore', () => ({ invalidateAuthContext: jest.fn() }));
 
 type Tuple = [unknown, unknown];
 
@@ -227,6 +229,69 @@ describe('UserService.deleteUser', () => {
     const svc = new UserService(pool);
     await expect(svc.deleteUser(1)).rejects.toThrow(/boom/);
     expect(conn.rollback).toHaveBeenCalled();
+  });
+});
+
+describe('UserService ends sessions on a credential or activation change (#818)', () => {
+  const REVOKE_ALL = /UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP\s+WHERE user_id = \? AND revoked_at IS NULL/;
+
+  beforeEach(() => {
+    (bcrypt.hash as jest.Mock).mockResolvedValue('hashed');
+    (invalidateAuthContext as jest.Mock).mockClear();
+  });
+
+  /** The order the transaction's statements and the cache invalidation happened in. */
+  const timeline = (conn: { execute: jest.Mock; commit: jest.Mock }) => {
+    const events: string[] = [];
+    conn.execute.mockImplementation(async (sql: string) => {
+      events.push(REVOKE_ALL.test(sql) ? 'revoke' : 'sql');
+      return [{ affectedRows: 1 }, null];
+    });
+    conn.commit.mockImplementation(async () => { events.push('commit'); });
+    (invalidateAuthContext as jest.Mock).mockImplementation(async () => { events.push('invalidate'); });
+    return events;
+  };
+
+  const mockFetch = (execute: jest.Mock) =>
+    execute
+      .mockResolvedValueOnce([[userRow], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+
+  it.each([
+    ['a password change', { password: 'new-password' }],
+    ['a deactivation', { isActive: false }],
+  ])('revokes every refresh token inside the transaction on %s, then drops the cached context', async (_label, change) => {
+    const { pool, conn, execute } = makePool();
+    const events = timeline(conn);
+    mockFetch(execute);
+
+    await new UserService(pool).updateUser(1, change as never);
+
+    expect(conn.execute.mock.calls.find(([sql]) => REVOKE_ALL.test(sql))?.[1]).toEqual([1]);
+    expect(events).toEqual(['sql', 'revoke', 'commit', 'invalidate']);
+  });
+
+  it.each([
+    ['a profile edit', { firstName: 'X' }],
+    ['a reactivation', { isActive: true }],
+  ])('leaves sessions alone on %s', async (_label, change) => {
+    const { pool, conn, execute } = makePool();
+    const events = timeline(conn);
+    mockFetch(execute);
+
+    await new UserService(pool).updateUser(1, change as never);
+
+    expect(events).toEqual(['sql', 'commit']);
+  });
+
+  it('revokes every refresh token when the account is deleted', async () => {
+    const { pool, conn } = makePool();
+    const events = timeline(conn);
+
+    await new UserService(pool).deleteUser(1);
+
+    expect(events).toEqual(['sql', 'sql', 'revoke', 'commit', 'invalidate']);
   });
 });
 

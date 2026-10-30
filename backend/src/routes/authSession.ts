@@ -35,6 +35,15 @@ const MOBILE_CLIENT_VALUE = 'mobile';
 export const isMobileClient = (req: Request): boolean =>
   req.header(MOBILE_CLIENT_HEADER)?.toLowerCase() === MOBILE_CLIENT_VALUE;
 
+/**
+ * The refresh token a request to the refresh path presents: the cookie, else
+ * — for a mobile client only — `refreshToken` from the validated body. Shared
+ * by `/refresh` and `/refresh/logout` so both read it identically; a web
+ * request's body is never consulted.
+ */
+export const presentedRefreshToken = (req: Request, bodyToken: string | undefined): string | undefined =>
+  (req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined) ?? (isMobileClient(req) ? bodyToken : undefined);
+
 // Shared cookie hardening for both the access and refresh cookies.
 const BASE_COOKIE_OPTIONS = {
   httpOnly: true,
@@ -69,6 +78,11 @@ const JWT_COOKIE_OPTIONS = {
 // Deriving it rather than widening it to `/api` is the point: a wide path
 // would attach the long-lived refresh token to EVERY api call, which is
 // exactly the exposure the narrow scope exists to prevent.
+//
+// The same reasoning places logout at `<prefix>/auth/refresh/logout` (#816):
+// a browser sends the cookie to every path BENEATH its path, so logout is the
+// one other endpoint that receives it, and can revoke the session it names.
+// At `/auth/logout` it never received the cookie and revoked nothing.
 export const refreshCookieOptions = (req: Request) => ({
   ...BASE_COOKIE_OPTIONS,
   // Inside the auth router `req.baseUrl` is `/api/v1/auth` — the only prefix

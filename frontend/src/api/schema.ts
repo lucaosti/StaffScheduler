@@ -1418,55 +1418,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/auth/logout": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Logout
-         * @description Informational endpoint. With JWT-based auth, logout is primarily client-side: the client drops the token from storage. The server responds with success without invalidating the token server-side (no revocation store). See security backlog item B001 for token blacklisting.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Logout acknowledged. */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        /**
-                         * @example {
-                         *       "success": true,
-                         *       "message": "Logged out successfully"
-                         *     }
-                         */
-                        "application/json": {
-                            success?: boolean;
-                            message?: string;
-                        };
-                    };
-                };
-                401: components["responses"]["Unauthorized"];
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/auth/refresh": {
         parameters: {
             query?: never;
@@ -1478,7 +1429,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh token
-         * @description Issues a new JWT for an already-authenticated user. The caller must hold a currently-valid token; this endpoint does not accept expired tokens.
+         * @description Rotates the refresh token and issues a fresh access token. Not behind access-token authentication: it works precisely when the access token has expired. The refresh token is read from the path-scoped `refresh_token` cookie, or — only with `X-Client-Type: mobile` and no cookie — from `refreshToken` in the body. A token presented again within seconds of being rotated (a concurrent refresh from another tab) is answered 409 `REFRESH_SUPERSEDED` without clearing cookies, and the client retries; any later replay is reuse and revokes the token's whole family.
          */
         post: {
             parameters: {
@@ -1511,6 +1462,67 @@ export interface paths {
                     };
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description The refresh token was rotated by a concurrent refresh moments ago (`REFRESH_SUPERSEDED`). Cookies are left untouched; retry once with the current refresh token. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/refresh/logout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Logout
+         * @description Ends the session server-side: revokes the presented refresh token's whole family and blacklists the access token if it is still valid, then clears both cookies. Lives beneath `/auth/refresh` because that is the only path family the path-scoped `refresh_token` cookie is sent to, and is not behind access-token authentication, so logging out works after the access token has expired. A native client (`X-Client-Type: mobile`) without the cookie passes `refreshToken` in the body. Always succeeds, so the client can complete its local logout.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": {
+                        refreshToken?: string;
+                    };
+                };
+            };
+            responses: {
+                /** @description Logged out. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        /**
+                         * @example {
+                         *       "success": true,
+                         *       "message": "Logged out successfully"
+                         *     }
+                         */
+                        "application/json": {
+                            success?: boolean;
+                            message?: string;
+                        };
+                    };
+                };
             };
         };
         delete?: never;

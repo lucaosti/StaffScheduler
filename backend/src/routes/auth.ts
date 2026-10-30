@@ -24,7 +24,7 @@ import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { RefreshTokenService } from '../services/RefreshTokenService';
-import { authenticate, addToBlacklist } from '../middleware/auth';
+import { authenticate, revokePresentedAccessToken } from '../middleware/auth';
 import { createLoginLimiter } from '../middleware/rateLimit';
 import { validateBody } from '../middleware/validation';
 import { loginBody, refreshBody, twoFactorLoginChallengeBody } from '../schemas';
@@ -34,6 +34,7 @@ import {
   JWT_COOKIE_NAME,
   REFRESH_COOKIE_NAME,
   isMobileClient,
+  presentedRefreshToken,
   clearRefreshCookie,
   refreshCookieOptions,
   createSessionCookies,
@@ -281,14 +282,14 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
  *                                   `X-Client-Type: mobile` is present and the cookie is absent
  * @returns {Object} `{ success, data: { user } }`, plus `accessToken`/`refreshToken` in
  *          `data` when the mobile-client signal is present; 401 with a cleared
- *          cookie when the refresh token is missing, expired, revoked or reused.
+ *          cookie when the refresh token is missing, expired, revoked or reused;
+ *          409 `REFRESH_SUPERSEDED`, cookies untouched, when a concurrent
+ *          refresh rotated it moments ago (see RefreshTokenService).
  */
 router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Response) => {
   const mobile = isMobileClient(req);
   const { refreshToken: bodyRefreshToken } = res.locals.body as { refreshToken?: string };
-  const presented =
-    (req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined) ??
-    (mobile ? bodyRefreshToken : undefined);
+  const presented = presentedRefreshToken(req, bodyRefreshToken);
   const clearAndReject = () => {
     clearRefreshCookie(req, res);
     res.clearCookie(JWT_COOKIE_NAME);
@@ -301,13 +302,25 @@ router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Res
   if (!presented) return clearAndReject();
 
   const rotated = await refreshTokens.rotate(presented);
-  if (!rotated) return clearAndReject();
+  if (rotated.status === 'superseded') {
+    // A concurrent refresh (another tab) rotated this token a moment ago. The
+    // cookies are deliberately NOT cleared: the browser's jar is shared
+    // between tabs and may already hold that refresh's successor, which a
+    // clear would destroy. The client retries once with what it now holds.
+    return res.status(409).json({
+      success: false,
+      error: { code: 'REFRESH_SUPERSEDED', message: 'Session was refreshed concurrently; retry' },
+    });
+  }
+  if (rotated.status === 'invalid') return clearAndReject();
 
   const user = await userService.getUserById(rotated.userId);
   if (!user || !user.isActive) {
     // The refresh token is valid but the account is gone/disabled: revoke the
     // whole family and reject, so a deactivated user cannot keep a session.
-    await refreshTokens.revoke(rotated.issued.token);
+    // Deactivation already revoked every token (#818); this is the backstop
+    // for an account disabled by any path that does not.
+    await refreshTokens.revokeFamilyOf(rotated.issued.token);
     return clearAndReject();
   }
 
@@ -336,29 +349,49 @@ router.post('/refresh', validateBody(refreshBody), async (req: Request, res: Res
 });
 
 /**
- * User logout endpoint.
+ * User logout endpoint — ends the session server-side.
  *
- * Blacklists the token's JTI so it is rejected on subsequent requests, then
- * clears the httpOnly cookie. The in-memory blacklist uses TTL-based expiry
- * (keyed to the token's own exp claim) so entries prune themselves automatically.
+ * Revokes the presented refresh token's whole family, so the session cannot
+ * be resurrected via /refresh, and blacklists the access token's JTI (TTL
+ * keyed to its own exp claim) so it is rejected on subsequent requests.
  *
- * @route      POST /api/auth/logout
- * @middleware authenticate
- * @returns    {Object} `{ success: true, message: "Logged out successfully" }`
+ * Why here, and why NOT behind `authenticate` (#816). At `/auth/logout`
+ * behind `authenticate` it revoked nothing in practice: the browser never
+ * sent it the refresh cookie (path-scoped to `/auth/refresh`), a native
+ * client sent no refresh token at all, and once the access token had expired
+ * it answered 401 before doing anything. Living beneath the cookie's path, it
+ * receives the cookie; reading the refresh token exactly as /refresh does, it
+ * serves the native client too; and the refresh token — not the access
+ * token — is the credential it acts on, so an expired access token no longer
+ * matters. Like /refresh, presenting the token is the authorisation: anyone
+ * who holds it could already use the session it ends.
+ *
+ * Alternatives rejected:
+ *  - widening the refresh cookie's path to `/auth` (or `/api`) so `/logout`
+ *    receives it: attaches the 30-day credential to every login, 2FA and
+ *    SSO call, the exposure the narrow path exists to prevent;
+ *  - a family id in the access token, revoked by an authenticated logout:
+ *    still fails once the access token has expired, the commonest moment to
+ *    log out after being away, and needs a token-payload change for it;
+ *  - setting a second copy of the refresh cookie on `/auth/logout`: two
+ *    cookies to keep in step on every rotation for no gain over a sub-path.
+ *
+ * Always 200 and always clears the cookies: the client must be able to finish
+ * its local logout whatever state the server-side session was in.
+ *
+ * @route   POST /api/v1/auth/refresh/logout
+ * @cookie  refresh_token       the session to end (web)
+ * @body    {string} [refreshToken]  the session to end — consulted only when
+ *                                   `X-Client-Type: mobile` is present and the cookie is absent
+ * @returns {Object} `{ success: true, message: "Logged out successfully" }`
  */
-router.post('/logout', authenticate, async (req: Request, res: Response) => {
-  // Await the revocation before confirming logout: the access token must be
-  // blacklisted (in shared Redis) by the time the client is told it is logged
-  // out, so an immediate replay on any instance is already rejected.
-  if (req.tokenJti) {
-    await addToBlacklist(req.tokenJti, req.tokenExp);
-  }
-  // Revoke the refresh token too, so the session cannot be resurrected via
-  // /refresh after logout. Best-effort: absence of the cookie is a no-op.
-  const presentedRefresh = req.cookies?.[REFRESH_COOKIE_NAME] as string | undefined;
-  if (presentedRefresh) {
-    await refreshTokens.revoke(presentedRefresh);
-  }
+router.post('/refresh/logout', validateBody(refreshBody), async (req: Request, res: Response) => {
+  const { refreshToken: bodyRefreshToken } = res.locals.body as { refreshToken?: string };
+  const presented = presentedRefreshToken(req, bodyRefreshToken);
+  // Both awaited before confirming: by the time the client is told it is
+  // logged out, neither token works on any instance.
+  if (presented) await refreshTokens.revokeFamilyOf(presented);
+  await revokePresentedAccessToken(req);
   res.clearCookie(JWT_COOKIE_NAME);
   clearRefreshCookie(req, res);
   res.json({

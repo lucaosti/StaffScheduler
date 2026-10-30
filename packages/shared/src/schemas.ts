@@ -1080,7 +1080,8 @@ export const loginBody = z.object({
 });
 
 /**
- * Body for `POST /auth/refresh`. Every field is optional because the web
+ * Body for `POST /auth/refresh` and `POST /auth/refresh/logout`, which read
+ * the refresh token the same way. Every field is optional because the web
  * client sends none of them: its refresh token travels solely via the
  * path-scoped httpOnly cookie, exactly as before this endpoint accepted a
  * body at all. `refreshToken` is only consulted when the request also

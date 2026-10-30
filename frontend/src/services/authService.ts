@@ -16,7 +16,8 @@
  * `isNativePlatform()` and, only when true, send `X-Client-Type: mobile` and
  * persist the token values the backend's mobile-client response mode then
  * includes in the body (see `backend/src/routes/auth.ts` and
- * `mobileAuthStorage.ts` for why). On the ordinary web platform neither
+ * `mobileAuthStorage.ts` for why); `logout` likewise sends the stored refresh
+ * token so the server can revoke it. On the ordinary web platform neither
  * branch runs: no extra header is sent, no token is read from the response
  * body, and behavior is exactly what it was before mobile support existed.
  *
@@ -25,7 +26,7 @@
 
 import { ApiResponse, LoginRequest, LoginResponse, User } from '../types';
 import { apiClient } from '../api/client';
-import { API_BASE_URL, getAuthHeaders } from './apiUtils';
+import { API_BASE_URL, ApiError, getAuthHeaders } from './apiUtils';
 import {
   MOBILE_CLIENT_HEADER,
   MOBILE_CLIENT_VALUE,
@@ -77,30 +78,52 @@ export const verifyToken = (): Promise<ApiResponse<User>> =>
  * in-memory cache `loadCachedTokens` populates at startup, is sent in the
  * body as a fallback source for a WebView that may not have the cookie.
  */
-export const refreshToken = async (): Promise<ApiResponse<LoginResponse>> => {
-  const native = isNativePlatform();
-  const response = await apiClient.post<LoginResponse, '/auth/refresh'>(
+const postRefresh = (): Promise<ApiResponse<LoginResponse>> =>
+  apiClient.post<LoginResponse, '/auth/refresh'>(
     '/auth/refresh',
-    native ? { refreshToken: getCachedRefreshToken() ?? undefined } : undefined,
+    isNativePlatform() ? { refreshToken: getCachedRefreshToken() ?? undefined } : undefined,
     { headers: clientTypeHeaders() }
   );
+
+/**
+ * One retry on `REFRESH_SUPERSEDED`: the server answers that when another
+ * tab's refresh rotated the same token a moment earlier. The cookie jar is
+ * shared, so by now it holds that refresh's successor (and on native the
+ * cache does), and a second attempt — rebuilt, so it reads the current token
+ * — succeeds. Only once: a second supersession is not a race worth chasing.
+ */
+export const refreshToken = async (): Promise<ApiResponse<LoginResponse>> => {
+  let response: ApiResponse<LoginResponse>;
+  try {
+    response = await postRefresh();
+  } catch (error) {
+    if (!(error instanceof ApiError && error.code === 'REFRESH_SUPERSEDED')) throw error;
+    response = await postRefresh();
+  }
   if (response.success && response.data) await persistMobileTokens(response.data);
   return response;
 };
 
 /**
- * Logout is intentionally fire-and-forget: the server clears the cookie and
- * blacklists the token, but the client should complete its local logout even
+ * Logout is intentionally fire-and-forget: the server revokes the session and
+ * clears the cookies, but the client should complete its local logout even
  * if that request fails, so this does not go through the throwing client.
+ *
+ * The endpoint sits beneath `/auth/refresh` so the browser sends it the
+ * path-scoped refresh cookie — the credential it revokes. The native client
+ * has no reliable cookie jar, so it sends its stored refresh token in the
+ * body instead, with the mobile signal that tells the server to read it.
  *
  * On the native platform the stored tokens are cleared regardless of whether
  * the network call succeeds — the device should forget the session either way.
  */
 export const logout = async (): Promise<void> => {
+  const native = isNativePlatform();
   try {
-    await fetch(`${API_BASE_URL}/auth/logout`, {
+    await fetch(`${API_BASE_URL}/auth/refresh/logout`, {
       method: 'POST',
-      ...getAuthHeaders(),
+      ...getAuthHeaders(clientTypeHeaders()),
+      ...(native ? { body: JSON.stringify({ refreshToken: getCachedRefreshToken() ?? undefined }) } : {}),
     });
   } finally {
     if (isNativePlatform()) await clearTokens();

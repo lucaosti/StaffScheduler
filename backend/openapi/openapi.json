@@ -3125,59 +3125,14 @@
         }
       }
     },
-    "/auth/logout": {
-      "post": {
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Logout",
-        "description": "Informational endpoint. With JWT-based auth, logout is primarily client-side: the client drops the token from storage. The server responds with success without invalidating the token server-side (no revocation store). See security backlog item B001 for token blacklisting.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Logout acknowledged.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "success": true,
-                  "message": "Logged out successfully"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
-        }
-      }
-    },
     "/auth/refresh": {
       "post": {
         "tags": [
           "Auth"
         ],
         "summary": "Refresh token",
-        "description": "Issues a new JWT for an already-authenticated user. The caller must hold a currently-valid token; this endpoint does not accept expired tokens.",
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
+        "description": "Rotates the refresh token and issues a fresh access token. Not behind access-token authentication: it works precisely when the access token has expired. The refresh token is read from the path-scoped `refresh_token` cookie, or — only with `X-Client-Type: mobile` and no cookie — from `refreshToken` in the body. A token presented again within seconds of being rotated (a concurrent refresh from another tab) is answered 409 `REFRESH_SUPERSEDED` without clearing cookies, and the client retries; any later replay is reuse and revokes the token's whole family.",
+        "security": [],
         "responses": {
           "200": {
             "description": "New token issued.",
@@ -3207,6 +3162,59 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The refresh token was rotated by a concurrent refresh moments ago (`REFRESH_SUPERSEDED`). Cookies are left untouched; retry once with the current refresh token."
+          }
+        },
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/refresh/logout": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout",
+        "description": "Ends the session server-side: revokes the presented refresh token's whole family and blacklists the access token if it is still valid, then clears both cookies. Lives beneath `/auth/refresh` because that is the only path family the path-scoped `refresh_token` cookie is sent to, and is not behind access-token authentication, so logging out works after the access token has expired. A native client (`X-Client-Type: mobile`) without the cookie passes `refreshToken` in the body. Always succeeds, so the client can complete its local logout.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Logged out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "success": true,
+                  "message": "Logged out successfully"
+                }
+              }
+            }
           }
         },
         "requestBody": {

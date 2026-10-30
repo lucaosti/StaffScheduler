@@ -24,13 +24,13 @@ import request from 'supertest';
 export {};
 
 const issue = jest.fn();
-const revoke = jest.fn();
+const revokeFamilyOf = jest.fn();
 const rotate = jest.fn();
 
 jest.mock('../services/RefreshTokenService', () => ({
   RefreshTokenService: jest.fn().mockImplementation(() => ({
     issue,
-    revoke,
+    revokeFamilyOf,
     rotate,
   })),
 }));
@@ -40,6 +40,7 @@ jest.mock('../middleware/auth', () => ({
     (req as unknown as { user: unknown }).user = { id: 1, email: 'a@b.c', permissions: [] };
     next();
   },
+  revokePresentedAccessToken: jest.fn(),
   requirePermission: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   userHasPermission: () => true,
   invalidateAuthContext: jest.fn(),
@@ -68,14 +69,14 @@ const refreshCookiePath = (res: request.Response): string | undefined => {
 
 beforeEach(() => {
   issue.mockReset().mockResolvedValue({ token: 'fresh-token' });
-  revoke.mockReset().mockResolvedValue(undefined);
-  rotate.mockReset().mockResolvedValue(null);
+  revokeFamilyOf.mockReset().mockResolvedValue(undefined);
+  rotate.mockReset().mockResolvedValue({ status: 'invalid' });
 });
 
 describe('the refresh cookie path', () => {
   it('is scoped to the canonical prefix when the request arrives there', async () => {
     const res = await request(mountCanonicalPrefix())
-      .post('/api/v1/auth/logout')
+      .post('/api/v1/auth/refresh/logout')
       .set('Cookie', 'refresh_token=old');
 
     expect(res.status).toBe(200);
@@ -90,7 +91,7 @@ describe('the refresh cookie path', () => {
 
   it('also clears the legacy hardcoded path, as one-time migration hygiene', async () => {
     const res = await request(mountCanonicalPrefix())
-      .post('/api/v1/auth/logout')
+      .post('/api/v1/auth/refresh/logout')
       .set('Cookie', 'refresh_token=old');
 
     const cleared = (res.headers['set-cookie'] as unknown as string[]).filter((c) =>
@@ -104,10 +105,10 @@ describe('the refresh cookie path', () => {
 
   it('revokes the presented token server-side', async () => {
     await request(mountCanonicalPrefix())
-      .post('/api/v1/auth/logout')
+      .post('/api/v1/auth/refresh/logout')
       .set('Cookie', 'refresh_token=old');
 
-    expect(revoke).toHaveBeenCalledWith('old');
+    expect(revokeFamilyOf).toHaveBeenCalledWith('old');
   });
 
   it('rejects a refresh with no cookie on the canonical prefix', async () => {

@@ -3,20 +3,31 @@
  * whole session-security model rests on.
  *
  * The pool is mocked, so these pin the exact SQL decisions rather than DB
- * behaviour: a valid token rotates (old revoked + linked to successor, new
- * issued in the same family); an already-revoked token triggers a family-wide
- * revocation (reuse response); an unknown or expired token yields null. The
- * raw token is asserted to never equal its stored hash.
+ * behaviour: a valid token is claimed first and only then rotated (successor
+ * in the same family, linked to its predecessor); a token another rotation
+ * claimed moments ago is `superseded`; an older spent token triggers a
+ * family-wide revocation (reuse response); an unknown or expired token is
+ * `invalid`. The raw token is asserted to never equal its stored hash. The
+ * real concurrency — two claims racing on one row lock — is exercised against
+ * MySQL in the integration suite.
  */
 
 import { createHash } from 'crypto';
-import { RefreshTokenService } from '../services/RefreshTokenService';
+import { RefreshTokenService, CONCURRENT_REFRESH_GRACE_SECONDS } from '../services/RefreshTokenService';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 const makePool = () => {
   const execute = jest.fn();
-  return { pool: { execute } as never, execute };
+  const conn = {
+    execute: jest.fn(),
+    beginTransaction: jest.fn().mockResolvedValue(undefined),
+    commit: jest.fn().mockResolvedValue(undefined),
+    rollback: jest.fn().mockResolvedValue(undefined),
+    release: jest.fn(),
+  };
+  const getConnection = jest.fn().mockResolvedValue(conn);
+  return { pool: { execute, getConnection } as never, execute, conn };
 };
 
 describe('RefreshTokenService.issue', () => {
@@ -37,68 +48,102 @@ describe('RefreshTokenService.issue', () => {
 });
 
 describe('RefreshTokenService.rotate', () => {
-  const validRow = {
-    id: 10,
-    user_id: 7,
-    family_id: 'fam-1',
-    expires_at: new Date(Date.now() + 60_000),
-    revoked_at: null,
-  };
+  const row = { id: 10, user_id: 7, family_id: 'fam-1', revoked: 0, within_grace: null };
 
-  it('returns null for an unknown token', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[], null]); // lookup: none
-    await expect(new RefreshTokenService(pool).rotate('nope')).resolves.toBeNull();
-  });
-
-  it('returns null and revokes the family when a spent token is replayed', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[{ ...validRow, revoked_at: new Date() }], null]) // already revoked
-      .mockResolvedValueOnce([{ affectedRows: 2 }, null]); // revokeFamily UPDATE
-
-    const result = await new RefreshTokenService(pool).rotate('replayed');
-
-    expect(result).toBeNull();
-    const familyRevoke = execute.mock.calls[1];
-    expect(familyRevoke[0]).toMatch(/UPDATE refresh_tokens SET revoked_at.*family_id = \?/s);
-    expect(familyRevoke[1]).toEqual(['fam-1']);
-  });
-
-  it('returns null for an expired token', async () => {
-    const { pool, execute } = makePool();
-    execute.mockResolvedValueOnce([[{ ...validRow, expires_at: new Date(Date.now() - 1) }], null]);
-    await expect(new RefreshTokenService(pool).rotate('expired')).resolves.toBeNull();
-  });
-
-  it('rotates a valid token: issues a successor in the same family and revokes the old', async () => {
-    const { pool, execute } = makePool();
-    execute
-      .mockResolvedValueOnce([[validRow], null]) // lookup
-      .mockResolvedValueOnce([{ insertId: 11 }, null]) // create successor INSERT
-      .mockResolvedValueOnce([[{ id: 11 }], null]) // successor id lookup
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // revoke old + link
+  it('claims before it issues, then links the successor, all in one transaction', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // claim
+      .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 0 }], null]) // locking read
+      .mockResolvedValueOnce([{ insertId: 11 }, null]) // successor INSERT
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // link
 
     const result = await new RefreshTokenService(pool).rotate('current');
 
-    expect(result).not.toBeNull();
-    expect(result!.userId).toBe(7);
-    expect(typeof result!.issued.token).toBe('string');
-    // The successor is created in the SAME family as the presented token.
-    expect(execute.mock.calls[1][1][1]).toBe('fam-1');
-    // The old row is revoked and linked to its replacement (id 11).
-    const revoke = execute.mock.calls[3];
-    expect(revoke[0]).toMatch(/revoked_at = CURRENT_TIMESTAMP, replaced_by = \?/);
-    expect(revoke[1]).toEqual([11, 10]);
+    expect(result.status).toBe('rotated');
+    if (result.status !== 'rotated') throw new Error('unreachable');
+    expect(result.userId).toBe(7);
+    expect(typeof result.issued.token).toBe('string');
+    const [claimSql, claimParams] = conn.execute.mock.calls[0];
+    expect(claimSql).toMatch(/UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP\s+WHERE token_hash = \? AND revoked_at IS NULL AND expires_at > \?/);
+    expect(claimParams[0]).toBe(sha256('current'));
+    expect(conn.execute.mock.calls[1][0]).toMatch(/FOR UPDATE/);
+    expect(conn.execute.mock.calls[1][1]).toEqual([CONCURRENT_REFRESH_GRACE_SECONDS, sha256('current')]);
+    // The successor is created in the SAME family, on the transaction's connection.
+    expect(conn.execute.mock.calls[2][1][1]).toBe('fam-1');
+    expect(conn.execute.mock.calls[3]).toEqual(['UPDATE refresh_tokens SET replaced_by = ? WHERE id = ?', [11, 10]]);
+    expect(conn.commit).toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('is invalid for an unknown token', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]).mockResolvedValueOnce([[], null]);
+    await expect(new RefreshTokenService(pool).rotate('nope')).resolves.toEqual({ status: 'invalid' });
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('is invalid, and revokes nothing, for an expired token that was never spent', async () => {
+    const { pool, conn } = makePool();
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]).mockResolvedValueOnce([[row], null]);
+    await expect(new RefreshTokenService(pool).rotate('expired')).resolves.toEqual({ status: 'invalid' });
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('is superseded, issuing and revoking nothing, when another rotation claimed it moments ago', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 1 }], null]);
+    await expect(new RefreshTokenService(pool).rotate('raced')).resolves.toEqual({ status: 'superseded' });
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('is invalid and revokes the family when a token spent outside the grace window is replayed', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 0 }], null])
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null]); // revokeFamily UPDATE
+
+    await expect(new RefreshTokenService(pool).rotate('replayed')).resolves.toEqual({ status: 'invalid' });
+
+    const familyRevoke = conn.execute.mock.calls[2];
+    expect(familyRevoke[0]).toMatch(/UPDATE refresh_tokens SET revoked_at.*family_id = \?/s);
+    expect(familyRevoke[1]).toEqual(['fam-1']);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('rolls back the claim and rethrows when issuing the successor fails', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[row], null])
+      .mockRejectedValueOnce(new Error('insert failed'));
+
+    await expect(new RefreshTokenService(pool).rotate('current')).rejects.toThrow('insert failed');
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
   });
 });
 
 describe('RefreshTokenService revocation helpers', () => {
-  it('revoke hashes the presented token', async () => {
+  it('revokeFamilyOf revokes the family the presented token belongs to', async () => {
     const { pool, execute } = makePool();
-    execute.mockResolvedValue([{ affectedRows: 1 }, null]);
-    await new RefreshTokenService(pool).revoke('tok');
+    execute.mockResolvedValueOnce([[{ family_id: 'fam-9' }], null]).mockResolvedValueOnce([{ affectedRows: 2 }, null]);
+    await new RefreshTokenService(pool).revokeFamilyOf('tok');
     expect(execute.mock.calls[0][1]).toEqual([sha256('tok')]);
+    expect(execute.mock.calls[1][0]).toMatch(/family_id = \? AND revoked_at IS NULL/);
+    expect(execute.mock.calls[1][1]).toEqual(['fam-9']);
+  });
+
+  it('revokeFamilyOf is silent for an unknown token', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null]);
+    await expect(new RefreshTokenService(pool).revokeFamilyOf('unknown')).resolves.toBeUndefined();
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('revokeAllForUser revokes every active token for the user', async () => {
@@ -107,6 +152,14 @@ describe('RefreshTokenService revocation helpers', () => {
     await new RefreshTokenService(pool).revokeAllForUser(7);
     expect(execute.mock.calls[0][0]).toMatch(/user_id = \? AND revoked_at IS NULL/);
     expect(execute.mock.calls[0][1]).toEqual([7]);
+  });
+
+  it('revokeAllForUser runs on the executor it is given, so it can join a transaction', async () => {
+    const { pool, execute } = makePool();
+    const connection = { execute: jest.fn().mockResolvedValue([{ affectedRows: 1 }, null]) };
+    await new RefreshTokenService(pool).revokeAllForUser(7, connection as never);
+    expect(connection.execute).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('pruneExpired deletes expired and long-revoked rows and returns the count', async () => {
