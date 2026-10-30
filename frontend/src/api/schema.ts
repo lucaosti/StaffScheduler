@@ -2445,6 +2445,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/delegations/delegable-for-unit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Codes a delegation scoped to one org unit may carry
+         * @description The permission codes a unit can bound. A delegation with `scopeOrgUnitId` set may carry only these; any other code acts organization-wide and is refused (422 DELEGATION_INVALID). The same list for every caller.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description `data.permissionCodes`: the codes, sorted. */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            data?: {
+                                permissionCodes: string[];
+                            };
+                        };
+                    };
+                };
+                401: components["responses"]["Unauthorized"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/delegations/{id}": {
         parameters: {
             query?: never;

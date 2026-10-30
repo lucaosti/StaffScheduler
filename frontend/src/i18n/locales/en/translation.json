@@ -440,6 +440,8 @@
   "delegations.revoking": "Revoking…",
   "delegations.validation.delegateeRequired": "Delegatee user ID is required.",
   "delegations.validation.permissionRequired": "At least one permission code is required.",
+  "delegations.validation.notDelegableForUnit": "{{code}} acts organization-wide and cannot be delegated for one org unit.",
+  "delegations.form.unitScopeHint": "Delegated for one org unit, only these codes can be passed on: {{codes}}.",
   "delegations.validation.expiryRequired": "Expiry date/time is required.",
   "changeRequests.title": "Change Requests",
   "changeRequests.subtitle": "Propose changes that appear as manager decisions when approved",

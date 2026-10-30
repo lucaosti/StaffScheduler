@@ -5,13 +5,18 @@
  * a bounded time window. All active delegations are visible here. Revoking
  * a delegation marks it inactive in the audit trail.
  *
+ * A delegation scoped to one org unit may carry only the codes a unit can
+ * bound; the server refuses the rest (422). The form reads that list from the
+ * server and, while a unit is set, offers only those codes and says so — so
+ * the refusal is explained before submitting rather than after.
+ *
  * @author Luca Ostinelli
  */
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Delegation, CreateDelegationBody } from '../../services/delegationService';
-import { useDelegationsQuery, useDelegationMutations } from '../../hooks/useDelegations';
+import { useDelegationsQuery, useDelegationMutations, useUnitDelegableCodesQuery } from '../../hooks/useDelegations';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 import ButtonSpinner from '../../components/ButtonSpinner';
@@ -34,6 +39,7 @@ const Delegations: React.FC = () => {
     ? (delegationsQuery.error as Error).message ?? t('delegations.loadFailed')
     : null;
   const { create, revoke } = useDelegationMutations();
+  const unitDelegable = useUnitDelegableCodesQuery().data ?? [];
 
   // Create modal
   const [showCreate, setShowCreate] = useState(false);
@@ -47,9 +53,15 @@ const Delegations: React.FC = () => {
 
   // ---------- Create ----------
 
+  const scopedToUnit = form.scopeOrgUnitId != null;
+  /** The first chosen code a unit-scoped delegation may not carry, if any. */
+  const firstUnbounded = (codes: string[]) => (scopedToUnit ? codes.find((c) => !unitDelegable.includes(c)) : undefined);
+
   const addPermission = () => {
     const code = form.permissionInput.trim();
     if (!code || form.permissionCodes.includes(code)) return;
+    if (firstUnbounded([code])) { setCreateError(t('delegations.validation.notDelegableForUnit', { code })); return; }
+    setCreateError(null);
     setForm((f) => ({ ...f, permissionCodes: [...f.permissionCodes, code], permissionInput: '' }));
   };
 
@@ -61,6 +73,9 @@ const Delegations: React.FC = () => {
     if (!form.delegateeId || form.delegateeId <= 0) { setCreateError(t('delegations.validation.delegateeRequired')); return; }
     if (form.permissionCodes.length === 0) { setCreateError(t('delegations.validation.permissionRequired')); return; }
     if (!form.expiresAt) { setCreateError(t('delegations.validation.expiryRequired')); return; }
+    // Codes chosen before a unit was set are checked again here.
+    const unbounded = firstUnbounded(form.permissionCodes);
+    if (unbounded) { setCreateError(t('delegations.validation.notDelegableForUnit', { code: unbounded })); return; }
 
     setCreateError(null);
     try {
@@ -234,7 +249,13 @@ const Delegations: React.FC = () => {
                         onChange={(e) => setForm((f) => ({ ...f, permissionInput: e.target.value }))}
                         onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addPermission(); } }}
                         aria-label={t('delegations.form.permissionCodeInputAriaLabel')}
+                        list={scopedToUnit ? 'delegUnitDelegableCodes' : undefined}
                       />
+                      {scopedToUnit && (
+                        <datalist id="delegUnitDelegableCodes">
+                          {unitDelegable.map((code) => <option key={code} value={code} />)}
+                        </datalist>
+                      )}
                       <button className="btn btn-outline-secondary" type="button" onClick={addPermission} aria-label={t('delegations.form.addPermissionAriaLabel')}>
                         {t('delegations.form.add')}
                       </button>
@@ -270,6 +291,11 @@ const Delegations: React.FC = () => {
                         scopeOrgUnitId: e.target.value ? Number(e.target.value) : null,
                       }))}
                     />
+                    {scopedToUnit && (
+                      <div className="form-text" data-testid="unit-scope-hint">
+                        {t('delegations.form.unitScopeHint', { codes: unitDelegable.join(', ') })}
+                      </div>
+                    )}
                   </div>
                   <div className="col-12">
                     <label htmlFor="delegJustification" className="form-label">{t('delegations.form.justification')} <span className="text-muted small">{t('delegations.form.optional')}</span></label>

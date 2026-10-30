@@ -11,6 +11,7 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { DelegationService } from '../services/DelegationService';
+import { UNIT_SCOPED_PERMISSIONS } from '../services/access/AccessPolicy';
 import { ConflictError } from '../errors';
 import { authenticate, userHasPermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
@@ -61,6 +62,16 @@ export const createDelegationsRouter = (pool: Pool): Router => {
       }
       throw error;
     }
+  });
+
+  /**
+   * The codes a delegation scoped to one org unit may carry
+   * (AccessPolicy.UNIT_SCOPED_PERMISSIONS), so the Delegations page offers
+   * exactly what createDelegation will accept instead of a copy that drifts.
+   * The same answer for every caller: it is the rule, not anyone's data.
+   */
+  router.get('/delegable-for-unit', authenticate, (_req: Request, res: Response) => {
+    res.json({ success: true, data: { permissionCodes: [...UNIT_SCOPED_PERMISSIONS].sort() } });
   });
 
   // List delegations for the current user

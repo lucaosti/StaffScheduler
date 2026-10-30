@@ -440,6 +440,8 @@
   "delegations.revoking": "Revocando…",
   "delegations.validation.delegateeRequired": "El ID de usuario del delegado es obligatorio.",
   "delegations.validation.permissionRequired": "Se requiere al menos un código de permiso.",
+  "delegations.validation.notDelegableForUnit": "{{code}} actúa en toda la organización y no puede delegarse para una sola unidad.",
+  "delegations.form.unitScopeHint": "Al delegar para una sola unidad solo pueden transmitirse estos códigos: {{codes}}.",
   "delegations.validation.expiryRequired": "Se requiere la fecha/hora de expiración.",
   "changeRequests.title": "Solicitudes de cambio",
   "changeRequests.subtitle": "Propón cambios que aparecen como decisiones de responsables una vez aprobados",

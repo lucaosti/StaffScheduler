@@ -4087,6 +4087,49 @@
         }
       }
     },
+    "/delegations/delegable-for-unit": {
+      "get": {
+        "tags": [
+          "Delegations"
+        ],
+        "summary": "Codes a delegation scoped to one org unit may carry",
+        "description": "The permission codes a unit can bound. A delegation with `scopeOrgUnitId` set may carry only these; any other code acts organization-wide and is refused (422 DELEGATION_INVALID). The same list for every caller.",
+        "responses": {
+          "200": {
+            "description": "`data.permissionCodes`: the codes, sorted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "permissionCodes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      },
+                      "required": [
+                        "permissionCodes"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          }
+        }
+      }
+    },
     "/delegations/{id}": {
       "delete": {
         "tags": [
