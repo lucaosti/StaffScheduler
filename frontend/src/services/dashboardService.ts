@@ -30,16 +30,13 @@ export const getAttentionItems = (): Promise<ApiResponse<AttentionItems>> =>
  * `fetch`, per the service-layer convention — this used to hand-parse the
  * response body itself, duplicating what `handleResponse` already does.
  *
- * Still swallows its own failure into an empty list rather than throwing:
- * the recent-activity feed is a secondary widget on the dashboard, and a
- * failure here should not take down the stat cards `useDashboardData`
- * loads alongside it.
+ * Failures propagate (#894 review). This used to swallow them into an empty
+ * list, so a disabled audit module (404) or a server fault rendered as "No
+ * recent activity" — a false statement about the organisation. The feed is
+ * its own query now (`useRecentActivity`), so a failure here no longer takes
+ * the stat cards down with it, which was the reason for swallowing.
  */
 export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
-  try {
-    const res = await listAuditLogs({ limit });
-    return res.success && Array.isArray(res.data) ? res.data : [];
-  } catch {
-    return [];
-  }
+  const res = await listAuditLogs({ limit });
+  return res.success && Array.isArray(res.data) ? res.data : [];
 };

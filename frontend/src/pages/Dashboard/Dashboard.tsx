@@ -29,6 +29,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
 import { useDashboardData, useAttentionItems, useRecentActivity } from '../../hooks/useDashboard';
 import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
+import { ApiError } from '../../services/apiUtils';
 
 /** Shown in a count's place until the count it stands for has loaded. */
 const NOT_LOADED = '—';
@@ -62,6 +64,11 @@ const Dashboard: React.FC = () => {
   const canReadAudit = can('audit.read');
   const activityQuery = useRecentActivity(canReadAudit);
   const recentActivity = activityQuery.data ?? [];
+  // A 404 from the audit endpoint means the audit module is disabled for this
+  // organisation: there is no feed to show, so the panel goes, as it does
+  // without audit.read. Any other failure is shown as an error in the panel.
+  const auditModuleOff = activityQuery.error instanceof ApiError && activityQuery.error.status === 404;
+  const showActivityPanel = canReadAudit && !auditModuleOff;
 
   // Kept off the main loading/error gate above: a slow or failed attention-items
   // fetch should not block the stat cards, which is what one combined query would do.
@@ -185,7 +192,13 @@ const Dashboard: React.FC = () => {
                         queue was empty. The attention items carry the count of
                         what this caller can decide; until they load, a dash
                         rather than a number that may be wrong. */}
-                    <h3 className="mb-0">{attention ? attention.pendingApprovalsAging.count : NOT_LOADED}</h3>
+                    <h3 className="mb-0">
+                      {attention
+                        ? attention.pendingApprovalsAging.count
+                        : attentionQuery.isError
+                          ? t('dashboard.stats.unavailable')
+                          : NOT_LOADED}
+                    </h3>
                   </div>
                 </div>
               </div>
@@ -370,16 +383,20 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Hidden without audit.read: "No recent activity" would be a false
-            statement about the organisation, not "you cannot see this" (#894). */}
-        {canReadAudit && (
+        {/* Hidden without audit.read or with the audit module off: "No recent
+            activity" would be a false statement about the organisation (#894). */}
+        {showActivityPanel && (
         <div className="col-md-6">
           <div className="card border-0 shadow-sm h-100">
             <div className="card-header bg-transparent border-bottom">
               <h5 className="card-title mb-0">{t('dashboard.recentActivity.title')}</h5>
             </div>
             <div className="card-body p-0">
-              {recentActivity.length === 0 ? (
+              {activityQuery.isError ? (
+                <div className="p-3">
+                  <ErrorAlert error={activityQuery.error} onRetry={() => activityQuery.refetch()} />
+                </div>
+              ) : recentActivity.length === 0 ? (
                 <div className="d-flex align-items-center justify-content-center text-center py-5 text-muted">
                   <div>
                     <i className="bi bi-clock-history fs-3 mb-2 d-block" aria-hidden="true"></i>

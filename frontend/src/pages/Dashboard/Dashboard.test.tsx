@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
@@ -155,6 +155,45 @@ describe('<Dashboard />', () => {
       expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument();
       expect(screen.queryByText(/no recent activity/i)).not.toBeInTheDocument();
       expect(auditRequested).toBe(false);
+    });
+
+    // Review of #894: the card showed "—" forever when its count failed to load.
+    it('says the pending count is unavailable when it fails to load', async () => {
+      server.use(
+        http.get(`${API_URL}/dashboard/attention-items`, () =>
+          HttpResponse.json({ success: false, error: { code: 'BOOM', message: 'x' } }, { status: 500 })
+        )
+      );
+      await renderLoaded();
+      const card = screen.getByText('Pending Approvals').closest('.card') as HTMLElement;
+      expect(await within(card).findByText('Unavailable')).toBeInTheDocument();
+    });
+
+    // Review of #894: with the audit module off (404) the panel claimed there
+    // was no recent activity.
+    it('hides the activity panel when the audit module is disabled', async () => {
+      permissions = ['audit.read'];
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () =>
+          HttpResponse.json({ success: false, error: { code: 'NOT_FOUND', message: 'Module disabled' } }, { status: 404 })
+        )
+      );
+      await renderLoaded();
+      await waitFor(() => expect(screen.queryByText('Recent Activity')).not.toBeInTheDocument());
+      expect(screen.queryByText(/no recent activity/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the error, not "no recent activity", when the feed fails', async () => {
+      permissions = ['audit.read'];
+      server.use(
+        http.get(`${API_URL}/audit-logs`, () =>
+          HttpResponse.json({ success: false, error: { code: 'BOOM', message: 'x' } }, { status: 500 })
+        )
+      );
+      await renderLoaded();
+      const panel = (await screen.findByText('Recent Activity')).closest('.card') as HTMLElement;
+      expect(await within(panel).findByRole('alert')).toBeInTheDocument();
+      expect(within(panel).queryByText(/no recent activity/i)).not.toBeInTheDocument();
     });
 
     it('shows the activity panel with audit.read', async () => {
