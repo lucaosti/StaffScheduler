@@ -171,6 +171,21 @@ describe('explicit environment (full profile)', () => {
     expect(() => loadConfig({ CORS_ORIGIN: 'http://localhost:3000,capacitor://localhost' })).not.toThrow();
   });
 
+  // The solver's limit is the watchdog minus a margin of at least 5 s, and
+  // never under 1 s; below about 6 s the limit reached the watchdog itself,
+  // which is the race #837 removed. A value that small is a misconfiguration,
+  // so it is refused at startup rather than silently corrected.
+  it.each([['5000'], ['9999'], ['not-a-number'], ['0']])(
+    'refuses to start with OPTIMIZATION_TIMEOUT=%s',
+    (value) => {
+      expect(() => loadConfig({ OPTIMIZATION_TIMEOUT: value })).toThrow(/OPTIMIZATION_TIMEOUT must be at least 10000/);
+    }
+  );
+
+  it('accepts the minimum OPTIMIZATION_TIMEOUT', () => {
+    expect(loadConfig({ OPTIMIZATION_TIMEOUT: '10000' }).optimization.timeout).toBe(10000);
+  });
+
   it('enforces the bcrypt cost floor of 10', () => {
     const config = loadConfig({ BCRYPT_ROUNDS: '4' });
     expect(config.security.bcryptRounds).toBe(10);

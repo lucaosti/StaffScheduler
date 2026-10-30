@@ -316,6 +316,30 @@ const regressionFixtures: OptimizerFixture[] = [
       constraints: CONSTRAINTS,
     },
   },
+  {
+    // The employee's contract requires 11 h between shifts while the problem
+    // default is 8 h; the two shifts leave 9 h. Both engines used to read only
+    // the problem-wide figure and gave this person both (#838).
+    name: 'an 11h contract turnaround over an 8h default (#838)',
+    fullyCoverable: false,
+    problem: {
+      shifts: [
+        { id: 'late', date: '2026-03-02', start_time: '14:00', end_time: '22:00', min_staff: 1, max_staff: 1 },
+        { id: 'early', date: '2026-03-03', start_time: '07:00', end_time: '15:00', min_staff: 1, max_staff: 1 },
+      ],
+      employees: [
+        {
+          id: 'e1',
+          max_hours_per_week: 40,
+          max_consecutive_days: 5,
+          min_hours_between_shifts: 11,
+          skills: [],
+          unavailable_dates: [],
+        },
+      ],
+      constraints: CONSTRAINTS,
+    },
+  },
 ];
 
 export const allFixtures: OptimizerFixture[] = [...feasibleFixtures, ...constrainedFixtures, ...regressionFixtures];

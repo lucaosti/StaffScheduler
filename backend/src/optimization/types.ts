@@ -64,6 +64,19 @@ export interface Employee {
    */
   max_hours_per_day?: number;
   /**
+   * Minimum rest between two of this employee's shifts, in hours.
+   *
+   * Per employee because the limit is: a contract can require 11 h where the
+   * organization's policy says 8 h, and a single problem-wide figure gave an
+   * 11 h contract 9 h turnarounds that ComplianceEngine then flagged (#838).
+   * `buildOptimizationProblem` always sets it, from the same resolver
+   * ComplianceEngine uses (WorkingTimeLimitsService). Absent, the problem-wide
+   * `constraints.min_hours_between_shifts` applies, then 8 h — a default for
+   * a problem stated by hand, as the fixtures are, not a second source of the
+   * limit.
+   */
+  min_hours_between_shifts?: number;
+  /**
    * Consecutive days off the contract asks for, at least once per rolling
    * 7-day window.
    *
