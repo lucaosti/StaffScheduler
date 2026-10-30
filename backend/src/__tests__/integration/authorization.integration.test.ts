@@ -41,7 +41,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { migrationUpSql } from '../helpers/schema';
 import { allRoutes, resolveRoute } from '../helpers/routeChain';
-import { AUTHORIZATION_MATRIX, EXTRA_OPERATIONS, AuthzRule } from './authorizationMatrix';
+import { AUTHORIZATION_MATRIX, CONSTANT_ENDPOINTS, EXTRA_OPERATIONS, AuthzRule } from './authorizationMatrix';
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -73,6 +73,8 @@ interface Fixtures {
   attB: number; loanB: number; cpB: number; skill: number; swapAB: number;
   onCallA: number; onCallB: number; templateA: number; templateB: number; pairingAB: number; exceptionB: number; changeB: number;
   unassigned2: number;
+  /** A person in no org unit whom no probe ever places. */
+  loose: number;
   users: Record<Principal, number>;
 }
 
@@ -148,6 +150,10 @@ const crossUnitProbes = (f: Fixtures): Record<string, Probe[]> => {
     'POST /org/loans': [
       { body: { userId: f.empB, fromOrgUnitId: f.unitB, toOrgUnitId: f.unitA, startDate: D1, endDate: D2 } },
       { body: { userId: f.empB, fromOrgUnitId: f.unitA, toOrgUnitId: f.unitA1, startDate: D1, endDate: D2 } },
+      // A person in no unit is not the caller's to lend (round-3 review).
+      { body: { userId: f.loose, fromOrgUnitId: f.unitA, toOrgUnitId: f.unitA1, startDate: D1, endDate: D2 } },
+      // The lent person must belong to the lending unit: empA is in A, not A1.
+      { body: { userId: f.empA, fromOrgUnitId: f.unitA1, toOrgUnitId: f.unitA, startDate: D1, endDate: D2 }, status: 400 },
     ],
     'POST /org/loans/{id}/approve': [{ params: { id: f.loanB }, body: {} }],
     'POST /org/loans/{id}/reject': [{ params: { id: f.loanB }, body: {} }],
@@ -277,6 +283,21 @@ const crossUnitProbes = (f: Fixtures): Record<string, Probe[]> => {
     'POST /change-requests/{id}/apply': [{ params: { id: f.changeB }, body: {} }],
   };
 };
+
+/**
+ * A person in NO org unit, named in a write by the scoped manager about an
+ * otherwise in-unit row: reachable only by unscoped callers (round-3 review).
+ * Only account creation and placement opt in; these must all refuse.
+ */
+const unassignedPersonProbes = (f: Fixtures): Array<[string, Probe]> => [
+  ['PUT /preferences/{userId}', { params: { userId: f.loose }, body: { maxHoursPerWeek: 10 } }],
+  ['POST /employment-contracts/users/{userId}', { params: { userId: f.loose }, body: { contractId: 1, effectiveFrom: D1 } }],
+  ['POST /employees/{id}/skills', { params: { id: f.loose }, body: { skillId: f.skill, proficiencyLevel: 3 } }],
+  ['POST /on-call/periods/{id}/assign', { params: { id: f.onCallA }, body: { userId: f.loose } }],
+  ['POST /assignments', { body: { shiftId: f.shiftA2, userId: f.loose } }],
+  ['POST /employee-pairings', { body: { userId: f.empA, otherUserId: f.loose, kind: 'requires' } }],
+  ['GET /employees/{id}', { params: { id: f.loose } }],
+];
 
 /**
  * Delegations of codes that act organization-wide cannot be bounded by a unit,
@@ -452,6 +473,7 @@ beforeAll(async () => {
   const empB = await createUser('authz-emp-b@example.com', unitB, 'Employee');
   const unassigned = await createUser('authz-unassigned@example.com', null, null);
   const unassigned2 = await createUser('authz-unassigned2@example.com', null, null);
+  const loose = await createUser('authz-loose@example.com', null, null);
   await admin.query('INSERT INTO user_departments (user_id, department_id) VALUES (?, ?), (?, ?)', [empA, deptA, empB, deptB]);
   // The scoped manager runs department A, so the department routes' own
   // manager-of-this-department check passes and only scope is left to refuse.
@@ -540,7 +562,7 @@ beforeAll(async () => {
   f = {
     unitA, unitA1, unitB, deptA, deptB, schedA, schedB, shiftA, shiftA2, shiftB, asgA, asgB,
     empA, empB, unassigned, toA, toB, attB, loanB, cpB, skill, swapAB,
-    onCallA, onCallB, templateA, templateB, pairingAB, exceptionB, changeB, unassigned2, users,
+    onCallA, onCallB, templateA, templateB, pairingAB, exceptionB, changeB, unassigned2, loose, users,
   };
 
   const { database } = require('../../config/database');
@@ -678,6 +700,16 @@ describe('each operation carries exactly its declared gate', () => {
    * must be exactly this: classifying an operation can only remove a code.
    */
   // `shared` is read-only reference data: a write to it is organization-wide authority.
+  // `self` must say whose data it acts on, or it could label an operation that
+  // reads other people's; only endpoints returning constants are exempt.
+  it('names the owner of every self-service operation', () => {
+    const wrong = Object.entries(AUTHORIZATION_MATRIX)
+      .filter(([op, rule]) => rule.scope === 'self' && !rule.owner?.trim() && !CONSTANT_ENDPOINTS[op]?.trim())
+      .map(([op]) => op);
+    expect(wrong).toEqual([]);
+    for (const op of Object.keys(CONSTANT_ENDPOINTS)) expect({ op, scope: AUTHORIZATION_MATRIX[op]?.scope }).toEqual({ op, scope: 'self' });
+  });
+
   it('allows shared only on reads', () => {
     const wrong = Object.entries(AUTHORIZATION_MATRIX)
       .filter(([op, rule]) => rule.scope === 'shared' && !op.startsWith('GET '))
@@ -764,6 +796,18 @@ describe('org-unit scope (#813)', () => {
     expect(wrong).toEqual([]);
   });
 
+  it('refuses a person in no org unit on every write but account placement', async () => {
+    const wrong: string[] = [];
+    for (const [op, probe] of unassignedPersonProbes(f)) {
+      const res = await call('scopedManager', op, probe);
+      if (res.status !== 404) wrong.push(`${op} → ${res.status} ${JSON.stringify(res.body?.error ?? {})}`);
+    }
+    expect(wrong).toEqual([]);
+    // The unscoped manager is not bound by it.
+    const unscoped = await call('unscopedManager', 'GET /employees/{id}', { params: { id: f.loose } });
+    expect(unscoped.status).toBe(200);
+  });
+
   it('lets the scoped manager act on their own unit', async () => {
     for (const [op, probe] of inUnitProbes(f)) {
       const res = await call('scopedManager', op, probe);
@@ -816,6 +860,13 @@ describe('delegation scope (#814)', () => {
     }
     const inside = await request(app).post(`${API}/delegations`).set('Cookie', cookies.scopedManager!).send({ ...base, scopeOrgUnitId: f.unitA1 });
     expect(inside.status).toBe(201);
+  });
+
+  it('publishes the codes a unit-scoped delegation may carry, for the Delegations page', async () => {
+    const { UNIT_SCOPED_PERMISSIONS } = require('../../services/access/AccessPolicy') as { UNIT_SCOPED_PERMISSIONS?: ReadonlySet<string> };
+    const res = await request(app).get(`${API}/delegations/delegable-for-unit`).set('Cookie', cookies.employee!);
+    expect(res.status).toBe(200);
+    expect(res.body.data.permissionCodes).toEqual([...(UNIT_SCOPED_PERMISSIONS ?? [])].sort());
   });
 
   it('refuses a scoped delegation of a code that acts organization-wide', async () => {

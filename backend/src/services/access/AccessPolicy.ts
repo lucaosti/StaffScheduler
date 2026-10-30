@@ -42,10 +42,15 @@
  * bridged by `departments.org_unit_id`: a department-owned row is in scope when
  * its department's org unit is; a person is in scope when any org unit they
  * belong to (`user_org_units`) is. A department attached to no org unit is
- * reachable only by unscoped callers, since no scoped authority covers it. A
- * person who belongs to no unit is the exception, and is reachable (see the
- * `unassigned` resolver flag): they belong to no one's authority, and refusing
- * them would strand the accounts scoped managers create.
+ * reachable only by unscoped callers, since no scoped authority covers it, and
+ * so is a person who belongs to no unit. The one deliberate exception is the
+ * `placeableUser` kind, which routes opt into only for creating and placing an
+ * account: adding a person in no unit to the caller's own org unit or to a
+ * department in their scope. Everything else a person can be the subject of —
+ * preferences, contracts, skills, on-call, assignments, pairings, loans —
+ * refuses an unassigned person to a scoped caller, because "in no unit" is
+ * not "in mine". (Editing such an account goes through UserAuthorityService,
+ * which applies the same opt-in under its permission-subset rule.)
  *
  * Rejected: passing the actor into every service method. It would put the same
  * check into a hundred signatures, and the services are also called by seeding,
@@ -79,7 +84,8 @@ export type ScopedKind =
   | 'shiftTemplate'
   | 'pairing'
   | 'changeRequest'
-  | 'policyException';
+  | 'policyException'
+  | 'placeableUser';
 
 /**
  * The caller's scope for one permission: the delegation override for that code
@@ -202,11 +208,11 @@ interface Resolver {
    */
   all?: boolean;
   /**
-   * A party in no org unit counts as reachable. A person who belongs nowhere
-   * belongs to no one's authority, and refusing them would leave an account a
-   * scoped manager has just created (`POST /users`, the imports) impossible to
-   * staff or edit by anyone but an Administrator. The permission-subset rule
-   * of UserAuthorityService still bounds which such accounts may be written.
+   * A party in no org unit counts as reachable. Only for `placeableUser`: an
+   * account a scoped manager has just created (`POST /users`, the imports)
+   * belongs nowhere, and placing it in their own unit or department is how it
+   * stops belonging nowhere. Any wider use would let "unassigned" stand in for
+   * "mine" on every person write.
    */
   unassigned?: boolean;
 }
@@ -235,6 +241,11 @@ const RESOLVERS: Record<ScopedKind, Resolver> = {
             LEFT JOIN departments d ON d.id = c.department_id WHERE c.id IN (${ids})`,
   },
   user: {
+    label: 'User',
+    sql: (ids) => `SELECT u.id, uou.org_unit_id AS unit, u.id AS owner, NULL AS party FROM users u
+            LEFT JOIN user_org_units uou ON uou.user_id = u.id WHERE u.id IN (${ids})`,
+  },
+  placeableUser: {
     label: 'User',
     unassigned: true,
     sql: (ids) => `SELECT u.id, uou.org_unit_id AS unit, u.id AS owner, NULL AS party FROM users u
@@ -275,7 +286,6 @@ const RESOLVERS: Record<ScopedKind, Resolver> = {
   pairing: {
     label: 'Employee pairing',
     all: true,
-    unassigned: true,
     repeat: 2,
     sql: (ids) => `SELECT p.id, uou.org_unit_id AS unit, NULL AS owner, p.user_id AS party FROM employee_pairings p
             LEFT JOIN user_org_units uou ON uou.user_id = p.user_id WHERE p.id IN (${ids})

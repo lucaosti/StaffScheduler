@@ -37,10 +37,11 @@
  * WHY ORG-UNIT SCOPE APPLIES TO TARGETS AND GRANTS. A scoped actor reaching an
  * account outside their subtree is the cross-unit access scoping exists to
  * prevent; such a target is answered 404, like every out-of-scope row (see
- * AccessPolicy for why). A target belonging to no unit yet is reachable, as
- * everywhere in AccessPolicy: it is the account a scoped manager just created
- * and must be able to staff and edit; the permission-subset test still bounds
- * which such accounts may be written. Grants made here are always organization-wide
+ * AccessPolicy for why). A target belonging to no unit yet is reachable here —
+ * the account-editing counterpart of AccessPolicy's `placeableUser` opt-in: it
+ * is the account a scoped manager just created and must be able to edit and
+ * place; the permission-subset test still bounds which such accounts may be
+ * written. Every other write about a person refuses such a target. Grants made here are always organization-wide
  * (`scope_org_unit_id NULL`), so a scoped actor granting any role would hand
  * out authority wider than their own — e.g. create an org-wide Manager with a
  * password they chose and log in as it. Scoped actors therefore create

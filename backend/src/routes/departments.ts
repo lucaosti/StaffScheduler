@@ -214,7 +214,8 @@ export const createDepartmentsRouter = (pool: Pool) => {
     }
 
     await scope.policy.assertReach(user, MANAGE_CODES, 'department', departmentId);
-    await scope.policy.assertReach(user, MANAGE_CODES, 'user', userId);
+    // placeableUser: an account in no unit yet may be placed here (AccessPolicy).
+    await scope.policy.assertReach(user, MANAGE_CODES, 'placeableUser', userId);
 
     const targetUser = await userService.getUserById(userId);
     if (!targetUser) {

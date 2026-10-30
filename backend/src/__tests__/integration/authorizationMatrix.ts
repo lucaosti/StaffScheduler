@@ -57,7 +57,8 @@ export interface AuthzRule {
 const pub = (note: string): AuthzRule => ({ requires: 'public', scope: 'org', note });
 const org = (note: string, ...requires: string[]): AuthzRule => ({ requires, scope: 'org', note });
 const shared = (note: string, ...requires: string[]): AuthzRule => ({ requires, scope: 'shared', note });
-const self = (note?: string): AuthzRule => ({ requires: [], scope: 'self', note });
+/** Self-service: `owner` names whose data it acts on, which the suite requires. */
+const self = (owner: string): AuthzRule => ({ requires: [], scope: 'self', owner });
 const unit = (...requires: string[]): AuthzRule => ({ requires, scope: 'unit' });
 const owned = (owner: string, ...requires: string[]): AuthzRule => ({ requires, owner, scope: 'unit' });
 const filtered = (...requires: string[]): AuthzRule => ({ requires, scope: 'filtered' });
@@ -106,8 +107,8 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /attendance/{id}': owned('the punching user, or attendance.read/approve over their unit'),
   'POST /attendance/{id}/approve': unit('attendance.approve'),
   'POST /attendance/{id}/reject': unit('attendance.approve'),
-  'POST /attendance/{id}/clock-out': self(),
-  'POST /attendance/clock-in': self(),
+  'POST /attendance/{id}/clock-out': self('the caller\'s own open punch'),
+  'POST /attendance/clock-in': self('the caller\'s own punch'),
   'GET /attendance/cost-estimate': unit('attendance.read'),
   'POST /attendance/kiosk/punch': pub('kiosk device credential, bound to one department'),
 
@@ -115,12 +116,12 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /audit-logs/{id}': org(AUDIT, 'audit.read'),
   'GET /audit-logs/export': org(AUDIT, 'audit.read'),
 
-  'POST /auth/2fa/challenge': self(),
-  'POST /auth/2fa/disable': self(),
-  'POST /auth/2fa/enable': self(),
-  'GET /auth/2fa/methods': self(),
-  'POST /auth/2fa/setup': self(),
-  'POST /auth/2fa/verify': self(),
+  'POST /auth/2fa/challenge': self('the caller\'s own second factor'),
+  'POST /auth/2fa/disable': self('the caller\'s own second factor'),
+  'POST /auth/2fa/enable': self('the caller\'s own second factor'),
+  'GET /auth/2fa/methods': self('the caller\'s own second factors'),
+  'POST /auth/2fa/setup': self('the caller\'s own second factor'),
+  'POST /auth/2fa/verify': self('the caller\'s own second factor'),
   'POST /auth/login': pub(PUBLIC),
   'POST /auth/login/challenge': pub(PUBLIC),
   'POST /auth/refresh': pub('refresh-token cookie'),
@@ -128,14 +129,14 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /auth/sso/{id}/callback': pub(PUBLIC),
   'GET /auth/sso/{id}/login': pub(PUBLIC),
   'GET /auth/sso/providers': pub(PUBLIC),
-  'GET /auth/verify': self(),
+  'GET /auth/verify': self('the caller\'s own session and account'),
 
   'GET /calendar/aggregate.ics': pub('feed token; visibility recomputed from its owner, delegation scopes included'),
   'GET /calendar/department/{id}.ics': pub('feed token of the owner'),
   'GET /calendar/feed.ics': pub('feed token of the owner'),
-  'GET /calendar/tokens': self(),
-  'POST /calendar/tokens': self(),
-  'DELETE /calendar/tokens/{id}': self(),
+  'GET /calendar/tokens': self('the caller\'s own feed tokens'),
+  'POST /calendar/tokens': self('the caller\'s own feed tokens'),
+  'DELETE /calendar/tokens/{id}': self('the caller\'s own feed tokens'),
 
   'GET /change-requests': gap(['change_request.review'], 'reviewers see every unit'),
   'POST /change-requests': gap(['change_request.create'], 'target ids are not scope-checked'),
@@ -154,7 +155,9 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /dashboard/attention-items': h(gap([], 'organization-wide counts behind in-handler permission checks'), 'report.read'),
   'GET /dashboard/stats': h(gap([], 'organization-wide counts behind in-handler permission checks'), 'report.read'),
 
-  'GET /delegations': self(),
+  // On CONSTANT_ENDPOINTS: the rule itself, the same for every caller.
+  'GET /delegations/delegable-for-unit': { requires: [], scope: 'self', note: 'the codes a unit-scoped delegation may carry: a constant' },
+  'GET /delegations': self('delegations the caller gave or received'),
   'POST /delegations': self('delegation.manage or delegation.self; codes and scope must be the delegator\'s own (#814)'),
   'DELETE /delegations/{id}': self('the delegator only'),
 
@@ -178,7 +181,7 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 
   'POST /directory/import-vcard': org('creates accounts organization-wide, in no unit; role names are held to UserAuthorityService', 'user.manage'),
   'POST /directory/import-vcard/preview': org('parses a file of accounts for the whole organization; writes nothing', 'user.manage'),
-  'GET /directory/me': self(),
+  'GET /directory/me': self('the caller\'s own profile'),
   'GET /directory/users/{id}': unit('user.read'),
   'PUT /directory/users/{id}/fields': unit('user.manage'),
   'DELETE /directory/users/{id}/fields/{key}': unit('user.manage'),
@@ -210,7 +213,9 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /employment-contracts': shared('the catalog of contract types, owned by no unit', 'employee.read'),
   'POST /employment-contracts': org('a contract type is organization-wide; editing it changes every unit\'s limits', 'preferences.manage'),
   'GET /employment-contracts/{id}': shared('one contract type of the catalog', 'employee.read'),
-  'PUT /employment-contracts/{id}': org('a contract type is organization-wide; editing it changes every unit\'s limits', 'preferences.manage'),
+  // preferences.manage is held by the default Manager role, so a manager of one
+  // ward can change these limits for every unit — tracked in #926.
+  'PUT /employment-contracts/{id}': org('a contract type is organization-wide; editing it changes every unit\'s limits, and the default Manager role holds preferences.manage (#926)', 'preferences.manage'),
   'GET /employment-contracts/users/{userId}': unit('employee.read'),
   'POST /employment-contracts/users/{userId}': unit('preferences.manage'),
 
@@ -241,17 +246,17 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'DELETE /modules/{code}/org/{org}': org(CONFIG, 'settings.manage'),
   'GET /modules/org/{org}': org(CONFIG, 'settings.manage'),
 
-  'GET /notifications': self(),
-  'PATCH /notifications/{id}/read': self(),
-  'POST /notifications/push/device-token': self(),
-  'DELETE /notifications/push/device-token': self(),
-  'GET /notifications/push/public-key': self(),
-  'POST /notifications/push/subscribe': self(),
-  'DELETE /notifications/push/subscribe': self(),
-  'PATCH /notifications/read-all': self(),
-  'GET /notifications/unread-count': self(),
+  'GET /notifications': self('the caller\'s own notifications'),
+  'PATCH /notifications/{id}/read': self('the caller\'s own notifications'),
+  'POST /notifications/push/device-token': self('the caller\'s own devices'),
+  'DELETE /notifications/push/device-token': self('the caller\'s own devices'),
+  'GET /notifications/push/public-key': self('the caller\'s own push subscription (the server\'s public key)'),
+  'POST /notifications/push/subscribe': self('the caller\'s own push subscriptions'),
+  'DELETE /notifications/push/subscribe': self('the caller\'s own push subscriptions'),
+  'PATCH /notifications/read-all': self('the caller\'s own notifications'),
+  'GET /notifications/unread-count': self('the caller\'s own notifications'),
 
-  'GET /on-call/me': self(),
+  'GET /on-call/me': self('the caller\'s own on-call duties'),
   'GET /on-call/periods': filtered('schedule.read'),
   'POST /on-call/periods': unit('oncall.manage'),
   'GET /on-call/periods/{id}': unit('schedule.read'),
@@ -261,11 +266,11 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'DELETE /on-call/periods/{id}/assign/{userId}': unit('oncall.manage'),
   'GET /on-call/periods/{id}/assignments': unit('schedule.read'),
 
-  'GET /org/authority': self(),
+  'GET /org/authority': self('who has authority over the caller'),
   'GET /org/authority/{userId}': h(gap([], 'self, or org_unit.read for anyone in any unit'), 'org_unit.read'),
-  'GET /org/history': self(),
+  'GET /org/history': self('the caller\'s own history'),
   'GET /org/history/{userId}': h(gap([], 'self, or org_unit.read for anyone in any unit'), 'org_unit.read'),
-  'GET /org/manager-chain': self(),
+  'GET /org/manager-chain': self('the caller\'s own superiors'),
   'GET /org/manager-chain/{userId}': h(gap([], 'no permission check (#850)')),
   'GET /org/loans': h({ requires: [], owner: 'own loans; loan.approve sees loans touching their scope', scope: 'filtered' }, 'loan.approve'),
   'POST /org/loans': unit('loan.request'),
@@ -310,8 +315,8 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'POST /policies/presets/{code}/apply': org(POLICY, 'policy.manage'),
   'POST /policies/validate/assignment': h(gap([], 'any signed-in caller evaluates the policies for any person and shift')),
 
-  'GET /preferences/me': self(),
-  'PUT /preferences/me': self(),
+  'GET /preferences/me': self('the caller\'s own preferences'),
+  'PUT /preferences/me': self('the caller\'s own preferences'),
   'GET /preferences/{userId}': unit('preferences.manage'),
   'PUT /preferences/{userId}': unit('preferences.manage'),
 
@@ -332,7 +337,7 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
   'GET /responsibility-rules/{id}/conflicts': org(RESPONSIBILITY, 'responsibility.read'),
   'POST /responsibility-rules/bulk': org(RESPONSIBILITY, 'responsibility.manage'),
   'GET /responsibility-rules/matrix': org(RESPONSIBILITY, 'responsibility.read'),
-  'GET /responsibility-rules/my-responsibilities': self(),
+  'GET /responsibility-rules/my-responsibilities': self('the caller\'s own responsibilities'),
   'GET /responsibility-rules/resolve': org(RESPONSIBILITY, 'responsibility.read'),
 
   'GET /roles': org(RBAC, 'role.manage'),
@@ -419,13 +424,14 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 
   'GET /time-off': { requires: [], owner: 'own requests; timeoff.approve sees their scope', scope: 'filtered' },
   'GET /time-off/export': { requires: [], owner: 'own requests; timeoff.approve sees their scope', scope: 'filtered' },
-  'POST /time-off': self(),
+  'POST /time-off': self('a request for the caller themselves'),
   'GET /time-off/{id}': owned('the requester, or timeoff.approve over their unit'),
   'POST /time-off/{id}/approve': unit('timeoff.approve'),
   'POST /time-off/{id}/reject': unit('timeoff.approve'),
   'POST /time-off/{id}/cancel': self('the requester only'),
 
   'GET /timeline': filtered('timeline.read'),
+  // On CONSTANT_ENDPOINTS: it returns constants, so there is no owner to name.
   'GET /timeline/sources': { requires: ['timeline.read'], scope: 'self', note: 'returns the fixed list of event sources: constants, no data about anyone' },
 
   'GET /users': h(gap([], 'user.read in the handler; account administration lists every unit'), 'user.read', 'user.read_all'),
@@ -442,6 +448,16 @@ export const AUTHORIZATION_MATRIX: Record<string, AuthzRule> = {
 };
 
 /** Mounted routes outside the versioned API (not in openapi.json), by full path. */
+/**
+ * `self` entries that return constants rather than anyone's data, so they name
+ * no owner. Each needs its reason; any other `self` entry must name an `owner`,
+ * or "self" could label an operation that reads other people's data.
+ */
+export const CONSTANT_ENDPOINTS: Record<string, string> = {
+  'GET /timeline/sources': 'the fixed list of timeline event sources, the same for every caller',
+  'GET /delegations/delegable-for-unit': 'AccessPolicy.UNIT_SCOPED_PERMISSIONS, the same for every caller',
+};
+
 export const EXTRA_OPERATIONS: Record<string, AuthzRule> = {
   'GET /metrics': pub('bearer METRICS_TOKEN when configured'),
   'GET /api/openapi.json': pub('the published API contract'),

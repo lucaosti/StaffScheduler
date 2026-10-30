@@ -164,15 +164,20 @@ describe('AccessPolicy', () => {
     expect(p.execute.mock.calls[0][1]).toEqual([7, 8, 7, 8]);
   });
 
-  it('reaches a person in no org unit, but not a department in none', async () => {
+  // "In no unit" is not "in mine": only account placement opts in (round-3 review).
+  it('refuses a person in no org unit unless the route opts into placement', async () => {
     const p = policyPool();
     const policy = new AccessPolicy(p.pool);
     p.row(null, [null]);
-    await expect(policy.assertReach(scoped, 'schedule.read', 'user', 3)).resolves.toBeUndefined();
+    await expect(policy.assertReach(scoped, 'schedule.read', 'user', 3)).rejects.toThrow('User not found');
+    await expect(policy.assertReach(scoped, 'schedule.read', 'placeableUser', 3)).resolves.toBeUndefined();
+    p.row(null, [4]);
+    await expect(policy.assertReach(scoped, 'schedule.read', 'placeableUser', 3)).rejects.toThrow('User not found');
+    p.row(null, [null]);
     await expect(policy.assertReach(scoped, 'schedule.read', 'department', 3)).rejects.toThrow('Department not found');
   });
 
-  it('reaches a pairing only when both people are in scope or in no unit', async () => {
+  it('reaches a pairing only when both people are in scope', async () => {
     const p = policyPool();
     const policy = new AccessPolicy(p.pool);
     const rows = (a: Array<number | null>, b: Array<number | null>) =>
@@ -180,7 +185,7 @@ describe('AccessPolicy', () => {
     rows([1], [1, 4]);
     await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).resolves.toBeUndefined();
     rows([1], [null]);
-    await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).resolves.toBeUndefined();
+    await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).rejects.toThrow(NotFoundError);
     rows([1], [4]);
     await expect(policy.assertReach(scoped, 'schedule.read', 'pairing', 9)).rejects.toThrow(NotFoundError);
   });

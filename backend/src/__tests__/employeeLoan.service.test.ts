@@ -56,9 +56,20 @@ describe('EmployeeLoanService.create', () => {
     ).rejects.toThrow(/endDate must be on or after/);
   });
 
+  it('refuses lending a person who does not belong to the source unit', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    await expect(new EmployeeLoanService(pool).create({
+      userId: 7, fromOrgUnitId: 1, toOrgUnitId: 2, startDate: '2026-05-10', endDate: '2026-05-15', requestedBy: 5,
+    })).rejects.toThrow('The person does not belong to the lending org unit');
+    expect(execute.mock.calls[0][1]).toEqual([7, 1]);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
   it('auto-approves when actor is the receiving unit manager', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ 1: 1 }], null] as Tuple) // the person belongs to the lending unit
       .mockResolvedValueOnce([{ insertId: 42 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow({ id: 42, status: 'approved' })], null] as Tuple) // SELECT created
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple) // audit INSERT for loan.create
@@ -96,7 +107,7 @@ describe('EmployeeLoanService.create', () => {
       requestedBy: 99,
     });
     expect(created.status).toBe('approved');
-    expect(execute.mock.calls[0][0]).toMatch(/INSERT INTO employee_loans/);
+    expect(execute.mock.calls[1][0]).toMatch(/INSERT INTO employee_loans/);
   });
 });
 
@@ -190,6 +201,7 @@ const spyLoanCreation = (service: EmployeeLoanService) => {
 describe('EmployeeLoanService.create — workflow attachment', () => {
   const queueCreate = (execute: jest.Mock) => {
     execute
+      .mockResolvedValueOnce([[{ 1: 1 }], null]) // the person belongs to the lending unit
       .mockResolvedValueOnce([{ insertId: 42 }, null]) // INSERT employee_loans
       .mockResolvedValueOnce([[loanRow({ id: 42 })], null]) // getById
       .mockResolvedValueOnce([{ insertId: 1 }, null]) // audit
@@ -199,7 +211,8 @@ describe('EmployeeLoanService.create — workflow attachment', () => {
   };
 
   it('refuses upfront when the first step cannot resolve an approver', async () => {
-    const { pool } = makePool();
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ 1: 1 }], null]); // the person belongs to the lending unit
     const service = new EmployeeLoanService(pool);
     const internals = spyLoanCreation(service);
     (internals.resolution.canCreatePendingApprovalForStep as jest.Mock).mockResolvedValue(false);

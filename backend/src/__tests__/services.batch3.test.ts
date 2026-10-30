@@ -115,6 +115,7 @@ describe('EmployeeLoanService.create — post-insert null', () => {
   it('throws Failed to create loan when getById returns null after insert', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ 1: 1 }], null] as Tuple)        // membership in the lending unit
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple)  // INSERT loan
       .mockResolvedValueOnce([[], null] as Tuple);               // getById → null
     const svc = new EmployeeLoanService(pool);
