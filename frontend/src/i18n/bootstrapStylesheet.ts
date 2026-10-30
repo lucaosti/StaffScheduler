@@ -30,9 +30,18 @@ const LINK_ATTRIBUTE = 'data-bootstrap-stylesheet';
 
 let hrefs: Record<Direction, string> | null = null;
 
+/**
+ * The switch still loading, if any. Tracked because a newer request must
+ * cancel it (#845 review): ar → en while the RTL sheet loaded saw the old LTR
+ * link, returned, and was then undone when the RTL load removed that link —
+ * leaving dir="ltr" over the RTL build.
+ */
+let pending: { href: string; link: HTMLLinkElement; done: Promise<void>; finish: () => void } | null = null;
+
 /** Registers the URLs of both builds; `index.tsx` does this once at startup. */
 export const configureBootstrapStylesheets = (urls: Record<Direction, string>): void => {
   hrefs = urls;
+  pending = null;
 };
 
 /**
@@ -42,21 +51,36 @@ export const configureBootstrapStylesheets = (urls: Record<Direction, string>): 
 export const applyBootstrapDirection = (dir: Direction): Promise<void> => {
   if (!hrefs || typeof document === 'undefined') return Promise.resolve();
   const href = hrefs[dir];
-  const current = document.head.querySelectorAll<HTMLLinkElement>(`link[${LINK_ATTRIBUTE}]`);
-  if (Array.from(current).some((link) => link.getAttribute('href') === href)) return Promise.resolve();
+  if (pending?.href === href) return pending.done;
+  if (pending) {
+    // Superseded: drop the sheet still loading and release its waiters.
+    pending.link.remove();
+    pending.finish();
+    pending = null;
+  }
+
+  const loaded = Array.from(document.head.querySelectorAll<HTMLLinkElement>(`link[${LINK_ATTRIBUTE}]`));
+  if (loaded.some((link) => link.getAttribute('href') === href)) return Promise.resolve();
 
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = href;
   link.setAttribute(LINK_ATTRIBUTE, dir);
-  return new Promise((resolve) => {
-    const settle = () => {
-      current.forEach((old) => old.remove());
-      resolve();
-    };
-    link.addEventListener('load', settle, { once: true });
-    link.addEventListener('error', settle, { once: true });
-    if (current.length > 0) current[current.length - 1].after(link);
-    else document.head.prepend(link);
+  let finish: () => void = () => undefined;
+  const done = new Promise<void>((resolve) => {
+    finish = resolve;
   });
+  const entry = { href, link, done, finish };
+  const settle = () => {
+    if (pending !== entry) return; // superseded meanwhile
+    loaded.forEach((old) => old.remove());
+    pending = null;
+    finish();
+  };
+  link.addEventListener('load', settle, { once: true });
+  link.addEventListener('error', settle, { once: true });
+  pending = entry;
+  if (loaded.length > 0) loaded[loaded.length - 1].after(link);
+  else document.head.prepend(link);
+  return done;
 };
