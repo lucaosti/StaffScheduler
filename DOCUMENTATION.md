@@ -451,6 +451,13 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   after the window is reuse as above. Rotation locks the owning `users` row
   before the token row — the same order a password change takes — so the two
   cannot deadlock.
+- **Expired access token**: the SPA refreshes ahead of expiry on a timer, but a
+  timer cannot see `JWT_EXPIRES_IN` (the token is in an httpOnly cookie) nor
+  survive sleep or a throttled background tab, so the typed client also answers
+  a 401 `INVALID_TOKEN` / `MISSING_TOKEN` / `TOKEN_REVOKED` with one refresh
+  (the same single-flight, cross-tab-locked one) and one retry of the request.
+  Concurrent 401s share that refresh. The auth endpoints themselves are exempt,
+  and a failed refresh signs the SPA out.
 - **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
   path, because that is the only place a browser sends the cookie, and not
   behind the auth middleware, so it works with an expired access token. It

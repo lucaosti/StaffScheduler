@@ -20,6 +20,7 @@ jest.mock('../api/client', () => ({
     post: jest.fn(),
     get: jest.fn(),
   },
+  setSessionRefresher: jest.fn(),
 }));
 
 const isNativePlatformMock = jest.spyOn(mobileAuthStorage, 'isNativePlatform');

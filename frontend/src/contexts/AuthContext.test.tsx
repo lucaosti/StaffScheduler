@@ -19,11 +19,18 @@ import * as nativePushService from '../services/nativePushService';
 import * as webPushSession from '../services/webPushSession';
 import i18n from '../i18n';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { onSessionExpired } from '../api/client';
 
 jest.mock('../services/authService');
 jest.mock('../services/translationOverrideService');
 jest.mock('../services/nativePushService');
 jest.mock('../services/webPushSession');
+// Captures the listener AuthProvider registers for "the client could not
+// refresh an expired session", so a test can fire it.
+jest.mock('../api/client', () => ({
+  ...jest.requireActual('../api/client'),
+  onSessionExpired: jest.fn(() => () => undefined),
+}));
 jest.mock('../i18n/organizationOverrides');
 // Only the two startup hooks are replaced: every other export keeps its real
 // (web-platform) behaviour, so the remaining suites run exactly as before.
@@ -298,6 +305,38 @@ describe('session isolation', () => {
     });
 
     expect(queryClient.getQueryData(['employees'])).toEqual([{ id: 99, name: 'A-only' }]);
+  });
+});
+
+// #842: when the client's reactive refresh fails the session is over, and the
+// UI must say so instead of leaving the user on a page whose requests all 401.
+describe('an expired session the client could not refresh', () => {
+  const fireSessionExpired = () => {
+    const calls = (onSessionExpired as jest.Mock).mock.calls;
+    const listener = calls[calls.length - 1][0] as () => void;
+    act(() => listener());
+  };
+
+  it('signs the user out', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedAuthService.logout.mockResolvedValue();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+
+    fireSessionExpired();
+
+    expect(result.current.isAuthenticated).toBe(false);
+    await waitFor(() => expect(mockedAuthService.logout).toHaveBeenCalledTimes(1));
+  });
+
+  it('is ignored when nobody is signed in, so logout cannot re-trigger itself', async () => {
+    mockedAuthService.verifyToken.mockRejectedValue(new Error('no session'));
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    fireSessionExpired();
+
+    expect(mockedAuthService.logout).not.toHaveBeenCalled();
   });
 });
 

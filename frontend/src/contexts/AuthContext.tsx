@@ -20,6 +20,7 @@ import * as authService from '../services/authService';
 import { isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
 import { registerForNativePush, unregisterNativePush } from '../services/nativePushService';
 import { dropWebPushSubscription } from '../services/webPushSession';
+import { onSessionExpired } from '../api/client';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -266,11 +267,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
   }, [state.isAuthenticated]);
 
+  // The client refreshes an expired session on a 401 and retries (#842); when
+  // that refresh fails the session is over, and the UI signs out rather than
+  // leaving the user on a page whose every request fails. Ignored while signed
+  // out: logout's own push-deactivation calls may 401 on an already-dead
+  // session, and must not start another logout.
+  const authenticatedRef = useRef(false);
+  authenticatedRef.current = state.isAuthenticated;
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        if (authenticatedRef.current) logout();
+      }),
+    [logout]
+  );
+
   // Proactive refresh: rotate the session before the ~15m access token expires,
-  // so an active user is never interrupted by an expired token mid-session.
-  // Refreshing at 12m (80% of the lifetime) leaves margin for clock skew and
-  // request latency. Only runs while authenticated; the interval is torn down
-  // on logout or unmount.
+  // so an active user is not made to wait on a refresh-and-retry mid-session.
+  // Refreshing at 12m (80% of the default lifetime) leaves margin for clock
+  // skew and request latency. It is an optimisation, not what keeps the
+  // session alive: the token's real lifetime (`JWT_EXPIRES_IN`) is not visible
+  // to the web client — the token lives in an httpOnly cookie — and a timer
+  // cannot cover sleep or a throttled background tab anyway, so an expiry the
+  // timer misses is caught by the client's refresh on 401. Only runs while
+  // authenticated; the interval is torn down on logout or unmount.
   useEffect(() => {
     if (!state.isAuthenticated) return;
     const ACCESS_REFRESH_INTERVAL_MS = 12 * 60 * 1000;
