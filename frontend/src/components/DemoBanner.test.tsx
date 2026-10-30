@@ -13,9 +13,17 @@ import * as systemService from '../services/systemService';
 jest.mock('../services/systemService');
 
 describe('<DemoBanner />', () => {
+  let cleanups: (() => void)[] = [];
+  const afterThis = (fn: () => void) => cleanups.push(fn);
+
   beforeEach(() => {
     sessionStorage.clear();
     jest.resetAllMocks();
+  });
+
+  afterEach(() => {
+    cleanups.forEach((fn) => fn());
+    cleanups = [];
   });
 
   it('renders nothing in production mode', async () => {
@@ -59,6 +67,33 @@ describe('<DemoBanner />', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(sessionStorage.getItem('demoBannerDismissed')).toBe('1');
+  });
+
+  /**
+   * #892: the banner sat at z-index 1080, above Bootstrap's modals and the
+   * fixed sidebar. It now stays below both (Bootstrap's sticky layer) and
+   * publishes its height so the fixed shell can start beneath it.
+   */
+  it('sits below modals and offsets the fixed shell by its own height', async () => {
+    (systemService.getSystemInfo as jest.Mock).mockResolvedValue({
+      success: true,
+      data: { mode: 'demo' },
+    });
+    // jsdom lays nothing out, so every offsetHeight is 0 without this.
+    const height = jest.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(48);
+    afterThis(() => height.mockRestore());
+
+    render(<DemoBanner />);
+    const banner = await screen.findByRole('alert', { name: /demo environment notice/i });
+
+    expect(banner).toHaveClass('sticky-top');
+    expect(banner.style.zIndex).toBe('');
+    await waitFor(() =>
+      expect(document.documentElement.style.getPropertyValue('--demo-banner-height')).toBe('48px')
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /dismiss demo banner/i }));
+    expect(document.documentElement.style.getPropertyValue('--demo-banner-height')).toBe('');
   });
 
   it('renders nothing when the API call fails', async () => {

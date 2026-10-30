@@ -7,7 +7,7 @@
  * @author Luca Ostinelli
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import PreferencesSection from '../Settings/PreferencesSection';
 import ProfileSection from '../Settings/ProfileSection';
@@ -20,30 +20,6 @@ import GeofenceSection from '../Settings/GeofenceSection';
 import KioskDevicesSection from '../Settings/KioskDevicesSection';
 import CostPlansSection from '../Settings/CostPlansSection';
 import TranslationOverridesSection from '../Settings/TranslationOverridesSection';
-import { useMyPreferencesQuery, useUpdateMyPreferences } from '../../hooks/usePreferences';
-
-interface UserSettings {
-  personalSettings: {
-    theme: 'light' | 'dark' | 'auto';
-    language: 'it' | 'en';
-    timezone: string;
-    notifications: {
-      email: boolean;
-      push: boolean;
-      sms: boolean;
-    };
-  };
-  workSettings: {
-    maxHoursPerWeek: number;
-    maxConsecutiveDays: number;
-    minRestHours: number;
-    preferredShifts: string[];
-    availabilitySettings: {
-      unavailableDates: string[];
-      preferredDepartments: string[];
-    };
-  };
-}
 
 const Settings: React.FC = () => {
   const { user } = useAuth();
@@ -54,84 +30,6 @@ const Settings: React.FC = () => {
   const canManageCostPlans = user?.permissions?.includes('report.manage');
 
   const [activeTab, setActiveTab] = useState<'personal' | 'work' | 'calendar' | 'security' | 'system' | 'modules' | 'fields' | 'geofences' | 'kiosks' | 'costPlans' | 'translations'>('personal');
-
-  const [settings, setSettings] = useState<UserSettings>({
-    personalSettings: {
-      theme: 'light',
-      language: 'en',
-      timezone: 'UTC',
-      notifications: {
-        email: true,
-        push: true,
-        sms: false,
-      },
-    },
-    workSettings: {
-      maxHoursPerWeek: 40,
-      maxConsecutiveDays: 5,
-      minRestHours: 11,
-      preferredShifts: [],
-      availabilitySettings: {
-        unavailableDates: [],
-        preferredDepartments: [],
-      },
-    },
-  });
-
-  // Saved preferences are fetched via TanStack Query (cached/deduped); hydrate
-  // the editable work-settings state once they resolve. Failure is non-fatal —
-  // the query yields null and the defaults above stand.
-  const { data: savedPreferences } = useMyPreferencesQuery();
-  const updatePreferences = useUpdateMyPreferences();
-  useEffect(() => {
-    if (!savedPreferences) return;
-    setSettings((prev) => ({
-      ...prev,
-      workSettings: {
-        ...prev.workSettings,
-        maxHoursPerWeek: savedPreferences.maxHoursPerWeek ?? prev.workSettings.maxHoursPerWeek,
-        maxConsecutiveDays:
-          savedPreferences.maxConsecutiveDays ?? prev.workSettings.maxConsecutiveDays,
-      },
-    }));
-  }, [savedPreferences]);
-
-  // Serialise personal settings (theme, language, timezone, notifications) into
-  // the `notes` field of user_preferences until dedicated columns are added.
-  const handleSavePersonalSettings = async (): Promise<void> => {
-    const { personalSettings } = settings;
-    const notes = JSON.stringify({
-      theme: personalSettings.theme,
-      language: personalSettings.language,
-      timezone: personalSettings.timezone,
-      notifications: personalSettings.notifications,
-    });
-    await updatePreferences.mutateAsync({ notes });
-  };
-
-  // Work scheduling constraints map directly to the preferences API fields.
-  // minRestHours and preferredShifts (string names) are not persisted here:
-  // minRestHours has no column in user_preferences yet, and preferredShifts
-  // requires shift template IDs rather than the display-name strings used in
-  // local state. Both will be wired once the schema is extended.
-  /**
-   * The Work tab has nothing self-editable left to save.
-   *
-   * It used to send `maxHoursPerWeek` and `maxConsecutiveDays` through the
-   * self-service endpoint, which is guarded by authentication alone — so an
-   * employee could raise their own working-time limits, which the optimizer
-   * enforces as hard constraints and which are legally bounded in most
-   * jurisdictions. The fields are now displayed read-only (they explain what
-   * someone can be scheduled for) and changing them requires
-   * `preferences.manage` through `PUT /preferences/:userId`.
-   *
-   * Kept as an explicit no-op rather than removing the Save control silently,
-   * so the shape of the section is obvious to the next reader; the remaining
-   * editable field on this tab is handled by the personal-settings save.
-   */
-  const handleSaveWorkSettings = async (): Promise<void> => {
-    // Nothing on this tab is self-editable.
-  };
 
   return (
     <div className="container-fluid py-4">
@@ -255,25 +153,9 @@ const Settings: React.FC = () => {
         </div>
       </div>
 
-      {activeTab === 'personal' && (
-        <PreferencesSection
-          settings={settings.personalSettings}
-          onChange={(updated) =>
-            setSettings((prev) => ({ ...prev, personalSettings: updated }))
-          }
-          onSave={handleSavePersonalSettings}
-        />
-      )}
+      {activeTab === 'personal' && <PreferencesSection />}
 
-      {activeTab === 'work' && (
-        <ProfileSection
-          settings={settings.workSettings}
-          onChange={(updated) =>
-            setSettings((prev) => ({ ...prev, workSettings: updated }))
-          }
-          onSave={handleSaveWorkSettings}
-        />
-      )}
+      {activeTab === 'work' && <ProfileSection />}
 
       {activeTab === 'calendar' && <CalendarSection />}
 

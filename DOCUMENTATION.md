@@ -112,6 +112,12 @@ generated typed client (`api/client`) where the endpoint is in the OpenAPI spec,
 otherwise `handleResponse` + `getAuthHeaders` from `./apiUtils`. The frontend proxies
 all `/api/*` requests to `http://localhost:3001` in development.
 
+**Bootstrap is CSS only.** Bootstrap's JavaScript is not loaded, so `data-bs-toggle`,
+`data-bs-dismiss` and the other plugin attributes do nothing. Menus use
+`components/Dropdown.tsx`; collapses, dismissible alerts and modals are React state.
+Loading `bootstrap.bundle` was rejected because its plugins mutate DOM that React
+renders, and a re-render silently undoes them (#840).
+
 ---
 
 ## 2. Domain model
@@ -372,7 +378,7 @@ or request a page.
 | `/api/settings` | System settings | `settings.manage` |
 | `/api/health` | Health check (unauthenticated) | — |
 
-**`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives.
+**`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives. The SPA's Pending Approvals card shows this caller-scoped count, not `GET /api/dashboard/stats`' `pendingApprovals`, which is organisation-wide; its quick actions are gated on the permissions the server checks for the action (`shift.manage`, `employee.manage`, `schedule.optimize`, `report.read`), and the recent-activity panel is fetched and shown only with `audit.read` (#894).
 
 **Cost plans (decision-support: cost vs. plan).** A cost plan is a fixed labor-cost target an administrator sets for one department over one period (`start_date`/`end_date`, the same period shape `schedules` already uses) — a manager-entered budget figure, not derived from headcount or contracted hours. `POST /api/cost-plans` creates one; `PUT /api/cost-plans/{id}` edits its target amount; `GET /api/cost-plans` / `GET /api/cost-plans/{id}` list or read one; `DELETE /api/cost-plans/{id}` removes one. A duplicate department+period is a `409`. Reading requires `report.read`; writing requires `report.manage`, a separate, stronger permission — deciding what the organization is measured against is a different act from viewing the measurement, the same read/write split `payroll.manage` draws against its own read-side gates. `GET /api/dashboard/stats` folds the other half of the comparison into its existing response: `monthlyCostPlan` is the sum of every cost plan whose period overlaps the current month, across departments, computed in the same route alongside `monthlyCost` and gated behind the identical `report.read` check — null under the exact same condition `monthlyCost` is null.
 
@@ -445,13 +451,35 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   after the window is reuse as above. Rotation locks the owning `users` row
   before the token row — the same order a password change takes — so the two
   cannot deadlock.
+- **Expired access token**: the SPA refreshes ahead of expiry on a timer, but a
+  timer cannot see `JWT_EXPIRES_IN` (the token is in an httpOnly cookie) nor
+  survive sleep or a throttled background tab, so the typed client also answers
+  a 401 `INVALID_TOKEN` / `MISSING_TOKEN` / `TOKEN_REVOKED` with one refresh
+  (the same single-flight, cross-tab-locked one) and one retry of the request.
+  Concurrent 401s share that refresh. The auth endpoints themselves are exempt.
+  Only a refused refresh (401, or `REFRESH_SUPERSEDED` after the retries) signs
+  the SPA out, and once however many requests were waiting; a 5xx or network
+  failure is just the request's error. The native app can read its token, so
+  there the proactive refresh is scheduled at 80% of the remaining lifetime
+  from `exp`, and runs on resume (`visibilitychange`) when the token is within
+  two minutes of expiry.
 - **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
   path, because that is the only place a browser sends the cookie, and not
   behind the auth middleware, so it works with an expired access token. It
   revokes the presented refresh token's whole family and blacklists the access
   JTI if the access token is still valid; a native client passes its refresh
   token in the body. Widening the cookie path so `/auth/logout` could receive it
-  was rejected for the exposure reason above.
+  was rejected for the exposure reason above. Before that call the SPA
+  deactivates this device's native push token (`DELETE
+  /notifications/push/device-token`, registered on every sign-in including a
+  restored session) and drops the browser's Web Push subscription, since both
+  belong to the device rather than the person and would keep delivering the
+  signed-out user's notifications to the next one. That cleanup is bounded to
+  1.5 s; the revocation is a `keepalive` request and is sent at once on
+  `pagehide`, so closing the tab after Logout still revokes. A sign-in waits
+  for a pending revocation, so it can never revoke the new session. The
+  TanStack Query cache is cleared whenever the signed-in user changes — before
+  the new user's first render on a switch, after the pages unmount on logout.
 - **Password changes and deactivation end every session**: `UserService`
   revokes all of the user's refresh tokens, in the same transaction, whenever
   the password is changed (via `/users` or `/employees`) or the account is
@@ -1088,12 +1116,19 @@ manages the override rows.
 **RTL**: `frontend/src/i18n/DirectionSync.tsx`, mounted once in `App.tsx`, reactively sets
 `dir` and `lang` on `<html>` from the active i18next locale (`dir="rtl"` for Arabic). It
 targets `<html>` rather than a nested wrapper so anything rendered outside the React tree
-(Bootstrap modals, portals) still inherits the correct writing direction. Bootstrap 5's
-utility classes (`ms-*`, `me-*`, `text-start`, `text-end`, ...) are logical properties
-already, so most of the app mirrors correctly with zero extra CSS. `frontend/src/index.css`
+(Bootstrap modals, portals) still inherits the correct writing direction. `dir` alone
+does not mirror Bootstrap: its default build defines the utilities (`ms-*`, `me-*`,
+`text-start`, `text-end`, ...) as physical properties (`.ms-2` is `margin-left`). So
+Bootstrap is linked, not bundled: `index.tsx` imports both `bootstrap.min.css` and
+`bootstrap.rtl.min.css` as URLs, and `i18n/bootstrapStylesheet.ts` attaches the one
+matching the direction — at startup, before the first render, and again from
+`DirectionSync` on every locale change, keeping the old sheet until the new one has
+loaded (#845). The link is the first stylesheet in `<head>`, so the app's own CSS still
+overrides it. `frontend/src/index.css`
 carries a documented `[dir='rtl']` override block for the handful of physical (non-logical)
 properties the app's own CSS still uses (`.sidebar`'s `left`/`border-right`,
-`.main-content`'s `margin-left`) — new custom CSS should prefer logical properties
+`.main-content`'s `margin-left`, and their phone-width variants: the closed drawer
+slides out to the right and the content takes the full width, #947) — new custom CSS should prefer logical properties
 (`margin-inline-start`, ...) over adding to that list. **RTL is verified end-to-end on one
 page today: Login** (`pages/Auth/Login.tsx`), chosen because it is small, always mounted,
 and its form/label/button layout visibly breaks if RTL CSS is wrong. Every other page is
