@@ -36,8 +36,12 @@ const DecisionModal: React.FC<Props> = ({ target, mode, deciding, onClose, onCon
     }
   };
 
+  // The dim scrim is the .modal's own background, as in ConfirmModal. A
+  // `.modal-backdrop` child sat above the dialog inside .modal's stacking
+  // context and swallowed every click (#941).
   return (
     <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true"
+      style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
       aria-label={mode === 'approve'
         ? t('approvals.approveAriaLabel', { id: target.id })
         : t('approvals.rejectAriaLabel', { id: target.id })}>
@@ -90,7 +94,6 @@ const DecisionModal: React.FC<Props> = ({ target, mode, deciding, onClose, onCon
           </div>
         </div>
       </div>
-      <div className="modal-backdrop fade show"></div>
     </div>
   );
 };

@@ -187,9 +187,12 @@ const Delegations: React.FC = () => {
         </div>
       </div>
 
-      {/* Create Modal */}
+      {/* Create Modal. Both modals paint their dim scrim as the .modal's own
+          background, as in ConfirmModal: a `.modal-backdrop` child sat above
+          the dialog inside .modal's stacking context and swallowed every
+          click (#941). */}
       {showCreate && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('delegations.newDelegation')}>
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('delegations.newDelegation')} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
@@ -300,7 +303,6 @@ const Delegations: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show"></div>
         </div>
       )}
 
@@ -312,6 +314,7 @@ const Delegations: React.FC = () => {
           role="dialog"
           aria-modal="true"
           aria-label={t('delegations.revokeAriaLabel', { id: revokeTarget.id })}
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
         >
           <div className="modal-dialog">
             <div className="modal-content">
@@ -356,7 +359,6 @@ const Delegations: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show"></div>
         </div>
       )}
     </div>

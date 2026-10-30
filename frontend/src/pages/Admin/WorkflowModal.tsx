@@ -115,8 +115,11 @@ const WorkflowModal: React.FC<Props> = ({ show, mode, editing, saving, onClose, 
     }
   };
 
+  // The dim scrim is the .modal's own background, as in ConfirmModal. A
+  // `.modal-backdrop` child sat above the dialog inside .modal's stacking
+  // context and swallowed every click (#941).
   return (
-    <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={mode === 'create' ? t('admin.approvalWorkflows.modal.createDialogAriaLabel') : t('admin.approvalWorkflows.modal.editDialogAriaLabel')}>
+    <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" aria-label={mode === 'create' ? t('admin.approvalWorkflows.modal.createDialogAriaLabel') : t('admin.approvalWorkflows.modal.editDialogAriaLabel')} style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
       <div className="modal-dialog modal-lg">
         <div className="modal-content">
           <div className="modal-header">
@@ -281,7 +284,6 @@ const WorkflowModal: React.FC<Props> = ({ show, mode, editing, saving, onClose, 
           </div>
         </div>
       </div>
-      <div className="modal-backdrop fade show"></div>
     </div>
   );
 };

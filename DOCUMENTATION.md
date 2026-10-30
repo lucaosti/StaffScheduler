@@ -2133,6 +2133,7 @@ CI job: `Frontend e2e (Playwright) [required]` in `.github/workflows/ci.yml`. Bo
 | Spec | Flow |
 |---|---|
 | `auth.spec.ts` | Admin and manager sign in and reach the dashboard; invalid credentials show an error |
+| `modal-dialogs.spec.ts` | Each hand-rolled modal (approval workflow create and delete, change request create and review, pending-approval decision, delegation create and revoke, org-chart details) is filled and submitted with real clicks, so a layer over the dialog fails the run |
 | `schedule.spec.ts` | Admin creates a schedule via the UI |
 | `theme.spec.ts` | Theme toggle cycles between light and dark |
 
