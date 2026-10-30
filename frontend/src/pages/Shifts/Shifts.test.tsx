@@ -15,6 +15,14 @@ const mockGetDepartments = jest.fn();
 // wrapping in a real provider: these tests are about the shift list, and a
 // provider would drag login state into every one of them.
 let permissions: string[] = ['assignment.manage'];
+// #844 re-review: the Shifts views show what a Generate changes, so they too
+// refresh once a job abandoned on the Schedule page has finished.
+const mockFinishedOptimizationRefresh = jest.fn();
+jest.mock('../../hooks/useSchedulePage', () => ({
+  ...jest.requireActual('../../hooks/useSchedulePage'),
+  useFinishedOptimizationRefresh: () => mockFinishedOptimizationRefresh(),
+}));
+
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, permissions } }),
 }));
@@ -51,6 +59,15 @@ jest.mock('../../services/departmentService', () => ({
 const Shifts = require('./Shifts').default;
 
 const ok = <T,>(data: T) => Promise.resolve({ success: true as const, data });
+
+/**
+ * Opens the first shift card's ⋯ menu. Its items are mounted only while it
+ * is open — the menu used to depend on Bootstrap's never-loaded JavaScript,
+ * and these tests clicked items no user could reach (#840).
+ */
+const openShiftMenu = async () => {
+  await userEvent.click((await screen.findAllByRole('button', { name: /shift actions/i }))[0]);
+};
 
 describe('<Shifts />', () => {
   beforeEach(() => {
@@ -138,14 +155,16 @@ describe('<Shifts />', () => {
     await userEvent.clear(screen.getByPlaceholderText(/search shifts/i));
     await userEvent.type(screen.getByPlaceholderText(/search shifts/i), 'note');
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
-    await userEvent.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    await openShiftMenu();
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^edit$/i })[0]);
     await userEvent.clear(screen.getByLabelText(/notes/i));
     await userEvent.type(screen.getByLabelText(/notes/i), 'updated');
     await userEvent.click(screen.getByRole('button', { name: /update shift/i }));
     expect(mockUpdateShift).toHaveBeenCalled();
 
     // Delete existing shift — now uses ConfirmModal; click Delete then Confirm
-    await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    await openShiftMenu();
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^delete$/i })[0]);
     const confirmBtn = await screen.findByRole('button', { name: /^confirm$/i });
     await userEvent.click(confirmBtn);
     expect(mockDeleteShift).toHaveBeenCalled();
@@ -155,11 +174,56 @@ describe('<Shifts />', () => {
     render(<Shifts />);
     await screen.findByText(/Emergency Medicine 2026-04-02/i);
     // Click delete to open the ConfirmModal
-    await userEvent.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    await openShiftMenu();
+    await userEvent.click(screen.getAllByRole('menuitem', { name: /^delete$/i })[0]);
     // Click the Cancel button inside the modal instead of Confirm
     const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
     await userEvent.click(cancelBtn);
     expect(mockDeleteShift).not.toHaveBeenCalled();
+  });
+
+  it('refreshes after an optimization abandoned elsewhere has finished', async () => {
+    render(<Shifts />);
+    await screen.findByText(/Emergency Medicine 2026-04-02/i);
+    expect(mockFinishedOptimizationRefresh).toHaveBeenCalled();
+  });
+
+  // The API sends `HH:MM:SS`; the card used to show "07:00:00 - 15:00:00" and
+  // "Duration: NaNh" for it (#891).
+  it('shows API times without seconds and the real duration', async () => {
+    mockGetShifts.mockResolvedValue(
+      ok([
+        {
+          id: 6,
+          date: '2026-04-02',
+          startTime: '07:00:00',
+          endTime: '15:00:00',
+          scheduleId: 1,
+          departmentId: 10,
+          minStaff: 1,
+          status: 'open',
+        },
+      ])
+    );
+    render(<Shifts />);
+
+    expect(await screen.findByText('07:00 - 15:00')).toBeInTheDocument();
+    expect(screen.getByText('8h')).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
+  it('keeps the shift actions closed until the ⋯ button opens them, and closes after a choice', async () => {
+    render(<Shifts />);
+    const toggle = (await screen.findAllByRole('button', { name: /shift actions/i }))[0];
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('menuitem', { name: /^edit$/i })).not.toBeInTheDocument();
+
+    await userEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(screen.getByRole('menuitem', { name: /^edit$/i }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
   /**
@@ -170,25 +234,25 @@ describe('<Shifts />', () => {
    */
   it('offers the staffing action only with assignment.manage', async () => {
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
-    expect(screen.getByRole('button', { name: /Staff/ })).toBeInTheDocument();
+    await openShiftMenu();
+    expect(screen.getByRole('menuitem', { name: /Staff/ })).toBeInTheDocument();
   });
 
   it('omits the staffing action without assignment.manage', async () => {
     permissions = [];
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
-    expect(screen.queryByRole('button', { name: /Staff/ })).not.toBeInTheDocument();
+    await openShiftMenu();
+    expect(screen.queryByRole('menuitem', { name: /Staff/ })).not.toBeInTheDocument();
     // Editing and deleting are unaffected: they are a different authority and
     // this change must not have narrowed them.
-    expect(screen.getByRole('button', { name: /Edit/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Delete/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Edit/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /Delete/ })).toBeInTheDocument();
   });
 
   it('opens the staffing panel for the chosen shift', async () => {
     render(<Shifts />);
-    await screen.findByRole('button', { name: /Edit/ });
-    await userEvent.click(screen.getByRole('button', { name: /Staff/ }));
+    await openShiftMenu();
+    await userEvent.click(screen.getByRole('menuitem', { name: /Staff/ }));
 
     const dialog = await screen.findByRole('dialog');
     // The heading names the shift, so a modal opened from a long list is not

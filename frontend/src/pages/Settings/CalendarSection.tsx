@@ -78,6 +78,11 @@ const CalendarSection: React.FC = () => {
   /** The one token whose raw URL can be shown: the one just created. */
   const [freshUrl, setFreshUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Which client's instructions are expanded. React state rather than
+  // Bootstrap's `data-bs-toggle="collapse"`, whose JavaScript the app never
+  // loads (see components/Dropdown.tsx for why it stays unloaded); one index
+  // keeps the accordion's one-open-at-a-time behaviour.
+  const [openClient, setOpenClient] = useState<number | null>(null);
   // No success banner here — the fresh-URL reveal and the list re-rendering
   // are the confirmation; `run`'s success path is unused, only its error
   // handling is.
@@ -307,11 +312,10 @@ const CalendarSection: React.FC = () => {
                 <div className="accordion-item" key={client.name}>
                   <h2 className="accordion-header" id={`heading-${idx}`}>
                     <button
-                      className="accordion-button collapsed"
+                      className={`accordion-button${openClient === idx ? '' : ' collapsed'}`}
                       type="button"
-                      data-bs-toggle="collapse"
-                      data-bs-target={`#collapse-${idx}`}
-                      aria-expanded="false"
+                      onClick={() => setOpenClient(openClient === idx ? null : idx)}
+                      aria-expanded={openClient === idx}
                       aria-controls={`collapse-${idx}`}
                     >
                       <i className={`bi ${client.icon} me-2`} aria-hidden="true"></i>
@@ -320,9 +324,8 @@ const CalendarSection: React.FC = () => {
                   </h2>
                   <div
                     id={`collapse-${idx}`}
-                    className="accordion-collapse collapse"
+                    className={`accordion-collapse collapse${openClient === idx ? ' show' : ''}`}
                     aria-labelledby={`heading-${idx}`}
-                    data-bs-parent="#client-instructions"
                   >
                     <div className="accordion-body">
                       <ol className="mb-3">

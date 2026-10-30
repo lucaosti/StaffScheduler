@@ -20,6 +20,7 @@ import ConfirmModal from '../../components/ConfirmModal';
 import QueryState from '../../components/QueryState';
 import ErrorAlert from '../../components/ErrorAlert';
 import { useShiftsPageData, useDeleteShift, useSaveShift } from '../../hooks/useShifts';
+import { useFinishedOptimizationRefresh } from '../../hooks/useSchedulePage';
 import { useAuth } from '../../contexts/AuthContext';
 import ShiftAssignmentPanel from '../Assignments/ShiftAssignmentPanel';
 import ExportCsvLink from '../../components/ExportCsvLink';
@@ -33,6 +34,9 @@ interface ConfirmState {
 
 const Shifts: React.FC = () => {
   const { t } = useTranslation();
+  // A Generate abandoned on the Schedule page changes these shifts' staffing
+  // when it finishes; refresh once it has (#844 re-review).
+  useFinishedOptimizationRefresh();
   const { user } = useAuth();
   // Assigning people is `assignment.manage`; editing the shift itself is not.
   // The menu entry is omitted without it rather than shown and refused.

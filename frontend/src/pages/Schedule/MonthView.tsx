@@ -8,7 +8,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shift } from '../../types';
-import { toLocalDateString } from '../../utils/format';
+import { formatTime, toLocalDateString } from '../../utils/format';
 
 // Keyed on Sun–Sat rather than transliterated because the month grid's
 // header order is fixed (the grid always starts the week on Sunday), so the
@@ -84,7 +84,7 @@ const MonthView: React.FC<Props> = ({
                           {dayShifts.map((shift) => (
                             <div key={shift.id} className="small">
                               <span className="badge bg-primary-subtle text-primary-emphasis">
-                                {t('common.timeRange', { start: shift.startTime, end: shift.endTime })}
+                                {t('common.timeRange', { start: formatTime(shift.startTime), end: formatTime(shift.endTime) })}
                               </span>{' '}
                               {shift.departmentName ?? ''}
                             </div>
@@ -155,15 +155,15 @@ const MonthView: React.FC<Props> = ({
                                 shift.departmentName
                                   ? t('schedule.monthDayTitle', {
                                       time: t('common.timeRange', {
-                                        start: shift.startTime,
-                                        end: shift.endTime,
+                                        start: formatTime(shift.startTime),
+                                        end: formatTime(shift.endTime),
                                       }),
                                       department: shift.departmentName,
                                     })
-                                  : t('common.timeRange', { start: shift.startTime, end: shift.endTime })
+                                  : t('common.timeRange', { start: formatTime(shift.startTime), end: formatTime(shift.endTime) })
                               }
                             >
-                              {shift.startTime} {shift.departmentName ?? ''}
+                              {formatTime(shift.startTime)} {shift.departmentName ?? ''}
                             </span>
                           ))}
                           {dayShifts.length > 3 && (

@@ -43,7 +43,11 @@ RUN python3 -m venv /opt/venv \
 # venv must come first for the solver to be found.
 ENV PATH=/opt/venv/bin:$PATH
 
-RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium \
+# WebKit as well as Chromium: Safari and the Capacitor iOS WKWebView use its
+# engine, and engine differences break real controls that a Chromium-only
+# suite cannot see (see the webkit project in frontend/playwright.config.ts,
+# #840 review).
+RUN npx -y "playwright@${PLAYWRIGHT_VERSION}" install --with-deps chromium webkit \
     && rm -rf /root/.npm /var/lib/apt/lists/*
 
 # The Docker CLI and its Compose plugin, for scripts/compose-config.test.mjs:

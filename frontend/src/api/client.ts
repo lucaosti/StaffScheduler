@@ -29,7 +29,7 @@
  */
 
 import type { paths } from './schema';
-import { API_BASE_URL, getAuthHeaders, handleResponse } from '../services/apiUtils';
+import { API_BASE_URL, ApiError, getAuthHeaders, handleResponse, isSessionRefusal } from '../services/apiUtils';
 import type { ApiResponse } from '../types';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -89,6 +89,14 @@ type RequestOptions<P extends keyof paths, M extends HttpMethod> =
        * `X-Client-Type: mobile` on login/refresh from inside Capacitor.
        */
       headers?: Record<string, string>;
+      /** Aborts the request (fetch's own `signal`). */
+      signal?: AbortSignal;
+      /**
+       * `false` skips the refresh-and-retry on an expired session. For
+       * logout's push cleanup, which can still be running when the next user
+       * signs in: a refresh then would present THEIR cookie (#841 re-review).
+       */
+      sessionRecovery?: boolean;
     };
 
 /**
@@ -129,6 +137,84 @@ const buildQuery = (query?: Record<string, unknown>): string => {
   return s ? `?${s}` : '';
 };
 
+/*
+ * SESSION RECOVERY (#842). An access token can expire however carefully the
+ * proactive refresh in AuthContext is timed: a laptop wakes from sleep, a
+ * background tab's timer is throttled, `JWT_EXPIRES_IN` is shorter than the
+ * timer. Without a reactive path every request then failed with 401 until the
+ * user reloaded. So a 401 that says the access token is missing, invalid or
+ * revoked triggers one refresh and one retry of the request.
+ *
+ * The refresher is registered by `services/authService` rather than imported
+ * here, because authService is itself built on this client — the import would
+ * be a cycle. It is the single-flight, cross-tab-locked `refreshToken`, so N
+ * concurrent 401s cost one `/auth/refresh`, never N rotations racing each
+ * other into the family-revocation path.
+ *
+ * The auth endpoints are exempt: a failed login or refresh is an answer, not
+ * an expired session, and `/auth/verify` is the bootstrap probe AuthContext
+ * already follows with an explicit refresh. When the server refuses the
+ * refresh the session is over; the listeners (AuthContext) are told — once —
+ * so the UI signs out instead of leaving the user on a page whose every
+ * request fails. A refresh that fails for any other reason ends nothing.
+ */
+const SESSION_ERROR_CODES = new Set(['INVALID_TOKEN', 'MISSING_TOKEN', 'TOKEN_REVOKED']);
+const NO_RECOVERY_PATHS = ['/auth/login', '/auth/refresh', '/auth/verify'];
+
+let refreshSession: (() => Promise<unknown>) | null = null;
+const sessionExpiredListeners = new Set<() => void>();
+
+/** Registers the refresh the client runs on an expired session (authService does, once). */
+export const setSessionRefresher = (refresher: () => Promise<unknown>): void => {
+  refreshSession = refresher;
+};
+
+/** Subscribes to "the session ended and could not be refreshed"; returns the unsubscribe. */
+export const onSessionExpired = (listener: () => void): (() => void) => {
+  sessionExpiredListeners.add(listener);
+  return () => sessionExpiredListeners.delete(listener);
+};
+
+/*
+ * One recovery at a time, and one verdict per recovery (#842 review): N
+ * requests that 401 together share this promise, so a refused refresh tells
+ * the listeners ONCE rather than once per waiting request — each of which
+ * used to start its own logout, and each logout's own calls could 401 and
+ * start another. Only a definitive refusal (`isSessionRefusal`) ends the
+ * session; a 5xx or network failure leaves it alone.
+ */
+let recovering: Promise<void> | null = null;
+const recoverSession = (refresher: () => Promise<unknown>): Promise<void> =>
+  (recovering ??= refresher()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      if (isSessionRefusal(error)) sessionExpiredListeners.forEach((listener) => listener());
+      throw error;
+    })
+    .finally(() => {
+      recovering = null;
+    }));
+
+const isExpiredSession = (error: unknown, path: string): boolean =>
+  error instanceof ApiError &&
+  error.status === 401 &&
+  SESSION_ERROR_CODES.has(error.code ?? '') &&
+  !NO_RECOVERY_PATHS.some((prefix) => path.startsWith(prefix));
+
+const send = async <T>(
+  method: HttpMethod,
+  url: string,
+  body: unknown,
+  headers?: Record<string, string>,
+  signal?: AbortSignal
+): Promise<ApiResponse<T>> => {
+  // Rebuilt per attempt: on the native platform the retry must carry the
+  // bearer token the refresh just cached, not the expired one.
+  const init: RequestInit = { method: method.toUpperCase(), ...getAuthHeaders(headers), signal };
+  if (body !== undefined) init.body = JSON.stringify(body);
+  return handleResponse<T>(await fetch(url, init));
+};
+
 const request = async <T>(
   method: HttpMethod,
   path: string,
@@ -137,16 +223,27 @@ const request = async <T>(
     query?: Record<string, unknown>;
     body?: unknown;
     headers?: Record<string, string>;
+    signal?: AbortSignal;
+    sessionRecovery?: boolean;
   }
 ): Promise<ApiResponse<T>> => {
   const url = `${API_BASE_URL}${buildPath(path, options?.params)}${buildQuery(options?.query)}`;
-  const init: RequestInit = {
-    method: method.toUpperCase(),
-    ...getAuthHeaders(options?.headers),
-  };
-  if (options?.body !== undefined) init.body = JSON.stringify(options.body);
-  const response = await fetch(url, init);
-  return handleResponse<T>(response);
+  try {
+    return await send<T>(method, url, options?.body, options?.headers, options?.signal);
+  } catch (error) {
+    if (!refreshSession || options?.sessionRecovery === false || !isExpiredSession(error, path)) throw error;
+    try {
+      await recoverSession(refreshSession);
+    } catch (refreshError) {
+      // A refused refresh reports the original 401 (the listeners have been
+      // told the session is over); a transient one reports itself — "server
+      // unavailable" is the truth, "unauthorised" would not be.
+      throw isSessionRefusal(refreshError) ? error : refreshError;
+    }
+    // Exactly one retry: a 401 after a successful refresh is a real refusal,
+    // and looping on it would rotate the refresh token on every request.
+    return send<T>(method, url, options?.body, options?.headers, options?.signal);
+  }
 };
 
 /**

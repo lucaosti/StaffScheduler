@@ -1241,5 +1241,13 @@
   "schedule.stats.shiftCount_one": "{{count}} turno",
   "schedule.stats.shiftCount_other": "{{count}} turni",
   "schedule.stats.employeeCount": "{{count}} dipendenti",
-  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}"
+  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}",
+  "settings.work.title": "Preferenze di lavoro",
+  "settings.work.constraints": "Vincoli di pianificazione",
+  "settings.work.limitsNote": "I tuoi limiti di orario sono fissati dal tuo responsabile. Sono mostrati qui perché determinano i turni che ti possono essere assegnati.",
+  "settings.work.maxHoursPerWeek": "Ore massime settimanali",
+  "settings.work.maxConsecutiveDays": "Giorni consecutivi massimi",
+  "settings.work.noLimits": "Non risultano limiti di orario registrati per te.",
+  "settings.work.loading": "Caricamento dei tuoi limiti di orario…",
+  "dashboard.stats.unavailable": "Non disponibile"
 }

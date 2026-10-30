@@ -5,13 +5,17 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { ADMIN, login } from './helpers';
+import { ADMIN_STATE_FILE } from './helpers';
+
+// Signed in through the run's one shared login (see global-setup.ts): with
+// two browser projects, per-spec logins exceed the backend's login limit.
+test.use({ storageState: ADMIN_STATE_FILE });
 
 const getResolvedTheme = (page: import('@playwright/test').Page) =>
   page.evaluate(() => document.documentElement.getAttribute('data-bs-theme'));
 
 test('theme toggle cycles between light and dark', async ({ page }) => {
-  await login(page, ADMIN.email, ADMIN.password);
+  await page.goto('/dashboard');
 
   const toggle = page.getByRole('button', { name: /^theme:/i });
   await expect(toggle).toBeVisible();
