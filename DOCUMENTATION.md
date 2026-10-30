@@ -200,8 +200,8 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 POST /api/auth/login             { email, password, code?, methodType? } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
 POST /api/auth/login/challenge   { email, password, methodType } → pre-session challenge request (email code delivery, WebAuthn assertion options)
 GET  /api/auth/verify            (cookie) → { user }
-POST /api/auth/refresh           (cookie) → rotates cookie; body: { user }; 409 REFRESH_SUPERSEDED when a concurrent refresh just rotated it
-POST /api/auth/refresh/logout    (cookie) → revokes the refresh-token family, blacklists the JTI if still valid, clears both cookies
+POST /api/v1/auth/refresh        (cookie) → rotates cookie; body: { user }; 409 REFRESH_SUPERSEDED when a concurrent refresh just rotated it
+POST /api/v1/auth/refresh/logout (cookie) → revokes the refresh-token family, blacklists the JTI if still valid, clears both cookies
 ```
 
 With `X-Client-Type: mobile` (see "Mobile client: token-based variant" below),
@@ -423,8 +423,15 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
   A token presented again within 10 seconds of its rotation is answered
   409 `REFRESH_SUPERSEDED` — nothing issued, nothing revoked, cookies untouched —
   rather than treated as reuse, so two tabs refreshing at once do not sign the
-  user out everywhere; the SPA retries once with the successor its shared cookie
-  jar now holds. A replay after that window is reuse as above.
+  user out everywhere. The SPA avoids the race in the first place — one
+  in-flight refresh per tab, serialised across tabs with a Web Lock where the
+  browser has them — and otherwise retries after 250 ms and 1 s, by when the
+  winning refresh's cookie has landed in the shared jar. If every retry is
+  still superseded, the successor went to another client (a stolen token
+  rotated first), so the SPA calls logout, which revokes the family. A replay
+  after the window is reuse as above. Rotation locks the owning `users` row
+  before the token row — the same order a password change takes — so the two
+  cannot deadlock.
 - **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
   path, because that is the only place a browser sends the cookie, and not
   behind the auth middleware, so it works with an expired access token. It

@@ -165,26 +165,77 @@ describe('logout — web platform (regression guard)', () => {
 describe('refreshToken — a concurrent refresh superseded this one', () => {
   const superseded = new ApiError('Session was refreshed concurrently; retry', 409, 'REFRESH_SUPERSEDED');
 
-  beforeEach(() => isNativePlatformMock.mockReturnValue(false));
+  const ok = { success: true, data: { user: { id: 1 } } };
+  const logoutCalls = () =>
+    (global.fetch as jest.Mock).mock.calls.filter(([url]) => /\/auth\/refresh\/logout$/.test(url));
 
-  it('retries once, with whatever refresh token is current by then', async () => {
-    postMock
-      .mockRejectedValueOnce(superseded)
-      .mockResolvedValueOnce({ success: true, data: { user: { id: 1 } } });
-    await expect(authService.refreshToken()).resolves.toEqual({ success: true, data: { user: { id: 1 } } });
+  beforeEach(() => {
+    isNativePlatformMock.mockReturnValue(false);
+    jest.useFakeTimers();
+  });
+  afterEach(() => jest.useRealTimers());
+
+  it('backs off and retries until the winning refresh has landed: 409, 409, then success', async () => {
+    postMock.mockRejectedValueOnce(superseded).mockRejectedValueOnce(superseded).mockResolvedValueOnce(ok);
+    const pending = authService.refreshToken();
+
+    await jest.advanceTimersByTimeAsync(249);
+    expect(postMock).toHaveBeenCalledTimes(1); // waits, rather than re-presenting the old token at once
+    await jest.advanceTimersByTimeAsync(1);
     expect(postMock).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(1000);
+
+    await expect(pending).resolves.toEqual(ok);
+    expect(postMock).toHaveBeenCalledTimes(3);
+    expect(logoutCalls()).toHaveLength(0);
   });
 
-  it('retries only once', async () => {
+  it('gives up after its retries and revokes the family: someone else holds the live successor', async () => {
     postMock.mockRejectedValue(superseded);
-    await expect(authService.refreshToken()).rejects.toBe(superseded);
-    expect(postMock).toHaveBeenCalledTimes(2);
+    const pending = authService.refreshToken();
+    const settled = expect(pending).rejects.toBe(superseded);
+    await jest.advanceTimersByTimeAsync(1250);
+    await settled;
+    expect(postMock).toHaveBeenCalledTimes(3);
+    expect(logoutCalls()).toHaveLength(1);
   });
 
-  it('does not retry any other failure', async () => {
+  it('does not retry, or revoke, on any other failure', async () => {
     const invalid = new ApiError('Session expired', 401, 'REFRESH_INVALID');
     postMock.mockRejectedValue(invalid);
     await expect(authService.refreshToken()).rejects.toBe(invalid);
     expect(postMock).toHaveBeenCalledTimes(1);
+    expect(logoutCalls()).toHaveLength(0);
+  });
+});
+
+describe('refreshToken — one refresh at a time', () => {
+  const ok = { success: true, data: { user: { id: 1 } } };
+  beforeEach(() => isNativePlatformMock.mockReturnValue(false));
+  afterEach(() => {
+    delete (navigator as unknown as { locks?: unknown }).locks;
+  });
+
+  it('shares one in-flight request between concurrent callers in a tab', async () => {
+    let resolve!: (v: unknown) => void;
+    postMock.mockReturnValueOnce(new Promise((r) => { resolve = r; }));
+    const a = authService.refreshToken();
+    const b = authService.refreshToken();
+    resolve(ok);
+    await expect(Promise.all([a, b])).resolves.toEqual([ok, ok]);
+    expect(postMock).toHaveBeenCalledTimes(1);
+
+    // Once settled, the next call is a new refresh.
+    postMock.mockResolvedValueOnce(ok);
+    await authService.refreshToken();
+    expect(postMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('serialises across tabs through a Web Lock when the browser has them', async () => {
+    const request = jest.fn((_name: string, work: () => Promise<unknown>) => work());
+    Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+    postMock.mockResolvedValueOnce(ok);
+    await expect(authService.refreshToken()).resolves.toEqual(ok);
+    expect(request).toHaveBeenCalledWith('staff-scheduler-auth-refresh', expect.any(Function));
   });
 });

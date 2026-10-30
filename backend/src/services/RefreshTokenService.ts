@@ -32,8 +32,15 @@
  *   revocation. Two tabs refreshing at once — opening several after the
  *   access token expired, a browser restoring a session — is the ordinary
  *   case, and treating its loser as reuse would sign the user out of every
- *   tab. The window costs little: a replay inside it obtains nothing, and
- *   any replay after it still revokes the family. Rejected alternatives:
+ *   tab. A replay inside the window obtains nothing, and any replay after it
+ *   still revokes the family. What the window does cost: a thief who rotates
+ *   a stolen token FIRST leaves the victim with `superseded`, not with a
+ *   reuse that kills the thief's chain. The client closes that gap — when its
+ *   backed-off retries all come back superseded, the successor went
+ *   somewhere else, so it calls logout, which revokes by family
+ *   (frontend `authService.refreshToken`). A server-side rule ("reuse once
+ *   the successor has itself been rotated") was rejected: a thief need not
+ *   rotate again within the window, so it would not fire. Rejected alternatives:
  *   handing the loser the SAME successor (impossible without storing the
  *   plaintext successor, which defeats hash-only storage) and minting the
  *   loser a sibling token (exactly the fork this fixes).
@@ -127,6 +134,20 @@ export class RefreshTokenService {
     return usingConnection(this.pool, async (connection) => {
       try {
         await connection.beginTransaction();
+        // Lock order: the owning users row BEFORE the token row. Issuing the
+        // successor takes a shared lock on users.id (the foreign key), while a
+        // password change or deactivation holds users X and then revokes the
+        // tokens (UserService). Claiming first would hold the token row while
+        // waiting on users — the reverse order, and a deadlock. Taking users
+        // first makes both paths users → refresh_tokens; a rotation that
+        // waits for a password change then finds its token revoked.
+        const [owner] = await connection.execute<RowDataPacket[]>(
+          'SELECT user_id FROM refresh_tokens WHERE token_hash = ?',
+          [tokenHash]
+        );
+        if (owner[0]) {
+          await connection.execute('SELECT id FROM users WHERE id = ? FOR SHARE', [owner[0].user_id]);
+        }
         // The claim. Expiry is compared against a parameter, not the server
         // clock, because `expires_at` was written from this process's clock.
         const [claim] = await connection.execute<ResultSetHeader>(

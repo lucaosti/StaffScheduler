@@ -2654,6 +2654,48 @@ describe('session lifecycle (#816, #818, #820)', () => {
       expect((await refreshWith(successor)).status).toBe(200);
     });
 
+    it("lets a victim left with a superseded token end the thief's session by logging out", async () => {
+      const user = await makeUser();
+      const { refreshToken: stolen } = await browserLogin(user.email);
+
+      // The thief rotates first and holds the live successor...
+      const thief = await refreshWith(stolen);
+      expect(thief.status).toBe(200);
+      const thiefSuccessor = setCookieValue(thief, 'refresh_token')!;
+      // ...so the victim, inside the grace window, only ever sees 409.
+      expect((await refreshWith(stolen)).status).toBe(409);
+
+      // The victim's client gives up and logs out with the cookie it still
+      // holds — sent to the logout path exactly as a browser would.
+      const out = await request(app).post(LOGOUT).set('Cookie', `refresh_token=${stolen}`);
+      expect(out.status).toBe(200);
+      expect((await refreshWith(thiefSuccessor)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('cannot deadlock with a password change that revokes the same tokens', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+      const other = await mysql.createConnection({ ...DB, database: ITEST_DB });
+      try {
+        // What updateUser does: lock the users row, then revoke the tokens.
+        await other.beginTransaction();
+        await other.query('UPDATE users SET first_name = ? WHERE id = ?', ['Locked', user.id]);
+        const rotation = tokens.rotate(token);
+        await new Promise((resolve) => setTimeout(resolve, 300)); // let the rotation block on its locks
+        await other.query(
+          'UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL',
+          [user.id]
+        );
+        await other.commit();
+        // The rotation waited for the password change and then found its token revoked.
+        await expect(rotation).resolves.toEqual({ status: 'invalid' });
+      } finally {
+        await other.end();
+      }
+    });
+
     it('still treats a replay outside the grace window as reuse and revokes the family', async () => {
       const user = await makeUser();
       const tokens = service();

@@ -50,9 +50,29 @@ describe('RefreshTokenService.issue', () => {
 describe('RefreshTokenService.rotate', () => {
   const row = { id: 10, user_id: 7, family_id: 'fam-1', revoked: 0, within_grace: null };
 
+  // Every rotation of a known token first locks its owner (see the lock-order
+  // note in rotate); these queue those two statements, and `stmt(n)` indexes
+  // the statements after them.
+  const owned = (conn: { execute: jest.Mock }) =>
+    conn.execute
+      .mockResolvedValueOnce([[{ user_id: 7 }], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null]);
+  const stmt = (conn: { execute: jest.Mock }, n: number) => conn.execute.mock.calls[n + 2];
+
+  it('locks the owning users row before it claims the token', async () => {
+    const { pool, conn } = makePool();
+    owned(conn)
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 1 }], null]);
+    await new RefreshTokenService(pool).rotate('current');
+    expect(conn.execute.mock.calls[0]).toEqual(['SELECT user_id FROM refresh_tokens WHERE token_hash = ?', [sha256('current')]]);
+    expect(conn.execute.mock.calls[1]).toEqual(['SELECT id FROM users WHERE id = ? FOR SHARE', [7]]);
+    expect(stmt(conn, 0)[0]).toMatch(/^UPDATE refresh_tokens SET revoked_at/);
+  });
+
   it('claims before it issues, then links the successor, all in one transaction', async () => {
     const { pool, conn } = makePool();
-    conn.execute
+    owned(conn)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // claim
       .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 0 }], null]) // locking read
       .mockResolvedValueOnce([{ insertId: 11 }, null]) // successor INSERT
@@ -64,52 +84,55 @@ describe('RefreshTokenService.rotate', () => {
     if (result.status !== 'rotated') throw new Error('unreachable');
     expect(result.userId).toBe(7);
     expect(typeof result.issued.token).toBe('string');
-    const [claimSql, claimParams] = conn.execute.mock.calls[0];
+    const [claimSql, claimParams] = stmt(conn, 0);
     expect(claimSql).toMatch(/UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP\s+WHERE token_hash = \? AND revoked_at IS NULL AND expires_at > \?/);
     expect(claimParams[0]).toBe(sha256('current'));
-    expect(conn.execute.mock.calls[1][0]).toMatch(/FOR UPDATE/);
-    expect(conn.execute.mock.calls[1][1]).toEqual([CONCURRENT_REFRESH_GRACE_SECONDS, sha256('current')]);
+    expect(stmt(conn, 1)[0]).toMatch(/FOR UPDATE/);
+    expect(stmt(conn, 1)[1]).toEqual([CONCURRENT_REFRESH_GRACE_SECONDS, sha256('current')]);
     // The successor is created in the SAME family, on the transaction's connection.
-    expect(conn.execute.mock.calls[2][1][1]).toBe('fam-1');
-    expect(conn.execute.mock.calls[3]).toEqual(['UPDATE refresh_tokens SET replaced_by = ? WHERE id = ?', [11, 10]]);
+    expect(stmt(conn, 2)[1][1]).toBe('fam-1');
+    expect(stmt(conn, 3)).toEqual(['UPDATE refresh_tokens SET replaced_by = ? WHERE id = ?', [11, 10]]);
     expect(conn.commit).toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalled();
   });
 
   it('is invalid for an unknown token', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]).mockResolvedValueOnce([[], null]);
+    conn.execute
+      .mockResolvedValueOnce([[], null]) // no owner: nothing to lock
+      .mockResolvedValueOnce([{ affectedRows: 0 }, null])
+      .mockResolvedValueOnce([[], null]);
     await expect(new RefreshTokenService(pool).rotate('nope')).resolves.toEqual({ status: 'invalid' });
-    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.execute).toHaveBeenCalledTimes(3);
   });
 
   it('is invalid, and revokes nothing, for an expired token that was never spent', async () => {
     const { pool, conn } = makePool();
-    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, null]).mockResolvedValueOnce([[row], null]);
+    owned(conn).mockResolvedValueOnce([{ affectedRows: 0 }, null]).mockResolvedValueOnce([[row], null]);
     await expect(new RefreshTokenService(pool).rotate('expired')).resolves.toEqual({ status: 'invalid' });
-    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.execute).toHaveBeenCalledTimes(4);
   });
 
   it('is superseded, issuing and revoking nothing, when another rotation claimed it moments ago', async () => {
     const { pool, conn } = makePool();
-    conn.execute
+    owned(conn)
       .mockResolvedValueOnce([{ affectedRows: 0 }, null])
       .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 1 }], null]);
     await expect(new RefreshTokenService(pool).rotate('raced')).resolves.toEqual({ status: 'superseded' });
-    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.execute).toHaveBeenCalledTimes(4);
     expect(conn.commit).toHaveBeenCalled();
   });
 
   it('is invalid and revokes the family when a token spent outside the grace window is replayed', async () => {
     const { pool, conn } = makePool();
-    conn.execute
+    owned(conn)
       .mockResolvedValueOnce([{ affectedRows: 0 }, null])
       .mockResolvedValueOnce([[{ ...row, revoked: 1, within_grace: 0 }], null])
       .mockResolvedValueOnce([{ affectedRows: 2 }, null]); // revokeFamily UPDATE
 
     await expect(new RefreshTokenService(pool).rotate('replayed')).resolves.toEqual({ status: 'invalid' });
 
-    const familyRevoke = conn.execute.mock.calls[2];
+    const familyRevoke = stmt(conn, 2);
     expect(familyRevoke[0]).toMatch(/UPDATE refresh_tokens SET revoked_at.*family_id = \?/s);
     expect(familyRevoke[1]).toEqual(['fam-1']);
     expect(conn.commit).toHaveBeenCalled();
@@ -117,7 +140,7 @@ describe('RefreshTokenService.rotate', () => {
 
   it('rolls back the claim and rethrows when issuing the successor fails', async () => {
     const { pool, conn } = makePool();
-    conn.execute
+    owned(conn)
       .mockResolvedValueOnce([{ affectedRows: 1 }, null])
       .mockResolvedValueOnce([[row], null])
       .mockRejectedValueOnce(new Error('insert failed'));
