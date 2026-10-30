@@ -1127,7 +1127,8 @@ loaded (#845). The link is the first stylesheet in `<head>`, so the app's own CS
 overrides it. `frontend/src/index.css`
 carries a documented `[dir='rtl']` override block for the handful of physical (non-logical)
 properties the app's own CSS still uses (`.sidebar`'s `left`/`border-right`,
-`.main-content`'s `margin-left`) — new custom CSS should prefer logical properties
+`.main-content`'s `margin-left`, and their phone-width variants: the closed drawer
+slides out to the right and the content takes the full width, #947) — new custom CSS should prefer logical properties
 (`margin-inline-start`, ...) over adding to that list. **RTL is verified end-to-end on one
 page today: Login** (`pages/Auth/Login.tsx`), chosen because it is small, always mounted,
 and its form/label/button layout visibly breaks if RTL CSS is wrong. Every other page is

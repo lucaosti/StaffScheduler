@@ -344,6 +344,30 @@ code {
 }
 
 /*
+ * The phone layout, mirrored (#947). The mobile query above resets
+ * `.main-content`'s LEFT margin and parks the closed drawer at
+ * translateX(-100%) — right for LTR only. In Arabic the desktop
+ * `margin-right` survived, so every page was pushed a sidebar's width off
+ * screen (571–1214 px wide on a 390 px phone), and the drawer slid left from
+ * the right edge into the middle of the page, over the headings. This block
+ * must follow the `[dir='rtl']` rules above: same specificity, so the later
+ * one wins.
+ */
+@media (max-width: 768px) {
+  [dir='rtl'] .main-content {
+    margin-right: 0;
+  }
+
+  [dir='rtl'] .sidebar {
+    transform: translateX(100%);
+  }
+
+  [dir='rtl'] .sidebar.show {
+    transform: translateX(0);
+  }
+}
+
+/*
  * Mobile touch targets for the schedule/calendar-adjacent pages (issue: the
  * Capacitor WebView shell has no mouse — every actionable control needs a
  * real touch target, not just enough visual padding to read as a button on a

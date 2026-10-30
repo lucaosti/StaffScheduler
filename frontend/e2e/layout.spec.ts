@@ -49,6 +49,40 @@ test.describe('demo banner', () => {
 });
 
 /**
+ * #947: on phones in Arabic the closed sidebar sat mid-screen over the
+ * headings and pages were 571–1214 px wide on a 390 px viewport — the RTL
+ * desktop margin was never reset in the mobile query, and the closed drawer
+ * slid out of the wrong side.
+ */
+test.describe('Arabic at phone width', () => {
+  /** True when nothing covers `locator` at its start, middle or end. */
+  const uncovered = (locator: Locator) =>
+    locator.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const y = box.top + box.height / 2;
+      return [box.left + 4, box.left + box.width / 2, box.right - 4].every((x) => {
+        const hit = document.elementFromPoint(x, y);
+        return hit !== null && el.contains(hit);
+      });
+    });
+
+  for (const path of ['/dashboard', '/shifts', '/schedule']) {
+    test(`${path} fits the screen and its heading is not covered`, async ({ browser }) => {
+      const page = await adminPage(browser, { viewport: { width: 390, height: 844 } });
+      await page.evaluate(() => window.localStorage.setItem('locale', 'ar'));
+      await page.goto(path);
+      await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
+      const heading = page.locator('h1').first();
+      await expect(heading).toBeVisible();
+
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow).toBeLessThanOrEqual(0);
+      expect(await uncovered(heading)).toBe(true);
+    });
+  }
+});
+
+/**
  * #845: only the LTR Bootstrap stylesheet was ever loaded, so its spacing
  * utilities stayed physical in Arabic (`.me-3` is `margin-right` there) and
  * the layout did not mirror.

@@ -26,8 +26,11 @@ export const ADMIN_STATE_FILE = path.join(os.tmpdir(), 'staff-scheduler-e2e-admi
  * A page already signed in as ADMIN, from the one login `global-setup.ts`
  * performs per run — see there for why specs do not each log in.
  */
-export async function adminPage(browser: Browser): Promise<Page> {
-  const context = await browser.newContext({ storageState: ADMIN_STATE_FILE });
+export async function adminPage(
+  browser: Browser,
+  options: { viewport?: { width: number; height: number } } = {}
+): Promise<Page> {
+  const context = await browser.newContext({ storageState: ADMIN_STATE_FILE, ...options });
   const page = await context.newPage();
   await page.goto('/dashboard');
   await expect(page).toHaveURL(/\/dashboard$/);
