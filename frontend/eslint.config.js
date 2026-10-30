@@ -29,6 +29,7 @@ const I18N_ENFORCED_FILES = [
   'src/components/LocaleSwitcher.tsx',
   'src/pages/Auth/Login.tsx',
   'src/pages/Dashboard/Dashboard.tsx',
+  'src/pages/Settings/ProfileSection.tsx',
   'src/pages/Kiosk/Kiosk.tsx',
   'src/pages/Assignments/MyAssignments.tsx',
   'src/pages/Assignments/ShiftAssignmentPanel.tsx',

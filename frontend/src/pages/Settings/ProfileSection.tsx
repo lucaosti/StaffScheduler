@@ -16,14 +16,19 @@
  * guarded by authentication alone; changing them requires
  * `preferences.manage` through `PUT /preferences/:userId`.
  *
+ * A failed fetch shows the error (#843 review): it used to read "no limits
+ * are on record", a false statement about the caller's contract.
+ *
  * @author Luca Ostinelli
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMyPreferencesQuery } from '../../hooks/usePreferences';
 import QueryState from '../../components/QueryState';
 
 const ProfileSection: React.FC = () => {
+  const { t } = useTranslation();
   const preferencesQuery = useMyPreferencesQuery();
   const preferences = preferencesQuery.data;
 
@@ -32,20 +37,25 @@ const ProfileSection: React.FC = () => {
       <div className="col-lg-8">
         <div className="card">
           <div className="card-header">
-            <h5 className="mb-0">Work Preferences</h5>
+            <h5 className="mb-0">{t('settings.work.title')}</h5>
           </div>
           <div className="card-body">
-            <h6 className="mb-3">Schedule Constraints</h6>
+            <h6 className="mb-3">{t('settings.work.constraints')}</h6>
             <div className="alert alert-secondary py-2 small" id="limitsSetByManager" role="note">
               <i className="bi bi-lock me-2" aria-hidden="true"></i>
-              Your working-time limits are set by your manager. They are shown
-              here because they govern what you can be scheduled for.
+              {t('settings.work.limitsNote')}
             </div>
-            <QueryState isLoading={preferencesQuery.isLoading} isError={false}>
+            <QueryState
+              isLoading={preferencesQuery.isLoading}
+              isError={preferencesQuery.isError}
+              error={preferencesQuery.error}
+              onRetry={() => preferencesQuery.refetch()}
+              loadingMessage={t('settings.work.loading')}
+            >
               {preferences ? (
                 <div className="row">
                   <div className="col-md-4 mb-3">
-                    <label htmlFor="maxHoursPerWeek" className="form-label">Max Hours Per Week</label>
+                    <label htmlFor="maxHoursPerWeek" className="form-label">{t('settings.work.maxHoursPerWeek')}</label>
                     <input
                       type="number"
                       className="form-control"
@@ -56,7 +66,7 @@ const ProfileSection: React.FC = () => {
                     />
                   </div>
                   <div className="col-md-4 mb-3">
-                    <label htmlFor="maxConsecutiveDays" className="form-label">Max Consecutive Days</label>
+                    <label htmlFor="maxConsecutiveDays" className="form-label">{t('settings.work.maxConsecutiveDays')}</label>
                     <input
                       type="number"
                       className="form-control"
@@ -68,7 +78,7 @@ const ProfileSection: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <p className="text-muted mb-0">No working-time limits are on record for you.</p>
+                <p className="text-muted mb-0">{t('settings.work.noLimits')}</p>
               )}
             </QueryState>
           </div>

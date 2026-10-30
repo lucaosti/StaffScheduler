@@ -13,6 +13,7 @@
 import { render, screen, fireEvent } from '../../test-utils/renderWithClient';
 import ProfileSection from './ProfileSection';
 import * as preferencesService from '../../services/preferencesService';
+import { ApiError } from '../../services/apiUtils';
 
 jest.mock('../../services/preferencesService', () => ({
   __esModule: true,
@@ -66,6 +67,17 @@ describe('<ProfileSection />', () => {
     expect(screen.queryByLabelText(/min rest hours/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/day shift/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  // Review of #843: a failed fetch read as "no limits on record", a false
+  // statement about the caller's contract.
+  it('shows the error, not "no limits", when the fetch fails', async () => {
+    // A 4xx: ErrorAlert replaces any 5xx text with its generic sentence.
+    getMyPreferences.mockRejectedValue(new ApiError('Preferences are unavailable', 403));
+    render(<ProfileSection />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Preferences are unavailable');
+    expect(screen.queryByText(/no working-time limits are on record/i)).not.toBeInTheDocument();
   });
 
   it('says so when the caller has no limits on record', async () => {
