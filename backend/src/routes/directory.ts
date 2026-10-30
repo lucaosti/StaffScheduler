@@ -27,6 +27,7 @@ import {
   vcardQuery,
 } from '../schemas';
 import { UserDirectoryService } from '../services/UserDirectoryService';
+import { UserAuthorityService } from '../services/UserAuthorityService';
 import { config } from '../config';
 
 const error = (res: Response, status: number, code: string, message: string): void => {
@@ -36,6 +37,9 @@ const error = (res: Response, status: number, code: string, message: string): vo
 export const createDirectoryRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new UserDirectoryService(pool);
+  // Directory fields are part of another person's account, so writing them is
+  // held to the same authority rule as the account itself (#810).
+  const authority = new UserAuthorityService(pool);
 
   router.use(authenticate);
 
@@ -51,7 +55,8 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     res.json({ success: true, data: profile });
   });
 
-  router.put('/users/:id/fields', requirePermission('user.manage'), validateParams(idParam), validateBody(directoryFieldsBody), async (_req: Request, res: Response) => {
+  router.put('/users/:id/fields', requirePermission('user.manage'), validateParams(idParam), validateBody(directoryFieldsBody), async (req: Request, res: Response) => {
+    await authority.assertCanManageUser(req.user!, res.locals.params.id);
     const fields = res.locals.body.fields;
     await service.setFields(res.locals.params.id, fields);
     const profile = await service.getProfile(res.locals.params.id);
@@ -62,7 +67,8 @@ export const createDirectoryRouter = (pool: Pool): Router => {
     '/users/:id/fields/:key',
     requirePermission('user.manage'),
     validateParams(idAndKeyParam),
-    async (_req: Request, res: Response) => {
+    async (req: Request, res: Response) => {
+      await authority.assertCanManageUser(req.user!, res.locals.params.id);
       const ok = await service.removeField(res.locals.params.id, res.locals.params.key);
       if (!ok) return error(res, 404, 'NOT_FOUND', 'Field not found');
       res.json({ success: true });
@@ -115,6 +121,7 @@ export const createDirectoryRouter = (pool: Pool): Router => {
       const out = await service.importVcf(vcf, {
         defaultPasswordHash: passwordHash,
         createdBy: req.user!.id,
+        actor: req.user!,
       });
       res.json({ success: true, data: out });
   }

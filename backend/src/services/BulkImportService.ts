@@ -20,6 +20,8 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
+import { UserAuthorityService } from './UserAuthorityService';
+import { User } from '../types';
 
 interface ImportRowError {
   row: number;
@@ -205,10 +207,14 @@ export const mapShiftRows = (rows: string[][]): { rows: ShiftRow[]; errors: Impo
 export class BulkImportService {
   constructor(private pool: Pool) {}
 
-  async importEmployees(csv: string, defaultPassword: string): Promise<ImportResult> {
+  async importEmployees(csv: string, defaultPassword: string, actor: User): Promise<ImportResult> {
     const parsed = parseCsv(csv);
     const { rows, errors } = mapEmployeeRows(parsed);
     if (errors.length > 0) return { inserted: 0, errors };
+    // Rows name their role, so an import is a role grant like any other and is
+    // held to the same anti-escalation rule — checked for the whole file before
+    // anything is written, consistent with the all-or-nothing import (#809).
+    await new UserAuthorityService(this.pool).assertCanAssignRoleNames(actor, rows.map((r) => r.roleName));
 
     return usingConnection(this.pool, async (conn) => {
       try {

@@ -6,6 +6,8 @@
  * without standing up the real RBAC tables.
  */
 
+import { User } from '../../types';
+
 // These lists must mirror the role_permissions seeds in the baseline
 // migration (db/migrations/*_initial_schema.sql) exactly: route tests use
 // them to decide what a given role may do, so a code missing here silently
@@ -62,3 +64,9 @@ export const permissionsForRole = (role?: string): string[] => {
   if (role === 'employee') return EMPLOYEE_PERMISSIONS;
   return [];
 };
+
+/**
+ * An actor holding every permission, for tests of import mechanics that now
+ * pass through the role-grant authority check (#809) without being about it.
+ */
+export const ADMIN_ACTOR = { id: 1, permissions: ALL_PERMISSIONS } as unknown as User;
