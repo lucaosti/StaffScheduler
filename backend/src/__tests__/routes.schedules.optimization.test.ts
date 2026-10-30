@@ -48,10 +48,10 @@ describe('POST /api/schedules/:id/generate', () => {
   });
 
   it('enqueues and returns 202 with a job id when the queue is enabled', async () => {
-    (enqueueOptimization as jest.Mock).mockResolvedValue('schedule:5');
+    (enqueueOptimization as jest.Mock).mockResolvedValue('schedule-5');
     const res = await request(app()).post('/api/schedules/5/generate');
     expect(res.status).toBe(202);
-    expect(res.body.data).toMatchObject({ jobId: 'schedule:5', scheduleId: 5, state: 'queued' });
+    expect(res.body.data).toMatchObject({ jobId: 'schedule-5', scheduleId: 5, state: 'queued' });
     expect(enqueueOptimization).toHaveBeenCalledWith({ scheduleId: 5, createdBy: 1 });
   });
 
@@ -73,7 +73,7 @@ describe('POST /api/schedules/:id/generate', () => {
 
 describe('GET /api/schedules/:id/optimization', () => {
   it('returns the job status', async () => {
-    (getOptimizationStatus as jest.Mock).mockResolvedValue({ jobId: 'schedule:5', state: 'active', progress: 40 });
+    (getOptimizationStatus as jest.Mock).mockResolvedValue({ jobId: 'schedule-5', state: 'active', progress: 40 });
     const res = await request(app()).get('/api/schedules/5/optimization');
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ state: 'active', progress: 40 });

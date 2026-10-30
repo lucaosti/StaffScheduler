@@ -19,7 +19,7 @@
  * infrastructure the async model needs.
  *
  * Dedup and re-runnability: the job id is deterministic per schedule
- * (`schedule:{id}`), so a second generate while one is in flight returns the
+ * (`schedule-{id}`), so a second generate while one is in flight returns the
  * SAME job instead of starting a competing solve for the same schedule
  * (bounded concurrency "one active solve per schedule", plus a global worker
  * concurrency of 1 so a burst cannot saturate the box). A finished job is
@@ -70,7 +70,12 @@ export interface OptimizationJobStatus {
   failedReason?: string;
 }
 
-const jobIdFor = (scheduleId: number): string => `schedule:${scheduleId}`;
+// A hyphen, not a colon: BullMQ rejects custom ids containing ':' (they collide
+// with its internal `repeat:` key format), and `schedule:{id}` made every
+// generate fail with "Custom Id cannot contain :" wherever Redis was on (#889).
+// The mocked unit suite could not see it; optimizationQueue.redis.integration
+// runs the real library.
+const jobIdFor = (scheduleId: number): string => `schedule-${scheduleId}`;
 
 /**
  * Refresh the queue-depth metric from the live waiting count. Best-effort: a

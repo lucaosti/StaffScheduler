@@ -677,7 +677,7 @@ Redis is available (`backend/src/services/OptimizationQueue.ts`, BullMQ):
 - Progress is also pushed over the SSE stream as `optimization.progress`,
   `optimization.completed` and `optimization.failed` events.
 
-The job id is deterministic per schedule (`schedule:{id}`), so a second
+The job id is deterministic per schedule (`schedule-{id}`; BullMQ rejects `:` in custom ids), so a second
 generate while one is in flight returns the same job rather than starting a
 competing solve, and the worker runs one solve at a time. Without Redis the
 endpoint falls back to running the optimizer synchronously and returns `200`
