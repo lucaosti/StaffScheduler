@@ -27,6 +27,7 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { ConflictError, NotFoundError } from '../errors';
 import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest, SqlParam } from '../types';
@@ -217,10 +218,11 @@ export class UserService {
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' ORDER BY u.last_name ASC, u.first_name ASC';
+      // `u.id` breaks name ties: without a total order MySQL may return the
+      // same row on two pages and skip another.
+      query += ' ORDER BY u.last_name ASC, u.first_name ASC, u.id ASC';
       if (pagination) {
-        query += ' LIMIT ? OFFSET ?';
-        params.push(pagination.limit, pagination.offset);
+        query += ` ${limitOffsetClause(pagination)}`;
       } else {
         query += ' LIMIT 1000';
       }
@@ -585,10 +587,9 @@ export class UserService {
         params.push(filters.departmentId);
       }
 
-      sql += ` ORDER BY u.last_name ASC, u.first_name ASC`;
+      sql += ` ORDER BY u.last_name ASC, u.first_name ASC, u.id ASC`;
       if (pagination) {
-        sql += ` LIMIT ? OFFSET ?`;
-        params.push(pagination.limit, pagination.offset);
+        sql += ` ${limitOffsetClause(pagination)}`;
       } else {
         sql += ` LIMIT 1000`;
       }

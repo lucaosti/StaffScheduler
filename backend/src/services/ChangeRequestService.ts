@@ -24,10 +24,14 @@ import {
   PendingApproval,
 } from '../types';
 import { logger } from '../config/logger';
+import { limitOffsetClause } from '../utils/sql';
 import { AuditLogService } from './AuditLogService';
 import { ApprovalWorkflowService } from './ApprovalWorkflowService';
 import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { resolveSubjectContext } from './subjectContext';
+
+// Same bounds as the audit log: a review queue is read in long runs.
+const CHANGE_REQUEST_PAGE_BOUNDS = { defaultLimit: 100, maxLimit: 500 };
 
 const mapRow = (row: RowDataPacket): ChangeRequest => ({
   id: row.id as number,
@@ -100,14 +104,12 @@ export class ChangeRequestService {
     );
     const total = (countRows[0] as { c: number }).c;
 
-    // See AuditLogService.list: a bound LIMIT/OFFSET fails under the
-    // prepared-statement protocol, so GET /api/change-requests returned 500 on
-    // every call. Both are clamped integers here, never caller-supplied text.
-    const limit = Math.max(1, Math.min(500, filters.limit ?? 100));
-    const offset = Math.max(0, filters.offset ?? 0);
-
+    // Inlined rather than bound — see limitOffsetClause. `id` breaks
+    // same-second ties so a page boundary never repeats or skips a request.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT * FROM change_requests${where} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`,
+      `SELECT * FROM change_requests${where}
+        ORDER BY created_at DESC, id DESC
+        ${limitOffsetClause(filters, CHANGE_REQUEST_PAGE_BOUNDS)}`,
       params
     );
 
