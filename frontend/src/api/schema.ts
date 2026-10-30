@@ -1225,6 +1225,13 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description The method is already enabled — disable it with a valid code before setting it up again — or is not available (`CONFLICT`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;

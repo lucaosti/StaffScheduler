@@ -56,6 +56,23 @@ describe('WebAuthnProvider.beginSetup', () => {
     const storedData = JSON.parse(execute.mock.calls[0][1][1]);
     expect(storedData.pendingChallenge).toBe('reg-challenge');
   });
+
+  it('never disables or overwrites an already-enabled row (#817 backstop)', async () => {
+    // TwoFactorService refuses setup on an enabled method; the upsert itself
+    // must not be able to undo an enrollment that wins a race with that check
+    // (this row holds the registered credentials, so overwriting it would
+    // also orphan the user's authenticator).
+    generateRegistrationOptions.mockResolvedValueOnce({ challenge: 'reg-challenge' });
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+
+    await new WebAuthnProvider(pool).beginSetup(7, 'jane@example.com');
+
+    const sql = execute.mock.calls[0][0] as string;
+    const update = sql.slice(sql.indexOf('ON DUPLICATE KEY UPDATE'));
+    expect(update).not.toMatch(/enabled\s*=\s*0/);
+    expect(update).toMatch(/secret_data = IF\(enabled = 1, secret_data, VALUES\(secret_data\)\)/);
+  });
 });
 
 describe('WebAuthnProvider.confirmEnable', () => {

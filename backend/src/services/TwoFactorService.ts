@@ -72,8 +72,31 @@ export class TwoFactorService {
     return provider.requestChallenge(userId);
   }
 
+  /**
+   * Step 1 of enrollment — refused for a method that is already enabled
+   * (#817). Every provider's setup writes a pending row, and used to do so by
+   * upserting `enabled = 0` over whatever was there: on an enabled method that
+   * turned 2FA off with no code, bypassing the code `/2fa/disable` demands, so
+   * a stolen session could strip the owner's second factor (and, for TOTP,
+   * enrol its own secret). Changing an enrolled method means disabling it with
+   * a valid code first.
+   *
+   * Checked here rather than in each provider: it is one rule for every
+   * method, a future provider gets it without remembering to, and it runs
+   * before email/SMS setup would deliver a code nobody should receive. Each
+   * provider's upsert also leaves an enabled row untouched, as the backstop
+   * for a setup racing a concurrent enable past this check.
+   */
   async beginSetup(userId: number, accountLabel: string, methodType: TwoFactorMethodType = 'totp'): Promise<TwoFactorSetupPayload> {
-    return this.resolveProvider(methodType).beginSetup(userId, accountLabel);
+    const provider = this.resolveProvider(methodType);
+    const [rows] = await this.pool.execute<RowDataPacket[]>(
+      `SELECT enabled FROM two_factor_methods WHERE user_id = ? AND method_type = ? LIMIT 1`,
+      [userId, methodType]
+    );
+    if (rows[0]?.enabled) {
+      throw new ConflictError('2FA is already enabled for this method — disable it before setting it up again');
+    }
+    return provider.beginSetup(userId, accountLabel);
   }
 
   /**

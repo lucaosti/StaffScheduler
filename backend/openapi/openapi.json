@@ -2905,6 +2905,9 @@
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "description": "The method is already enabled — disable it with a valid code before setting it up again — or is not available (`CONFLICT`)."
           }
         },
         "requestBody": {

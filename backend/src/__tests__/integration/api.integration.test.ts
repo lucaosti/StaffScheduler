@@ -2199,6 +2199,56 @@ describe('TOTP two-factor authentication against the real schema (#899)', () => 
     );
     expect(rows[0].n).toBe(0);
   });
+
+  it('refuses setup on an enabled method with 409 and leaves 2FA enabled (#817)', async () => {
+    // Setup used to upsert `enabled = 0` with a fresh secret, so a stolen
+    // session could turn 2FA off without the code /2fa/disable demands — and
+    // lock the owner out by enrolling its own authenticator.
+    const email = `itest-totp-resetup-${Date.now()}@example.com`;
+    await admin.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, ?, 'Totp', 'Resetup', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    const cookie = await loginCookie(email, PASSWORD);
+
+    const setup = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    const secret = setup.body.data.secret as string;
+    const enable = await request(app)
+      .post('/api/v1/auth/2fa/enable')
+      .set('Cookie', cookie)
+      .send({ methodType: 'totp', code: totp(secret, { nowSeconds: Math.floor(Date.now() / 1000) }) });
+    expect(enable.status).toBe(200);
+    const [before] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+
+    const again = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    expect(again.status).toBe(409);
+    expectErrorEnvelope(again.body);
+    expect(again.body.data).toBeUndefined();
+
+    const [after] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.enabled, tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0].enabled).toBe(1);
+    expect(after[0].secret_data).toEqual(before[0].secret_data);
+
+    // Backstop: even a provider call that slips past the dispatcher's check
+    // (a race with a concurrent enable) cannot disable or re-key the row.
+    const { TotpProvider } = require('../../services/TotpProvider');
+    const { database } = require('../../config/database');
+    const [[owner]] = await admin.query<mysql.RowDataPacket[]>('SELECT id FROM users WHERE email = ?', [email]);
+    await new TotpProvider(database.getPool()).beginSetup(owner.id, email);
+    const [raced] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT enabled, secret_data FROM two_factor_methods WHERE user_id = ?`,
+      [owner.id]
+    );
+    expect(raced[0].enabled).toBe(1);
+    expect(raced[0].secret_data).toEqual(before[0].secret_data);
+  });
 });
 
 describe('user-management authority (#809, #810)', () => {

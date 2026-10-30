@@ -46,6 +46,23 @@ describe('SmsCodeProvider.beginSetup', () => {
     expect(execute.mock.calls[1][0]).toMatch(/INSERT INTO two_factor_methods/);
   });
 
+  it('never disables or overwrites an already-enabled row (#817 backstop)', async () => {
+    // TwoFactorService refuses setup on an enabled method; the upsert itself
+    // must not be able to undo an enrollment that wins a race with that check.
+    const { pool, execute } = makePool();
+    const { provider: smsProvider } = makeSmsProvider();
+    execute
+      .mockResolvedValueOnce([[{ phone: '+15551234567' }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+
+    await new SmsCodeProvider(pool, smsProvider).beginSetup(7, 'jane@example.com');
+
+    const sql = execute.mock.calls[1][0] as string;
+    const update = sql.slice(sql.indexOf('ON DUPLICATE KEY UPDATE'));
+    expect(update).not.toMatch(/enabled\s*=\s*0/);
+    expect(update).toMatch(/secret_data = IF\(enabled = 1, secret_data, VALUES\(secret_data\)\)/);
+  });
+
   it('throws when SMS is not configured, without touching the database', async () => {
     isSmsConfigured.mockReturnValue(false);
     const { pool, execute } = makePool();
