@@ -164,6 +164,34 @@ describe('TwoFactorService.verifyCode', () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
+  it('guards a later code on the recorded counter, compared as JSON (#899)', async () => {
+    const secret = generateSecret();
+    const previous = Math.floor(Date.now() / 1000 / 30) - 5;
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 1, secret_data: JSON.stringify({ secret, lastCounter: previous }) }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    const service = new TwoFactorService(pool);
+    expect(await service.verifyCode(7, totp(secret))).toBe(true);
+    const [sql, params] = execute.mock.calls[1];
+    expect(String(sql)).toContain('CAST(? AS JSON)');
+    expect(params[2]).toBe(String(previous));
+  });
+
+  it('guards the first code after enrolment on a JSON null, not on SQL NULL (#899)', async () => {
+    const secret = generateSecret();
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 1, secret_data: JSON.stringify({ secret, lastCounter: null }) }], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+    const service = new TwoFactorService(pool);
+    await service.verifyCode(7, totp(secret));
+    const [sql, params] = execute.mock.calls[1];
+    expect(String(sql)).toContain('JSON_TYPE');
+    expect(String(sql)).not.toContain('<=>');
+    expect(params).toHaveLength(2);
+  });
+
   it('rejects the code when a concurrent login wins the compare-and-set', async () => {
     const secret = generateSecret();
     const { pool, execute } = makePool();
