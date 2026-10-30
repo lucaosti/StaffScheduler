@@ -12,6 +12,8 @@ import { AttendanceService } from '../services/AttendanceService';
 import { CostPlanService } from '../services/CostPlanService';
 import { EmployeeLoanService } from '../services/EmployeeLoanService';
 import { ReportsService } from '../services/ReportsService';
+import { OnCallService } from '../services/OnCallService';
+import { ShiftTemplateService } from '../services/ShiftTemplateService';
 
 const makePool = (rows: unknown[] = []) => {
   const execute = jest.fn().mockResolvedValue([rows, null]);
@@ -40,6 +42,14 @@ describe('scope filters in list services', () => {
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain('department_id = ? AND department_id IN (SELECT id FROM departments WHERE org_unit_id IN (?))');
     expect(params).toEqual([2, 5]);
+  });
+
+  it('bounds on-call periods and shift templates by their department\'s org unit', async () => {
+    const { pool, execute } = makePool();
+    await new OnCallService(pool).listPeriods({ orgUnitIds: [4] });
+    expect(execute.mock.calls[0][0]).toContain('d.org_unit_id IN (?)');
+    await new ShiftTemplateService(pool).getAllShiftTemplates([]);
+    expect(execute.mock.calls[1][0]).toContain('department_id IN (SELECT id FROM departments WHERE 1 = 0)');
   });
 
   it('shows a loan to either end of it', async () => {

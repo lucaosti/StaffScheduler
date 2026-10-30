@@ -222,6 +222,14 @@ describe('AccessPolicy', () => {
       ['costPlan', 'Cost plan'],
       ['orgUnit', 'Org unit'],
       ['timeOff', 'Time-off request'],
+      ['onCallPeriod', 'On-call period'],
+      ['shiftTemplate', 'Shift template'],
+      ['changeRequest', 'Change request'],
+      ['policyException', 'Policy exception'],
+      ['shiftSwap', 'Shift swap request'],
+      ['attendance', 'Attendance record'],
+      ['loan', 'Loan'],
+      ['assignment', 'Assignment'],
     ] as const) {
       await expect(policy.assertReach(scoped, 'schedule.read', kind, 1)).rejects.toThrow(`${label} not found`);
     }
