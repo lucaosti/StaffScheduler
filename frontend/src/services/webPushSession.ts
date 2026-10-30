@@ -23,13 +23,14 @@
 
 import { unsubscribePush } from './notificationService';
 
-export const dropWebPushSubscription = async (): Promise<void> => {
+export const dropWebPushSubscription = async (signal?: AbortSignal): Promise<void> => {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   const registration = await navigator.serviceWorker.getRegistration();
   const subscription = await registration?.pushManager?.getSubscription();
   if (!subscription) return;
   try {
-    await unsubscribePush(subscription.endpoint);
+    // Never refreshes: it can still be running as the next user signs in.
+    await unsubscribePush(subscription.endpoint, { signal, sessionRecovery: false });
   } catch {
     // See the header: the browser-side unsubscribe below is what matters.
   } finally {

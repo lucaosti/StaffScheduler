@@ -89,6 +89,14 @@ type RequestOptions<P extends keyof paths, M extends HttpMethod> =
        * `X-Client-Type: mobile` on login/refresh from inside Capacitor.
        */
       headers?: Record<string, string>;
+      /** Aborts the request (fetch's own `signal`). */
+      signal?: AbortSignal;
+      /**
+       * `false` skips the refresh-and-retry on an expired session. For
+       * logout's push cleanup, which can still be running when the next user
+       * signs in: a refresh then would present THEIR cookie (#841 re-review).
+       */
+      sessionRecovery?: boolean;
     };
 
 /**
@@ -197,11 +205,12 @@ const send = async <T>(
   method: HttpMethod,
   url: string,
   body: unknown,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  signal?: AbortSignal
 ): Promise<ApiResponse<T>> => {
   // Rebuilt per attempt: on the native platform the retry must carry the
   // bearer token the refresh just cached, not the expired one.
-  const init: RequestInit = { method: method.toUpperCase(), ...getAuthHeaders(headers) };
+  const init: RequestInit = { method: method.toUpperCase(), ...getAuthHeaders(headers), signal };
   if (body !== undefined) init.body = JSON.stringify(body);
   return handleResponse<T>(await fetch(url, init));
 };
@@ -214,13 +223,15 @@ const request = async <T>(
     query?: Record<string, unknown>;
     body?: unknown;
     headers?: Record<string, string>;
+    signal?: AbortSignal;
+    sessionRecovery?: boolean;
   }
 ): Promise<ApiResponse<T>> => {
   const url = `${API_BASE_URL}${buildPath(path, options?.params)}${buildQuery(options?.query)}`;
   try {
-    return await send<T>(method, url, options?.body, options?.headers);
+    return await send<T>(method, url, options?.body, options?.headers, options?.signal);
   } catch (error) {
-    if (!refreshSession || !isExpiredSession(error, path)) throw error;
+    if (!refreshSession || options?.sessionRecovery === false || !isExpiredSession(error, path)) throw error;
     try {
       await recoverSession(refreshSession);
     } catch (refreshError) {
@@ -231,7 +242,7 @@ const request = async <T>(
     }
     // Exactly one retry: a 401 after a successful refresh is a real refusal,
     // and looping on it would rotate the refresh token on every request.
-    return send<T>(method, url, options?.body, options?.headers);
+    return send<T>(method, url, options?.body, options?.headers, options?.signal);
   }
 };
 

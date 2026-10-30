@@ -270,7 +270,16 @@ export function useScheduleMutations() {
 const unfinishedOptimizations = new Set<number>();
 
 /**
- * On (re)mount of the Schedule page, asks once about each abandoned job and,
+ * Forgets the abandoned jobs. They belong to the session that started them,
+ * so AuthContext calls this whenever the signed-in user changes (#844
+ * re-review): the next user must not poll, or refresh views, for them.
+ */
+export const resetOptimizationWatch = (): void => {
+  unfinishedOptimizations.clear();
+};
+
+/**
+ * On (re)mount of the Schedule and Shifts pages, asks once about each abandoned job and,
  * for those that have finished, refreshes every dependent view. The abort
  * itself already invalidated them once, which covers a job that finished
  * before the user looked again only if they navigate away and back, so this

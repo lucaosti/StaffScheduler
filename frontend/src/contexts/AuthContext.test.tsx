@@ -20,12 +20,14 @@ import * as webPushSession from '../services/webPushSession';
 import i18n from '../i18n';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { onSessionExpired } from '../api/client';
+import { resetOptimizationWatch } from '../hooks/useSchedulePage';
 import { ApiError } from '../services/apiUtils';
 
 jest.mock('../services/authService');
 jest.mock('../services/translationOverrideService');
 jest.mock('../services/nativePushService');
 jest.mock('../services/webPushSession');
+jest.mock('../hooks/useSchedulePage', () => ({ resetOptimizationWatch: jest.fn() }));
 // Captures the listener AuthProvider registers for "the client could not
 // refresh an expired session", so a test can fire it.
 jest.mock('../api/client', () => ({
@@ -327,6 +329,25 @@ describe('session isolation', () => {
     expect(queryClient.getQueryData(['employees'])).toBeUndefined();
   });
 
+  // #844 re-review: the Schedule page's remembered optimization jobs are
+  // session state too.
+  it('forgets the previous user\'s remembered optimization jobs on a switch and on logout', async () => {
+    mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
+    mockedAuthService.refreshToken.mockResolvedValue({ success: true, data: { user: userB } } as never);
+    mockedAuthService.logout.mockResolvedValue();
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    await waitFor(() => expect(result.current.isAuthenticated).toBe(true));
+    expect(resetOptimizationWatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.refreshToken();
+    });
+    expect(resetOptimizationWatch).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.logout());
+    await waitFor(() => expect(resetOptimizationWatch).toHaveBeenCalledTimes(2));
+  });
+
   it('a refresh for the same user keeps the cache', async () => {
     mockedAuthService.verifyToken.mockResolvedValue({ success: true, data: userA as never });
     mockedAuthService.refreshToken.mockResolvedValue({ success: true, data: { user: userA } as never });
@@ -414,6 +435,32 @@ describe('logout revocation', () => {
 
     expect(order).toEqual(['revoke A', 'login B']);
     expect(result.current.user?.id).toBe(2);
+  });
+
+  /**
+   * #841 re-review: push cleanup that outlives the 1.5 s budget used to run
+   * on as user B — its DELETE could 401 and refresh with B's cookie. A new
+   * sign-in now aborts it.
+   */
+  it('a new sign-in aborts push cleanup still running from the last logout', async () => {
+    mockedUnregisterNativePush.mockImplementation(never);
+    mockedDropWebPush.mockImplementation(never);
+    mockedAuthService.login.mockResolvedValue({ success: true, data: { user: userB } } as never);
+    const { result } = await signedInAsA();
+    jest.useFakeTimers();
+
+    act(() => result.current.logout());
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2000); // past the budget: revoked
+    });
+    await act(async () => {
+      await result.current.login({ email: 'b@x', password: 'pw' } as never);
+    });
+
+    const nativeSignal = mockedUnregisterNativePush.mock.calls[0][0] as AbortSignal;
+    const webSignal = mockedDropWebPush.mock.calls[0][0] as AbortSignal;
+    expect(nativeSignal.aborted).toBe(true);
+    expect(webSignal.aborted).toBe(true);
   });
 
   it('several logouts at once revoke once', async () => {

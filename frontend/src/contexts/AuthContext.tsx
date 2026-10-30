@@ -22,6 +22,7 @@ import { isSessionRefusal } from '../services/apiUtils';
 import { registerForNativePush, unregisterNativePush } from '../services/nativePushService';
 import { dropWebPushSubscription } from '../services/webPushSession';
 import { onSessionExpired } from '../api/client';
+import { resetOptimizationWatch } from '../hooks/useSchedulePage';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -141,12 +142,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   // (A → none) is cleared in the effect below instead, after the protected
   // pages have unmounted: cleared while they are mounted, their observers
   // would refetch with the session not yet revoked and repopulate the cache.
-  // A refresh for the SAME user keeps the cache.
+  // A refresh for the SAME user keeps the cache. The Schedule page's memory
+  // of abandoned optimization jobs is session state too, and goes with it.
   const queryClient = useQueryClient();
   const lastUserId = useRef<number | null>(null);
   const establishSession = useCallback(
     (user: User) => {
-      if (lastUserId.current !== null && lastUserId.current !== user.id) queryClient.clear();
+      if (lastUserId.current !== null && lastUserId.current !== user.id) {
+        queryClient.clear();
+        resetOptimizationWatch();
+      }
       lastUserId.current = user.id;
       dispatch({ type: 'LOGIN_SUCCESS', payload: { user } });
     },
@@ -156,6 +161,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     if (userId === null && lastUserId.current !== null) {
       queryClient.clear();
+      resetOptimizationWatch();
       lastUserId.current = null;
     }
   }, [userId, queryClient]);
@@ -208,8 +214,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     initializeAuth();
   }, [establishSession]);
 
-  // The logout still in flight, if any — see `logout`.
+  // The logout still in flight, if any, and the push cleanup it started —
+  // see `logout`.
   const pendingLogout = useRef<Promise<void> | null>(null);
+  const pushCleanup = useRef<AbortController | null>(null);
 
   const login = useCallback(async (credentials: LoginRequest): Promise<void> => {
     dispatch({ type: 'LOGIN_START' });
@@ -219,6 +227,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // web the revocation authenticates with whatever refresh cookie the jar
       // holds when it is sent, so sent after B's login it would revoke B.
       await pendingLogout.current;
+      // Push cleanup the budget cut short may still be running; from here on
+      // it would run as B (#841 re-review), so it stops.
+      pushCleanup.current?.abort();
+      pushCleanup.current = null;
       const response: ApiResponse<LoginResponse> = await authService.login(credentials);
 
       if (response.success && response.data) {
@@ -246,7 +258,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
    * sent the revocation and left the 30-day refresh cookie live. For the same
    * reason a `pagehide` during the wait revokes at once, and the revocation
    * itself is a keepalive request (authService). A push registration the
-   * budget cuts short stays the server's to retire when delivery fails.
+   * budget cuts short stays the server's to retire when delivery fails. Its
+   * calls never refresh the session and are aborted when the next sign-in
+   * starts (#841 re-review): otherwise a late DELETE could 401, refresh with
+   * the next user's cookie, and run as them.
    *
    * One logout at a time: a second call while one is in flight (several
    * requests reporting the same dead session, a double click) only updates
@@ -261,9 +276,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const revoke = () => (revocation ??= authService.logout().catch(() => undefined));
       const onPageHide = () => void revoke();
       window.addEventListener('pagehide', onPageHide);
+      const cleanup = new AbortController();
+      pushCleanup.current = cleanup;
       pendingLogout.current = (async () => {
         await Promise.race([
-          Promise.allSettled([unregisterNativePush(), dropWebPushSubscription()]),
+          Promise.allSettled([unregisterNativePush(cleanup.signal), dropWebPushSubscription(cleanup.signal)]),
           new Promise((resolve) => setTimeout(resolve, PUSH_CLEANUP_BUDGET_MS)),
         ]);
         await revoke();

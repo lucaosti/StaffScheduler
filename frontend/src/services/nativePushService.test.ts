@@ -193,10 +193,15 @@ describe('unregisterNativePush', () => {
     await registerForNativePush();
     await registrationHandler()!({ value: 'device-token-123' });
 
-    await unregisterNativePush();
+    const controller = new AbortController();
+    await unregisterNativePush(controller.signal);
 
+    // Abortable, and never a trigger for a session refresh: it can run while
+    // the next user signs in (#841 re-review).
     expect(deleteMock).toHaveBeenCalledWith('/notifications/push/device-token', {
       body: { token: 'device-token-123' },
+      signal: controller.signal,
+      sessionRecovery: false,
     });
   });
 

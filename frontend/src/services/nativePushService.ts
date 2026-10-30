@@ -100,14 +100,15 @@ export const registerForNativePush = async (): Promise<void> => {
  * revoked, because the DELETE is an authenticated call. Best-effort like
  * registration: a failure is logged, never thrown, so logout always finishes.
  */
-export const unregisterNativePush = async (): Promise<void> => {
+export const unregisterNativePush = async (signal?: AbortSignal): Promise<void> => {
   const token = registeredToken;
   if (!token) return;
   registeredToken = null;
   try {
     await apiClient.delete<undefined, '/notifications/push/device-token'>(
       '/notifications/push/device-token',
-      { body: { token } }
+      // Never refreshes: it can still be running as the next user signs in.
+      { body: { token }, signal, sessionRecovery: false }
     );
   } catch (err) {
     console.error('Failed to deactivate device push token', err);

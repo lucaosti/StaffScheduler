@@ -178,8 +178,19 @@ setSessionRefresher(async () => {
  * On the native platform the stored tokens are cleared regardless of whether
  * the network call succeeds — the device should forget the session either way.
  */
+/**
+ * How long the revocation may take before this client stops waiting. `login`
+ * waits for a pending revocation (AuthContext), so one stalled on a dead
+ * connection must not hold the next sign-in forever (#841 re-review). A
+ * timer-driven AbortController rather than `AbortSignal.timeout`: the same
+ * effect, and a timer the tests can drive.
+ */
+const REVOCATION_TIMEOUT_MS = 5000;
+
 export const logout = async (): Promise<void> => {
   const native = isNativePlatform();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REVOCATION_TIMEOUT_MS);
   try {
     await fetch(`${API_BASE_URL}/auth/refresh/logout`, {
       method: 'POST',
@@ -187,10 +198,12 @@ export const logout = async (): Promise<void> => {
       // closes the tab would otherwise leave the 30-day refresh cookie live,
       // signing the next visitor in as them (#841 review).
       keepalive: true,
+      signal: controller.signal,
       ...getAuthHeaders(clientTypeHeaders()),
       ...(native ? { body: JSON.stringify({ refreshToken: getCachedRefreshToken() ?? undefined }) } : {}),
     });
   } finally {
+    clearTimeout(timer);
     if (isNativePlatform()) await clearTokens();
   }
 };

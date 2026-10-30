@@ -15,6 +15,14 @@ const mockGetDepartments = jest.fn();
 // wrapping in a real provider: these tests are about the shift list, and a
 // provider would drag login state into every one of them.
 let permissions: string[] = ['assignment.manage'];
+// #844 re-review: the Shifts views show what a Generate changes, so they too
+// refresh once a job abandoned on the Schedule page has finished.
+const mockFinishedOptimizationRefresh = jest.fn();
+jest.mock('../../hooks/useSchedulePage', () => ({
+  ...jest.requireActual('../../hooks/useSchedulePage'),
+  useFinishedOptimizationRefresh: () => mockFinishedOptimizationRefresh(),
+}));
+
 jest.mock('../../contexts/AuthContext', () => ({
   useAuth: () => ({ user: { id: 1, permissions } }),
 }));
@@ -172,6 +180,12 @@ describe('<Shifts />', () => {
     const cancelBtn = await screen.findByRole('button', { name: /^cancel$/i });
     await userEvent.click(cancelBtn);
     expect(mockDeleteShift).not.toHaveBeenCalled();
+  });
+
+  it('refreshes after an optimization abandoned elsewhere has finished', async () => {
+    render(<Shifts />);
+    await screen.findByText(/Emergency Medicine 2026-04-02/i);
+    expect(mockFinishedOptimizationRefresh).toHaveBeenCalled();
   });
 
   // The API sends `HH:MM:SS`; the card used to show "07:00:00 - 15:00:00" and

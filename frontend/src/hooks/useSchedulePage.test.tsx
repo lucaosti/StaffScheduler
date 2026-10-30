@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
+  resetOptimizationWatch,
   schedulePageKey,
   useFinishedOptimizationRefresh,
   useScheduleAssignments,
@@ -180,6 +181,37 @@ describe('useScheduleMutations', () => {
     // left its own job (schedule 1) listed, and it is checked here too.
     await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(1));
     expect(scheduleService.getOptimizationStatus).toHaveBeenCalledWith(7);
+  });
+
+  // #844 re-review: the remembered jobs are the last user's; a new session
+  // must not poll or refresh for them.
+  it('forgets abandoned jobs when the session changes', async () => {
+    jest.useFakeTimers();
+    (scheduleService.generateSchedule as jest.Mock).mockResolvedValue({ success: true, data: { jobId: 'j3' } });
+    (scheduleService.getOptimizationStatus as jest.Mock).mockResolvedValue({ success: true, data: { state: 'active' } });
+    const client = makeClient();
+    const { result, unmount } = renderHook(() => useScheduleMutations(), { wrapper: makeWrapper(client) });
+    const controller = new AbortController();
+    let outcome: Promise<unknown> = Promise.resolve();
+    act(() => {
+      outcome = result.current.generate.mutateAsync({ scheduleId: 9, signal: controller.signal }).catch((e: unknown) => e);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2100);
+    });
+    controller.abort();
+    await act(async () => {
+      await outcome;
+    });
+    unmount();
+    jest.useRealTimers();
+
+    resetOptimizationWatch();
+    (scheduleService.getOptimizationStatus as jest.Mock).mockClear();
+    renderHook(() => useFinishedOptimizationRefresh(), { wrapper: makeWrapper(client) });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(scheduleService.getOptimizationStatus).not.toHaveBeenCalled();
   });
 
   it('stops polling an optimization job once aborted', async () => {

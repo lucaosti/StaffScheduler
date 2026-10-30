@@ -165,6 +165,17 @@ describe('apiClient — an expired access token', () => {
     expect(refreshCalls).toBe(0);
   });
 
+  // #841 re-review: logout's push cleanup must never refresh — by then the
+  // cookie in the jar may already be the next user's.
+  it('does not refresh a request that opts out of session recovery', async () => {
+    withSessionHandlers(refreshOk);
+
+    await expect(
+      apiClient.get('/departments', { sessionRecovery: false })
+    ).rejects.toMatchObject({ status: 401 });
+    expect(refreshCalls).toBe(0);
+  });
+
   it('does not refresh on the auth endpoints themselves', async () => {
     server.use(
       http.post(`${API_URL}/auth/refresh`, () => {

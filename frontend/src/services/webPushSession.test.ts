@@ -35,9 +35,14 @@ describe('dropWebPushSubscription', () => {
     installServiceWorker(subscription);
     unsubscribePush.mockResolvedValue({ success: true });
 
-    await dropWebPushSubscription();
+    const controller = new AbortController();
+    await dropWebPushSubscription(controller.signal);
 
-    expect(unsubscribePush).toHaveBeenCalledWith('https://push.example/abc');
+    // Abortable and never a trigger for a session refresh (#841 re-review).
+    expect(unsubscribePush).toHaveBeenCalledWith('https://push.example/abc', {
+      signal: controller.signal,
+      sessionRecovery: false,
+    });
     expect(subscription.unsubscribe).toHaveBeenCalled();
   });
 
