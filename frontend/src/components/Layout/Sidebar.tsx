@@ -8,6 +8,8 @@ import { useAuth } from '../../contexts/AuthContext';
 interface SidebarProps {
   /** Whether the sidebar is in collapsed state */
   collapsed: boolean;
+  /** Whether the off-canvas drawer is open (narrow viewports only) */
+  drawerOpen?: boolean;
 }
 
 /**
@@ -15,7 +17,7 @@ interface SidebarProps {
  * @param collapsed - Whether sidebar should be collapsed
  * @returns JSX element containing the navigation sidebar
  */
-const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
+const Sidebar: React.FC<SidebarProps> = ({ collapsed, drawerOpen = false }) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
@@ -227,7 +229,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
   );
 
   return (
-    <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <div id="app-sidebar" className={`sidebar ${collapsed ? 'collapsed' : ''} ${drawerOpen ? 'show' : ''}`}>
       <div className="sidebar-brand">
         <i className="bi bi-calendar-check-fill me-2" aria-hidden="true"></i>
         {!collapsed && 'Staff Scheduler'}

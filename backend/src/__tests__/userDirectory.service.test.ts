@@ -3,6 +3,7 @@
  */
 
 import { UserDirectoryService } from '../services/UserDirectoryService';
+import { ADMIN_ACTOR } from './helpers/permissions';
 
 const makePool = () => {
   const execute = jest.fn();
@@ -154,7 +155,7 @@ describe('UserDirectoryService.importVcf', () => {
     const service = new UserDirectoryService(pool);
     const out = await service.importVcf(
       'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bruno Demo\r\nEMAIL:bruno@example.local\r\nEND:VCARD\r\n',
-      { defaultPasswordHash: 'hash', createdBy: 1 }
+      { defaultPasswordHash: 'hash', createdBy: 1, actor: ADMIN_ACTOR }
     );
     expect(out.inserted).toBe(1);
     expect(out.skipped).toEqual([]);
@@ -166,7 +167,7 @@ describe('UserDirectoryService.importVcf', () => {
     const service = new UserDirectoryService(pool);
     const out = await service.importVcf(
       'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:X\r\nEMAIL:dup@x.com\r\nEND:VCARD\r\n',
-      { defaultPasswordHash: 'h', createdBy: 1 }
+      { defaultPasswordHash: 'h', createdBy: 1, actor: ADMIN_ACTOR }
     );
     expect(out.inserted).toBe(0);
     expect(out.skipped[0]).toMatchObject({ email: 'dup@x.com', reason: 'email already exists' });
@@ -177,7 +178,7 @@ describe('UserDirectoryService.importVcf', () => {
     const service = new UserDirectoryService(pool);
     const out = await service.importVcf(
       'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:No Email\r\nEND:VCARD\r\n',
-      { defaultPasswordHash: 'h', createdBy: 1 }
+      { defaultPasswordHash: 'h', createdBy: 1, actor: ADMIN_ACTOR }
     );
     expect(out.inserted).toBe(0);
     expect(out.skipped[0].reason).toBe('missing email');

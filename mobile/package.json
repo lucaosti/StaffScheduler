@@ -4,18 +4,20 @@
   "description": "Capacitor shell wrapping the Staff Scheduler frontend for iOS and Android",
   "private": true,
   "scripts": {
-    "build": "npm --prefix ../frontend run build && node scripts/copy-web-assets.mjs && npx cap sync",
+    "build": "node scripts/check-api-url.mjs && npm --prefix ../frontend run build && node scripts/copy-web-assets.mjs && npx cap sync",
     "sync": "npx cap sync",
     "open:ios": "npx cap open ios",
     "open:android": "npx cap open android",
     "version:bump": "node scripts/version-bump.mjs"
   },
   "dependencies": {
-    "@capacitor/android": "^8.5.0",
-    "@capacitor/core": "^8.5.0",
-    "@capacitor/ios": "^8.5.0"
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/preferences": "^8.0.1",
+    "@capacitor/push-notifications": "^8.0.1"
   },
   "devDependencies": {
-    "@capacitor/cli": "^8.5.0"
+    "@capacitor/cli": "^8.5.3"
   }
 }

@@ -2,6 +2,8 @@
  * Extended app.ts tests — covers:
  *   - CORS callback: development origin (localhost) is allowed, the
  *     configured CORS_ORIGIN is allowed, any other origin is rejected.
+ *   - CORS origin list: every listed origin (the Capacitor shells among
+ *     them) passes a preflight carrying X-Client-Type; an unlisted one does not.
  *   - Non-silent build: rate-limiter and morgan are applied when
  *     `options.silent` is false/omitted.
  */
@@ -146,6 +148,70 @@ describe('buildApp CORS callback', () => {
     } finally {
       (config.server as any).env = original;
     }
+  });
+});
+
+describe('buildApp CORS origin list', () => {
+  // Production, so the development localhost fast-path cannot be what lets a
+  // request through: only the configured list decides here.
+  const webOrigin = 'https://app.example.com';
+  const iosOrigin = 'capacitor://localhost';
+  const androidOrigin = 'https://localhost';
+
+  const withCors = async (origins: string[], run: () => Promise<void>): Promise<void> => {
+    const originalEnv = config.server.env;
+    const originalCors = { ...config.cors };
+    (config.server as any).env = 'production';
+    config.cors.origin = origins[0];
+    config.cors.allowedOrigins = origins;
+    try {
+      await run();
+    } finally {
+      (config.server as any).env = originalEnv;
+      Object.assign(config.cors, originalCors);
+    }
+  };
+
+  const preflight = (origin: string) =>
+    request(buildApp(fakePool, { silent: true }))
+      .options('/api/v1/auth/login')
+      .set('Origin', origin)
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'content-type,x-client-type');
+
+  it.each([iosOrigin, androidOrigin])(
+    'lets a mobile preflight from listed origin %s carry X-Client-Type, with credentials',
+    async (origin) => {
+      await withCors([webOrigin, iosOrigin, androidOrigin], async () => {
+        const res = await preflight(origin);
+        expect(res.status).toBe(204);
+        expect(res.headers['access-control-allow-origin']).toBe(origin);
+        expect(res.headers['access-control-allow-credentials']).toBe('true');
+        expect(res.headers['access-control-allow-headers'].toLowerCase().split(',')).toContain('x-client-type');
+      });
+    }
+  );
+
+  it('refuses a preflight from an origin that is not on the list', async () => {
+    await withCors([webOrigin, iosOrigin], async () => {
+      const res = await preflight('https://evil.example.com');
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  it('matches whole origins only, not prefixes of a listed one', async () => {
+    await withCors([webOrigin, androidOrigin], async () => {
+      const res = await preflight('https://localhost.evil.example.com');
+      expect(res.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  it('still serves a single-origin configuration', async () => {
+    await withCors([webOrigin], async () => {
+      const res = await preflight(webOrigin);
+      expect(res.status).toBe(204);
+      expect(res.headers['access-control-allow-origin']).toBe(webOrigin);
+    });
   });
 });
 

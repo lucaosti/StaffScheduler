@@ -33,6 +33,7 @@ import { RbacService } from '../services/RbacService';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { UserDirectoryService } from '../services/UserDirectoryService';
 import { BulkImportService } from '../services/BulkImportService';
+import { ADMIN_ACTOR } from './helpers/permissions';
 
 type Tuple = [unknown, unknown];
 
@@ -255,7 +256,7 @@ describe('BulkImportService.importEmployees — unknown role', () => {
       .mockResolvedValueOnce([[], null]); // SELECT roles → not found
     const svc = new BulkImportService(pool);
     const csv = 'email,firstName,lastName,role\ntest@example.com,First,Last,GhostRole';
-    const result = await svc.importEmployees(csv, 'default');
+    const result = await svc.importEmployees(csv, 'default', ADMIN_ACTOR);
     expect(result.inserted).toBe(0);
     expect(result.errors[0].message).toMatch(/Unknown role/);
     expect(conn.rollback).toHaveBeenCalled();

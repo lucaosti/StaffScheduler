@@ -15,6 +15,8 @@ import { usingConnection } from '../utils/transaction';
 import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { buildVcfFile, parseVcf, VCard } from '../utils/vcard';
+import { UserAuthorityService } from './UserAuthorityService';
+import { User } from '../types';
 
 interface CustomField {
   key: string;
@@ -39,6 +41,13 @@ const mapField = (row: RowDataPacket): CustomField => ({
   value: (row.field_value as string) ?? '',
   isPublic: Boolean(row.is_public),
 });
+
+/** Role names a card grants through its comma-separated X-ROLE field. */
+const roleNamesOf = (card: VCard): string[] =>
+  (card.extra?.['X-ROLE'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
 export class UserDirectoryService {
   constructor(private pool: Pool) {}
@@ -156,9 +165,15 @@ export class UserDirectoryService {
    */
   async importVcf(
     vcfText: string,
-    options: { defaultPasswordHash: string; createdBy: number }
+    options: { defaultPasswordHash: string; createdBy: number; actor: User }
   ): Promise<{ inserted: number; skipped: Array<{ email: string; reason: string }> }> {
     const cards = parseVcf(vcfText);
+    // X-ROLE grants roles by name: the whole file is held to the
+    // anti-escalation rule before any card is written (#809).
+    await new UserAuthorityService(this.pool).assertCanAssignRoleNames(
+      options.actor,
+      cards.flatMap((card) => roleNamesOf(card))
+    );
     let inserted = 0;
     const skipped: Array<{ email: string; reason: string }> = [];
 
@@ -198,11 +213,7 @@ export class UserDirectoryService {
 
         // Assign roles referenced by name in the X-ROLE field (comma-separated).
         // Unknown role names are ignored; the user is still created.
-        const roleNames = (card.extra?.['X-ROLE'] ?? '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-        for (const roleName of roleNames) {
+        for (const roleName of roleNamesOf(card)) {
           await conn.execute(
             `INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id)
              SELECT ?, id, NULL FROM roles WHERE name = ?`,

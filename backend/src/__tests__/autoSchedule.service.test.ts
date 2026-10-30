@@ -21,9 +21,13 @@ import { AutoScheduleService } from '../services/AutoScheduleService';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { config } from '../config';
 import { logger } from '../config/logger';
+import { spawn } from 'child_process';
 import { driverDate } from './helpers/driverDate';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
+// Only the #811 test below reaches a real optimize(); everywhere else the
+// optimizer is mocked whole and never spawns anything.
+jest.mock('child_process', () => ({ spawn: jest.fn() }));
 
 const makePool = () => {
   const execute = jest.fn();
@@ -833,6 +837,51 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(out.engine).toBe('greedy');
     expect(out.degraded).toBe(true);
     expect(out.degradedReason).toContain('python3 not found');
+  });
+
+  /**
+   * End to end through the REAL optimize(), with only the child process faked:
+   * the defect (#811) lived in the hand-off between the two — the solver
+   * finished with MODEL_INVALID and no assignments, optimize() passed that
+   * through, and this service reported an empty schedule as an or-tools
+   * success. A mocked optimize() cannot catch that, because the mock decides
+   * the very status whose handling is under test.
+   */
+  it('reports a degraded greedy schedule, not an empty or-tools one, when CP-SAT returns MODEL_INVALID', async () => {
+    config.optimization.engine = 'or-tools';
+    const { ScheduleOptimizer: RealOptimizer } = jest.requireActual(
+      '../optimization/ScheduleOptimizerORTools'
+    );
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => new RealOptimizer());
+    (spawn as unknown as jest.Mock).mockImplementation(() => {
+      const { EventEmitter } = jest.requireActual('events');
+      const proc = new EventEmitter();
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = {
+        write: jest.fn(),
+        end: jest.fn(() =>
+          setImmediate(() => {
+            // The shape schedule_optimizer.py really writes for this status.
+            const output = { status: 'MODEL_INVALID', assignments: [], statistics: {} };
+            proc.stdout.emit('data', Buffer.from(JSON.stringify(output)));
+            proc.emit('close', 1);
+          })
+        ),
+      };
+      return proc;
+    });
+
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute);
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(out.engine).toBe('greedy');
+    expect(out.degraded).toBe(true);
+    expect(out.degradedReason).toContain('MODEL_INVALID');
+    expect(out.assignmentsCreated).toBe(1);
   });
 
   it('uses the greedy draft engine directly (not degraded) when selected explicitly', async () => {

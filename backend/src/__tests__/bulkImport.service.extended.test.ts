@@ -6,6 +6,7 @@
  */
 
 import { BulkImportService } from '../services/BulkImportService';
+import { ADMIN_ACTOR } from './helpers/permissions';
 
 const makePool = () => {
   const conn = {
@@ -31,7 +32,7 @@ describe('BulkImportService.importEmployees — DB error rollback', () => {
     conn.execute.mockRejectedValueOnce(dbErr);
 
     const service = new BulkImportService(pool);
-    await expect(service.importEmployees(csv, 'pw')).rejects.toThrow('DB constraint violation');
+    await expect(service.importEmployees(csv, 'pw', ADMIN_ACTOR)).rejects.toThrow('DB constraint violation');
     expect(conn.rollback).toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalled();
   });

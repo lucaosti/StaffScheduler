@@ -1,0 +1,108 @@
+# Verification stack — runs every gate in containers (#864).
+#
+# Use it through scripts/verify-in-docker.sh, which wraps the commands below.
+#
+# WHY A SEPARATE COMPOSE PROJECT. `name:` pins the project, so this stack and
+# the deployment in docker-compose.yml never share containers, networks or
+# volumes: `down -v` here cannot remove the production database or its backups
+# (the failure mode in #847).
+#
+# WHY THE DATABASE IS ON tmpfs. Every run starts from an empty server, so a
+# result never depends on what a previous run left behind, and nothing is
+# written to disk. It is the same image as production (docker-compose.yml).
+#
+# WHY node_modules AND BUILD OUTPUT ARE VOLUMES. The repository is bind-mounted
+# so generated sources (openapi.json, the frontend client) land in the working
+# tree like any other edit. Dependencies and build output must not: the host's
+# node_modules are built for the host OS, the container's for Linux, and
+# letting either overwrite the other breaks both. Named volumes keep the
+# container's copies apart and leave the host untouched.
+
+name: staffscheduler-verify
+
+services:
+  db:
+    image: mysql:8.0.42
+    environment:
+      MYSQL_ROOT_PASSWORD: verify
+      MYSQL_DATABASE: staff_scheduler
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      # 127.0.0.1, not localhost: during initialisation MySQL runs a temporary
+      # server on the socket only, which a socket ping would report as ready.
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pverify"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+
+  redis:
+    image: redis:7.4-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  toolchain:
+    build:
+      context: .
+      dockerfile: ops/toolchain/Dockerfile
+    image: staffscheduler-verify-toolchain
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USER: root
+      DB_PASSWORD: verify
+      DATABASE_URL: mysql://root:verify@db:3306/staff_scheduler
+      JWT_SECRET: verify-only-secret-not-for-production
+      REDIS_URL: redis://redis:6379
+      REQUIRE_ORTOOLS: "1"
+      CI: "true"
+      # Node sizes its default heap from the memory the container sees, which on
+      # a Docker Desktop VM is far less than the host's; the in-band backend
+      # suite with coverage instrumentation then dies of heap exhaustion. 4 GB
+      # is the observed need with headroom, not a guess at the machine.
+      NODE_OPTIONS: --max-old-space-size=4096
+    # Published only by `serve` (compose `run --service-ports`), and only on the
+    # loopback interface: the seeded demo accounts must not be reachable from
+    # the network.
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - .:/workspace
+      - root_node_modules:/workspace/node_modules
+      - backend_node_modules:/workspace/backend/node_modules
+      - frontend_node_modules:/workspace/frontend/node_modules
+      - mobile_node_modules:/workspace/mobile/node_modules
+      - shared_node_modules:/workspace/packages/shared/node_modules
+      - shared_dist:/workspace/packages/shared/dist
+      - backend_dist:/workspace/backend/dist
+      - backend_coverage:/workspace/backend/coverage
+      - backend_logs:/workspace/backend/logs
+      - frontend_build:/workspace/frontend/build
+      - frontend_coverage:/workspace/frontend/coverage
+      - frontend_test_results:/workspace/frontend/test-results
+      - frontend_playwright_report:/workspace/frontend/playwright-report
+
+volumes:
+  root_node_modules:
+  backend_node_modules:
+  frontend_node_modules:
+  mobile_node_modules:
+  shared_node_modules:
+  shared_dist:
+  backend_dist:
+  backend_coverage:
+  backend_logs:
+  frontend_build:
+  frontend_coverage:
+  frontend_test_results:
+  frontend_playwright_report:

@@ -10,6 +10,7 @@ import {
   mapShiftRows,
   parseCsv,
 } from '../services/BulkImportService';
+import { ADMIN_ACTOR } from './helpers/permissions';
 
 describe('parseCsv', () => {
   it('parses a plain header + row', () => {
@@ -184,7 +185,7 @@ describe('BulkImportService.importEmployees', () => {
   it('returns parse errors without touching the DB', async () => {
     const { pool, conn } = makePool();
     const service = new BulkImportService(pool);
-    const out = await service.importEmployees('garbage', 'pw');
+    const out = await service.importEmployees('garbage', 'pw', ADMIN_ACTOR);
     expect(out.inserted).toBe(0);
     expect(out.errors.length).toBeGreaterThan(0);
     expect(conn.beginTransaction).not.toHaveBeenCalled();
@@ -196,7 +197,7 @@ describe('BulkImportService.importEmployees', () => {
     conn.execute.mockResolvedValueOnce([[{ id: 1 }], null]);
 
     const service = new BulkImportService(pool);
-    const out = await service.importEmployees(csv, 'pw');
+    const out = await service.importEmployees(csv, 'pw', ADMIN_ACTOR);
     expect(out.inserted).toBe(0);
     expect(out.errors[0].message).toMatch(/already exists/);
     expect(conn.rollback).toHaveBeenCalled();
@@ -210,7 +211,7 @@ describe('BulkImportService.importEmployees', () => {
       .mockResolvedValueOnce([[], null]); // role lookup: not found
 
     const service = new BulkImportService(pool);
-    const out = await service.importEmployees(csv, 'pw');
+    const out = await service.importEmployees(csv, 'pw', ADMIN_ACTOR);
     expect(out.inserted).toBe(0);
     expect(out.errors[0].message).toMatch(/Unknown role/);
     expect(conn.rollback).toHaveBeenCalled();
@@ -233,7 +234,7 @@ describe('BulkImportService.importEmployees', () => {
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]);      // INSERT IGNORE user_roles row 2
 
     const service = new BulkImportService(pool);
-    const out = await service.importEmployees(csv, 'pw');
+    const out = await service.importEmployees(csv, 'pw', ADMIN_ACTOR);
     expect(out.inserted).toBe(2);
     expect(out.errors).toHaveLength(0);
     expect(conn.commit).toHaveBeenCalled();

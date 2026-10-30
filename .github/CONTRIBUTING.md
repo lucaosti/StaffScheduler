@@ -39,6 +39,13 @@ links there instead of repeating it.
 
 ## Prerequisites
 
+**Docker with Compose v2 is the only requirement.** Every gate, the demo stack
+and a seeded development server run in containers (see
+[The local gate](#the-local-gate)), so nothing has to be installed on the host
+and results do not depend on its operating system.
+
+Working on the host instead is possible but not the reference setup:
+
 | Tool | Version | Needed for |
 |---|---|---|
 | Node.js | 22.12 or newer | everything (CI and both images run Node 22) |
@@ -46,7 +53,6 @@ links there instead of repeating it.
 | MySQL | 8.0 | running the backend, integration tests, e2e |
 | Python | 3.11 (CI) with a virtual environment | the CP-SAT optimizer and its tests |
 | Redis | 7 | optional; the backend falls back to in-process state without it |
-| Docker | with Compose v2 | optional; the demo stack and the `ops` / `backup` profiles |
 
 ## Setup
 
@@ -219,7 +225,7 @@ Step-by-step recipes for adding an endpoint, a page or a migration are in
 | Frontend unit | jsdom, React Testing Library, mocked services or MSW | `cd frontend && npm test` | Frontend |
 | End to end | Playwright, real backend, seeded MySQL and Redis | `cd frontend && npm run test:e2e` | e2e |
 | Backup and restore | real dump, drop, restore | `backup-restore` workflow | weekly and on change |
-| Dependency audit gate | its own unit tests | `npm run test:scripts` (root) | Backend |
+| Repository scripts | the audit gate's decision, the mobile build's API-URL check and native-plugin list | `npm run test:scripts` (root) | Backend |
 | Simulation harness | a seeded MySQL; not part of CI | `cd backend && npm run sim:run` | — |
 
 Details of the integration suite, the dead-code tools and the simulation
@@ -306,6 +312,27 @@ coverage needs a stated reason.
 Run this before opening a pull request. It is what CI runs.
 
 ```bash
+./scripts/verify-in-docker.sh            # every gate, in containers
+./scripts/verify-in-docker.sh static backend   # or chosen gates; see scripts/verify.sh
+./scripts/verify-in-docker.sh serve      # seeded app on http://127.0.0.1:3000 (API :3001)
+./scripts/verify-in-docker.sh down       # remove the verification stack and its volumes
+```
+
+The verification stack (`docker-compose.verify.yml`) is a separate compose
+project with a disposable MySQL 8.0 on tmpfs, Redis, and a toolchain image
+(`ops/toolchain/Dockerfile`) holding Node 22, the pinned OR-Tools, ruff and the
+Playwright Chromium. The repository is bind-mounted, so regenerated
+`openapi.json` and `src/api/schema.ts` appear in the working tree; the
+container's `node_modules` and build output stay in volumes. It runs, in order:
+`install`, `audit`, `static` (script tests, ruff, lint, type-check, knip,
+madge, builds, OpenAPI and client drift), `backend` (coverage gate,
+`REQUIRE_ORTOOLS=1`), `frontend`, `timezones`, `migrations` (up, roll back
+every migration, reapply), `integration` (real MySQL), `seed` (twice) and
+`e2e` (Playwright, backend on Redis).
+
+The same steps on a host toolchain, for reference:
+
+```bash
 # Backend (with the optimizer environment active)
 cd backend
 npm run lint
@@ -334,12 +361,11 @@ npm run audit:deps
 npm run test:scripts
 ```
 
-Two steps cannot be reproduced without a database and are the usual cause of a
-red pull request:
+Two steps need a database and are the usual cause of a red pull request when
+the gate is run on a host toolchain (the Docker gate runs both):
 
 - **The demo seed.** `backend/scripts/seed-demo.ts` inserts into real tables.
-  Any change to a table name or a required column must update it; only the e2e
-  job runs it.
+  Any change to a table name or a required column must update it.
 - **Generated artefacts.** After changing a Zod schema or a `validate*`
   middleware, run `openapi:generate` (backend) and then `api:generate`
   (frontend), and commit both results.

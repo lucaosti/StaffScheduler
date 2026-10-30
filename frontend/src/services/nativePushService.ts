@@ -16,6 +16,17 @@
  * no-op — so unconditionally registering on every login costs nothing and
  * covers the rotation case without a separate "did this change" check.
  *
+ * WHY NATIVE PUSH IS OPT-IN AT BUILD TIME (`REACT_APP_NATIVE_PUSH=true`). The
+ * plugin's native `register()` needs the platform's push configuration: on
+ * Android it calls Firebase Messaging unconditionally, and without a
+ * `google-services.json` that throws inside the native bridge, which turns it
+ * into a crash of the whole app — a JavaScript `try` around the call never
+ * sees it. Whether that configuration exists is a property of the build, not
+ * of the device, so the build decides. Detecting Firebase at runtime was
+ * rejected: the plugin exposes no such probe, and the probe would be the same
+ * crashing call. Defaulting to on was rejected too: a build without the
+ * configuration would crash right after the first login.
+ *
  * WHY THE NOTIFICATION-TAP HANDLER IS THIS MINIMAL. The design deliberately
  * keeps deep-linking out of this first version: `pushNotificationActionPerformed`
  * always navigates to the notifications list rather than routing per
@@ -34,6 +45,13 @@ import { isNativePlatform } from './mobileAuthStorage';
 
 const NOTIFICATIONS_PATH = '/notifications';
 
+/**
+ * True only for a build made with `REACT_APP_NATIVE_PUSH=true` (injected by
+ * vite.config.ts). Read at call time, not captured at module load, so the
+ * value the bundle was built with is the only thing deciding it.
+ */
+const isNativePushEnabled = (): boolean => process.env.REACT_APP_NATIVE_PUSH === 'true';
+
 let listenersAttached = false;
 
 /** Test-only: clears the memoised "listeners attached" flag between test cases. */
@@ -43,13 +61,14 @@ export function resetNativePushListeners(): void {
 
 /**
  * Requests push permission, obtains a device token via the plugin, and
- * registers it with the backend. A no-op on the web platform. Failures are
+ * registers it with the backend. A no-op on the web platform and on a native
+ * build that did not enable push (see the file header). Failures are
  * swallowed (logged to the console) rather than thrown: a user who declines
  * the permission prompt, or a device without push services, should not break
  * login.
  */
 export const registerForNativePush = async (): Promise<void> => {
-  if (!isNativePlatform()) return;
+  if (!isNativePlatform() || !isNativePushEnabled()) return;
 
   attachListeners();
 

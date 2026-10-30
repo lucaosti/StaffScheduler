@@ -51,7 +51,7 @@ import { TwoFactorMethodProvider, TwoFactorSetupPayload } from './TwoFactorMetho
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 
 const RP_NAME = 'Staff Scheduler';
-/** The relying party ID is the bare hostname `CORS_ORIGIN` resolves to — WebAuthn requires no scheme/port. */
+/** The relying party ID is the bare hostname of the first `CORS_ORIGIN` entry (the web app) — WebAuthn requires no scheme/port. */
 const RP_ID = new URL(config.cors.origin).hostname;
 
 interface WebAuthnSecretData {

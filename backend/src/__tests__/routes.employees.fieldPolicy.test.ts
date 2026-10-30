@@ -43,6 +43,15 @@ jest.mock('../services/AuditLogService', () => ({
   AuditLogService: jest.fn().mockImplementation(() => ({ write: jest.fn() })),
 }));
 
+// Account authority (#809) is a separate rule with its own tests; here it is
+// held open so each case isolates the field policy.
+jest.mock('../services/UserAuthorityService', () => ({
+  UserAuthorityService: jest.fn().mockImplementation(() => ({
+    assertCanAssignRoles: jest.fn().mockResolvedValue(undefined),
+    assertCanManageUser: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
+
 let organizationName: string | null = 'Acme';
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
@@ -56,6 +65,7 @@ jest.mock('../middleware/auth', () => ({
   },
   requirePermission: () => (_req: unknown, _res: unknown, next: () => void) => next(),
   userHasPermission: () => true,
+  invalidateAuthContext: jest.fn(),
 }));
 
 const mount = () => {

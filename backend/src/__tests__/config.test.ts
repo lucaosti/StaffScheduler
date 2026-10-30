@@ -103,7 +103,7 @@ describe('defaults (bare environment)', () => {
     });
     expect(config.logging).toEqual({ level: 'info', file: './logs/app.log', maxSize: '10m', maxFiles: 5 });
     expect(config.security).toEqual({ bcryptRounds: 12, rateLimitWindow: 60000, rateLimitMax: 200, rateLimitOrgMax: 2000 });
-    expect(config.cors.origin).toBe('http://localhost:3000');
+    expect(config.cors).toEqual({ origin: 'http://localhost:3000', allowedOrigins: ['http://localhost:3000'] });
     expect(config.notifications).toEqual({ enabled: false, emailEnabled: true, inAppEnabled: true });
   });
 });
@@ -144,8 +144,31 @@ describe('explicit environment (full profile)', () => {
     expect(config.optimization).toMatchObject({ engine: 'or-tools', timeout: 60000, maxIterations: 10, populationSize: 20, mutationRate: 0.2, crossoverRate: 0.5 });
     expect(config.logging).toEqual({ level: 'debug', file: '/tmp/l.log', maxSize: '5m', maxFiles: 2 });
     expect(config.security).toEqual({ bcryptRounds: 14, rateLimitWindow: 1000, rateLimitMax: 50, rateLimitOrgMax: 500 });
-    expect(config.cors.origin).toBe('https://app.example.com');
+    expect(config.cors).toEqual({ origin: 'https://app.example.com', allowedOrigins: ['https://app.example.com'] });
     expect(config.notifications).toEqual({ enabled: true, emailEnabled: false, inAppEnabled: false });
+  });
+
+  it('reads CORS_ORIGIN as a comma-separated list whose first entry is the web app', () => {
+    const config = loadConfig({ CORS_ORIGIN: ' https://app.example.com , capacitor://localhost,,https://localhost ' });
+    expect(config.cors).toEqual({
+      origin: 'https://app.example.com',
+      allowedOrigins: ['https://app.example.com', 'capacitor://localhost', 'https://localhost'],
+    });
+  });
+
+  it.each([
+    ['a non-HTTP scheme', 'capacitor://localhost,https://app.example.com'],
+    ['a trailing slash', 'https://app.example.com/'],
+    ['a path', 'https://app.example.com/app'],
+    ['an unparseable value', 'app.example.com'],
+  ])('refuses to start when the first CORS_ORIGIN entry has %s', (_label, value) => {
+    expect(() => loadConfig({ CORS_ORIGIN: value })).toThrow(/first CORS_ORIGIN entry/);
+  });
+
+  it('accepts a non-HTTP scheme after the first CORS_ORIGIN entry', () => {
+    // capacitor://localhost has no URL origin of its own ("null"), so only the
+    // web app's entry can be checked this way.
+    expect(() => loadConfig({ CORS_ORIGIN: 'http://localhost:3000,capacitor://localhost' })).not.toThrow();
   });
 
   it('enforces the bcrypt cost floor of 10', () => {

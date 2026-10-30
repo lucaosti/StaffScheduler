@@ -30,6 +30,8 @@ import { isInternalPath } from '../../utils/internalPath';
 interface HeaderProps {
   /** Callback function to toggle sidebar visibility */
   onToggleSidebar: () => void;
+  /** Whether the navigation is currently visible, for the button's aria-expanded */
+  sidebarExpanded: boolean;
 }
 
 // Notifications are best-effort chrome, not a live feed: a plain interval
@@ -43,7 +45,7 @@ const RECENT_LIMIT = 5;
  * @param onToggleSidebar - Function to toggle sidebar collapsed state
  * @returns JSX element containing the header navigation
  */
-const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
+const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [unreadCount, setUnreadCount] = useState(0);
@@ -110,6 +112,8 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar }) => {
         className="btn btn-link text-body p-0 me-3 text-decoration-none"
         onClick={onToggleSidebar}
         aria-label="Toggle sidebar"
+        aria-controls="app-sidebar"
+        aria-expanded={sidebarExpanded}
         style={{ fontSize: '1.25rem' }}
       >
         <i className="bi bi-list"></i>
