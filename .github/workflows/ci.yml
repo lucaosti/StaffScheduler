@@ -327,7 +327,11 @@ jobs:
           JWT_SECRET: ci-secret-please-change
           # The optimization-queue suite runs real BullMQ against the job's
           # Redis service: the library's own id validation is what #889 missed.
-          REDIS_URL: redis://127.0.0.1:6379
+          # Database 1, not 0: the suites' logins (the API fuzzer alone sends
+          # hundreds) are counted in Redis under the same 127.0.0.1 key the
+          # development backend started below reads with a limit of ten, so a
+          # shared database left Playwright's first login at 429.
+          REDIS_URL: redis://127.0.0.1:6379/1
         run: npm run test:integration
 
       - name: Seed demo data

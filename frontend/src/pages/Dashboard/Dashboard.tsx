@@ -407,12 +407,18 @@ const Dashboard: React.FC = () => {
                 <ul className="list-group list-group-flush">
                   {recentActivity.map((entry) => (
                     <li key={entry.id} className="list-group-item px-3 py-2">
-                      <div className="d-flex justify-content-between align-items-start">
-                        <div>
+                      {/* The description column may shrink (min-width: 0 —
+                          Bootstrap has no utility for it) and break inside a
+                          long unspaced token — an email, a path — and the row
+                          wraps the timestamp below it on narrow screens;
+                          without both, one such entry widened the page past a
+                          phone's width (#954). */}
+                      <div className="d-flex flex-wrap justify-content-between align-items-start column-gap-2">
+                        <div className="flex-grow-1 text-break" style={{ minWidth: 0 }}>
                           <span className="badge bg-secondary me-2">{entry.entityType}</span>
                           <small>{entry.description ?? entry.action}</small>
                         </div>
-                        <small className="text-muted text-nowrap ms-2">
+                        <small className="text-muted text-nowrap">
                           {new Date(entry.createdAt).toLocaleString()}
                         </small>
                       </div>
