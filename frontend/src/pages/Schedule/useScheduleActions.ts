@@ -15,7 +15,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../../services/apiUtils';
-import { useScheduleMutations, type OptimizationOutcome } from '../../hooks/useSchedulePage';
+import {
+  useFinishedOptimizationRefresh,
+  useScheduleMutations,
+  type OptimizationOutcome,
+} from '../../hooks/useSchedulePage';
 import type { CreateScheduleValues } from '../Schedule/CreateScheduleModal';
 
 const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
@@ -31,6 +35,8 @@ const failureMessage = (err: unknown, fallback: string) =>
 export function useScheduleActions() {
   const { t } = useTranslation();
   const mutations = useScheduleMutations();
+  // Refreshes the views a job abandoned on a previous visit has since changed.
+  useFinishedOptimizationRefresh();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 

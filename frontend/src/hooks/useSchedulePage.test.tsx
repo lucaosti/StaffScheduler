@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   schedulePageKey,
+  useFinishedOptimizationRefresh,
   useScheduleAssignments,
   useScheduleMutations,
   useSchedulePageData,
@@ -127,7 +128,7 @@ describe('useScheduleMutations', () => {
   it('refreshes every view a schedule change affects, not only the schedule page', async () => {
     (scheduleService.publishSchedule as jest.Mock).mockResolvedValue({ success: true, data: {} });
     const client = makeClient();
-    for (const key of [['schedule-page'], ['shifts-page'], ['shifts-range', 'a'], ['assignments', {}], ['dashboard'], ['employees']]) {
+    for (const key of [['schedule-page'], ['shifts-page'], ['shifts-range', 'a'], ['assignments', {}], ['dashboard'], ['reports', 'range'], ['employees']]) {
       client.setQueryData(key, 'cached');
     }
     const { result } = renderHook(() => useScheduleMutations(), { wrapper: makeWrapper(client) });
@@ -139,7 +140,46 @@ describe('useScheduleMutations', () => {
       .getAll()
       .filter((q) => q.state.isInvalidated)
       .map((q) => q.queryKey[0]);
-    expect(invalidated.sort()).toEqual(['assignments', 'dashboard', 'schedule-page', 'shifts-page', 'shifts-range']);
+    expect(invalidated.sort()).toEqual(['assignments', 'dashboard', 'reports', 'schedule-page', 'shifts-page', 'shifts-range']);
+  });
+
+  /**
+   * Review of #844: leaving the page during Generate aborted the poll, and
+   * nothing then refreshed the views the job goes on to change server-side.
+   */
+  it('when the poll is abandoned, refreshes now and again once the job is seen finished', async () => {
+    jest.useFakeTimers();
+    (scheduleService.generateSchedule as jest.Mock).mockResolvedValue({ success: true, data: { jobId: 'j2' } });
+    (scheduleService.getOptimizationStatus as jest.Mock).mockResolvedValue({ success: true, data: { state: 'active' } });
+    const client = makeClient();
+    client.setQueryData(['assignments', {}], 'cached');
+    const spy = jest.spyOn(client, 'invalidateQueries');
+    const { result, unmount } = renderHook(() => useScheduleMutations(), { wrapper: makeWrapper(client) });
+    const controller = new AbortController();
+
+    let outcome: Promise<unknown> = Promise.resolve();
+    act(() => {
+      outcome = result.current.generate.mutateAsync({ scheduleId: 7, signal: controller.signal }).catch((e: unknown) => e);
+    });
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(2100);
+    });
+    controller.abort();
+    await act(async () => {
+      await outcome;
+    });
+    unmount();
+    jest.useRealTimers();
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Back on the page later: the job has finished, so the views refresh again.
+    (scheduleService.getOptimizationStatus as jest.Mock).mockResolvedValue({ success: true, data: { state: 'completed' } });
+    renderHook(() => useFinishedOptimizationRefresh(), { wrapper: makeWrapper(client) });
+
+    // Greater-than rather than exactly 2: the earlier abort test in this file
+    // left its own job (schedule 1) listed, and it is checked here too.
+    await waitFor(() => expect(spy.mock.calls.length).toBeGreaterThan(1));
+    expect(scheduleService.getOptimizationStatus).toHaveBeenCalledWith(7);
   });
 
   it('stops polling an optimization job once aborted', async () => {

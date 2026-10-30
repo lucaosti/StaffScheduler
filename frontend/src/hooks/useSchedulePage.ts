@@ -35,6 +35,7 @@
  * @author Luca Ostinelli
  */
 
+import { useEffect } from 'react';
 import { useMutation, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import type { Schedule as ScheduleType, ShiftAssignment, Employee, Shift } from '../types';
 import * as scheduleService from '../services/scheduleService';
@@ -59,12 +60,13 @@ export const schedulePageKey = ['schedule-page'] as const;
 /**
  * The roots of every query a schedule change can make stale: this page, the
  * Shifts page and month grid (generate creates assignments; archive changes
- * what is listed), the assignment screens, and the dashboard counters. Matched
+ * what is listed), the assignment screens, the dashboard counters and the
+ * reports (coverage, cost and fairness are computed from assignments). Matched
  * on the first key element because the owning hooks keep their full keys
  * private — and importing them from useAssignments would be a cycle, since it
  * imports `schedulePageKey` from here.
  */
-const SCHEDULE_DEPENDENT_KEYS = new Set(['schedule-page', 'shifts-page', 'shifts-range', 'assignments', 'dashboard']);
+const SCHEDULE_DEPENDENT_KEYS = new Set(['schedule-page', 'shifts-page', 'shifts-range', 'assignments', 'dashboard', 'reports']);
 
 const invalidateScheduleDependents = (queryClient: QueryClient) =>
   queryClient.invalidateQueries({
@@ -244,6 +246,50 @@ export function useScheduleMutations() {
           : data;
       },
       onSuccess,
+      onError: (error, { scheduleId }) => {
+        // Abandoned, not failed: the page went away and the job runs on
+        // server-side, changing what the dependent views show — see
+        // `useFinishedOptimizationRefresh`.
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          unfinishedOptimizations.add(Number(scheduleId));
+          void invalidateScheduleDependents(queryClient);
+        }
+      },
     }),
   };
+}
+
+/**
+ * Optimizations whose poll was abandoned before the job finished (#844
+ * review). Leaving the page during Generate aborts the poll — rather than
+ * letting it run on for up to five minutes against nothing — but the job
+ * keeps running, and nothing would then refresh the assignments, shifts,
+ * reports and dashboard it changes. Module scope because it must outlive the
+ * page that started the job.
+ */
+const unfinishedOptimizations = new Set<number>();
+
+/**
+ * On (re)mount of the Schedule page, asks once about each abandoned job and,
+ * for those that have finished, refreshes every dependent view. The abort
+ * itself already invalidated them once, which covers a job that finished
+ * before the user looked again only if they navigate away and back, so this
+ * check is what makes the refresh reliable. A job still running stays listed
+ * for the next mount; a status call that fails is left for the next one too.
+ */
+export function useFinishedOptimizationRefresh() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    for (const scheduleId of Array.from(unfinishedOptimizations)) {
+      scheduleService
+        .getOptimizationStatus(scheduleId)
+        .then((status) => {
+          const state = status.data?.state;
+          if (state !== 'completed' && state !== 'failed') return;
+          unfinishedOptimizations.delete(scheduleId);
+          void invalidateScheduleDependents(queryClient);
+        })
+        .catch(() => undefined);
+    }
+  }, [queryClient]);
 }
