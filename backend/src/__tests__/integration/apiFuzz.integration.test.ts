@@ -37,6 +37,7 @@
  *   FUZZ_ITERATIONS=<n>      requests per class, operation and actor (default 1)
  *   FUZZ_OPERATIONS=<regex>  only operations whose "METHOD /path" matches
  *   FUZZ_REPORT=<file>       also write every failure, as JSON, to this file
+ *   FUZZ_NOW=<ISO instant>   the frozen instant of the run (see FROZEN CLOCK)
  *
  * e.g. inside `./scripts/verify-in-docker.sh shell`:
  *   cd backend && TEST_SEED=42 FUZZ_ITERATIONS=20 FUZZ_REPORT=/tmp/fuzz.json \
@@ -89,7 +90,28 @@ const SEED = baseSeed(908);
 const ITERATIONS = Number(process.env.FUZZ_ITERATIONS || 1);
 const OPERATION_FILTER = process.env.FUZZ_OPERATIONS ? new RegExp(process.env.FUZZ_OPERATIONS) : undefined;
 /** The CI configuration: the only one in which every allowlist entry must still fire. */
-const DEFAULT_RUN = !process.env.TEST_SEED && !process.env.FUZZ_ITERATIONS && !OPERATION_FILTER;
+const DEFAULT_RUN = !process.env.TEST_SEED && !process.env.FUZZ_ITERATIONS && !OPERATION_FILTER && !process.env.FUZZ_NOW;
+
+/*
+ * FROZEN CLOCK. The demo seed dates everything relative to "today" (schedules,
+ * requests, delegations that are active or expired), and the app compares
+ * those rows against "now" in JavaScript and in SQL. With a real clock the
+ * same seed would reach different outcomes on different days, and the
+ * allowlist's "an entry that stops firing fails the run" rule would turn the
+ * calendar into a source of red builds. So the whole run happens at one
+ * instant: JavaScript's Date is faked (timers stay real, so drivers and
+ * timeouts behave normally) and every MySQL session the seed and the app open
+ * gets `SET TIMESTAMP`, which pins NOW(), CURDATE() and column defaults.
+ * Doing it here rather than giving the seed or the pool a clock parameter
+ * keeps application code free of test hooks. FUZZ_NOW moves the instant.
+ */
+const FUZZ_NOW = new Date(process.env.FUZZ_NOW || '2026-11-02T09:00:00Z');
+const FUZZ_NOW_SECONDS = Math.floor(FUZZ_NOW.getTime() / 1000);
+const REAL_TIMERS = [
+  'hrtime', 'nextTick', 'performance', 'queueMicrotask', 'requestAnimationFrame', 'cancelAnimationFrame',
+  'requestIdleCallback', 'cancelIdleCallback', 'setImmediate', 'clearImmediate', 'setInterval',
+  'clearInterval', 'setTimeout', 'clearTimeout',
+] as const;
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -505,6 +527,7 @@ const judgeResponse = (o: Operation, c: Case, res: request.Response): Array<Omit
 let admin: mysql.Connection;
 let app: Express;
 let teardown: () => Promise<void>;
+let appPool: mysql.Pool;
 const fx = new Fixtures();
 const cookies = new Map<string, string>();
 const loggedErrors: string[] = [];
@@ -668,6 +691,9 @@ const formatCase = (f: Failure & { count?: number }) =>
 
 beforeAll(async () => {
   if (!process.env.REDIS_URL) throw new Error('REDIS_URL must point at a reachable Redis for the fuzzing suite');
+  // `advanceTimers` lets the faked Date tick on from FUZZ_NOW in real time, so
+  // token lifetimes and durations measured during the run stay sensible.
+  jest.useFakeTimers({ now: FUZZ_NOW, advanceTimers: true, doNotFake: [...REAL_TIMERS] });
   admin = await mysql.createConnection({ ...DB, multipleStatements: true });
   await admin.query(`DROP DATABASE IF EXISTS \`${FUZZ_DB}\``);
   await admin.query(`CREATE DATABASE \`${FUZZ_DB}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
@@ -676,11 +702,27 @@ beforeAll(async () => {
 
   // The demo dataset gives every operation real rows to point at: schedules
   // in each status, pending requests, an org tree, delegations, tokens.
+  // The seed opens its own connection; pin that session's clock as well.
   const { seedDemo } = require('../../../scripts/seed-demo') as typeof import('../../../scripts/seed-demo');
-  await seedDemo();
+  const realCreateConnection = mysql.createConnection.bind(mysql);
+  const pinned = jest.spyOn(mysql, 'createConnection').mockImplementation((async (options: mysql.ConnectionOptions) => {
+    const conn = await realCreateConnection(options);
+    await conn.query('SET TIMESTAMP = ?', [FUZZ_NOW_SECONDS]);
+    return conn;
+  }) as unknown as typeof mysql.createConnection);
+  try {
+    await seedDemo();
+  } finally {
+    pinned.mockRestore();
+  }
 
   const { database } = require('../../config/database');
   const { buildApp } = require('../../app');
+  // Registered before the first query, so every pooled session is pinned.
+  database.getPool().on('connection', (conn: { query: (sql: string, values: unknown[]) => unknown }) => {
+    conn.query('SET TIMESTAMP = ?', [FUZZ_NOW_SECONDS]);
+  });
+  appPool = database.getPool();
   app = buildApp(database.getPool(), { silent: true });
   // The 500 body is deliberately generic (#895); the cause is in the log.
   // Capture what the app logs at error level so a 5xx entry in the report
@@ -712,6 +754,7 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
+  jest.useRealTimers();
   if (teardown) await teardown();
   if (admin) {
     await admin.query(`DROP DATABASE IF EXISTS \`${FUZZ_DB}\``);
@@ -720,6 +763,16 @@ afterAll(async () => {
 }, 60_000);
 
 describe(`API contract fuzzing (seed ${SEED}, ${ITERATIONS} per class)`, () => {
+  it('runs at the frozen instant, in JavaScript, in the seed and in the app', async () => {
+    // If pinning silently stopped working the run would follow the calendar
+    // again, and only show it as unexplained allowlist churn weeks later.
+    expect(Math.abs(Date.now() - FUZZ_NOW.getTime())).toBeLessThan(15 * 60_000);
+    const [[appClock]] = await appPool.query<mysql.RowDataPacket[]>('SELECT UNIX_TIMESTAMP(NOW()) AS t');
+    expect(Number(appClock.t)).toBe(FUZZ_NOW_SECONDS);
+    const [[seeded]] = await admin.query<mysql.RowDataPacket[]>('SELECT UNIX_TIMESTAMP(MAX(created_at)) AS t FROM users');
+    expect(Number(seeded.t)).toBe(FUZZ_NOW_SECONDS);
+  });
+
   it('finds every operation of the spec', () => {
     // 318 when this suite landed; the floor guards against the spec failing
     // to load or the loop silently reaching only part of it.
@@ -787,21 +840,19 @@ describe(`API contract fuzzing (seed ${SEED}, ${ITERATIONS} per class)`, () => {
  * Known failure signatures (`METHOD /path | oracle | status`), each against the
  * open issue that tracks it. An entry is deleted in the PR that fixes it: the
  * default run fails on an entry that no longer fires, so the list only shrinks.
- * Declared last because it is long; it is read only once the tests run.
+ * Only signatures the default run reaches belong here; what larger campaigns
+ * find is tracked by the same issues. Declared last because it is long; it is
+ * read only once the tests run.
  */
 const KNOWN_FAILURES: Record<string, number> = {
   // #900: expiry strings reach a DATETIME column unconverted (500 on an ISO timestamp).
   'POST /delegations | 5xx | 500': 900,
   'POST /roles/bulk-assign | 5xx | 500': 900,
   'POST /roles/users/{userId} | 5xx | 500': 900,
-  // #903: spec mismatches — undocumented statuses, 2xx without `data`, response schemas that do not describe the response.
-  'DELETE /approval-workflows/{id} | success-envelope | 200': 903,
+  // #903, undocumented statuses: 4xx the operation does not document (and 201 where 200 is documented).
   'DELETE /approval-workflows/{id} | undocumented-status | 400': 903,
-  'DELETE /assignments/{id} | success-envelope | 200': 903,
   'DELETE /assignments/{id} | undocumented-status | 400': 903,
-  'DELETE /calendar/tokens/{id} | success-envelope | 200': 903,
   'DELETE /calendar/tokens/{id} | undocumented-status | 400': 903,
-  'DELETE /cost-plans/{id} | success-envelope | 200': 903,
   'DELETE /cost-plans/{id} | undocumented-status | 400': 903,
   'DELETE /delegations/{id} | undocumented-status | 400': 903,
   'DELETE /departments/{id} | undocumented-status | 400': 903,
@@ -810,38 +861,20 @@ const KNOWN_FAILURES: Record<string, number> = {
   'DELETE /departments/{id}/kiosks/{kioskId} | undocumented-status | 404': 903,
   'DELETE /departments/{id}/users/{userId} | undocumented-status | 400': 903,
   'DELETE /directory/users/{id}/fields/{key} | undocumented-status | 400': 903,
-  'DELETE /employee-pairings/{id} | success-envelope | 200': 903,
   'DELETE /employee-pairings/{id} | undocumented-status | 400': 903,
-  'DELETE /employees/{id} | success-envelope | 200': 903,
   'DELETE /employees/{id} | undocumented-status | 400': 903,
-  'DELETE /employees/{id}/skills/{skillId} | success-envelope | 200': 903,
   'DELETE /employees/{id}/skills/{skillId} | undocumented-status | 400': 903,
-  'DELETE /i18n/overrides/admin/{id} | success-envelope | 200': 903,
   'DELETE /i18n/overrides/admin/{id} | undocumented-status | 400': 903,
-  'DELETE /modules/{code}/org/{org} | success-envelope | 200': 903,
-  'DELETE /on-call/periods/{id} | success-envelope | 200': 903,
-  'DELETE /org/units/{id} | success-envelope | 200': 903,
   'DELETE /org/units/{id} | undocumented-status | 400': 903,
-  'DELETE /org/units/{id}/members/{userId} | success-envelope | 200': 903,
-  'DELETE /policies/{id} | success-envelope | 200': 903,
   'DELETE /policies/{id} | undocumented-status | 400': 903,
   'DELETE /policies/{id} | undocumented-status | 404': 903,
-  'DELETE /responsibility-rules/{id} | success-envelope | 200': 903,
   'DELETE /responsibility-rules/{id} | undocumented-status | 400': 903,
-  'DELETE /roles/{id} | success-envelope | 200': 903,
-  'DELETE /roles/users/{userId}/{roleId} | success-envelope | 200': 903,
   'DELETE /roles/users/{userId}/{roleId} | undocumented-status | 400': 903,
   'DELETE /schedules/{id} | undocumented-status | 409': 903,
-  'DELETE /schedules/{id}/optimization | success-envelope | 200': 903,
-  'DELETE /shifts/{id} | success-envelope | 200': 903,
   'DELETE /shifts/{id} | undocumented-status | 400': 903,
-  'DELETE /shifts/templates/{id} | success-envelope | 200': 903,
   'DELETE /shifts/templates/{id} | undocumented-status | 400': 903,
-  'DELETE /skills/{id} | success-envelope | 200': 903,
   'DELETE /skills/{id} | undocumented-status | 400': 903,
-  'DELETE /sso/providers/{id} | success-envelope | 200': 903,
   'DELETE /sso/providers/{id} | undocumented-status | 400': 903,
-  'DELETE /users/{id} | success-envelope | 200': 903,
   'DELETE /users/{id} | undocumented-status | 400': 903,
   'GET /approval-workflows | undocumented-status | 403': 903,
   'GET /assignments | undocumented-status | 403': 903,
@@ -857,12 +890,10 @@ const KNOWN_FAILURES: Record<string, number> = {
   'GET /assignments/user/{userId} | undocumented-status | 403': 903,
   'GET /attendance | undocumented-status | 400': 903,
   'GET /attendance/{id} | undocumented-status | 400': 903,
-  'GET /audit-logs | response-schema | 200': 903,
   'GET /audit-logs | undocumented-status | 400': 903,
   'GET /audit-logs/{id} | undocumented-status | 400': 903,
   'GET /auth/sso/{id}/login | undocumented-status | 400': 903,
   'GET /auth/sso/providers | undocumented-status | 400': 903,
-  'GET /auth/verify | response-schema | 200': 903,
   'GET /calendar/aggregate.ics | undocumented-status | 400': 903,
   'GET /calendar/department/{id}.ics | undocumented-status | 400': 903,
   'GET /calendar/feed.ics | undocumented-status | 400': 903,
@@ -870,7 +901,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'GET /change-requests/{id} | undocumented-status | 400': 903,
   'GET /cost-plans | undocumented-status | 400': 903,
   'GET /cost-plans/{id} | undocumented-status | 400': 903,
-  'GET /departments | response-schema | 200': 903,
   'GET /departments | undocumented-status | 400': 903,
   'GET /departments/{id} | undocumented-status | 400': 903,
   'GET /departments/{id} | undocumented-status | 403': 903,
@@ -896,7 +926,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'GET /on-call/periods/{id} | undocumented-status | 400': 903,
   'GET /on-call/periods/{id}/assignments | undocumented-status | 400': 903,
   'GET /org/loans | undocumented-status | 400': 903,
-  'GET /org/units/{id} | response-schema | 200': 903,
   'GET /org/units/{id} | undocumented-status | 400': 903,
   'GET /org/units/{id}/members | undocumented-status | 400': 903,
   'GET /org/units/{id}/members/detailed | undocumented-status | 400': 903,
@@ -919,7 +948,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'GET /responsibility-rules | undocumented-status | 400': 903,
   'GET /responsibility-rules/{id} | undocumented-status | 400': 903,
   'GET /responsibility-rules/{id}/conflicts | undocumented-status | 400': 903,
-  'GET /responsibility-rules/matrix | response-schema | 200': 903,
   'GET /roles | undocumented-status | 403': 903,
   'GET /roles/{id} | undocumented-status | 400': 903,
   'GET /roles/{id} | undocumented-status | 403': 903,
@@ -947,7 +975,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'GET /time-off | undocumented-status | 400': 903,
   'GET /time-off/{id} | undocumented-status | 400': 903,
   'GET /time-off/{id} | undocumented-status | 403': 903,
-  'GET /users | response-schema | 200': 903,
   'GET /users | undocumented-status | 400': 903,
   'GET /users/{id} | undocumented-status | 400': 903,
   'GET /users/{id} | undocumented-status | 403': 903,
@@ -962,7 +989,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'PATCH /schedules/{id}/publish | undocumented-status | 409': 903,
   'POST /approval-workflows | undocumented-status | 400': 903,
   'POST /approval-workflows | undocumented-status | 409': 903,
-  'POST /assignments | response-schema | 201': 903,
   'POST /assignments | undocumented-status | 404': 903,
   'POST /assignments/bulk | undocumented-status | 400': 903,
   'POST /attendance/{id}/approve | undocumented-status | 400': 903,
@@ -973,7 +999,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'POST /auth/2fa/setup | undocumented-status | 400': 903,
   'POST /auth/login/challenge | undocumented-status | 400': 903,
   'POST /auth/refresh | undocumented-status | 400': 903,
-  'POST /auth/refresh/logout | success-envelope | 200': 903,
   'POST /auth/refresh/logout | undocumented-status | 400': 903,
   'POST /change-requests/{id}/apply | undocumented-status | 400': 903,
   'POST /change-requests/{id}/approve | undocumented-status | 400': 903,
@@ -986,7 +1011,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'POST /departments/{id}/users | undocumented-status | 201': 903,
   'POST /departments/{id}/users | undocumented-status | 400': 903,
   'POST /directory/import-vcard/preview | undocumented-status | 400': 903,
-  'POST /employees/{id}/skills | success-envelope | 201': 903,
   'POST /employees/{id}/skills | undocumented-status | 400': 903,
   'POST /import/employees | undocumented-status | 400': 903,
   'POST /import/shifts | undocumented-status | 400': 903,
@@ -1017,7 +1041,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'POST /roles | undocumented-status | 400': 903,
   'POST /schedules/{id}/duplicate | undocumented-status | 400': 903,
   'POST /schedules/{id}/generate | undocumented-status | 400': 903,
-  'POST /settings/{category}/{key}/reset | success-envelope | 200': 903,
   'POST /shift-swap | undocumented-status | 409': 903,
   'POST /shift-swap/{id}/approve | undocumented-status | 409': 903,
   'POST /shift-swap/{id}/cancel | undocumented-status | 403': 903,
@@ -1042,30 +1065,68 @@ const KNOWN_FAILURES: Record<string, number> = {
   'PUT /settings/currency | undocumented-status | 400': 903,
   'PUT /shifts/{id} | undocumented-status | 400': 903,
   'PUT /users/{id} | undocumented-status | 400': 903,
-  // Found by this suite, no issue of their own yet: driver errors surfacing as 500 (INT overflow, impossible dates, CHECK/FK violations, enum truncation), non-JSON or envelope-less errors, schemas looser than the handler behind them. Re-point each entry when its issue is filed.
-  'GET /assignments/shift/{shiftId} | malformed-accepted | 200': 908,
-  'GET /calendar/aggregate.ics | error-not-json | 401': 908,
-  'GET /calendar/department/{id}.ics | error-not-json | 401': 908,
-  'GET /calendar/feed.ics | error-not-json | 401': 908,
-  'GET /directory/vcard.vcf | valid-rejected | 400': 908,
-  'GET /employees/department/{departmentId} | malformed-accepted | 200': 908,
-  'GET /on-call/periods/{id}/assignments | malformed-accepted | 200': 908,
-  'GET /org/manager-chain/{userId} | malformed-accepted | 200': 908,
-  'GET /reports/hours-worked | valid-rejected | 400': 908,
-  'POST /approval-workflows | 5xx | 500': 908,
-  'POST /departments/{id}/kiosks | 5xx | 500': 908,
-  'POST /employment-contracts/users/{userId} | 5xx | 500': 908,
-  'POST /import/employees | error-envelope | 400': 908,
-  'POST /import/employees | valid-rejected | 400': 908,
-  'POST /import/shifts | error-envelope | 400': 908,
-  'POST /import/shifts | valid-rejected | 400': 908,
-  'POST /integrations/payroll/export | 5xx | 500': 908,
-  'POST /org/units/{id}/members | 5xx | 500': 908,
-  'POST /sso/providers | 5xx | 500': 908,
-  'POST /time-off | 5xx | 500': 908,
-  'PUT /assignments/{id} | 5xx | 500': 908,
-  'PUT /directory/users/{id}/fields | valid-rejected | 400': 908,
-  'PUT /on-call/periods/{id} | 5xx | 500': 908,
-  'PUT /preferences/{userId} | 5xx | 500': 908,
-  'PUT /shifts/{id} | 5xx | 500': 908,
+  // #903, 2xx without `data`: success responses that carry no `data` field.
+  'DELETE /approval-workflows/{id} | success-envelope | 200': 903,
+  'DELETE /assignments/{id} | success-envelope | 200': 903,
+  'DELETE /calendar/tokens/{id} | success-envelope | 200': 903,
+  'DELETE /cost-plans/{id} | success-envelope | 200': 903,
+  'DELETE /employee-pairings/{id} | success-envelope | 200': 903,
+  'DELETE /employees/{id} | success-envelope | 200': 903,
+  'DELETE /employees/{id}/skills/{skillId} | success-envelope | 200': 903,
+  'DELETE /i18n/overrides/admin/{id} | success-envelope | 200': 903,
+  'DELETE /modules/{code}/org/{org} | success-envelope | 200': 903,
+  'DELETE /on-call/periods/{id} | success-envelope | 200': 903,
+  'DELETE /org/units/{id} | success-envelope | 200': 903,
+  'DELETE /org/units/{id}/members/{userId} | success-envelope | 200': 903,
+  'DELETE /policies/{id} | success-envelope | 200': 903,
+  'DELETE /responsibility-rules/{id} | success-envelope | 200': 903,
+  'DELETE /roles/{id} | success-envelope | 200': 903,
+  'DELETE /roles/users/{userId}/{roleId} | success-envelope | 200': 903,
+  'DELETE /schedules/{id}/optimization | success-envelope | 200': 903,
+  'DELETE /shifts/{id} | success-envelope | 200': 903,
+  'DELETE /shifts/templates/{id} | success-envelope | 200': 903,
+  'DELETE /skills/{id} | success-envelope | 200': 903,
+  'DELETE /sso/providers/{id} | success-envelope | 200': 903,
+  'DELETE /users/{id} | success-envelope | 200': 903,
+  'POST /auth/refresh/logout | success-envelope | 200': 903,
+  'POST /employees/{id}/skills | success-envelope | 201': 903,
+  'POST /settings/{category}/{key}/reset | success-envelope | 200': 903,
+  // #903, response-schema mismatches: the documented response schema does not describe the response.
+  'GET /audit-logs | response-schema | 200': 903,
+  'GET /auth/verify | response-schema | 200': 903,
+  'GET /departments | response-schema | 200': 903,
+  'GET /org/units/{id} | response-schema | 200': 903,
+  'GET /responsibility-rules/matrix | response-schema | 200': 903,
+  'GET /users | response-schema | 200': 903,
+  'POST /assignments | response-schema | 201': 903,
+  // #935: integer/decimal overflow reaches the database and returns 500.
+  'POST /approval-workflows | 5xx | 500': 935,
+  'POST /departments/{id}/kiosks | 5xx | 500': 935,
+  'POST /org/units/{id}/members | 5xx | 500': 935,
+  'PUT /preferences/{userId} | 5xx | 500': 935,
+  // #936: impossible calendar dates (2031-02-29, 0000-00-00) reach the database and return 500.
+  'POST /integrations/payroll/export | 5xx | 500': 936,
+  'POST /time-off | 5xx | 500': 936,
+  // #938: database constraint violations (FK, CHECK, duplicate, enum truncation) return 500.
+  'POST /employment-contracts/users/{userId} | 5xx | 500': 938,
+  'POST /sso/providers | 5xx | 500': 938,
+  'PUT /assignments/{id} | 5xx | 500': 938,
+  'PUT /on-call/periods/{id} | 5xx | 500': 938,
+  'PUT /shifts/{id} | 5xx | 500': 938,
+  // #939: unvalidated id path parameters, schemas looser than their handlers, wrong status for a missing referenced row.
+  'GET /assignments/shift/{shiftId} | malformed-accepted | 200': 939,
+  'GET /directory/vcard.vcf | valid-rejected | 400': 939,
+  'GET /employees/department/{departmentId} | malformed-accepted | 200': 939,
+  'GET /on-call/periods/{id}/assignments | malformed-accepted | 200': 939,
+  'GET /org/manager-chain/{userId} | malformed-accepted | 200': 939,
+  'GET /reports/hours-worked | valid-rejected | 400': 939,
+  'POST /import/employees | valid-rejected | 400': 939,
+  'POST /import/shifts | valid-rejected | 400': 939,
+  'PUT /directory/users/{id}/fields | valid-rejected | 400': 939,
+  // #940: errors outside the JSON envelope (calendar 401 as text/plain, import errors without error.code).
+  'GET /calendar/aggregate.ics | error-not-json | 401': 940,
+  'GET /calendar/department/{id}.ics | error-not-json | 401': 940,
+  'GET /calendar/feed.ics | error-not-json | 401': 940,
+  'POST /import/employees | error-envelope | 400': 940,
+  'POST /import/shifts | error-envelope | 400': 940,
 };

@@ -2245,6 +2245,15 @@ TEST_SEED=42 FUZZ_ITERATIONS=20 FUZZ_REPORT=/tmp/fuzz.json \
 | `FUZZ_ITERATIONS` | Requests per class, operation and actor (default `1`). |
 | `FUZZ_OPERATIONS` | Regex over `"METHOD /path"`: fuzz only matching operations (the report's replay line uses it). |
 | `FUZZ_REPORT` | Also write every failure signature, as JSON, to this file. |
+| `FUZZ_NOW` | The instant the run happens at (default `2026-11-02T09:00:00Z`). |
+
+The run happens at a frozen instant: the demo seed dates its rows relative to
+"today" and the app compares them against "now", so with a real clock the
+same seed would reach different outcomes on different days and the
+"no stale entry" rule would fail builds by the calendar. JavaScript's `Date`
+is faked (timers stay real) and every MySQL session of the seed and the app is
+pinned with `SET TIMESTAMP`, which fixes `NOW()`, `CURDATE()` and column
+defaults — all from the test, with no clock hook in application code.
 
 `GET /events/stream` is the one operation not fuzzed: a server-sent-events
 response never ends, so there is no status and body to judge.
