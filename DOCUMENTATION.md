@@ -1741,13 +1741,47 @@ Rolling deploy:
 ops/deploy/rolling-deploy.sh 2      # replica count (default 2)
 ```
 
-Compose has no native per-replica rolling update, so the script does the standard
-scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
-start alongside the old), wait until the load balancer answers, then scale back
-**down** to N — Compose removes the oldest containers, i.e. the previous image.
-Throughout, a poller hits `/api/v1/health` twice a second and the script **fails the
-deploy if a single request was dropped**, so "zero downtime" is verified rather
-than asserted.
+Compose has no native per-replica rolling update, so the script starts the new
+replicas beside the old ones and retires the old ones **by id**:
+
+1. build the new image and record the ids of the replicas running now;
+2. `up --no-recreate --scale backend=<old + N>`: the old replicas are left
+   untouched and only the added ones start, on the new image;
+3. wait until every **new** replica's own healthcheck reports `healthy` (an
+   unhealthy or exited one aborts the deploy and removes the new replicas, so
+   the old ones keep serving as before);
+4. wait `DRAIN_SECONDS` (default 15, longer than the 10 s resolver TTL of the
+   frontend proxy and the 5 s of `backend-lb`) so both proxies route to the new
+   replicas;
+5. `docker stop` the recorded old ids — SIGTERM makes each stop accepting while
+   its in-flight requests complete, and a refused connection is one nginx
+   retries on another replica, POSTs included, because nothing was sent — then
+   remove them;
+6. wait `DRAIN_SECONDS` again, so the proxies forget the old addresses.
+
+Throughout, a poller sends a GET (`/health`) and a POST (`/auth/refresh` with
+no token, answered 401 without touching the database) every second, and the
+script **fails the deploy if a single one was dropped** — no answer, or a 5xx —
+so "zero downtime" is verified rather than asserted. The POST matters because
+nginx never re-sends a non-idempotent request that already reached a replica:
+a GET-only probe cannot see the drop a careless switch causes.
+
+The former scale-up/scale-down version was wrong in four ways (#848): without
+`--no-recreate` the scale-up recreated the old replicas too; its wait passed as
+soon as the load balancer answered, which the old replicas did, so an unhealthy
+new image went unnoticed; the scale-down removed whichever containers Compose
+chose, an order Compose does not document; and nothing waited out the proxies'
+DNS cache. Both proxies also bound their connect timeout to 2 s, so an address
+still cached after its replica is gone costs a quick retry rather than nginx's
+60 s default.
+
+The script reads `COMPOSE_FILE`/`COMPOSE_PROJECT_NAME` like Compose itself
+(default: the base file plus this overlay), `API_URL` for where clients reach
+the API (default the load balancer on `BACKEND_PORT`), and expects to run from
+the repository root. The backend's healthcheck probes every 2 s while a
+container starts (`start_interval`, Docker Engine 25 or newer), so step 3 takes
+seconds rather than the 30 s healthcheck interval. As before, every later `up`
+must pass `--scale backend=N`, or Compose scales back to one replica.
 
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.

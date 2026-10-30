@@ -154,6 +154,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+      # Probe every 2s while starting, so a new replica is reported healthy as
+      # soon as it is: ops/deploy/rolling-deploy.sh waits on exactly this
+      # status, and at the 30s interval each deploy spent half a minute idle.
+      start_interval: 2s
 
   # Frontend Service
   frontend:

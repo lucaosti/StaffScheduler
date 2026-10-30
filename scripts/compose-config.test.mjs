@@ -136,6 +136,13 @@ test('the backup directory is configurable (#847)', () => {
   assert.equal(mount.source, '/srv/backups');
 });
 
+test('a starting backend replica is probed often enough for the rolling deploy to wait on it (#848)', () => {
+  // rolling-deploy.sh waits for each new replica's own healthcheck; at the
+  // 30s interval alone every deploy idled for half a minute per replica.
+  const { healthcheck } = resolved({ files: ['docker-compose.yml', 'docker-compose.scale.yml'] }).services.backend;
+  assert.equal(healthcheck.start_interval, '2s');
+});
+
 test('phpMyAdmin asks for credentials instead of logging every visitor in (#823)', () => {
   const { environment } = resolved({ profiles: ['dev'] }).services.phpmyadmin;
   assert.equal(environment.PMA_USER, undefined);
