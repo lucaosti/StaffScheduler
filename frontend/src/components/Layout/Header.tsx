@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ThemeToggle from '../ThemeToggle';
 import LocaleSwitcher from '../LocaleSwitcher';
+import Dropdown from '../Dropdown';
 import * as notificationService from '../../services/notificationService';
 import type { AppNotification } from '../../services/notificationService';
 import { isInternalPath } from '../../utils/internalPath';
@@ -119,62 +120,68 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
         <i className="bi bi-list"></i>
       </button>
 
-      <h5 className="mb-0 text-body">{t('app.title')}</h5>
+      {/* Truncates rather than widening the page on a phone (#947). */}
+      <h5 className="mb-0 text-body text-truncate" style={{ minWidth: 0 }}>{t('app.title')}</h5>
 
       <div className="ms-auto d-flex align-items-center gap-2">
         <LocaleSwitcher />
         <ThemeToggle />
-        <div className="dropdown">
-          <button
-            className="btn btn-link text-body p-0 text-decoration-none position-relative"
-            type="button"
-            data-bs-toggle="dropdown"
-            aria-expanded="false"
-            aria-label={
-              unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'
-            }
-          >
-            <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
-            {unreadCount > 0 && (
-              <span
-                className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
-                style={{ fontSize: '0.6rem' }}
-              >
-                {unreadCount > 99 ? '99+' : unreadCount}
-                <span className="visually-hidden"> unread notifications</span>
-              </span>
-            )}
-          </button>
-          <ul className="dropdown-menu dropdown-menu-end" style={{ minWidth: '20rem' }}>
-            <li className="d-flex align-items-center justify-content-between px-2">
-              <h6 className="dropdown-header mb-0 px-0">Notifications</h6>
+        <Dropdown
+          toggleClassName="btn btn-link text-body p-0 text-decoration-none position-relative"
+          toggleLabel={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'}
+          toggleContent={
+            <>
+              <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
+              {/* Positioned by `.notification-badge` in index.css rather than
+                  start-100 + translate-middle, which overflow the screen in
+                  Arabic (#947). */}
               {unreadCount > 0 && (
-                <button
-                  className="btn btn-link btn-sm text-decoration-none p-0"
-                  type="button"
-                  onClick={handleMarkAllRead}
-                >
-                  Mark all read
-                </button>
+                <span className="notification-badge badge rounded-pill bg-danger">
+                  {unreadCount > 99 ? '99+' : unreadCount}
+                  <span className="visually-hidden"> unread notifications</span>
+                </span>
               )}
+            </>
+          }
+          alignEnd
+          menuStyle={{ minWidth: '20rem' }}
+        >
+          {/* A role="menu" holds menuitems: every <li> is role="none", and
+              "Mark all read" is an item of its own like the notifications —
+              keyboard-reachable with the arrow keys, closing the menu when
+              chosen (#840 re-review). */}
+          <li role="none">
+            <h6 className="dropdown-header">Notifications</h6>
+          </li>
+          {unreadCount > 0 && (
+            <li role="none">
+              <button
+                className="dropdown-item small text-primary"
+                type="button"
+                role="menuitem"
+                onClick={handleMarkAllRead}
+              >
+                Mark all read
+              </button>
             </li>
-            {recent.length === 0 && (
-              <li><span className="dropdown-item-text text-muted">No new notifications</span></li>
-            )}
-            {recent.map((n) => (
-              <li key={n.id}>
-                <button
-                  className="dropdown-item"
-                  type="button"
-                  onClick={() => handleSelect(n)}
-                >
-                  <div className={n.isRead ? 'text-muted' : 'fw-semibold'}>{n.title}</div>
-                  {n.body && <div className="small text-muted text-truncate">{n.body}</div>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
+          )}
+          {recent.length === 0 && (
+            <li role="none"><span className="dropdown-item-text text-muted">No new notifications</span></li>
+          )}
+          {recent.map((n) => (
+            <li key={n.id} role="none">
+              <button
+                className="dropdown-item"
+                role="menuitem"
+                type="button"
+                onClick={() => handleSelect(n)}
+              >
+                <div className={n.isRead ? 'text-muted' : 'fw-semibold'}>{n.title}</div>
+                {n.body && <div className="small text-muted text-truncate">{n.body}</div>}
+              </button>
+            </li>
+          ))}
+        </Dropdown>
       </div>
     </div>
   );

@@ -42,6 +42,7 @@ import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem, ScheduleAssignment } from '../optimization/types';
 import { logger } from '../config/logger';
 import { config } from '../config';
+import { OptimizationFailedError } from '../errors';
 import { ReplanProposalService } from './ReplanProposalService';
 import { AutoScheduleInputLoader } from './AutoScheduleInputLoader';
 import { buildOptimizationProblem, type ScheduleInputs } from './autoScheduleProblem';
@@ -220,14 +221,29 @@ export class AutoScheduleService {
 
     if (config.optimization.engine !== 'or-tools') {
       logger.info(`Optimization for schedule=${scheduleId} using greedy draft engine (explicit)`);
-      return {
-        assignments: await optimizer.generateGreedySchedule(problem),
-        engine: 'greedy',
-        degraded: false,
-      };
+      let assignments: ScheduleAssignment[];
+      try {
+        assignments = await optimizer.generateGreedySchedule(problem);
+      } catch (error) {
+        logger.error(`Greedy engine failed for schedule=${scheduleId}: ${error instanceof Error ? error.message : String(error)}`);
+        throw new OptimizationFailedError();
+      }
+      return { assignments, engine: 'greedy', degraded: false };
     }
 
     const result = await optimizer.optimize(problem);
+
+    // ERROR means the greedy fallback itself threw, so NO engine produced a
+    // schedule and `assignments` is empty by failure, not by decision. Passed
+    // on, a published schedule got a replan proposal breaking every
+    // commitment and a draft an "OK" run that wrote nothing (#858) — the
+    // harm #811 closed for solver statuses, through a different door. Thrown
+    // here, before either persistence path, so nothing is proposed or written
+    // and the planner is told the run failed.
+    if (result.status === 'ERROR') {
+      logger.error(`No engine produced a schedule for schedule=${scheduleId}: ${result.error ?? 'unknown error'}`);
+      throw new OptimizationFailedError();
+    }
     // Named positively: only a status that carries a schedule is an or-tools
     // result. optimize() already folds every other solver status into
     // GREEDY_FALLBACK (#811); listing the failures instead is how an empty

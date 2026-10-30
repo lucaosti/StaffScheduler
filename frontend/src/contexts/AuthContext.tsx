@@ -13,11 +13,16 @@
  * @author Luca Ostinelli
  */
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { User, LoginRequest, LoginResponse, ApiResponse } from '../types';
 import * as authService from '../services/authService';
-import { isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
-import { registerForNativePush } from '../services/nativePushService';
+import { getCachedAccessToken, isNativePlatform, loadCachedTokens } from '../services/mobileAuthStorage';
+import { isSessionRefusal } from '../services/apiUtils';
+import { registerForNativePush, unregisterNativePush } from '../services/nativePushService';
+import { dropWebPushSubscription } from '../services/webPushSession';
+import { onSessionExpired } from '../api/client';
+import { resetOptimizationWatch } from '../hooks/useSchedulePage';
 import i18n, { isSupportedLocale } from '../i18n';
 import { applyOrganizationOverrides } from '../i18n/organizationOverrides';
 import { getMyOverrides } from '../services/translationOverrideService';
@@ -45,6 +50,34 @@ interface AuthContextType extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/** How long logout waits for push deactivation before revoking anyway. */
+const PUSH_CLEANUP_BUDGET_MS = 1500;
+/** The web client's proactive refresh period (80% of the default 15m). */
+const WEB_REFRESH_INTERVAL_MS = 12 * 60 * 1000;
+/** Floor for a native refresh scheduled from a token about to expire. */
+const MIN_REFRESH_DELAY_MS = 10_000;
+/** On resume, a native token closer than this to expiry is refreshed at once. */
+const RESUME_REFRESH_MARGIN_MS = 2 * 60 * 1000;
+
+/** The `exp` of a JWT in ms, or null when there is no readable one. */
+const jwtExpiresAt = (token: string | null): number | null => {
+  try {
+    const payload = token?.split('.')[1];
+    if (!payload) return null;
+    const exp = (JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown }).exp;
+    return typeof exp === 'number' ? exp * 1000 : null;
+  } catch {
+    return null;
+  }
+};
+
+/** When to refresh next: from the native token's `exp`, else the web period. */
+const nextRefreshDelayMs = (): number => {
+  const expiresAt = isNativePlatform() ? jwtExpiresAt(getCachedAccessToken()) : null;
+  if (expiresAt === null) return WEB_REFRESH_INTERVAL_MS;
+  return Math.max(MIN_REFRESH_DELAY_MS, (expiresAt - Date.now()) * 0.8);
+};
 
 type AuthAction =
   | { type: 'LOGIN_START' }
@@ -99,6 +132,40 @@ interface AuthProviderProps {
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
+  // One user's cached server state must never be shown to the next (#841).
+  // The cache is app-wide and outlives a session. Every sign-in goes through
+  // `establishSession`, which clears it BEFORE dispatching when the user
+  // differs from the last one this tab saw (a silent switch: another tab
+  // signed in as B and this tab's refresh picked up B's cookie). Doing it in
+  // an effect, as first written, ran after B's tree had rendered, so a
+  // mounted observer painted A's data under B's name for a frame. A logout
+  // (A → none) is cleared in the effect below instead, after the protected
+  // pages have unmounted: cleared while they are mounted, their observers
+  // would refetch with the session not yet revoked and repopulate the cache.
+  // A refresh for the SAME user keeps the cache. The Schedule page's memory
+  // of abandoned optimization jobs is session state too, and goes with it.
+  const queryClient = useQueryClient();
+  const lastUserId = useRef<number | null>(null);
+  const establishSession = useCallback(
+    (user: User) => {
+      if (lastUserId.current !== null && lastUserId.current !== user.id) {
+        queryClient.clear();
+        resetOptimizationWatch();
+      }
+      lastUserId.current = user.id;
+      dispatch({ type: 'LOGIN_SUCCESS', payload: { user } });
+    },
+    [queryClient]
+  );
+  const userId = state.user?.id ?? null;
+  useEffect(() => {
+    if (userId === null && lastUserId.current !== null) {
+      queryClient.clear();
+      resetOptimizationWatch();
+      lastUserId.current = null;
+    }
+  }, [userId, queryClient]);
+
   useEffect(() => {
     // On mount, try the access token first. Because access tokens are now
     // short-lived (~15m), a page reload after that window would otherwise log
@@ -113,11 +180,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // logged-out state as any other failed bootstrap. Awaited outside it, the
       // rejection skipped every dispatch below and left `isLoading` true, so
       // the protected routes spun forever instead of showing the login page.
+      // A restored session registers native push exactly like a fresh login
+      // (#841 review): the device token logout deactivates is recorded only
+      // when this runs, so after a cold start with a restored session logout
+      // had no token and the device kept receiving the signed-out user's
+      // notifications. Registration is idempotent server-side.
+      const restored = (user: User) => {
+        establishSession(user);
+        void registerForNativePush();
+      };
       try {
         if (isNativePlatform()) await loadCachedTokens();
         const response = await authService.verifyToken();
         if (response.success && response.data) {
-          dispatch({ type: 'LOGIN_SUCCESS', payload: { user: response.data } });
+          restored(response.data);
           return;
         }
       } catch {
@@ -126,7 +202,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       try {
         const refreshed = await authService.refreshToken();
         if (refreshed.success && refreshed.data) {
-          dispatch({ type: 'LOGIN_SUCCESS', payload: refreshed.data });
+          restored(refreshed.data.user);
           return;
         }
       } catch {
@@ -136,20 +212,29 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     initializeAuth();
-  }, []);
+  }, [establishSession]);
+
+  // The logout still in flight, if any, and the push cleanup it started —
+  // see `logout`.
+  const pendingLogout = useRef<Promise<void> | null>(null);
+  const pushCleanup = useRef<AbortController | null>(null);
 
   const login = useCallback(async (credentials: LoginRequest): Promise<void> => {
     dispatch({ type: 'LOGIN_START' });
 
     try {
+      // A previous user's revocation must land before this sign-in: on the
+      // web the revocation authenticates with whatever refresh cookie the jar
+      // holds when it is sent, so sent after B's login it would revoke B.
+      await pendingLogout.current;
+      // Push cleanup the budget cut short may still be running; from here on
+      // it would run as B (#841 re-review), so it stops.
+      pushCleanup.current?.abort();
+      pushCleanup.current = null;
       const response: ApiResponse<LoginResponse> = await authService.login(credentials);
 
       if (response.success && response.data) {
-        const { user } = response.data;
-        dispatch({
-          type: 'LOGIN_SUCCESS',
-          payload: { user },
-        });
+        establishSession(response.data.user);
         // Native only: obtain a device token and register it with the
         // backend. A no-op on the web platform. Fire-and-forget — a push
         // registration failure (permission declined, no push services on
@@ -162,10 +247,48 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       dispatch({ type: 'LOGIN_FAILURE', payload: error instanceof Error ? error.message : 'Login failed' });
       throw error;
     }
-  }, []);
+  }, [establishSession]);
 
+  /**
+   * Ends the session and everything tied to it (#841).
+   *
+   * Deactivating the push registrations is an authenticated call, so it goes
+   * before the revocation — but bounded by PUSH_CLEANUP_BUDGET_MS (#841
+   * review): an unbounded wait meant closing the tab right after Logout never
+   * sent the revocation and left the 30-day refresh cookie live. For the same
+   * reason a `pagehide` during the wait revokes at once, and the revocation
+   * itself is a keepalive request (authService). A push registration the
+   * budget cuts short stays the server's to retire when delivery fails. Its
+   * calls never refresh the session and are aborted when the next sign-in
+   * starts (#841 re-review): otherwise a late DELETE could 401, refresh with
+   * the next user's cookie, and run as them.
+   *
+   * One logout at a time: a second call while one is in flight (several
+   * requests reporting the same dead session, a double click) only updates
+   * the state. And `login` waits for this to finish, so a revocation can
+   * never land after — and revoke — the next user's sign-in.
+   *
+   * The state flips immediately; the calls finish in the background.
+   */
   const logout = useCallback((): void => {
-    authService.logout().catch(() => {});
+    if (!pendingLogout.current) {
+      let revocation: Promise<void> | null = null;
+      const revoke = () => (revocation ??= authService.logout().catch(() => undefined));
+      const onPageHide = () => void revoke();
+      window.addEventListener('pagehide', onPageHide);
+      const cleanup = new AbortController();
+      pushCleanup.current = cleanup;
+      pendingLogout.current = (async () => {
+        await Promise.race([
+          Promise.allSettled([unregisterNativePush(cleanup.signal), dropWebPushSubscription(cleanup.signal)]),
+          new Promise((resolve) => setTimeout(resolve, PUSH_CLEANUP_BUDGET_MS)),
+        ]);
+        await revoke();
+      })().finally(() => {
+        window.removeEventListener('pagehide', onPageHide);
+        pendingLogout.current = null;
+      });
+    }
     dispatch({ type: 'LOGOUT' });
   }, []);
 
@@ -183,21 +306,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
+  // Only a refused refresh ends the session (#842 review): a 5xx during a
+  // rolling deploy or a dropped connection used to sign the user out too.
   const refreshToken = useCallback(async (): Promise<void> => {
     try {
       const response = await authService.refreshToken();
       if (response.success && response.data) {
-        dispatch({
-          type: 'LOGIN_SUCCESS',
-          payload: response.data,
-        });
+        establishSession(response.data.user);
       } else {
         logout();
       }
-    } catch {
-      logout();
+    } catch (error) {
+      if (isSessionRefusal(error)) logout();
     }
-  }, [logout]);
+  }, [logout, establishSession]);
 
   // Organization translation overrides: fetched once the authenticated user
   // (and therefore their organization) is known, and re-fetched whenever the
@@ -234,18 +356,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
   }, [state.isAuthenticated]);
 
-  // Proactive refresh: rotate the session before the ~15m access token expires,
-  // so an active user is never interrupted by an expired token mid-session.
-  // Refreshing at 12m (80% of the lifetime) leaves margin for clock skew and
-  // request latency. Only runs while authenticated; the interval is torn down
-  // on logout or unmount.
+  // The client refreshes an expired session on a 401 and retries (#842); when
+  // that refresh fails the session is over, and the UI signs out rather than
+  // leaving the user on a page whose every request fails. Ignored while signed
+  // out: logout's own push-deactivation calls may 401 on an already-dead
+  // session, and must not start another logout.
+  const authenticatedRef = useRef(false);
+  authenticatedRef.current = state.isAuthenticated;
+  useEffect(
+    () =>
+      onSessionExpired(() => {
+        if (authenticatedRef.current) logout();
+      }),
+    [logout]
+  );
+
+  // Proactive refresh: rotate the session before the access token expires, so
+  // an active user is not made to wait on a refresh-and-retry mid-session. It
+  // is an optimisation, not what keeps the session alive — an expiry it misses
+  // is caught by the client's refresh on 401.
+  //
+  // On the web the token lives in an httpOnly cookie, so its lifetime is not
+  // visible: refresh every 12 minutes, 80% of the default 15. The native app
+  // holds the token itself, so there the next refresh is scheduled at 80% of
+  // the remaining lifetime read from its `exp` (#842 review), following
+  // whatever `JWT_EXPIRES_IN` the server uses. A native app is also suspended
+  // in the background, where no timer runs, so on returning to the foreground
+  // it refreshes at once if the token is near expiry. The WebView's
+  // `visibilitychange` is that signal — it fires on Capacitor's resume — so
+  // no `@capacitor/app` dependency is added for it. Torn down on logout or
+  // unmount.
   useEffect(() => {
     if (!state.isAuthenticated) return;
-    const ACCESS_REFRESH_INTERVAL_MS = 12 * 60 * 1000;
-    const id = window.setInterval(() => {
-      void refreshToken();
-    }, ACCESS_REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    let timer: number | undefined;
+    const schedule = () => {
+      timer = window.setTimeout(async () => {
+        await refreshToken();
+        schedule();
+      }, nextRefreshDelayMs());
+    };
+    schedule();
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible' || !isNativePlatform()) return;
+      const expiresAt = jwtExpiresAt(getCachedAccessToken());
+      if (expiresAt !== null && expiresAt - Date.now() < RESUME_REFRESH_MARGIN_MS) void refreshToken();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
   }, [state.isAuthenticated, refreshToken]);
 
   const value: AuthContextType = useMemo(

@@ -20,6 +20,7 @@ jest.mock('../api/client', () => ({
     post: jest.fn(),
     get: jest.fn(),
   },
+  setSessionRefresher: jest.fn(),
 }));
 
 const isNativePlatformMock = jest.spyOn(mobileAuthStorage, 'isNativePlatform');
@@ -159,6 +160,33 @@ describe('logout — web platform (regression guard)', () => {
     expect(url).toMatch(/\/auth\/refresh\/logout$/);
     expect(init.body).toBeUndefined();
     expect((init.headers as Record<string, string>)['X-Client-Type']).toBeUndefined();
+  });
+});
+
+/**
+ * #841 re-review: `login` waits for a pending revocation, so a revocation
+ * stalled on a dead connection must not hold the next sign-in forever.
+ */
+describe('logout — a stalled connection', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('gives up after a bounded wait, keeping the keepalive semantics', async () => {
+    jest.useFakeTimers();
+    isNativePlatformMock.mockReturnValue(false);
+    global.fetch = jest.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        })
+    ) as unknown as typeof fetch;
+
+    const done = authService.logout().then(() => 'settled', () => 'settled');
+    await jest.advanceTimersByTimeAsync(5_000);
+
+    await expect(done).resolves.toBe('settled');
+    const [, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(init.keepalive).toBe(true);
+    expect(init.signal).toBeDefined();
   });
 });
 

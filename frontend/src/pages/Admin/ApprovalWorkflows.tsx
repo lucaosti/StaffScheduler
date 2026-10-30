@@ -112,9 +112,11 @@ const ApprovalWorkflows: React.FC = () => {
         onUpdate={handleUpdate}
       />
 
-      {/* Delete Confirm Modal */}
+      {/* Delete Confirm Modal. The dim scrim is the .modal's own background, as
+          in ConfirmModal: a `.modal-backdrop` child sat above the dialog inside
+          .modal's stacking context and swallowed every click (#941). */}
       {deleteTarget && (
-        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true">
+        <div className="modal d-block" tabIndex={-1} role="dialog" aria-modal="true" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog">
             <div className="modal-content">
               <div className="modal-header">
@@ -143,7 +145,6 @@ const ApprovalWorkflows: React.FC = () => {
               </div>
             </div>
           </div>
-          <div className="modal-backdrop fade show"></div>
         </div>
       )}
     </div>

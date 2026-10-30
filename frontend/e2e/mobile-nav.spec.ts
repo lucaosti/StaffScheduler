@@ -9,12 +9,16 @@
  */
 
 import { expect, test } from '@playwright/test';
-import { ADMIN, login } from './helpers';
+import { ADMIN_STATE_FILE } from './helpers';
+
+// Signed in through the run's one shared login (see global-setup.ts): with
+// two browser projects, per-spec logins exceed the backend's login limit.
+test.use({ storageState: ADMIN_STATE_FILE });
 
 test.use({ viewport: { width: 390, height: 844 } });
 
 test('the menu button opens the drawer and a link in it navigates', async ({ page }) => {
-  await login(page, ADMIN.email, ADMIN.password);
+  await page.goto('/dashboard');
 
   const sidebar = page.locator('#app-sidebar');
   const employees = sidebar.getByRole('link', { name: 'Employees' });

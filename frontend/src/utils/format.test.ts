@@ -7,6 +7,7 @@ import {
   formatDate,
   formatPercentage,
   formatTime,
+  formatShiftDuration,
   todayIso,
   firstOfMonthIso,
   toLocalDateString,
@@ -61,6 +62,32 @@ describe('formatTime', () => {
   it('returns empty string on invalid input', () => {
     expect(formatTime('')).toBe('');
     expect(formatTime('garbage')).toBe('');
+  });
+});
+
+/**
+ * The API returns shift times as `HH:MM:SS`; the Shifts page appended its own
+ * `:00` and fed `07:00:00:00` to `Date`, rendering "Duration: NaNh" (#891).
+ */
+describe('formatShiftDuration', () => {
+  it.each([
+    ['07:00:00', '15:00:00', '8h'],
+    ['07:00', '15:00', '8h'],
+    ['07:00:00', '15:30', '8h 30m'],
+    ['22:00:00', '06:00:00', '8h'],
+    ['09:15', '09:45', '0h 30m'],
+  ])('%s to %s is %s', (start, end, expected) => {
+    expect(formatShiftDuration(start, end)).toBe(expected);
+  });
+
+  it('treats equal start and end as a full day, the way an overnight wrap does', () => {
+    expect(formatShiftDuration('08:00:00', '08:00:00')).toBe('24h');
+  });
+
+  it('returns an empty string rather than NaN for unusable input', () => {
+    expect(formatShiftDuration('', '15:00')).toBe('');
+    expect(formatShiftDuration('7am', '15:00')).toBe('');
+    expect(formatShiftDuration(undefined, undefined)).toBe('');
   });
 });
 

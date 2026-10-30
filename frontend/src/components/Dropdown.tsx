@@ -1,0 +1,152 @@
+/**
+ * Dropdown — a Bootstrap-styled menu whose open state React owns.
+ *
+ * WHY NOT BOOTSTRAP'S OWN JAVASCRIPT. Only Bootstrap's CSS is imported; its
+ * JavaScript never was, so every `data-bs-toggle="dropdown"` in the app was a
+ * dead control (#840). Loading `bootstrap.bundle` would have revived them,
+ * and was rejected: Bootstrap's plugins toggle classes and ARIA attributes on
+ * DOM nodes React renders, so the next re-render of the owning component
+ * silently resets them (an open menu snaps shut when the bell's 30-second
+ * poll lands); it would be a second, imperative UI model next to the
+ * React-rendered modals the app already uses; and it adds Popper for menus
+ * that never need collision-aware placement. Owning the state here keeps one
+ * model, and lets jsdom tests see what a user sees — the menu is mounted only
+ * while open, so a test that skips opening it fails the way a user would,
+ * where the CSS-hidden menu let every test click items no user could reach.
+ *
+ * Behaviour matches Bootstrap's: the toggle reports `aria-expanded`; Escape,
+ * a press outside, or choosing a `.dropdown-item` closes the menu. The menu
+ * carries `data-bs-popper="static"`, the attribute Bootstrap's CSS keys its
+ * no-Popper placement on (`top: 100%`, and `right: 0` with
+ * `dropdown-menu-end`), so it sits under the toggle in both directions.
+ *
+ * @author Luca Ostinelli
+ */
+
+import React, { useEffect, useId, useRef, useState } from 'react';
+
+interface Props {
+  /** Classes for the toggle button. */
+  toggleClassName: string;
+  /** Accessible name of the toggle (its content is usually an icon). */
+  toggleLabel: string;
+  /** What the toggle renders. */
+  toggleContent: React.ReactNode;
+  /** Align the menu with the toggle's end edge (`dropdown-menu-end`). */
+  alignEnd?: boolean;
+  menuStyle?: React.CSSProperties;
+  /**
+   * The menu's `<li role="none">` items, each holding a
+   * `<button className="dropdown-item" role="menuitem">`; the `.dropdown-item`
+   * class is what keyboard navigation and close-on-choice look for.
+   */
+  children: React.ReactNode;
+}
+
+const Dropdown: React.FC<Props> = ({
+  toggleClassName,
+  toggleLabel,
+  toggleContent,
+  alignEnd = false,
+  menuStyle,
+  children,
+}) => {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const toggleId = useId();
+  const menuRef = useRef<HTMLUListElement>(null);
+
+  const items = () =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('.dropdown-item') ?? []);
+
+  // Keyboard behaviour of a WAI-ARIA menu button, which Bootstrap's script
+  // used to supply (#840 review): opening moves focus to the first item,
+  // the arrow keys move between items (wrapping), and Escape or a choice
+  // closes the menu and returns focus to the toggle so a keyboard user is
+  // not dropped at the top of the page.
+  const closeToToggle = () => {
+    setOpen(false);
+    toggleRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    menuRef.current?.querySelector<HTMLElement>('.dropdown-item')?.focus();
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      toggleRef.current?.focus();
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  const onMenuKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const list = items();
+    if (list.length === 0) return;
+    const at = list.indexOf(document.activeElement as HTMLElement);
+    const step = event.key === 'ArrowDown' ? 1 : -1;
+    list[(at + step + list.length) % list.length].focus();
+  };
+
+  // Tabbing out of the menu closes it, as a click outside does. Only a blur
+  // toward a known element outside counts: on macOS Safari, iOS WKWebView and
+  // Firefox-mac a button does not take focus on click, so pressing a second
+  // item blurs the focused first one with relatedTarget === null — treated
+  // as "left the menu", that unmounted it before the click landed and Delete
+  // or "Mark all read" did nothing there (#840 re-review). A press outside
+  // is the mousedown listener's job, not this one's.
+  const onBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget as Node | null;
+    if (open && next !== null && !rootRef.current?.contains(next)) setOpen(false);
+  };
+
+  // A choice closes the menu; anything else inside it (a "Mark all read"
+  // header link, plain text) leaves it open, as Bootstrap's autoClose does.
+  const onMenuClick = (event: React.MouseEvent<HTMLUListElement>) => {
+    if ((event.target as HTMLElement).closest('.dropdown-item')) closeToToggle();
+  };
+
+  return (
+    <div className="dropdown" ref={rootRef} onBlur={onBlur}>
+      <button
+        ref={toggleRef}
+        id={toggleId}
+        className={toggleClassName}
+        type="button"
+        aria-label={toggleLabel}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((value) => !value)}
+      >
+        {toggleContent}
+      </button>
+      {open && (
+        <ul
+          ref={menuRef}
+          role="menu"
+          aria-labelledby={toggleId}
+          className={`dropdown-menu show${alignEnd ? ' dropdown-menu-end' : ''}`}
+          data-bs-popper="static"
+          style={menuStyle}
+          onClick={onMenuClick}
+          onKeyDown={onMenuKeyDown}
+        >
+          {children}
+        </ul>
+      )}
+    </div>
+  );
+};
+
+export default Dropdown;
