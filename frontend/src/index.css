@@ -95,6 +95,10 @@ code {
 
 .main-content {
   flex: 1;
+  /* A flex item defaults to min-width: auto, i.e. never narrower than its
+     content's min-content width; with the longer Arabic header that made the
+     page wider than a phone (#947). Content wraps or scrolls inside instead. */
+  min-width: 0;
   margin-left: var(--sidebar-width);
   transition: margin-left 0.3s ease;
 }
@@ -341,6 +345,27 @@ code {
 
 [dir='rtl'] .main-content.expanded {
   margin-right: 0;
+}
+
+/*
+ * The unread badge on the header's bell, centred on its top end corner.
+ * Not Bootstrap's `top-0 start-100 translate-middle`: the RTL build flips
+ * `start-100` to `right: 100%` but leaves `translate-middle` at
+ * translate(-50%, -50%), so in Arabic the badge sat a further half-width
+ * past the bell — beyond the screen's left edge on a phone, widening the page
+ * (#947). A logical offset plus a direction-aware translate keeps it centred
+ * on the corner either way.
+ */
+.notification-badge {
+  position: absolute;
+  top: 0;
+  inset-inline-start: 100%;
+  transform: translate(-50%, -50%);
+  font-size: 0.6rem;
+}
+
+[dir='rtl'] .notification-badge {
+  transform: translate(50%, -50%);
 }
 
 /*

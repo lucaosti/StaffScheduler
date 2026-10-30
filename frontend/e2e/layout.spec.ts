@@ -76,7 +76,19 @@ test.describe('Arabic at phone width', () => {
       await expect(heading).toBeVisible();
 
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-      expect(overflow).toBeLessThanOrEqual(0);
+      // On failure, name the elements that stick out, so the message says
+      // what to fix rather than only by how much.
+      const offenders = await page.evaluate(() =>
+        Array.from(document.querySelectorAll<HTMLElement>('body *'))
+          .filter((el) => {
+            if (el.closest('#app-sidebar')) return false; // off-screen by design while closed
+            const box = el.getBoundingClientRect();
+            return box.width > 0 && (box.left < -1 || box.right > window.innerWidth + 1);
+          })
+          .slice(0, 8)
+          .map((el) => `${el.tagName.toLowerCase()}.${el.className}`)
+      );
+      expect(overflow, `overflowing: ${offenders.join(' | ')}`).toBeLessThanOrEqual(0);
       expect(await uncovered(heading)).toBe(true);
     });
   }

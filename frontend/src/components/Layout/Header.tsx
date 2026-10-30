@@ -120,7 +120,8 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
         <i className="bi bi-list"></i>
       </button>
 
-      <h5 className="mb-0 text-body">{t('app.title')}</h5>
+      {/* Truncates rather than widening the page on a phone (#947). */}
+      <h5 className="mb-0 text-body text-truncate" style={{ minWidth: 0 }}>{t('app.title')}</h5>
 
       <div className="ms-auto d-flex align-items-center gap-2">
         <LocaleSwitcher />
@@ -131,11 +132,11 @@ const Header: React.FC<HeaderProps> = ({ onToggleSidebar, sidebarExpanded }) => 
           toggleContent={
             <>
               <i className="bi bi-bell" style={{ fontSize: '1.25rem' }}></i>
+              {/* Positioned by `.notification-badge` in index.css rather than
+                  start-100 + translate-middle, which overflow the screen in
+                  Arabic (#947). */}
               {unreadCount > 0 && (
-                <span
-                  className="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
-                  style={{ fontSize: '0.6rem' }}
-                >
+                <span className="notification-badge badge rounded-pill bg-danger">
                   {unreadCount > 99 ? '99+' : unreadCount}
                   <span className="visually-hidden"> unread notifications</span>
                 </span>
