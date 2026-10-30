@@ -109,6 +109,7 @@ describe('POST /api/auth/refresh — response mode and token source', () => {
   beforeEach(() => {
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue(makeUser());
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 7,
       issued: { token: 'new-refresh-token', expiresAt: new Date(Date.now() + 1000) },
     });

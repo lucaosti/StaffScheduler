@@ -263,6 +263,10 @@ CORS_ORIGIN=http://localhost:3000
 and revokes the whole family on reuse of a spent token. `POST /api/auth/refresh`
 is NOT behind `authenticate` — it works precisely when the access token has
 expired. The frontend refreshes proactively (`AuthContext`) and on mount.
+Logout is `POST <prefix>/auth/refresh/logout` for the same path reason (the
+only other place the cookie is sent), likewise not behind `authenticate`; it
+revokes the token's family. Password changes and deactivation revoke every
+refresh token of the user (`UserService`).
 
 Frontend optionally uses `REACT_APP_API_URL` — the full API base including the version prefix, e.g. `http://localhost:3001/api/v1`; default `/api/v1`, which the dev proxy handles. It is injected at build time from the process environment.
 

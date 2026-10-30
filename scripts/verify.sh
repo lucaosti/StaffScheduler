@@ -31,6 +31,13 @@ set -euo pipefail
 ROOT=/workspace
 cd "$ROOT"
 
+# Frontend Jest worker cap. Jest defaults to one worker per core minus one, and
+# every worker inherits NODE_OPTIONS' 4 GB heap limit (docker-compose.verify.yml),
+# so on a 12-core host eleven workers could claim more than an 8 GB Docker VM
+# holds; the frontend and timezone gates were killed with exit 137 (#916). Four
+# workers keep the suite fast and the peak well inside the VM.
+FRONTEND_JEST_WORKERS=4
+
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 dbmate() { (cd "$ROOT/backend" && npx --no-install dbmate --no-dump-schema "$@"); }
@@ -82,7 +89,7 @@ gate_backend() {
 
 gate_frontend() {
   step "frontend suite with coverage gate"
-  (cd frontend && npx jest --ci --coverage --coverageReporters=text-summary)
+  (cd frontend && npx jest --ci --maxWorkers=$FRONTEND_JEST_WORKERS --coverage --coverageReporters=text-summary)
 }
 
 gate_timezones() {
@@ -91,7 +98,7 @@ gate_timezones() {
     step "backend suite under $tz"
     (cd backend && TZ=$tz npx jest --ci --runInBand --silent)
     step "frontend suite under $tz"
-    (cd frontend && TZ=$tz npx jest --ci --silent)
+    (cd frontend && TZ=$tz npx jest --ci --maxWorkers=$FRONTEND_JEST_WORKERS --silent)
   done
 }
 

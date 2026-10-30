@@ -171,6 +171,16 @@ export interface CandidateContext {
  * Defensive defaults rather than throwing: an older solver build that predates
  * the shortfall fields should degrade to "nothing reported", not take down a
  * run that otherwise produced a usable schedule.
+ *
+ * EVERY FIELD IS MAPPED; NOTHING IS SPREAD. The result used to start with
+ * `...raw`, which carried the script's snake_case `assignments`
+ * (`employee_id`, `shift_id`, `start_time`, …), `objective_value` and
+ * `solve_time_seconds` through under a type promising camelCase. Every CP-SAT
+ * plan therefore reached AutoScheduleService with undefined ids and was
+ * persisted as NaN (#919); the greedy path builds camelCase itself, which is
+ * why nothing noticed while production ran greedy only. With no spread, a key
+ * the solver adds later is absent until it is mapped here, rather than present
+ * under the wrong name.
  */
 const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   const stats = (raw.statistics ?? {}) as Record<string, unknown>;
@@ -178,7 +188,18 @@ const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   const understaffed = (coverage.understaffed_shifts ?? []) as Array<Record<string, unknown>>;
 
   return {
-    ...(raw as unknown as SolverResult),
+    status: raw.status as SolverStatus,
+    objectiveValue: typeof raw.objective_value === 'number' ? raw.objective_value : undefined,
+    solveTimeSeconds: typeof raw.solve_time_seconds === 'number' ? raw.solve_time_seconds : 0,
+    error: typeof raw.error === 'string' ? raw.error : undefined,
+    assignments: ((raw.assignments ?? []) as Array<Record<string, unknown>>).map((a) => ({
+      employeeId: String(a.employee_id),
+      shiftId: String(a.shift_id),
+      date: String(a.date),
+      startTime: String(a.start_time),
+      endTime: String(a.end_time),
+      hours: Number(a.hours),
+    })),
     overCommittedEmployees: ((raw.over_committed_employees ?? []) as Array<Record<string, unknown>>).map(
       (o) => ({
         employeeId: String(o.employee_id),
