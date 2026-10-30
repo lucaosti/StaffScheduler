@@ -43,7 +43,7 @@ import {
   qualifiedStaffShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
-import { shiftBoundsMs, shiftHours } from '../optimization/shiftTime';
+import { exceedsHours, formatHours, shiftBoundsMs, shiftHours, shiftMinutes } from '../optimization/shiftTime';
 import { allFixtures, fairnessBystanderFixture, feasibleFixtures } from './fixtures/optimizerFixtures';
 
 const toValidated = (
@@ -2263,5 +2263,35 @@ describe('zero-length shifts are read consistently', () => {
     };
     const violations = findConstraintViolations(problem, [{ employeeId: 'e1', shiftId: 's0' }]);
     expect(violations.map((v) => v.rule)).toContain('daily-hours');
+  });
+});
+
+/**
+ * Caps are judged in exact minutes, the unit CP-SAT has to use (#834).
+ *
+ * Hours rounded to a tenth per shift do not survive a sum: three 2h40 shifts
+ * are 8h, and 3 x 2.7 is 8.1h. The validator then rejected a legal day that
+ * CP-SAT, counting minutes, had produced.
+ */
+describe('shift durations are counted in exact minutes', () => {
+  const day = (start_time: string, end_time: string) => ({ date: '2033-12-01', start_time, end_time });
+
+  it('measures minutes exactly, overnight and zero-length included', () => {
+    expect(shiftMinutes(day('06:00', '08:40'))).toBe(160);
+    expect(shiftMinutes(day('22:00', '06:00'))).toBe(480);
+    expect(shiftMinutes(day('08:00', '08:00'))).toBe(1440);
+  });
+
+  it('allows exactly the cap and refuses one minute over', () => {
+    expect(exceedsHours(480, 8)).toBe(false);
+    expect(exceedsHours(481, 8)).toBe(true);
+    // 7.3h is 437.99999... in binary; the cap must not lose the minute it has.
+    expect(exceedsHours(438, 7.3)).toBe(false);
+  });
+
+  it('formats minutes as hours for messages', () => {
+    expect(formatHours(510)).toBe('8.5');
+    expect(formatHours(480)).toBe('8');
+    expect(formatHours(160)).toBe('2.67');
   });
 });

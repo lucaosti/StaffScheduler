@@ -19,22 +19,26 @@
  *       else — so a greedy that out-covers an OPTIMAL CP-SAT means CP-SAT's
  *       model forbids something the validator allows.
  *
- * SEEDS. `TEST_SEED` overrides the fixed default; a failure names the base
- * seed and instance index, shrinks the instance by removals, and prints it as
- * an `OptimizerFixture` literal for optimizerFixtures.ts — a random failure is
- * meant to become a fixed regression test, not to be re-rolled away.
+ * SEEDS. `TEST_SEED` overrides the fixed default. A failure first prints the
+ * base seed, the instance index and the unshrunk instance — before anything
+ * that could time out — then shrinks it by removals within a time budget and
+ * reports the result as an `OptimizerFixture` literal for optimizerFixtures.ts:
+ * a random failure is meant to become a fixed regression test, not to be
+ * re-rolled away.
  *
  * SIZE. Instances are at most 6 employees, 3 days and 8 shifts. The greedy is
  * cheap, so it sees many; CP-SAT costs a Python start per instance, so it sees
- * fewer, run concurrently with one search worker each — single-worker CP-SAT
- * is also deterministic, which a replayed seed needs.
+ * fewer, run concurrently with one search worker each and a short time limit.
+ * A single worker that finishes inside its limit is deterministic, which a
+ * replayed seed needs; a run cut off by the limit is not, which is one more
+ * reason the instances are kept small enough to be proven well within it.
  *
  * @author Luca Ostinelli
  */
 
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import { findConstraintViolations, type ValidatedAssignment } from '../optimization/constraintValidator';
-import { DAY_MS, dateToMs } from '../optimization/shiftTime';
+import { DAY_MS, dateToMs, shiftBoundsMs } from '../optimization/shiftTime';
 import type { OptimizationProblem } from '../optimization/types';
 import { describeOrtools, solveCpSat, solveCpSatAsync, type CpSatResult } from './helpers/cpSat';
 import { asFixture, baseSeed, generateInstance, instanceSeed, shrink } from './helpers/scheduleGenerator';
@@ -44,6 +48,13 @@ const GREEDY_INSTANCES = 500;
 const CPSAT_INSTANCES = 120;
 const CPSAT_CONCURRENCY = 4;
 const CPSAT_ENV = { ...process.env, OPTIMIZATION_SEARCH_WORKERS: '1' };
+const CPSAT_TIME_LIMIT_SECONDS = 5;
+/** How long a failure may spend shrinking; the property tests' timeout sits above it. */
+const SHRINK_BUDGET_MS = 120_000;
+const PROPERTY_TIMEOUT_MS = SHRINK_BUDGET_MS + 60_000;
+// Above the shrink budget, so a failure is reported rather than cut off by
+// the default 30s timeout while it is still being reduced.
+jest.setTimeout(PROPERTY_TIMEOUT_MS);
 
 interface Instance {
   index: number;
@@ -110,6 +121,15 @@ const assertNoFailures = async (
 ): Promise<void> => {
   if (failing.length === 0) return;
   const [first] = failing;
+  const header = [
+    `Property "${property}" failed on ${failing.length} instance(s): #${failing.map((f) => f.index).join(', #')}`,
+    `Replay with TEST_SEED=${BASE_SEED} (instance #${first.index}, instance seed ${first.seed}).`,
+  ];
+  // Written before shrinking: if shrinking is killed (timeout, interrupted
+  // run), the seed and a failing instance must already be on record.
+  process.stderr.write(
+    [...header, 'Unshrunk failing instance:', asFixture(`${property} (unshrunk)`, first.problem), ''].join('\n')
+  );
   const safe = async (p: OptimizationProblem) => {
     try {
       return await fails(p);
@@ -117,17 +137,24 @@ const assertNoFailures = async (
       return false;
     }
   };
-  const minimal = await shrink(first.problem, safe);
+  const { problem: minimal, complete } = await shrink(first.problem, safe, SHRINK_BUDGET_MS);
   throw new Error(
     [
-      `Property "${property}" failed on ${failing.length} instance(s): #${failing.map((f) => f.index).join(', #')}`,
-      `Replay with TEST_SEED=${BASE_SEED} (instance #${first.index}, instance seed ${first.seed}).`,
-      'Minimal failing instance, as an OptimizerFixture for optimizerFixtures.ts:',
+      ...header,
+      complete
+        ? 'Minimal failing instance, as an OptimizerFixture for optimizerFixtures.ts:'
+        : `Shrinking stopped at its ${SHRINK_BUDGET_MS / 1000}s budget; failing instance, not necessarily minimal:`,
       asFixture(`${property} (TEST_SEED=${BASE_SEED} #${first.index})`, minimal),
       `On it: ${JSON.stringify(await explain(minimal), null, 2)}`,
     ].join('\n')
   );
 };
+
+const addDay = (date: string) => new Date(dateToMs(date) + DAY_MS).toISOString().slice(0, 10);
+
+/** Whether an employee could hold any shift at all (skills, levels, unavailability). */
+const eligibleForSome = (p: OptimizationProblem, e: OptimizationProblem['employees'][number]) =>
+  p.shifts.some((s) => ineligible({ ...p, employees: [e] }, [{ employeeId: e.id, shiftId: s.id }]).length === 0);
 
 describe('seeded instance generator', () => {
   it('yields the identical instance for the same seed (d)', () => {
@@ -153,14 +180,45 @@ describe('seeded instance generator', () => {
     expect(some((p) => p.employees.some((e) => e.max_hours_per_day !== undefined))).toBe(true);
     expect(some((p) => p.employees.some((e) => e.max_consecutive_days !== undefined))).toBe(true);
     expect(some((p) => p.constraints?.min_hours_between_shifts === 10.5)).toBe(true);
+    // Durations that are not whole tenths of an hour (2h40 is 2.666...h).
+    expect(some((p) => p.shifts.some((s) => /:[1245]0$/.test(s.start_time) || /:[1245]0$/.test(s.end_time)))).toBe(
+      true
+    );
     // Unavailable the day after an overnight shift (#853's shape).
-    const dayAfter = (date: string) => new Date(dateToMs(date) + DAY_MS).toISOString().slice(0, 10);
     expect(
       some((p) =>
         p.shifts.some(
-          (s) => s.end_time <= s.start_time && p.employees.some((e) => e.unavailable_dates.includes(dayAfter(s.date)))
+          (s) => s.end_time <= s.start_time && p.employees.some((e) => e.unavailable_dates.includes(addDay(s.date)))
         )
       )
+    ).toBe(true);
+    // An employee eligible for no shift at all (#839's shape).
+    expect(some((p) => p.employees.some((e) => !eligibleForSome(p, e)))).toBe(true);
+    // A night shift overlapping a shift that starts the next day (#835's shape).
+    expect(
+      some((p) =>
+        p.shifts.some((n) => {
+          const [, nightEnd] = shiftBoundsMs(n);
+          return p.shifts.some((m) => m.date === addDay(n.date) && shiftBoundsMs(m)[0] < nightEnd);
+        })
+      )
+    ).toBe(true);
+    // External work outside the period that survived the drop step, so a
+    // rolling window straddles the boundary.
+    expect(
+      some((p) => {
+        const dates = p.shifts.map((s) => s.date).sort();
+        return p.employees.some((e) =>
+          (e.existing_assignments ?? []).some((x) => x.date < dates[0] || x.date > dates[dates.length - 1])
+        );
+      })
+    ).toBe(true);
+    // A period crossing a calendar-week boundary (Sunday into Monday).
+    expect(
+      some((p) => {
+        const dates = [...new Set(p.shifts.map((s) => s.date))].sort();
+        return dates.some((d, i) => i > 0 && new Date(dateToMs(d)).getUTCDay() === 1);
+      })
     ).toBe(true);
   });
 
@@ -168,11 +226,19 @@ describe('seeded instance generator', () => {
     const { problem } = instances.find((i) => i.problem.shifts.length > 3 && i.problem.employees.length > 2)!;
     const hasOvernight = (p: OptimizationProblem) => p.shifts.some((s) => s.end_time <= s.start_time);
     const seeded = { ...problem, shifts: [...problem.shifts, { ...problem.shifts[0], id: 'night', start_time: '22:00', end_time: '06:00' }] };
-    const minimal = await shrink(seeded, hasOvernight);
+    const { problem: minimal, complete } = await shrink(seeded, hasOvernight);
+    expect(complete).toBe(true);
     expect(minimal.shifts).toHaveLength(1);
     expect(hasOvernight(minimal)).toBe(true);
     expect(minimal.employees).toHaveLength(1);
     expect(minimal.pairings ?? []).toEqual([]);
+  });
+
+  it('stops shrinking at its budget and says so', async () => {
+    const { problem } = instances.find((i) => i.problem.shifts.length > 3)!;
+    const { problem: partial, complete } = await shrink(problem, () => true, -1);
+    expect(complete).toBe(false);
+    expect(partial).toBe(problem);
   });
 });
 
@@ -220,13 +286,13 @@ describeOrtools('CP-SAT engine on seeded instances', () => {
     const worker = async () => {
       while (next < sample.length) {
         const i = next++;
-        results[i] = await solveCpSatAsync(sample[i].problem, CPSAT_ENV);
+        results[i] = await solveCpSatAsync(sample[i].problem, CPSAT_ENV, CPSAT_TIME_LIMIT_SECONDS);
       }
     };
     await Promise.all(Array.from({ length: CPSAT_CONCURRENCY }, worker));
   }, 180_000);
 
-  const solve = (p: OptimizationProblem) => solveCpSat(p, CPSAT_ENV);
+  const solve = (p: OptimizationProblem) => solveCpSat(p, CPSAT_ENV, CPSAT_TIME_LIMIT_SECONDS);
   const solved = (r: CpSatResult) => r.status === 'OPTIMAL' || r.status === 'FEASIBLE';
 
   it('returns a schedule for every instance', async () => {

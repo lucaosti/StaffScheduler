@@ -48,7 +48,7 @@ import { coverageShortfalls, findOverCommitments } from './constraintValidator';
 // The overnight-aware time arithmetic these engines share. It used to be four
 // private helpers here and equivalent copies in constraintValidator, kept in
 // step by a comment — see ./shiftTime for why that was not good enough.
-import { dateToMs, shiftBoundsMs, shiftHours } from './shiftTime';
+import { dateToMs, exceedsHours, shiftBoundsMs, shiftHours, shiftMinutes } from './shiftTime';
 import type { OverCommitment } from './constraintValidator';
 
 // Re-exported so every existing import site keeps working unchanged; the
@@ -138,8 +138,11 @@ export interface CandidateContext {
   assignedShiftIds: Set<string>;
   /** All shifts in the problem (needed for overlap detection). */
   allShifts: Shift[];
-  /** Hours already scheduled per employee per date key "empId|date". */
-  dailyHoursMap: Map<string, number>;
+  /**
+   * Minutes already scheduled per employee per date key "empId|date".
+   * Minutes, not hours: rounded hours drift when summed (see shiftMinutes).
+   */
+  dailyMinutesMap: Map<string, number>;
   /** Assignments already committed to this shift (for max_staff check). */
   currentShiftAssignmentCount: number;
   /**
@@ -531,7 +534,7 @@ export class ScheduleOptimizer {
    * @returns true if the employee can be assigned to ctx.shift
    */
   evaluateCandidate(emp: Employee, ctx: CandidateContext): boolean {
-    const { shift, assignedShiftIds, allShifts, dailyHoursMap, currentShiftAssignmentCount } = ctx;
+    const { shift, assignedShiftIds, allShifts, dailyMinutesMap, currentShiftAssignmentCount } = ctx;
 
     // 1. Staff cap — never exceed max_staff for this shift
     if (shift.max_staff !== undefined && currentShiftAssignmentCount >= shift.max_staff) {
@@ -576,10 +579,11 @@ export class ScheduleOptimizer {
     // Contract cap when present; otherwise the historical derived formula.
     // Kept in lock-step with constraintValidator, which is the authority.
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const hours = shiftHours(shift);
+    // Exact minutes: three 2h40 shifts are 8h, which per-shift rounded hours
+    // read as 8.1h and refused (#834).
     const dailyKey = `${emp.id}|${shift.date}`;
-    const hoursAlreadyToday = dailyHoursMap.get(dailyKey) ?? 0;
-    if (hoursAlreadyToday + hours > dailyBudget) {
+    const minutesAlreadyToday = dailyMinutesMap.get(dailyKey) ?? 0;
+    if (exceedsHours(minutesAlreadyToday + shiftMinutes(shift), dailyBudget)) {
       return false;
     }
 
@@ -640,12 +644,12 @@ export class ScheduleOptimizer {
 
     const anchors = [shift, ...assigned.filter((s) => withinWeek(s, shift))];
     for (const anchor of anchors) {
-      let total = shiftHours(anchor);
+      let totalMinutes = shiftMinutes(anchor);
       for (const other of assigned) {
-        if (other !== anchor && withinWeek(anchor, other)) total += shiftHours(other);
+        if (other !== anchor && withinWeek(anchor, other)) totalMinutes += shiftMinutes(other);
       }
-      if (anchor !== shift && withinWeek(anchor, shift)) total += shiftHours(shift);
-      if (total > emp.max_hours_per_week) return true;
+      if (anchor !== shift && withinWeek(anchor, shift)) totalMinutes += shiftMinutes(shift);
+      if (exceedsHours(totalMinutes, emp.max_hours_per_week)) return true;
     }
     return false;
   }
@@ -776,12 +780,12 @@ export class ScheduleOptimizer {
       employeeAssignments.set(emp.id, new Set(externalShiftsByEmployee.get(emp.id)!.map((s) => s.id)))
     );
 
-    // Track hours already assigned per employee per date ("empId|date" -> hours)
-    const dailyHoursMap = new Map<string, number>();
+    // Track minutes already assigned per employee per date ("empId|date" -> minutes)
+    const dailyMinutesMap = new Map<string, number>();
     for (const emp of problem.employees) {
       for (const stub of externalShiftsByEmployee.get(emp.id) ?? []) {
         const key = `${emp.id}|${stub.date}`;
-        dailyHoursMap.set(key, (dailyHoursMap.get(key) ?? 0) + shiftHours(stub));
+        dailyMinutesMap.set(key, (dailyMinutesMap.get(key) ?? 0) + shiftMinutes(stub));
       }
     }
 
@@ -800,7 +804,7 @@ export class ScheduleOptimizer {
           shift,
           assignedShiftIds: employeeAssignments.get(emp.id)!,
           allShifts: allShiftsForLookup,
-          dailyHoursMap,
+          dailyMinutesMap,
           minRestHoursBetweenShifts,
           // Pass 0 here — max_staff is re-enforced in the assignment loop below
           // so we collect all eligible candidates first.
@@ -837,12 +841,12 @@ export class ScheduleOptimizer {
 
         // Two different constraints, so two different indexes: employeeAssignments
         // (which shifts this employee already holds) feeds the overlap check above,
-        // while dailyHoursMap (cumulative hours per employee per day) feeds the
-        // max-daily-hours check elsewhere in this loop — neither can be derived
-        // from the other without re-scanning `assignments`.
+        // while dailyMinutesMap (cumulative minutes per employee per day) feeds
+        // the max-daily-hours check elsewhere in this loop — neither can be
+        // derived from the other without re-scanning `assignments`.
         employeeAssignments.get(emp.id)!.add(shift.id);
         const dailyKey = `${emp.id}|${shift.date}`;
-        dailyHoursMap.set(dailyKey, (dailyHoursMap.get(dailyKey) ?? 0) + hours);
+        dailyMinutesMap.set(dailyKey, (dailyMinutesMap.get(dailyKey) ?? 0) + shiftMinutes(shift));
       }
     }
 

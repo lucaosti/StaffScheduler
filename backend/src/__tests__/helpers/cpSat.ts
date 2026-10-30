@@ -46,7 +46,7 @@ interface RawResult {
   over_committed_employees?: Array<{ employee_id: string }>;
 }
 
-const ARGS = [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', '10'];
+const args = (timeLimitSeconds: number) => [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', String(timeLimitSeconds)];
 
 /*
  * Exit 2 is the script's ERROR protocol: a JSON body naming the fault. It is
@@ -71,8 +71,8 @@ const parse = (code: number | null, stdout: string, stderr: string): CpSatResult
 };
 
 /** Solve synchronously with the engine's default search workers. */
-export const solveCpSat = (problem: unknown, env: typeof process.env = process.env): CpSatResult => {
-  const res = spawnSync('python3', ARGS, {
+export const solveCpSat = (problem: unknown, env: typeof process.env = process.env, timeLimitSeconds = 10): CpSatResult => {
+  const res = spawnSync('python3', args(timeLimitSeconds), {
     input: JSON.stringify(problem),
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
@@ -82,9 +82,9 @@ export const solveCpSat = (problem: unknown, env: typeof process.env = process.e
 };
 
 /** Solve in a child process without blocking, so several instances can run at once. */
-export const solveCpSatAsync = (problem: unknown, env: typeof process.env): Promise<CpSatResult> =>
+export const solveCpSatAsync = (problem: unknown, env: typeof process.env, timeLimitSeconds = 10): Promise<CpSatResult> =>
   new Promise((resolve, reject) => {
-    const child = spawn('python3', ARGS, { env });
+    const child = spawn('python3', args(timeLimitSeconds), { env });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (d) => (stdout += d.toString()));

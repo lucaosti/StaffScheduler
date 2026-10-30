@@ -97,6 +97,26 @@ export const feasibleFixtures: OptimizerFixture[] = [
       constraints: CONSTRAINTS,
     },
   },
+  {
+    // Three 2h40 shifts are exactly 8h, so they fit an 8h daily cap. Counted
+    // as hours rounded to 0.1 they were 3 x 2.7 = 8.1h: the validator flagged
+    // a legal schedule and the greedy left the third shift empty, while
+    // CP-SAT, counting minutes, staffed it (#834, #907). One employee, and no
+    // rest requirement, so the cap is the only thing deciding.
+    name: 'three 2h40 shifts are exactly an 8h day (#834)',
+    fullyCoverable: true,
+    problem: {
+      shifts: [
+        { id: 's1', date: '2026-03-02', start_time: '06:00', end_time: '08:40', min_staff: 1, max_staff: 1 },
+        { id: 's2', date: '2026-03-02', start_time: '10:00', end_time: '12:40', min_staff: 1, max_staff: 1 },
+        { id: 's3', date: '2026-03-02', start_time: '14:00', end_time: '16:40', min_staff: 1, max_staff: 1 },
+      ],
+      employees: [
+        { id: 'e1', max_hours_per_week: 40, max_hours_per_day: 8, skills: [], unavailable_dates: [] },
+      ],
+      constraints: { min_hours_between_shifts: 0 },
+    },
+  },
 ];
 
 /**

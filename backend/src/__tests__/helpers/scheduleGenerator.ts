@@ -67,20 +67,23 @@ export const createRng = (seed: number) => {
 const addDays = (date: string, days: number): string =>
   new Date(dateToMs(date) + days * DAY_MS).toISOString().slice(0, 10);
 
-/** "HH:MM" for a half-hour slot index, wrapping past midnight. */
-const slotTime = (slot: number): string => {
-  const minutes = (slot % 48) * 30;
+/** "HH:MM" for a minute offset, wrapping past midnight. */
+const clockTime = (offset: number): string => {
+  const minutes = offset % 1440;
   return `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 };
 
 const SKILLS = ['RN', 'ICU'] as const;
 
 /*
- * Durations in half-hour slots. Weighted toward the boundaries the engines
- * have got wrong — 8 h, 8.5 h, 10.5 h — rather than uniform, because a uniform
- * draw rarely lands on a cap exactly.
+ * Durations in minutes. Weighted toward the boundaries the engines have got
+ * wrong rather than uniform, because a uniform draw rarely lands on a cap
+ * exactly: 8 h, 8.5 h and 10.5 h on the half-hour grid, and on the 10-minute
+ * grid 2h40, three of which make exactly 8 h — a sum that hours rounded to
+ * 0.1 used to read as 8.1 h.
  */
-const DURATIONS = [4, 8, 12, 16, 16, 17, 17, 20, 21, 24];
+const HALF_HOUR_DURATIONS = [120, 240, 360, 480, 480, 510, 510, 600, 630, 720];
+const TEN_MINUTE_DURATIONS = [160, 160, 160, 250, 470, 490];
 
 /*
  * Caps chosen so the two engines' fallback daily budgets agree: Python
@@ -91,12 +94,25 @@ const DURATIONS = [4, 8, 12, 16, 16, 17, 17, 20, 21, 24];
  */
 const WEEKLY_CAPS = [12, 16, 20, 24, 37.5, 40];
 const DAILY_CAPS = [6, 8, 8.5, 10, 12];
-const REST_HOURS = [6, 8, 10.5, 11, 12];
+// 0 lets several shifts share a day, which is what makes a daily cap bind.
+const REST_HOURS = [0, 6, 8, 10.5, 11, 12];
 
+/*
+ * Mostly the half-hour grid real rotas use; sometimes a 10-minute grid, so
+ * durations that are not a whole number of tenths of an hour are exercised.
+ */
 const randomTimes = (rng: ReturnType<typeof createRng>) => {
-  const start = rng.int(0, 47);
-  const duration = rng.chance(0.7) ? rng.pick(DURATIONS) : rng.int(4, 24);
-  return { start_time: slotTime(start), end_time: slotTime(start + duration) };
+  const tenMinute = rng.chance(0.3);
+  let start: number;
+  let duration: number;
+  if (tenMinute) {
+    start = rng.int(0, 143) * 10;
+    duration = rng.chance(0.7) ? rng.pick(TEN_MINUTE_DURATIONS) : rng.int(12, 72) * 10;
+  } else {
+    start = rng.int(0, 47) * 30;
+    duration = rng.chance(0.7) ? rng.pick(HALF_HOUR_DURATIONS) : rng.int(4, 24) * 30;
+  }
+  return { start_time: clockTime(start), end_time: clockTime(start + duration) };
 };
 
 const isOvernight = (s: { start_time: string; end_time: string }): boolean => s.end_time <= s.start_time;
@@ -237,13 +253,20 @@ function* reductions(problem: OptimizationProblem): Generator<OptimizationProble
  */
 export const shrink = async (
   problem: OptimizationProblem,
-  fails: (candidate: OptimizationProblem) => boolean | Promise<boolean>
-): Promise<OptimizationProblem> => {
+  fails: (candidate: OptimizationProblem) => boolean | Promise<boolean>,
+  budgetMs = Infinity
+): Promise<{ problem: OptimizationProblem; complete: boolean }> => {
+  // Bounded because each CP-SAT check is a Python start: an unbounded shrink
+  // of a large instance could outlive the test's timeout, and the failure
+  // would then be reported as a timeout with no instance at all. Stopping
+  // early still yields a failing instance, only a less minimal one.
+  const deadline = Date.now() + budgetMs;
   let current = problem;
   let progressed = true;
   while (progressed) {
     progressed = false;
     for (const candidate of reductions(current)) {
+      if (Date.now() > deadline) return { problem: current, complete: false };
       if (await fails(candidate)) {
         current = candidate;
         progressed = true;
@@ -251,7 +274,7 @@ export const shrink = async (
       }
     }
   }
-  return current;
+  return { problem: current, complete: true };
 };
 
 /** An instance as an `OptimizerFixture` literal, ready to paste into optimizerFixtures.ts. */

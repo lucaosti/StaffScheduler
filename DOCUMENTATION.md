@@ -660,9 +660,16 @@ the instance shrunk to the parts that still fail, as an `OptimizerFixture`
 literal for `optimizerFixtures.ts`. Its CP-SAT half sits behind the same
 `REQUIRE_ORTOOLS` gate as the parity suite.
 
-Both engines count shift durations, caps and minimum rest in exact minutes:
-CP-SAT is an integer solver, and it used to model hours as whole hours, so an
-08:00–16:30 shift fit an 8h cap and 10.5h of required rest was read as 10h.
+The validator and both engines total shift durations in exact minutes
+(`shiftMinutes` in `backend/src/optimization/shiftTime.ts` and `_shift_minutes`
+in the solver) and compare those totals with the daily and weekly caps; minimum
+rest is compared on exact timestamps. CP-SAT, an integer solver, used to model
+whole hours, so an 08:00–16:30 shift fit an 8h cap and 10.5h of required rest
+was read as 10h; the validator and the greedy used hours rounded to a tenth per
+shift, so three 2h40 shifts — exactly 8h — summed to 8.1h. Rounded hours
+(`shiftHours`) remain only for displayed figures such as an assignment's
+`hours`. `ComplianceEngine`, which checks single manual assignments outside the
+engines, still totals rounded hours.
 
 ### Staffing suggestions (seasonal baseline)
 
