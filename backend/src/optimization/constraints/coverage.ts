@@ -10,7 +10,7 @@
  */
 
 import type { OptimizationProblem } from '../types';
-import { DAY_MS, dateToMs, shiftHours } from '../shiftTime';
+import { DAY_MS, dateToMs, exceedsHours, formatHours, shiftMinutes } from '../shiftTime';
 import type { ValidatedAssignment } from './hardConstraints';
 
 /**
@@ -78,16 +78,19 @@ export function findOverCommitments(problem: OptimizationProblem): OverCommitmen
     if (external.length === 0) continue;
 
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const hoursByDate = new Map<string, number>();
+    // In exact minutes, like findConstraintViolations and both engines — a
+    // diagnosis in another unit would keep an employee whom the constraints
+    // then cannot place (see shiftMinutes).
+    const minutesByDate = new Map<string, number>();
     for (const ext of external) {
-      hoursByDate.set(ext.date, (hoursByDate.get(ext.date) ?? 0) + shiftHours(ext));
+      minutesByDate.set(ext.date, (minutesByDate.get(ext.date) ?? 0) + shiftMinutes(ext));
     }
-    for (const [date, hours] of [...hoursByDate].sort()) {
-      if (hours > dailyBudget + 1e-9) {
+    for (const [date, minutes] of [...minutesByDate].sort()) {
+      if (exceedsHours(minutes, dailyBudget)) {
         findings.push({
           employeeId: emp.id,
           rule: 'daily-hours',
-          detail: `already holds ${hours}h on ${date} from other schedules, exceeding the ${dailyBudget}h daily limit`,
+          detail: `already holds ${formatHours(minutes)}h on ${date} from other schedules, exceeding the ${dailyBudget}h daily limit`,
         });
       }
     }
@@ -95,17 +98,17 @@ export function findOverCommitments(problem: OptimizationProblem): OverCommitmen
     if (emp.max_hours_per_week) {
       const dated = external.map((ext) => ({
         day: dateToMs(ext.date) / DAY_MS,
-        hours: shiftHours(ext),
+        minutes: shiftMinutes(ext),
       }));
       for (const { day } of dated) {
         const window = dated
           .filter((d) => d.day >= day && d.day < day + 7)
-          .reduce((sum, d) => sum + d.hours, 0);
-        if (window > emp.max_hours_per_week + 1e-9) {
+          .reduce((sum, d) => sum + d.minutes, 0);
+        if (exceedsHours(window, emp.max_hours_per_week)) {
           findings.push({
             employeeId: emp.id,
             rule: 'weekly-hours',
-            detail: `already holds ${window}h in a 7-day window on other schedules, exceeding the ${emp.max_hours_per_week}h weekly limit`,
+            detail: `already holds ${formatHours(window)}h in a 7-day window on other schedules, exceeding the ${emp.max_hours_per_week}h weekly limit`,
           });
           break;
         }

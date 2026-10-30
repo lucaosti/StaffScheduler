@@ -11,9 +11,9 @@
  * here; it is the difference between one definition and several that disagree.
  *
  * These are fragments, never whole statements. The SQL expressions here
- * interpolate no user input; `inClause` is the one exception and exists
- * precisely to make that exception safe by construction rather than by each
- * caller arguing that its own ids are trustworthy.
+ * interpolate no user input; `inClause` and `limitOffsetClause` are the two
+ * exceptions and exist precisely to make them safe by construction rather than
+ * by each caller arguing that its own values are trustworthy.
  *
  * @author Luca Ostinelli
  */
@@ -89,4 +89,59 @@ export const inClause = (ids: Array<number | string>): string => {
     throw new Error('inClause called with a non-integer id');
   }
   return safe.join(',');
+};
+
+/** Rows per page when a caller names none, and the most a page may hold. */
+export const PAGE_SIZE_DEFAULT = 25;
+export const PAGE_SIZE_MAX = 200;
+
+/**
+ * A safe `LIMIT n OFFSET m` for a paginated SELECT.
+ *
+ * WHY NOT PLACEHOLDERS. `pool.execute()` uses MySQL's binary prepared-statement
+ * protocol, and mysqld rejects a bound LIMIT/OFFSET from mysql2 with
+ * ER_WRONG_ARGUMENTS ("Incorrect arguments to mysqld_stmt_execute"). Every
+ * listing that appended `LIMIT ? OFFSET ?` therefore answered 200 unpaginated
+ * and 500 the moment a client asked for a page (#824) — while the mocked unit
+ * tests, which only checked the bound values, passed. The alternatives were
+ * rejected: `pool.query()` would give up server-side preparation for the whole
+ * statement just to dodge two values, and binding them as strings leans on the
+ * server's type derivation for prepared statements, which MySQL 8.0.22
+ * changed once already.
+ *
+ * WHY INLINING IS SAFE. The rendered numbers are produced HERE, from
+ * `Math.trunc` of a value proven to be a finite `number`, then clamped — never
+ * a string a caller handed over. A non-number (something that slipped past the
+ * type system), NaN or Infinity falls back to the default rather than throwing:
+ * unlike `inClause`, where dropping an id would silently change WHICH rows a
+ * DELETE touches, a malformed page window only changes how many rows a read
+ * returns, and every caller already clamped before this helper existed. The
+ * offset is capped at MAX_SAFE_INTEGER because `String(1e21)` is "1e+21",
+ * which would be a syntax error rather than a page.
+ *
+ * ONE IMPLEMENTATION. Each service used to clamp and inline on its own (audit
+ * log, change requests, notifications, webhook deliveries) or not at all (the
+ * five #824 listings); the bounds are the only thing that legitimately differs
+ * between them, so they are the only parameter.
+ *
+ * `bounds` ARE TRUSTED. They are internal integer constants chosen in code
+ * (`AUDIT_PAGE_BOUNDS` and the like), never derived from a request, and are
+ * not re-validated: only `window` carries caller input.
+ */
+export const limitOffsetClause = (
+  window: { limit?: number; offset?: number },
+  bounds: { defaultLimit: number; maxLimit: number } = {
+    defaultLimit: PAGE_SIZE_DEFAULT,
+    maxLimit: PAGE_SIZE_MAX,
+  }
+): string => {
+  const finite = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+  const limit = finite(window.limit)
+    ? Math.min(bounds.maxLimit, Math.max(1, Math.trunc(window.limit)))
+    : bounds.defaultLimit;
+  const offset = finite(window.offset)
+    ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.trunc(window.offset)))
+    : 0;
+  return `LIMIT ${limit} OFFSET ${offset}`;
 };

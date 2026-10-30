@@ -237,6 +237,17 @@ either is present the response carries a `meta` block
 (`{ total, page, pageSize, pages }`) alongside `data`; when neither is present
 the plain `{ success, data }` shape is returned, for backward compatibility.
 
+Every paginated SELECT renders its window with `limitOffsetClause` in
+`backend/src/utils/sql.ts`, never `LIMIT ? OFFSET ?`: under `pool.execute()`
+MySQL's binary protocol rejects a bound LIMIT/OFFSET with ER_WRONG_ARGUMENTS,
+which made the employees, users, assignments, schedules and shifts listings
+answer 500 to any `?page` request (#824). The helper inlines integers it
+derives and clamps itself, so no caller text reaches the SQL. Each paginated
+listing — those five plus the audit log and change requests, whose entries
+routinely share a `created_at` second — orders by its `id` last, so a page
+boundary never repeats or skips a row; the notification and webhook-delivery
+feeds do the same so the rows a limit keeps are stable.
+
 Query filters are validated with `validateQuery(schema)` against a Zod schema
 in `@staff-scheduler/shared`, the same way bodies and path params are, and the
 spec's `parameters` are **generated** from those schemas by
@@ -688,6 +699,32 @@ locally it self-skips when OR-Tools is not installed. Coverage is deliberately
 not treated as a hard violation (the greedy is best-effort and may leave a shift
 short where CP-SAT would prove infeasibility); it is reported separately.
 
+Fixed fixtures only test the shapes their author thought of, so a seeded
+property suite (`backend/src/__tests__/optimizer.properties.test.ts`) runs both
+engines on random small instances — at most 6 employees, 3 days and 8 shifts,
+with half-hour boundaries, overnight shifts, external assignments on either
+side of the period, unavailability (including the day after an overnight
+shift), skills and levels, pairings, and per-employee daily/weekly/consecutive
+caps. It asserts that neither engine breaks a hard rule, that every assignment
+pairs an eligible employee and shift, that the same seed gives the same instance
+and the same greedy schedule, and that CP-SAT, when it proves optimality, fills
+at least as many seats as the greedy. The seed is fixed by default and
+overridden with `TEST_SEED`; a failure prints the seed, the instance index and
+the instance shrunk to the parts that still fail, as an `OptimizerFixture`
+literal for `optimizerFixtures.ts`. Its CP-SAT half sits behind the same
+`REQUIRE_ORTOOLS` gate as the parity suite.
+
+The validator and both engines total shift durations in exact minutes
+(`shiftMinutes` in `backend/src/optimization/shiftTime.ts` and `_shift_minutes`
+in the solver) and compare those totals with the daily and weekly caps; minimum
+rest is compared on exact timestamps. CP-SAT, an integer solver, used to model
+whole hours, so an 08:00–16:30 shift fit an 8h cap and 10.5h of required rest
+was read as 10h; the validator and the greedy used hours rounded to a tenth per
+shift, so three 2h40 shifts — exactly 8h — summed to 8.1h. Rounded hours
+(`shiftHours`) remain only for displayed figures such as an assignment's
+`hours`. `ComplianceEngine`, which checks single manual assignments outside the
+engines, still totals rounded hours.
+
 ### Staffing suggestions (seasonal baseline)
 
 `DemandForecastService` (`backend/src/services/DemandForecastService.ts`)
@@ -824,7 +861,7 @@ as lexicographic stages.
 - **Start-time spread within a period (soft, reported).** Bounds how much an individual employee's own shift start times bounce around within a period — someone whose start time moves between 06:00, 14:00 and 22:00 across one period has their daily rhythm reshuffled week to week even though every individual shift is otherwise legal. Unlike weekend/night equity, this measures variation WITHIN one employee's own shifts, not a gap BETWEEN employees, so there is no team-wide number to report — `startTimeSpreads` in `constraintValidator.ts` reports one `max − min` figure per employee, in minutes, with no invented pass/fail threshold: there is no working-time-regulation precedent for a cutoff here the way there was for a weekly rest block, so the raw measurement is left for whoever reads it to judge.
 - **Night-then-morning turnaround (soft, reported).** The general minimum-rest hard constraint is calibrated for an ordinary turnaround, not the fatigue a night shift leaves behind — a gap that clears the general figure can still be a recognised unsafe pattern: finish a night shift, come back a few hours later for an early morning one. `illegalTurnarounds` in `constraintValidator.ts` checks the same pair of adjacent shifts `min-rest` already looks at, against a separate, normally higher, threshold (`constraints.min_hours_after_night_shift`, default 11h) that only applies when the earlier shift was night work. Only the IMMEDIATELY next shift is examined — the pattern this exists to catch is about adjacency, not general workload. Soft for the same reason as every other item in this family: made hard, an already-tight rota with one person able to cover the gap becomes unsolvable. Rotating shift TYPES across periods so nobody holds nights indefinitely is a related but separate concern, tracked separately since it needs carried history across periods rather than a same-period check.
 - **Shift-category rotation across periods (soft), on the same weekend/night categories equity already tracks.** Equity above minimises the *total* spread of category days across employees over the history horizon — it can be perfectly balanced in total while one person still works nights three straight periods running and another has the inverse pattern, since a spread has no notion of adjacency between periods. This charges *consecutive-period concentration* on the same person, independent of the running total: `AutoScheduleService` walks the same predecessor chain `resolvePredecessorId` uses, one period at a time up to a bounded lookback (6 periods), and counts how many of the most recent consecutive **published** periods had the employee working at least one day of the category — stored as `Employee.consecutive_category_periods`, a count of *periods*, not days, which is why it is a field of its own rather than a reuse of `carried_load`. `shiftRotationViolations` in `constraintValidator.ts` flags an employee assigned to a category this period whose streak already meets or exceeds `constraints.max_consecutive_category_periods` (default 2). Soft for the same reason as every other item in this family: made hard, an organization with too few night- or weekend-qualified staff to always rotate becomes unsolvable. Only the CP-SAT engine is steered by it (`_rotation_terms` in `schedule_optimizer.py`, at the same SOFT level as the equity terms it is layered on top of) — the greedy engine has no global view to balance with, the same asymmetry that already applies to weekend/night equity itself.
-- **Workload fairness (soft).** Minimises the spread between the busiest and least-busy employee, measured in minutes so half-hour shifts are not invisible. Squared deviation from the mean is the textbook form and is what Timefold uses, but CP-SAT is a linear/integer solver, so it would need a piecewise-linear approximation whose parameters are harder to justify than the thing they approximate; the spread is exactly expressible in two auxiliary variables. Its known weakness — indifference to the middle of the distribution — is stated rather than left to be discovered. The greedy engine cannot balance at all (no global view), which is why the engine is always reported.
+- **Workload fairness (soft).** Minimises the spread between the busiest and least-busy employee, measured in minutes so half-hour shifts are not invisible. Squared deviation from the mean is the textbook form and is what Timefold uses, but CP-SAT is a linear/integer solver, so it would need a piecewise-linear approximation whose parameters are harder to justify than the thing they approximate; the spread is exactly expressible in two auxiliary variables. Its known weakness — indifference to the middle of the distribution — is stated rather than left to be discovered. An employee eligible for no shift at all is left out of the balance rather than counted at zero, which would pin the minimum and make the spread a constant; that exclusion used to drop the term for everyone instead. The greedy engine cannot balance at all (no global view), which is why the engine is always reported.
 - **Surplus staffing is charged (soft), at a derived weight.** Fairness rewards over-staffing *indirectly*, because adding people flattens the distribution: when the term first landed, a 3-shift / 4-employee fixture went from 6 assignments to 8, buying an even split with two extra shifts of wages. One extra assignment can improve the spread by at most the longest shift's duration, so surplus is charged strictly more than that — over-staffing is never worth a fairness gain, while remaining available when coverage needs it, since shortfall sits at MEDIUM and outranks both.
 - **A published assignment is a commitment, not a proposal.** `generate` used to solve from scratch every time, so re-running it on a published schedule could legally reshuffle everyone — wrong in a way no scheduling metric can see, since a published assignment is something a person has arranged their life around. **Publishing is what writes the pin**, in the same transaction as the status change — "published" and "committed" are one fact, and a crash between them would leave a live schedule the optimizer is free to reshuffle. Only `pending` and `confirmed` assignments are pinned: nobody is relying on work they declined. An assignment added to an *already published* schedule is pinned on creation, with the schedule's status read inside the `INSERT` rather than fetched first, so a schedule published between the read and the write cannot produce an unpinned commitment. Assignments on a published schedule carry `is_pinned`, enter the model as commitments, and are rewarded at **their own objective level between coverage and the soft terms**: above preferences and fairness, so a commitment is never broken to satisfy a preference however many accumulate; below coverage, so it *is* broken rather than leave a shift unstaffed. Pinning is a stored column, not inferred from schedule status, because a planner deliberately unpinning one person is the normal way to use this and an inferred rule leaves nowhere to record it. **The diff is the deliverable**: every run reports `keptCommitments` and `brokenCommitments`, and a broken one is logged with the affected users named — reporting both halves matters because an empty broken list on its own is indistinguishable from a diff that was never computed. Re-solving with unchanged inputs returns zero changes, which the previous implementation could not do at all.
 - **Re-solving a published schedule PROPOSES; approving is what applies it.** `generate` used to write its result and report the diff afterwards, so a planner learned that fourteen people had moved by reading the response — the change to their commitments had already happened before anyone could judge whether it was worth making. On a published schedule the run now writes nothing: it records the whole solved plan in `schedule_replan_proposals` and returns `status: 'PROPOSED'` with a `proposalId`, and `POST /schedules/:id/replan-proposals/:proposalId/apply` (or `/reject`) decides it. Drafts keep the immediate path — nobody has been told anything about a draft. **Applying is what makes the diff true**: the old persist path was `INSERT IGNORE` and nothing else, so assignments the optimizer dropped survived the run and `brokenCommitments` named people who were still assigned in every read path the app has; a schedule solved twice was the union of both solves. Applying removes what the approved plan leaves out and writes what it adds, pinned, in one transaction. **Staleness is handled by verify-at-apply**: the stored plan is checked against live data (the shifts still exist and still belong to this schedule, the people are still active) and refused *whole* if anything moved, because a plan that is 95% still valid is not 95% approved. Re-solving at approval time was rejected — a solver is not required to return the same optimum twice, so an approved diff could legitimately fail to reproduce and the planner would have approved a decision the system then declines to make. A second re-solve **supersedes** any undecided proposal rather than leaving two. Deciding is gated on `schedule.publish`, deliberately stronger than `schedule.optimize`: applying a plan changes commitments people were already told about, and gating it on the weaker permission would let anyone who can press "generate" rearrange a live schedule. **Everyone whose commitment the applied plan breaks is notified inside the same transaction** — the removal and the message commit together, so nobody is left unassigned and uninformed, which is what the outbox exists to rule out. One message per person listing every shift they lost, not one per shift: a re-solve that moves forty people can take several from the same one, and forty separate emails bury the fact that their week changed. Only *pinned* losses are announced — an unpinned assignment on a published schedule is one nobody was told about, and announcing it would claim a shift was taken away that the person never knew they had. One audit row per broken commitment, attributed to the **approver**: the optimizer produced the plan but a person decided to apply it, and recording a machine actor would now be the synthetic attribution.
@@ -1556,8 +1593,23 @@ docker compose --profile ops up -d
 ```
 
 Starts Prometheus, Grafana, Loki and Promtail (config under `ops/`), all on the
-internal network with only Grafana published (`GRAFANA_PORT`, default `3002`;
-login `admin` / `GRAFANA_ADMIN_PASSWORD`):
+internal network with only Grafana published, and on the host's loopback
+interface only (`127.0.0.1:GRAFANA_PORT`, default `3002`; login `admin` /
+`GRAFANA_ADMIN_PASSWORD`). From another machine, tunnel to it
+(`ssh -L 3002:127.0.0.1:3002 <host>`) rather than publishing the login page.
+
+`GRAFANA_ADMIN_PASSWORD` has no default: Compose refuses to start **any**
+service from `docker-compose.yml` without it, profile or not, because Compose
+interpolates every service before it filters by profile. Grafana can read every
+log line through Loki, so the former `admin/admin` fallback was a credential
+for the whole log stream. Grafana applies the variable only when it first
+initialises its `grafana_data` volume; to rotate it later, run
+`docker compose exec grafana grafana cli admin reset-admin-password <new>`.
+
+The `dev` profile's phpMyAdmin follows the same rules: loopback only
+(`127.0.0.1:PHPMYADMIN_PORT`, default `8080`) and no auto-login — it shows its
+login form and you sign in with a MySQL account, instead of every visitor being
+logged in as the application's database user.
 
 - **Prometheus** scrapes `backend:3001/metrics` every 15s and loads the alert
   rules in `ops/prometheus/alerts.yml` (high 5xx rate, high p95 latency, DB pool
@@ -1584,10 +1636,34 @@ docker compose --profile backup up -d
 ```
 
 It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
-`backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
-dumps older than `BACKUP_RETENTION_DAYS` (default 14). A dump smaller than 1 KB
-is treated as a failure and removed, so an empty/failed dump never masquerades as
-a good backup.
+host directory `BACKUP_HOST_DIR` (default `./backups`, gitignored) every
+`BACKUP_INTERVAL_SECONDS` (default daily) and prunes dumps older than
+`BACKUP_RETENTION_DAYS` (default 14).
+
+The backups are deliberately **not** a named volume. A named volume belongs to
+the compose project, so the `docker compose down -v` that deletes `mysql_data`
+used to delete the backups in the same command. A host directory survives
+`down -v`; for backups that also survive the machine, point `BACKUP_HOST_DIR` at
+another disk or a mount that is synced off-host. The same incident shaped the
+two scripts that remove things: `scripts/demo.sh` runs as its own compose
+project (`staffscheduler-demo`), so `demo.sh down` can delete only the demo's
+volumes, and `./stop.sh -c` removes containers and networks but keeps volumes —
+only `./stop.sh -p` deletes volumes, and only after `DELETE` is typed.
+`scripts/stack-scripts.test.mjs` runs both scripts against a recording `docker`
+stub to pin this.
+
+A dump is kept only once it is proven complete. Each run writes to a
+`*.sql.gz.tmp` file under `pipefail`, so a `mysqldump` that dies mid-stream fails
+the run instead of being hidden behind gzip's success; the file must then end in
+mysqldump's own `-- Dump completed` trailer, which only a finished dump writes;
+only then is it renamed to its final `*.sql.gz` name, and **only after that** are
+old dumps pruned. A failed run therefore leaves no file behind and deletes
+nothing, and `restore.sh --latest` (which matches `*.sql.gz` only) can never pick
+a partial dump. `restore.sh` applies the same check before it touches the
+database — a corrupt or truncated archive is refused while the target is still
+intact — and fails if the replay itself fails. Watch the sidecar's log for
+`[backup] run failed`: the loop keeps its schedule after a failure, so a run of
+failures is visible only there and in the age of the newest dump.
 
 **Restore runbook** (recovering into the running stack):
 
@@ -1619,7 +1695,10 @@ job runs weekly (and whenever the backup scripts or migrations change): it appli
 the migrations, seeds a marker row, runs the real `backup.sh`, DROPs the database,
 runs the real `restore.sh --latest`, and asserts the marker survived the
 round-trip. A broken restore path is therefore a red CI check, not a discovery
-made during an incident.
+made during an incident. The failure paths, which a healthy server never
+produces, are covered by `scripts/backup-scripts.test.mjs` (part of
+`npm run test:scripts`): both scripts run against stub `mysqldump`/`mysql`
+clients that die mid-dump, truncate silently, or reject the replay.
 
 ### Deployment hardening and scaling
 
@@ -1632,9 +1711,18 @@ override:
   access goes through the `dev`-profile phpMyAdmin or a temporary, explicit port
   forward — the database is never exposed to the host by default.
 - **`caching_sha2_password`.** MySQL uses its 8.x default authentication plugin;
-  the legacy `mysql_native_password` (deprecated, removed in MySQL 9) is no longer
-  forced. Both the backend driver (`mysql2`) and the migration runner
-  (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+  the legacy `mysql_native_password` (disabled by default in 8.4, removed in
+  MySQL 9) is not used. Both the backend driver (`mysql2`) and the migration
+  runner (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+- **One pinned MySQL release everywhere.** The deployment, its backup sidecar,
+  the verification stack and every CI service run the same exact 8.4 LTS tag
+  (8.0 reached end of life in April 2026). A floating tag in CI meant the
+  migrations, the integration suite and the backup round-trip were proven on
+  whatever the registry served that day rather than on what is deployed;
+  `scripts/mysql-version.test.mjs` fails if any file names a different tag. To
+  upgrade, change every occurrence in one pull request and let CI run the
+  migration round-trip, integration suite and backup-restore job on it. The 9.x
+  innovation line was rejected: each release is supported only until the next.
 
 ### Hardware-aware defaults
 
@@ -1671,15 +1759,23 @@ serve traffic. The default compose file runs a single backend; the
 docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2
 ```
 
-**Set `TRUST_PROXY_HOPS=1` whenever this overlay is in use.** Express does not
+**`TRUST_PROXY_HOPS` is `1` in both compose layouts.** Express does not
 trust `X-Forwarded-For`/`X-Forwarded-Proto` by default, so without it every
-request's `req.ip` resolves to the load balancer's own address rather than the
+request's `req.ip` resolves to the proxy's own address rather than the
 real client — collapsing IP-keyed rate limiting (including the login
 brute-force limiter) into one shared bucket across every caller, and making
-audit-log IPs useless. Left at its default of `0` for any directly-exposed
-instance (dev, or a single, unscaled backend): with no proxy actually in
-front, trusting the hop would let a client set its own `X-Forwarded-For` and
-spoof its IP to dodge rate limiting.
+audit-log IPs useless. Compose forwards `${TRUST_PROXY_HOPS:-1}` to the backend
+because every network request crosses exactly one nginx: the frontend's `/api`
+proxy, or `backend-lb` under this overlay (the two are siblings, not chained, so
+the overlay stays at one). Raise it by one for each further proxy chained in
+front, e.g. `2` behind a TLS terminator in front of the frontend. For the same
+reason the base file publishes the backend's own port on `127.0.0.1` only: a
+client that reached it directly could write its own `X-Forwarded-For` and pick
+the address it is limited under. The backend's built-in default stays `0`, for
+a process run with no proxy in front (`npm run dev`), where trusting a hop
+would let any client spoof its IP.
+`scripts/compose-config.test.mjs` asserts both, on the configuration Compose
+actually resolves.
 
 The overlay clears the backend's published port (several replicas cannot share
 one host port) and puts `backend-lb` (nginx, `ops/nginx/backend-lb.conf`) in
@@ -1696,13 +1792,47 @@ Rolling deploy:
 ops/deploy/rolling-deploy.sh 2      # replica count (default 2)
 ```
 
-Compose has no native per-replica rolling update, so the script does the standard
-scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
-start alongside the old), wait until the load balancer answers, then scale back
-**down** to N — Compose removes the oldest containers, i.e. the previous image.
-Throughout, a poller hits `/api/v1/health` twice a second and the script **fails the
-deploy if a single request was dropped**, so "zero downtime" is verified rather
-than asserted.
+Compose has no native per-replica rolling update, so the script starts the new
+replicas beside the old ones and retires the old ones **by id**:
+
+1. build the new image and record the ids of the replicas running now;
+2. `up --no-recreate --scale backend=<old + N>`: the old replicas are left
+   untouched and only the added ones start, on the new image;
+3. wait until every **new** replica's own healthcheck reports `healthy` (an
+   unhealthy or exited one aborts the deploy and removes the new replicas, so
+   the old ones keep serving as before);
+4. wait `DRAIN_SECONDS` (default 15, longer than the 10 s resolver TTL of the
+   frontend proxy and the 5 s of `backend-lb`) so both proxies route to the new
+   replicas;
+5. `docker stop` the recorded old ids — SIGTERM makes each stop accepting while
+   its in-flight requests complete, and a refused connection is one nginx
+   retries on another replica, POSTs included, because nothing was sent — then
+   remove them;
+6. wait `DRAIN_SECONDS` again, so the proxies forget the old addresses.
+
+Throughout, a poller sends a GET (`/health`) and a POST (`/auth/refresh` with
+no token, answered 401 without touching the database) every second, and the
+script **fails the deploy if a single one was dropped** — no answer, or a 5xx —
+so "zero downtime" is verified rather than asserted. The POST matters because
+nginx never re-sends a non-idempotent request that already reached a replica:
+a GET-only probe cannot see the drop a careless switch causes.
+
+The former scale-up/scale-down version was wrong in four ways (#848): without
+`--no-recreate` the scale-up recreated the old replicas too; its wait passed as
+soon as the load balancer answered, which the old replicas did, so an unhealthy
+new image went unnoticed; the scale-down removed whichever containers Compose
+chose, an order Compose does not document; and nothing waited out the proxies'
+DNS cache. Both proxies also bound their connect timeout to 2 s, so an address
+still cached after its replica is gone costs a quick retry rather than nginx's
+60 s default.
+
+The script reads `COMPOSE_FILE`/`COMPOSE_PROJECT_NAME` like Compose itself
+(default: the base file plus this overlay), `API_URL` for where clients reach
+the API (default the load balancer on `BACKEND_PORT`), and expects to run from
+the repository root. The backend's healthcheck probes every 2 s while a
+container starts (`start_interval`, Docker Engine 25 or newer), so step 3 takes
+seconds rather than the 30 s healthcheck interval. As before, every later `up`
+must pass `--scale backend=N`, or Compose scales back to one replica.
 
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.

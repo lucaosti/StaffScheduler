@@ -12,6 +12,7 @@
 
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { withTransaction } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { logger } from '../config/logger';
 import { isEmailConfigured } from './MailerService';
 import { isPushConfigured } from './PushService';
@@ -185,20 +186,18 @@ export class NotificationService {
     userId: number,
     options: { unreadOnly?: boolean; limit?: number } = {}
   ): Promise<Notification[]> {
-    const limit = Math.max(1, Math.min(200, options.limit ?? 50));
     const conditions = ['user_id = ?'];
     const params: Array<string | number> = [userId];
     if (options.unreadOnly) {
       conditions.push('is_read = 0');
     }
-    // See AuditLogService.list: a bound LIMIT fails under the prepared-statement
-    // protocol, so GET /api/notifications returned 500 on every call. `limit` is
-    // clamped to 1..200 above, never raw input.
+    // Inlined rather than bound — see limitOffsetClause. `id` makes the
+    // order total, so which same-second rows fall inside the limit is stable.
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM notifications
         WHERE ${conditions.join(' AND ')}
-        ORDER BY created_at DESC
-        LIMIT ${limit}`,
+        ORDER BY created_at DESC, id DESC
+        ${limitOffsetClause({ limit: options.limit }, { defaultLimit: 50, maxLimit: 200 })}`,
       params
     );
     return rows.map(mapRow);

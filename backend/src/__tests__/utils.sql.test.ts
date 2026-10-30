@@ -11,7 +11,7 @@
  * @author Luca Ostinelli
  */
 
-import { inClause } from '../utils/sql';
+import { inClause, limitOffsetClause, PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from '../utils/sql';
 
 export {};
 
@@ -50,5 +50,72 @@ describe('inClause', () => {
     // Filtering would narrow a query without saying so, and one call site is a
     // DELETE — where a quietly shorter list means the wrong rows survive.
     expect(() => inClause([1, 'x' as unknown as number, 3])).toThrow();
+  });
+});
+
+/**
+ * `limitOffsetClause` — LIMIT/OFFSET cannot be bound under `execute()` (#824),
+ * so they are inlined; these tests are what makes inlining them safe.
+ */
+describe('limitOffsetClause', () => {
+  it('renders the requested window', () => {
+    expect(limitOffsetClause({ limit: 25, offset: 50 })).toBe('LIMIT 25 OFFSET 50');
+  });
+
+  it('defaults a missing window to the first default-sized page', () => {
+    expect(limitOffsetClause({})).toBe(`LIMIT ${PAGE_SIZE_DEFAULT} OFFSET 0`);
+  });
+
+  it('caps the limit at the maximum page size', () => {
+    expect(limitOffsetClause({ limit: 10_000 })).toBe(`LIMIT ${PAGE_SIZE_MAX} OFFSET 0`);
+  });
+
+  it('honours caller-specific bounds', () => {
+    const bounds = { defaultLimit: 100, maxLimit: 500 };
+    expect(limitOffsetClause({}, bounds)).toBe('LIMIT 100 OFFSET 0');
+    expect(limitOffsetClause({ limit: 999 }, bounds)).toBe('LIMIT 500 OFFSET 0');
+  });
+
+  it('raises a zero or negative limit to one row', () => {
+    expect(limitOffsetClause({ limit: 0 })).toBe('LIMIT 1 OFFSET 0');
+    expect(limitOffsetClause({ limit: -4 })).toBe('LIMIT 1 OFFSET 0');
+  });
+
+  it('clamps a negative offset to zero', () => {
+    expect(limitOffsetClause({ limit: 5, offset: -5 })).toBe('LIMIT 5 OFFSET 0');
+  });
+
+  it('truncates fractional values, since a float in LIMIT is a syntax error', () => {
+    expect(limitOffsetClause({ limit: 10.9, offset: 5.7 })).toBe('LIMIT 10 OFFSET 5');
+  });
+
+  it.each([
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+    ['-Infinity', -Infinity],
+  ])('treats a %s value as absent', (_name, value) => {
+    expect(limitOffsetClause({ limit: value, offset: value })).toBe(`LIMIT ${PAGE_SIZE_DEFAULT} OFFSET 0`);
+  });
+
+  it.each([
+    ['SQL fragment', '1; DROP TABLE users'],
+    ['numeric string', '7'],
+    ['object', { toString: (): string => '1 OR 1=1' }],
+  ])('never interpolates a %s that bypassed the type system', (_name, value) => {
+    // Only a finite `number` is accepted; anything else falls back to the
+    // default, so no caller-supplied text can ever reach the SQL.
+    const clause = limitOffsetClause({ limit: value as unknown as number, offset: value as unknown as number });
+    expect(clause).toBe(`LIMIT ${PAGE_SIZE_DEFAULT} OFFSET 0`);
+  });
+
+  it('keeps a huge offset in plain integer notation', () => {
+    // String(1e21) is "1e+21", which MySQL would reject as a syntax error.
+    expect(limitOffsetClause({ limit: 5, offset: 1e21 })).toBe(`LIMIT 5 OFFSET ${Number.MAX_SAFE_INTEGER}`);
+  });
+
+  it('only ever renders digits', () => {
+    for (const value of [-1, 0, 0.5, 3, 1e300, NaN, -0]) {
+      expect(limitOffsetClause({ limit: value, offset: value })).toMatch(/^LIMIT \d+ OFFSET \d+$/);
+    }
   });
 });

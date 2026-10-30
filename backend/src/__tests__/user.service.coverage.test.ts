@@ -125,9 +125,10 @@ describe('UserService.getAllUsers additional filters', () => {
     const svc = new UserService(pool);
     const out = await svc.getAllUsers({}, { limit: 10, offset: 20 });
     expect(out.length).toBe(1);
-    const params = execute.mock.calls[0][1] as unknown[];
-    // Last two params should be limit=10, offset=20
-    expect(params.slice(-2)).toEqual([10, 20]);
+    // Inlined, never bound: MySQL rejects a bound LIMIT/OFFSET under execute() (#824).
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/LIMIT 10 OFFSET 20$/);
+    expect(params).toEqual([]);
   });
 });
 
@@ -323,8 +324,10 @@ describe('UserService.getUsersForManager filters and pagination', () => {
     execute.mockResolvedValueOnce([[userRow], null] as Tuple);
     const svc = new UserService(pool);
     await svc.getUsersForManager(managerActor, {}, { limit: 5, offset: 10 });
-    const params = execute.mock.calls[0][1] as unknown[];
-    expect(params.slice(-2)).toEqual([5, 10]);
+    // Inlined, never bound: MySQL rejects a bound LIMIT/OFFSET under execute() (#824).
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/LIMIT 5 OFFSET 10$/);
+    expect(params).toEqual([99]);
   });
 });
 

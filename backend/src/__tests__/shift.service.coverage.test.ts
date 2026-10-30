@@ -94,8 +94,10 @@ describe('ShiftService.getAllShifts orgUnitIds and pagination', () => {
     execute.mockResolvedValueOnce([[shiftRow], null] as Tuple);
     const svc = new ShiftService(pool);
     await svc.getAllShifts({}, { limit: 25, offset: 50 });
-    const params = execute.mock.calls[0][1] as unknown[];
-    expect(params.slice(-2)).toEqual([25, 50]);
+    // Inlined, never bound: MySQL rejects a bound LIMIT/OFFSET under execute() (#824).
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/LIMIT 25 OFFSET 50$/);
+    expect(params).toEqual([]);
   });
 });
 

@@ -40,6 +40,7 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { ShiftAssignment, CreateAssignmentRequest, SqlParam } from '../types';
 import { ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
@@ -365,11 +366,12 @@ export class AssignmentService {
 
       const { where, params } = buildAssignmentFilters(filters);
       query += where;
-      query += ' ORDER BY s.date ASC, s.start_time ASC';
+      // `sa.id` breaks ties between assignments on the same shift slot, so a
+      // page boundary never repeats or skips a row.
+      query += ' ORDER BY s.date ASC, s.start_time ASC, sa.id ASC';
 
       if (pagination) {
-        query += ' LIMIT ? OFFSET ?';
-        params.push(pagination.limit, pagination.offset);
+        query += ` ${limitOffsetClause(pagination)}`;
       } else {
         // Fetch one row beyond the cap so an overflow is detectable rather
         // than indistinguishable from an exactly-full page.
