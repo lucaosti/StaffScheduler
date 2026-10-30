@@ -20,6 +20,14 @@ services:
     # balancer below owns the host port instead. `!reset` clears the base
     # file's ports list rather than appending to it.
     ports: !reset []
+    environment:
+      # Still one hop with the load balancer: a request arrives either through
+      # backend-lb or through the frontend's /api proxy, and both talk to the
+      # replicas directly — neither is chained behind the other. Restated here
+      # rather than inherited so that changing the topology (say, routing the
+      # frontend through backend-lb, which would make it two) has to touch
+      # this line.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
 
   # nginx in front of the backend replicas; owns the API's host port.
   backend-lb:

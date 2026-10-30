@@ -39,14 +39,6 @@ interface Props {
   children: React.ReactNode;
 }
 
-/** Reads a human message out of whatever was thrown/returned as `error`. */
-const messageOf = (error: unknown): string | undefined => {
-  if (!error) return undefined;
-  if (typeof error === 'string') return error;
-  if (error instanceof Error) return error.message;
-  return undefined;
-};
-
 const QueryState: React.FC<Props> = ({
   isLoading,
   isError,
@@ -58,7 +50,7 @@ const QueryState: React.FC<Props> = ({
   children,
 }) => {
   if (isLoading) return <LoadingSpinner message={loadingMessage} />;
-  if (isError) return <ErrorAlert message={messageOf(error)} onRetry={onRetry} />;
+  if (isError) return <ErrorAlert error={error} onRetry={onRetry} />;
   if (isEmpty) return <>{empty}</>;
   return <>{children}</>;
 };

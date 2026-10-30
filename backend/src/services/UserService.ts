@@ -27,17 +27,22 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { ConflictError, NotFoundError } from '../errors';
 import bcrypt from 'bcrypt';
 import { User, CreateUserRequest, UpdateUserRequest, SqlParam } from '../types';
 import { logger } from '../config/logger';
 import { config } from '../config';
 import { AuditLogService } from './AuditLogService';
+import { RefreshTokenService } from './RefreshTokenService';
+import { invalidateAuthContext } from './cacheStore';
 
 export class UserService {
   private audit: AuditLogService;
+  private refreshTokens: RefreshTokenService;
   constructor(private pool: Pool) {
     this.audit = new AuditLogService(pool);
+    this.refreshTokens = new RefreshTokenService(pool);
   }
 
   async createUser(userData: CreateUserRequest, actorId?: number | null): Promise<User> {
@@ -213,10 +218,11 @@ export class UserService {
         params.push(searchPattern, searchPattern, searchPattern, searchPattern);
       }
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' ORDER BY u.last_name ASC, u.first_name ASC';
+      // `u.id` breaks name ties: without a total order MySQL may return the
+      // same row on two pages and skip another.
+      query += ' ORDER BY u.last_name ASC, u.first_name ASC, u.id ASC';
       if (pagination) {
-        query += ' LIMIT ? OFFSET ?';
-        params.push(pagination.limit, pagination.offset);
+        query += ` ${limitOffsetClause(pagination)}`;
       } else {
         query += ' LIMIT 1000';
       }
@@ -364,7 +370,17 @@ export class UserService {
             );
           }
         }
+        // A new password or a deactivation must end every existing session
+        // (#818): a reset is how an administrator locks out whoever holds a
+        // compromised account, and leaving its refresh tokens alive kept them
+        // in for up to 30 days. Revoked in the same transaction, so the
+        // credential and the sessions it vouched for never disagree.
+        const endsSessions = userData.password !== undefined || userData.isActive === false;
+        if (endsSessions) await this.refreshTokens.revokeAllForUser(id, connection);
         await connection.commit();
+        // After the commit: invalidating first would let a concurrent request
+        // re-cache the still-active account before the change landed.
+        if (endsSessions) await invalidateAuthContext(id);
         logger.info('User updated: ' + id);
         const updatedUser = await this.getUserById(id);
         if (!updatedUser) throw new NotFoundError('User not found after update');
@@ -395,7 +411,10 @@ export class UserService {
         const [exists] = await connection.execute<RowDataPacket[]>('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
         if ((exists as RowDataPacket[]).length === 0) throw new NotFoundError('User not found');
         await connection.execute('UPDATE users SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [id]);
+        // Same as a deactivation through updateUser (#818).
+        await this.refreshTokens.revokeAllForUser(id, connection);
         await connection.commit();
+        await invalidateAuthContext(id);
         logger.info('User deleted: ' + id);
         await this.audit.write({
           actorId: actorId ?? null,
@@ -568,10 +587,9 @@ export class UserService {
         params.push(filters.departmentId);
       }
 
-      sql += ` ORDER BY u.last_name ASC, u.first_name ASC`;
+      sql += ` ORDER BY u.last_name ASC, u.first_name ASC, u.id ASC`;
       if (pagination) {
-        sql += ` LIMIT ? OFFSET ?`;
-        params.push(pagination.limit, pagination.offset);
+        sql += ` ${limitOffsetClause(pagination)}`;
       } else {
         sql += ` LIMIT 1000`;
       }

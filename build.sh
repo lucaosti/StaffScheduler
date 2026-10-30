@@ -159,7 +159,7 @@ build_frontend() {
 
 build_mysql() {
     print_section "Building MySQL Service"
-    print_info "MySQL uses official image (mysql:8.0) - skipping custom build"
+    print_info "MySQL uses the official image (tag pinned in docker-compose.yml) - skipping custom build"
 }
 
 # Display built images

@@ -22,10 +22,19 @@ Usage:
 import os
 import sys
 import json
+import math
+import time
 import argparse
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-from ortools.sat.python import cp_model
+
+# The caller's budget runs from process start, so the clock starts BEFORE the
+# ortools import, which alone takes a large fraction of a second (see
+# solve_time_budget). The standard-library imports above cost nothing by
+# comparison.
+PROCESS_START = time.monotonic()
+
+from ortools.sat.python import cp_model  # noqa: E402 - imported after the clock on purpose
 
 
 class ScheduleOptimizerORTools:
@@ -61,7 +70,24 @@ class ScheduleOptimizerORTools:
             for p in problem_data.get('pinned_assignments', []) or []
         }
         self.weights = problem_data.get('weights', self._default_weights())
-        
+
+        # Per-shift facts every builder needs, computed ONCE. They used to be
+        # recomputed inside the builders' loops — bounds with strptime on every
+        # pairwise comparison, for every employee — which made the model build
+        # O(E * S^2) date parses and took two minutes on a 100 x 336 month on
+        # its own, while the watchdog allowed none of it (#837).
+        self._ords = {
+            sid: datetime.strptime(s['date'], '%Y-%m-%d').toordinal()
+            for sid, s in self.shifts.items()
+        }
+        self._bounds = {sid: self._abs_bounds(s) for sid, s in self.shifts.items()}
+        self._minutes = {sid: self._shift_minutes(s) for sid, s in self.shifts.items()}
+        self._shifts_by_ord: Dict[int, List[str]] = {}
+        for sid, o in self._ords.items():
+            self._shifts_by_ord.setdefault(o, []).append(sid)
+        # Conflict cliques per rest value, in minutes; see _conflict_cliques.
+        self._clique_cache: Dict[int, List[List[str]]] = {}
+
     def _default_weights(self) -> Dict[str, float]:
         """Default constraint weights (similar to PoliTO Parameters.py)."""
         return {
@@ -129,8 +155,7 @@ class ScheduleOptimizerORTools:
         self._add_shift_coverage_constraints()
         self._add_qualified_staff_constraints()
         self._add_pairing_constraints()
-        self._add_no_double_booking_constraints()
-        self._add_min_rest_constraints()
+        self._add_shift_conflict_constraints()
         self._add_daily_hours_constraints()
         self._add_max_hours_constraints()
         self._add_max_consecutive_days_constraints()
@@ -225,23 +250,24 @@ class ScheduleOptimizerORTools:
             if not external:
                 continue
 
-            # Daily.
-            daily_budget = employee.get('max_hours_per_day') or max(
-                8, employee.get('max_hours_per_week', 40) // 5
-            )
-            hours_by_date: Dict[str, int] = {}
+            # Daily. In minutes, like the constraints this diagnosis must agree
+            # with: were it in whole hours while _add_daily_hours_constraints
+            # is in minutes, an 8.5h external under an 8h cap would pass here
+            # as 8h and then make the model INFEASIBLE there (#834).
+            daily_budget = self._daily_budget_hours(employee)
+            minutes_by_date: Dict[str, int] = {}
             for ext in external:
-                hours_by_date[ext['date']] = (
-                    hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                minutes_by_date[ext['date']] = (
+                    minutes_by_date.get(ext['date'], 0) + self._shift_minutes(ext)
                 )
-            for date, hours in sorted(hours_by_date.items()):
-                if hours > daily_budget:
+            for date, minutes in sorted(minutes_by_date.items()):
+                if minutes > self._cap_minutes(daily_budget):
                     findings.append({
                         'employee_id': employee_id,
                         'rule': 'daily-hours',
                         'detail': (
-                            f'already holds {hours}h on {date} from other schedules, '
-                            f'exceeding the {daily_budget}h daily limit'
+                            f'already holds {minutes / 60:g}h on {date} from other schedules, '
+                            f'exceeding the {daily_budget:g}h daily limit'
                         ),
                     })
 
@@ -250,17 +276,17 @@ class ScheduleOptimizerORTools:
             if weekly_cap:
                 ords = [
                     (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
-                     self._calculate_shift_hours(ext))
+                     self._shift_minutes(ext))
                     for ext in external
                 ]
                 for anchor, _ in ords:
-                    window = sum(h for o, h in ords if anchor <= o < anchor + 7)
-                    if window > weekly_cap:
+                    window = sum(m for o, m in ords if anchor <= o < anchor + 7)
+                    if window > self._cap_minutes(weekly_cap):
                         findings.append({
                             'employee_id': employee_id,
                             'rule': 'weekly-hours',
                             'detail': (
-                                f'already holds {window}h in the 7 days from '
+                                f'already holds {window / 60:g}h in the 7 days from '
                                 f'{datetime.fromordinal(anchor).date()} on other schedules, '
                                 f'exceeding the {weekly_cap}h weekly limit'
                             ),
@@ -489,74 +515,112 @@ class ScheduleOptimizerORTools:
                     else:
                         self.model.Add(a <= b)
 
-    def _add_no_double_booking_constraints(self):
+    def _add_shift_conflict_constraints(self):
         """
-        HARD: an employee cannot hold two time-overlapping shifts. Uses absolute
-        (date + time) bounds so an overnight shift is compared against the next
-        day's shifts too, not just same-date ones — matching the validator and
-        the greedy's _shiftBoundsMs. External assignments force the conflicting
-        decision shift off entirely.
+        HARD: no double-booking and minimum rest, as ONE relation.
+
+        Two shifts conflict for an employee when they overlap OR leave less
+        than `min_hours_between_shifts` of rest between them — absolute
+        (date + time) bounds, overnight-aware, so a night shift is compared
+        with the next day's shifts too. Same rules as the validator's
+        double-booking and min-rest checks, ComplianceEngine.checkMinRest and
+        the greedy's evaluateCandidate steps 2 and 2b.
+
+        WHY ONE RELATION. Both rules reduce to the same test once each shift's
+        interval is extended by the required rest: a and b conflict exactly
+        when [start, end + rest) of one meets that of the other (an overlap
+        meets for any rest >= 0; a gap g meets precisely when g < rest). So
+        the conflict graph is an INTERVAL graph, whose maximal cliques a
+        single sweep finds — and one AddAtMostOne per maximal clique says
+        everything the pairwise `v1 + v2 <= 1` constraints said, because every
+        conflicting pair lies inside some maximal clique.
+
+        WHY IT CHANGED (#837). The two builders this replaces compared every
+        pair of shifts for every employee and recomputed both shifts' bounds,
+        with strptime, on every comparison: O(E * S^2), about 33 million
+        date parses on a 100 x 336 month, and a build of two minutes on its
+        own. The cliques depend only on the shifts and the rest value, so they
+        are computed once per distinct rest value and reused for every
+        employee; an at-most-one over a clique is also a tighter relaxation
+        for the solver than the pairwise constraints it implies.
+
+        The requirement is converted to minutes rounding UP, never through
+        `int(hours)`: that truncated 10.5h of required rest to 10h, so a 10h
+        gap passed here and failed the validator (#834). Up is the safe
+        direction for a minimum, as down is for a cap.
+
+        External assignments are fixed neighbours: a decision shift meeting
+        one is forced off.
         """
-        shift_items = list(self.shifts.items())
-        for employee_id in self.employees.keys():
-            externals = self.external_by_employee[employee_id]
-            for i, (sid1, s1) in enumerate(shift_items):
-                # Decision shift vs the employee's fixed external shifts.
-                for ext in externals:
-                    if self._shifts_overlap_abs(s1, ext):
-                        if (v := self._var(employee_id, sid1)) is not None:
+        for employee_id, employee in self.employees.items():
+            # The employee's own requirement (#838): a contract can ask for
+            # more rest than the organization's default. Cliques are cached
+            # per rest value, so a workforce on two or three distinct values
+            # costs two or three sweeps, not one per person.
+            rest_minutes = self._rest_minutes(employee)
+            for clique in self._conflict_cliques(rest_minutes):
+                present = [
+                    v for sid in clique
+                    if (v := self._var(employee_id, sid)) is not None
+                ]
+                if len(present) > 1:
+                    self.model.AddAtMostOne(present)
+
+            for ext in self.external_by_employee[employee_id]:
+                ext_start, ext_end = self._abs_bounds(ext)
+                for sid, (start, end) in self._bounds.items():
+                    if start < ext_end + rest_minutes and ext_start < end + rest_minutes:
+                        if (v := self._var(employee_id, sid)) is not None:
                             self.model.Add(v == 0)
-                # Decision shift vs decision shift.
-                for sid2, s2 in shift_items[i + 1:]:
-                    if self._shifts_overlap_abs(s1, s2):
-                        v1 = self._var(employee_id, sid1)
-                        v2 = self._var(employee_id, sid2)
-                        if v1 is None or v2 is None:
-                            continue
-                        self.model.Add(
-                            v1 + v2 <= 1
-                        )
 
-    def _add_min_rest_constraints(self):
+    def _rest_minutes(self, employee: Dict) -> int:
         """
-        HARD: consecutive (non-overlapping) shifts for one employee must leave at
-        least `min_hours_between_shifts` of rest, across day boundaries. Same
-        rule as ComplianceEngine.checkMinRest and the validator's min-rest check.
-        External assignments are included as fixed neighbours.
+        Rest this employee needs between two shifts, in whole minutes rounded
+        up: their own `min_hours_between_shifts`, else the problem-wide one,
+        else 8 h. The precedence of constraintValidator's minRestHoursFor,
+        which is the authority.
         """
-        min_rest_minutes = int(self.constraints_config.get('min_hours_between_shifts', 8)) * 60
-        shift_items = list(self.shifts.items())
-        for employee_id in self.employees.keys():
-            externals = self.external_by_employee[employee_id]
-            for i, (sid1, s1) in enumerate(shift_items):
-                for ext in externals:
-                    if not self._shifts_overlap_abs(s1, ext) and \
-                            self._rest_conflict(s1, ext, min_rest_minutes):
-                        if (v := self._var(employee_id, sid1)) is not None:
-                            self.model.Add(v == 0)
-                for sid2, s2 in shift_items[i + 1:]:
-                    if not self._shifts_overlap_abs(s1, s2) and \
-                            self._rest_conflict(s1, s2, min_rest_minutes):
-                        v1 = self._var(employee_id, sid1)
-                        v2 = self._var(employee_id, sid2)
-                        if v1 is None or v2 is None:
-                            continue
-                        self.model.Add(
-                            v1 + v2 <= 1
-                        )
+        hours = employee.get('min_hours_between_shifts')
+        if hours is None:
+            hours = self.constraints_config.get('min_hours_between_shifts', 8)
+        return math.ceil(float(hours) * 60 - 1e-9)
 
-    def _shifts_overlap_abs(self, shift1: Dict, shift2: Dict) -> bool:
-        """Absolute-time overlap check (date + time, overnight-aware)."""
-        a_start, a_end = self._abs_bounds(shift1)
-        b_start, b_end = self._abs_bounds(shift2)
-        return a_start < b_end and b_start < a_end
+    def _conflict_cliques(self, rest_minutes: int) -> List[List[str]]:
+        """
+        Maximal cliques (of two or more shifts) of the conflict graph for one
+        rest value, by a sweep over the rest-extended intervals.
 
-    def _rest_conflict(self, a: Dict, b: Dict, min_rest_minutes: int) -> bool:
-        """True if the rest gap between two non-overlapping shifts is too short."""
-        a_start, a_end = self._abs_bounds(a)
-        b_start, b_end = self._abs_bounds(b)
-        gap = (b_start - a_end) if a_end <= b_start else (a_start - b_end)
-        return gap < min_rest_minutes
+        Ends sort before starts at the same instant: the intervals are
+        half-open, so a shift starting exactly when another's rest runs out
+        does not conflict with it — the `gap < rest` of the pairwise rule.
+        A clique is maximal when the sweep is about to drop an interval after
+        having added one since the last clique it reported.
+        """
+        cached = self._clique_cache.get(rest_minutes)
+        if cached is not None:
+            return cached
+
+        events = []
+        for sid, (start, end) in self._bounds.items():
+            events.append((start, 1, sid))
+            events.append((end + rest_minutes, 0, sid))
+        events.sort(key=lambda e: (e[0], e[1]))
+
+        cliques: List[List[str]] = []
+        active: Dict[str, None] = {}  # insertion-ordered set
+        grew = False
+        for _, is_start, sid in events:
+            if is_start:
+                active[sid] = None
+                grew = True
+            else:
+                if grew and len(active) > 1:
+                    cliques.append(list(active))
+                grew = False
+                del active[sid]
+
+        self._clique_cache[rest_minutes] = cliques
+        return cliques
 
     def _parse_time(self, time_str: str) -> int:
         """Parse time string to minutes since midnight."""
@@ -572,38 +636,40 @@ class ScheduleOptimizerORTools:
     def _add_daily_hours_constraints(self):
         """
         HARD: an employee's assigned hours on any single date must stay within a
-        one-day budget of max(8, max_hours_per_week / 5). Mirrors the validator's
-        daily-hours rule and evaluateCandidate step 5. External hours on the date
-        are pre-charged against the budget.
-        """
-        for employee_id, employee in self.employees.items():
-            # Contract cap when present; otherwise the historical derived
-            # formula. Mirrors constraintValidator, which is the authority.
-            daily_budget = employee.get('max_hours_per_day') or max(
-                8, employee.get('max_hours_per_week', 40) // 5
-            )
+        one-day budget (see _daily_budget_hours). Mirrors the validator's
+        daily-hours rule and evaluateCandidate step 5. External hours on the
+        date are pre-charged against the budget.
 
-            # Pre-existing external hours per date.
-            external_hours_by_date: Dict[str, int] = {}
+        Counted in MINUTES. Whole hours truncated 08:00–16:30 to 8h, so an
+        8.5h shift fit an 8h cap here while the validator and the greedy
+        rejected it (#834); and a fractional cap such as 8.5h was not even an
+        integer the model could hold, so building it raised and the run fell
+        back to greedy.
+        """
+        # Decision shifts per date: the same for every employee.
+        shifts_by_date: Dict[str, List[str]] = {}
+        for shift_id, shift in self.shifts.items():
+            shifts_by_date.setdefault(shift['date'], []).append(shift_id)
+
+        for employee_id, employee in self.employees.items():
+            budget_minutes = self._cap_minutes(self._daily_budget_hours(employee))
+
+            # Pre-existing external minutes per date.
+            external_minutes_by_date: Dict[str, int] = {}
             for ext in self.external_by_employee[employee_id]:
-                external_hours_by_date[ext['date']] = (
-                    external_hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                external_minutes_by_date[ext['date']] = (
+                    external_minutes_by_date.get(ext['date'], 0) + self._shift_minutes(ext)
                 )
 
-            # Decision-shift hours per date.
-            shifts_by_date: Dict[str, List[str]] = {}
-            for shift_id, shift in self.shifts.items():
-                shifts_by_date.setdefault(shift['date'], []).append(shift_id)
-
-            dates = set(shifts_by_date) | set(external_hours_by_date)
+            dates = set(shifts_by_date) | set(external_minutes_by_date)
             for date in dates:
                 terms = [
-                    v * self._calculate_shift_hours(self.shifts[sid])
+                    v * self._minutes[sid]
                     for sid in shifts_by_date.get(date, [])
                     if (v := self._var(employee_id, sid)) is not None
                 ]
                 self.model.Add(
-                    sum(terms) + external_hours_by_date.get(date, 0) <= daily_budget
+                    sum(terms) + external_minutes_by_date.get(date, 0) <= budget_minutes
                 )
 
     def _add_max_hours_constraints(self):
@@ -614,33 +680,45 @@ class ScheduleOptimizerORTools:
         which let an employee work e.g. Thu–Sun of one week and Mon–Wed of the
         next (11 days) without either "week" tripping. The forward-window form
         matches the validator exactly. External hours in the window count too.
+
+        In minutes, for the reason given in _add_daily_hours_constraints: five
+        8.5h shifts are 42.5h, which whole hours read as exactly 40 (#834).
         """
+        # The decision shifts inside each window, per anchor day: they depend
+        # only on the shifts, so they are listed once rather than re-filtered
+        # from every shift for every employee and anchor.
+        window_shifts: Dict[int, List[str]] = {}
+
+        def shifts_in_window(anchor: int) -> List[str]:
+            if anchor not in window_shifts:
+                window_shifts[anchor] = [
+                    sid for o in range(anchor, anchor + 7)
+                    for sid in self._shifts_by_ord.get(o, [])
+                ]
+            return window_shifts[anchor]
+
         for employee_id, employee in self.employees.items():
             max_hours = employee.get('max_hours_per_week')
             if not max_hours:
                 continue
+            cap_minutes = self._cap_minutes(max_hours)
 
             externals = self.external_by_employee[employee_id]
             external_ord = [
                 (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
-                 self._calculate_shift_hours(ext))
+                 self._shift_minutes(ext))
                 for ext in externals
             ]
-            decision_ord = [
-                (datetime.strptime(shift['date'], '%Y-%m-%d').toordinal(), shift_id)
-                for shift_id, shift in self.shifts.items()
-            ]
 
-            anchor_days = {o for o, _ in external_ord} | {o for o, _ in decision_ord}
+            anchor_days = {o for o, _ in external_ord} | set(self._shifts_by_ord)
             for anchor in anchor_days:
-                window = range(anchor, anchor + 7)
                 terms = [
-                    v * self._calculate_shift_hours(self.shifts[sid])
-                    for o, sid in decision_ord
-                    if o in window and (v := self._var(employee_id, sid)) is not None
+                    v * self._minutes[sid]
+                    for sid in shifts_in_window(anchor)
+                    if (v := self._var(employee_id, sid)) is not None
                 ]
-                fixed = sum(h for o, h in external_ord if o in window)
-                self.model.Add(sum(terms) + fixed <= max_hours)
+                fixed = sum(m for o, m in external_ord if anchor <= o < anchor + 7)
+                self.model.Add(sum(terms) + fixed <= cap_minutes)
 
     def _day_worked_indicators(self, employee_id: str) -> Dict[int, object]:
         """
@@ -662,11 +740,7 @@ class ScheduleOptimizerORTools:
         if cached is not None:
             return cached
 
-        shifts_by_ord: Dict[int, List[str]] = {}
-        for shift_id, shift in self.shifts.items():
-            o = datetime.strptime(shift['date'], '%Y-%m-%d').toordinal()
-            shifts_by_ord.setdefault(o, []).append(shift_id)
-
+        shifts_by_ord = self._shifts_by_ord
         external_ords = {
             datetime.strptime(ext['date'], '%Y-%m-%d').toordinal()
             for ext in self.external_by_employee.get(employee_id, [])
@@ -717,17 +791,12 @@ class ScheduleOptimizerORTools:
             if not max_consec:
                 continue
 
-            shifts_by_ord: Dict[int, List[str]] = {}
-            for shift_id, shift in self.shifts.items():
-                o = datetime.strptime(shift['date'], '%Y-%m-%d').toordinal()
-                shifts_by_ord.setdefault(o, []).append(shift_id)
-
             external_ords = {
                 datetime.strptime(ext['date'], '%Y-%m-%d').toordinal()
                 for ext in self.external_by_employee[employee_id]
             }
 
-            all_ords = set(shifts_by_ord) | external_ords
+            all_ords = set(self._shifts_by_ord) | external_ords
             if not all_ords:
                 continue
 
@@ -737,37 +806,61 @@ class ScheduleOptimizerORTools:
                 window = [day_worked[o] for o in range(start, start + max_consec + 1)]
                 self.model.Add(sum(window) <= max_consec)
 
-    def _calculate_shift_hours(self, shift: Dict) -> int:
-        """Calculate shift duration in hours."""
-        start = self._parse_time(shift['start_time'])
-        end = self._parse_time(shift['end_time'])
-        
-        # `<=` and not `<`: a shift whose end equals its start spans a full
-        # day, matching _abs_bounds and the TypeScript shiftHours. The two
-        # disagreed until this was reconciled, and this is the safe direction —
-        # for a cap, over-counting refuses work that might have been allowed,
-        # while a zero-hour shift is invisible to every limit.
-        if end <= start:
-            end += 24 * 60
+    def _calculate_shift_hours(self, shift: Dict) -> float:
+        """
+        Shift duration in hours, for the `hours` field of the output only,
+        rounded to one decimal as the TypeScript shiftHours rounds it.
 
-        return (end - start) // 60  # Convert minutes to hours
-    
+        No constraint reads this. It used to be `minutes // 60`, and the caps
+        were built on it: an 08:00–16:30 shift counted as 8h, so it fit an 8h
+        daily cap and five of them fit a 40h week, while the validator — which
+        counts 8.5h — rejected both (#834). The caps now use _shift_minutes.
+        """
+        return round(self._shift_minutes(shift) / 60, 1)
+
     def _shift_minutes(self, shift: Dict) -> int:
         """
-        Shift duration in MINUTES, overnight-aware.
+        Shift duration in MINUTES, overnight-aware: the unit every cap, the
+        rest rule and fairness are modelled in.
 
-        Fairness balances on minutes rather than the integer hours used by the
-        cap constraints, because `_calculate_shift_hours` truncates: a 7.5-hour
-        shift counts as 7. For a cap that under-counts is merely conservative,
-        but for BALANCING it introduces a systematic bias — half-hour shifts
-        become invisible, so someone holding many of them looks under-loaded
-        and keeps being given more.
+        `<=` and not `<`: a shift whose end equals its start spans a full day,
+        matching _abs_bounds and the TypeScript shiftHours. This is the safe
+        direction — for a cap, over-counting refuses work that might have been
+        allowed, while a zero-length shift would be invisible to every limit.
+
+        Minutes rather than hours because hours are not integral (a 7.5h shift
+        is common) and CP-SAT is an integer solver. Truncating to whole hours
+        was wrong in both uses: for a cap it admitted work over the limit
+        (#834), and for balancing it made half-hours invisible, so someone
+        holding many of them looked under-loaded and kept being given more.
         """
         start = self._parse_time(shift['start_time'])
         end = self._parse_time(shift['end_time'])
         if end <= start:
             end += 24 * 60
         return end - start
+
+    @staticmethod
+    def _cap_minutes(hours: float) -> int:
+        """
+        A cap in hours as whole minutes, rounded DOWN — the safe direction for
+        a ceiling. The epsilon keeps a value such as 7.3h, whose float product
+        is 437.99999..., from losing a minute it does have.
+        """
+        return math.floor(float(hours) * 60 + 1e-9)
+
+    @staticmethod
+    def _daily_budget_hours(employee: Dict) -> float:
+        """
+        The contract's daily cap when present; otherwise the historical derived
+        formula. Mirrors constraintValidator, which is the authority. One
+        definition for both the constraint and the over-commitment diagnosis,
+        which must agree or an employee the diagnosis keeps makes the model
+        infeasible.
+        """
+        return employee.get('max_hours_per_day') or max(
+            8, employee.get('max_hours_per_week', 40) // 5
+        )
 
     def _fairness_terms(self, scale: int) -> Tuple[List, int]:
         """
@@ -799,10 +892,17 @@ class ScheduleOptimizerORTools:
         is intended: someone left entirely unused IS an unequal distribution.
         Where there is simply more staff than work the spread is unavoidable
         and this term cannot improve it, so it does no harm either.
-        """
-        if len(self.employees) < 2:
-            return [], 0  # Nothing to balance.
 
+        Employees eligible for NO shift are the exception: they are left out of
+        the balance rather than counted at 0. Their 0 is not a distribution
+        choice the solver made — nothing could be assigned to them — so
+        including them would pin `min` at 0 and make the spread a constant the
+        term cannot move. That exclusion used to be a `return [], 0` inside
+        this loop, which dropped the fairness term for EVERYONE the moment one
+        such employee existed: two RNs over six RN shifts split 3/3, and adding
+        a colleague without the skill turned it into 6/0 (#839).
+        """
+        upper = sum(self._shift_minutes(s) for s in self.shifts.values())
         loads = []
         for emp_id in self.employees:
             terms = [
@@ -811,13 +911,14 @@ class ScheduleOptimizerORTools:
                 if (v := self._var(emp_id, shift_id)) is not None
             ]
             if not terms:
-                return [], 0
-            upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+                continue
             load = self.model.NewIntVar(0, upper, f'load_e{emp_id}')
             self.model.Add(load == sum(terms))
             loads.append(load)
 
-        upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+        if len(loads) < 2:
+            return [], 0  # Nothing to balance.
+
         max_load = self.model.NewIntVar(0, upper, 'max_load')
         min_load = self.model.NewIntVar(0, upper, 'min_load')
         self.model.AddMaxEquality(max_load, loads)
@@ -1417,17 +1518,19 @@ class ScheduleOptimizerORTools:
         
         return 0  # Neutral
 
-    def solve(self, time_limit_seconds: int = 300) -> Dict:
+    def solve(self, time_limit_seconds: float = 300) -> Dict:
         """
         Solve the CP-SAT model and return solution.
-        
+
         Args:
-            time_limit_seconds: Maximum time to spend solving
-            
+            time_limit_seconds: Maximum time to spend searching — what is left
+                of the caller's budget once the model is built (see
+                solve_time_budget)
+
         Returns:
             Dictionary with solution and statistics
         """
-        print(f"Solving with CP-SAT (time limit: {time_limit_seconds}s)...", file=sys.stderr)
+        print(f"Solving with CP-SAT (time limit: {time_limit_seconds:.1f}s)...", file=sys.stderr)
         
         solver = cp_model.CpSolver()
         solver.parameters.max_time_in_seconds = time_limit_seconds
@@ -1560,6 +1663,39 @@ class ScheduleOptimizerORTools:
         }
 
 
+MIN_SOLVE_SECONDS = 1.0
+
+
+def solve_time_budget(total_seconds: float, elapsed_seconds: float) -> Optional[float]:
+    """
+    Seconds left for the search once reading the input and building the model
+    have taken `elapsed_seconds` of the caller's `total_seconds`, or None when
+    less than MIN_SOLVE_SECONDS remain.
+
+    WHY THE SCRIPT SUBTRACTS ITS OWN BUILD TIME. `--time-limit` is the whole
+    budget the caller can wait for, and the caller's watchdog kills the process
+    at its end. The search limit used to be that same figure, so a run that
+    searched to the limit was killed after a build of any length — 25 s at
+    40 x 224, more at larger sizes — and degraded to greedy, discarding the
+    feasible solution it was about to return (#837). Build time is not
+    predictable from outside: it grows with employees x shifts and with how
+    many pairings survive eligibility, so a fixed allowance estimated by the
+    caller would be wrong at one end of the range or the other. Measured here,
+    it is exact.
+
+    `elapsed_seconds` is measured from PROCESS_START, before the ortools
+    import — part of what the caller waits for, and the largest fixed cost of
+    a small run. Extracting the solution and writing it out happen after the
+    search and are not budgeted here: they are what the caller's margin
+    (solverTimeLimitSeconds in ScheduleOptimizerORTools.ts) is for.
+
+    Below a second there is nothing useful left to search, so the run reports
+    no schedule rather than overrunning the caller's deadline.
+    """
+    remaining = total_seconds - elapsed_seconds
+    return remaining if remaining >= MIN_SOLVE_SECONDS else None
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Staff Schedule Optimizer using OR-Tools')
@@ -1567,8 +1703,11 @@ def main():
     parser.add_argument('output', nargs='?', help='Output JSON file (or use --stdout)')
     parser.add_argument('--stdin', action='store_true', help='Read input from stdin')
     parser.add_argument('--stdout', action='store_true', help='Write output to stdout')
-    parser.add_argument('--time-limit', type=int, default=300, help='Time limit in seconds')
-    
+    parser.add_argument(
+        '--time-limit', type=float, default=300,
+        help='Total budget in seconds for building the model AND searching',
+    )
+
     args = parser.parse_args()
     
     # Read input
@@ -1585,7 +1724,25 @@ def main():
     try:
         optimizer = ScheduleOptimizerORTools(problem_data)
         optimizer.build_model()
-        result = optimizer.solve(time_limit_seconds=args.time_limit)
+        # Since process start: interpreter, ortools import, input and build.
+        elapsed = time.monotonic() - PROCESS_START
+        print(f'Ready to search {elapsed:.2f}s after start', file=sys.stderr)
+        budget = solve_time_budget(args.time_limit, elapsed)
+        if budget is None:
+            # UNKNOWN is what CP-SAT itself reports for a limit reached with no
+            # solution, and the bridge already treats it as "no schedule".
+            result = {
+                'status': 'UNKNOWN',
+                'error': (
+                    f'starting, reading the input and building the model took {elapsed:.2f}s '
+                    f'of the {args.time_limit:g}s time limit, leaving no time to search'
+                ),
+                'assignments': [],
+                'over_committed_employees': optimizer.over_committed,
+                'statistics': {'is_optimal': False},
+            }
+        else:
+            result = optimizer.solve(time_limit_seconds=budget)
         
         # Write output
         if args.stdout:

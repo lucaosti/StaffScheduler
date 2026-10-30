@@ -23,6 +23,7 @@ jest.mock('../middleware/auth', () => ({
   requirePermission: () => (_req: any, _res: any, next: any) => next(),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
+  revokePresentedAccessToken: jest.fn(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
 }));
@@ -2005,6 +2006,30 @@ describe('bulk-import router (extended)', () => {
     const res = await request(app()).post('/api/import/shifts').send({ csv: 'x' });
     expect(res.status).toBe(500);
   });
+
+  // #895: IMPORT_FAILED used to carry the raw message of whatever was thrown.
+  it.each(['employees', 'shifts'] as const)(
+    'POST /%s renders an unexpected fault as the generic 500, without the driver text',
+    async (kind) => {
+      const fault = Object.assign(new Error("Duplicate entry 'x' for key 'users.email'"), { code: 'ER_DUP_ENTRY' });
+      (BulkImportService.prototype.importEmployees as jest.Mock) = jest.fn().mockRejectedValue(fault);
+      (BulkImportService.prototype.importShifts as jest.Mock) = jest.fn().mockRejectedValue(fault);
+      const res = await request(app())
+        .post(`/api/import/${kind}`)
+        .send({ csv: 'x', defaultPassword: 'Pass123!' });
+      expect(res.status).toBe(500);
+      expect(res.body.error).toEqual({ code: 'INTERNAL_ERROR', message: 'An internal error occurred' });
+    }
+  );
+
+  it('POST /shifts renders an AppError with its own status, not IMPORT_FAILED', async () => {
+    (BulkImportService.prototype.importShifts as jest.Mock) = jest
+      .fn()
+      .mockRejectedValue(new ForbiddenError('Not allowed'));
+    const res = await request(app()).post('/api/import/shifts').send({ csv: 'x' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('FORBIDDEN');
+  });
 });
 
 /* ---------------------------------------------------------------------------
@@ -2219,6 +2244,7 @@ describe('auth router (extended)', () => {
 
   it('POST /refresh 200 rotates the session', async () => {
     (RefreshTokenService.prototype.rotate as jest.Mock) = jest.fn().mockResolvedValue({
+      status: 'rotated',
       userId: 1,
       issued: { token: 'rotated', expiresAt: new Date(Date.now() + 1000) },
     });
@@ -2237,8 +2263,8 @@ describe('auth router (extended)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('POST /logout 200', async () => {
-    const res = await request(app()).post('/api/auth/logout');
+  it('POST /refresh/logout 200', async () => {
+    const res = await request(app()).post('/api/auth/refresh/logout');
     expect(res.status).toBe(200);
   });
 });

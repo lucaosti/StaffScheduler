@@ -39,10 +39,12 @@ export class TotpProvider implements TwoFactorMethodProvider {
   async beginSetup(userId: number, accountLabel: string): Promise<TwoFactorSetupPayload> {
     const secret = generateSecret();
     const secretData: TotpSecretData = { secret, lastCounter: null };
+    // Leaves an enabled row untouched — the race backstop behind the
+    // already-enabled check in TwoFactorService.beginSetup (#817).
     await this.pool.execute(
       `INSERT INTO two_factor_methods (user_id, method_type, enabled, secret_data)
        VALUES (?, 'totp', 0, ?)
-       ON DUPLICATE KEY UPDATE enabled = 0, secret_data = VALUES(secret_data)`,
+       ON DUPLICATE KEY UPDATE secret_data = IF(enabled = 1, secret_data, VALUES(secret_data))`,
       [userId, JSON.stringify(secretData)]
     );
     const otpauthUri = buildOtpauthUri({
@@ -103,15 +105,29 @@ export class TotpProvider implements TwoFactorMethodProvider {
       return false;
     }
 
-    // Compare-and-set via JSON_SET, scoped on the previous lastCounter value
-    // (NULL-safe with <=>): only wins if no concurrent login recorded this
-    // (or a later) step first. affectedRows = 0 means we lost the race.
+    // Compare-and-set via JSON_SET, scoped on the previous lastCounter value:
+    // only wins if no concurrent login recorded this (or a later) step first.
+    // affectedRows = 0 means we lost the race.
+    //
+    // The "no step used yet" case cannot be written `JSON_EXTRACT(...) <=> ?`
+    // with a NULL parameter: enrolment stores `"lastCounter": null`, and
+    // JSON_EXTRACT returns that as a JSON null, which is not NULL-safe-equal to
+    // SQL NULL. That form never matched, so every first code after enrolment
+    // was rejected and TOTP accounts could only sign in with recovery codes
+    // (#899). JSON_TYPE names the JSON null explicitly; a missing key (SQL
+    // NULL) is treated the same way.
+    const previous = secretData.lastCounter;
     const [result] = await this.pool.execute<ResultSetHeader>(
-      `UPDATE two_factor_methods
-          SET secret_data = JSON_SET(secret_data, '$.lastCounter', ?)
-        WHERE user_id = ? AND method_type = 'totp'
-          AND JSON_EXTRACT(secret_data, '$.lastCounter') <=> ?`,
-      [counter, userId, secretData.lastCounter]
+      previous === null
+        ? `UPDATE two_factor_methods
+              SET secret_data = JSON_SET(secret_data, '$.lastCounter', ?)
+            WHERE user_id = ? AND method_type = 'totp'
+              AND COALESCE(JSON_TYPE(JSON_EXTRACT(secret_data, '$.lastCounter')), 'NULL') = 'NULL'`
+        : `UPDATE two_factor_methods
+              SET secret_data = JSON_SET(secret_data, '$.lastCounter', ?)
+            WHERE user_id = ? AND method_type = 'totp'
+              AND JSON_EXTRACT(secret_data, '$.lastCounter') = CAST(? AS JSON)`,
+      previous === null ? [counter, userId] : [counter, userId, String(previous)]
     );
     return result.affectedRows > 0;
   }

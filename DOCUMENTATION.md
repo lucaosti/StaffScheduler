@@ -112,6 +112,12 @@ generated typed client (`api/client`) where the endpoint is in the OpenAPI spec,
 otherwise `handleResponse` + `getAuthHeaders` from `./apiUtils`. The frontend proxies
 all `/api/*` requests to `http://localhost:3001` in development.
 
+**Bootstrap is CSS only.** Bootstrap's JavaScript is not loaded, so `data-bs-toggle`,
+`data-bs-dismiss` and the other plugin attributes do nothing. Menus use
+`components/Dropdown.tsx`; collapses, dismissible alerts and modals are React state.
+Loading `bootstrap.bundle` was rejected because its plugins mutate DOM that React
+renders, and a re-render silently undoes them (#840).
+
 ---
 
 ## 2. Domain model
@@ -184,6 +190,8 @@ Every endpoint returns:
 
 The `code` field is always present in error responses. `message` is safe for display in production.
 
+An internal fault (anything that is not a typed `AppError`) is always rendered as `500 { "code": "INTERNAL_ERROR", "message": "An internal error occurred", "requestId": "<uuid>" }`, in every `NODE_ENV` (#895): the driver/library message and any driver `code` (`ER_…`) are logged, never sent. `requestId` is the same value as the `X-Request-Id` header and the `requestId` on the server's log entry, so a user can quote it and support can find the cause; CORS exposes `X-Request-Id` so a cross-origin client can read it too. No route renders a caught fault's message itself — routes re-render only typed errors. A malformed JSON body or an oversized payload (body-parser's exposed 4xx errors) answers with its own status and `code: "BAD_REQUEST"`. The frontend never shows a 5xx's text: `handleResponse` and `ErrorAlert` render a translated "something went wrong on our side" sentence with the request id instead.
+
 ### Authoritative contract
 
 The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi/openapi.json), served live at `http://localhost:3001/api/docs` (Swagger UI). When this file conflicts with the spec, the spec wins.
@@ -200,19 +208,19 @@ The single source of truth is [`backend/openapi/openapi.json`](./backend/openapi
 POST /api/auth/login             { email, password, code?, methodType? } → sets httpOnly cookie "token"; body: { user: { id, email, firstName, lastName, roles, permissions } }
 POST /api/auth/login/challenge   { email, password, methodType } → pre-session challenge request (email code delivery, WebAuthn assertion options)
 GET  /api/auth/verify            (cookie) → { user }
-POST /api/auth/refresh           (cookie) → rotates cookie; body: { user }
-POST /api/auth/logout            blacklists the JTI and clears the cookie
+POST /api/v1/auth/refresh        (cookie) → rotates cookie; body: { user }; 409 REFRESH_SUPERSEDED when a concurrent refresh just rotated it
+POST /api/v1/auth/refresh/logout (cookie) → revokes the refresh-token family, blacklists the JTI if still valid, clears both cookies
 ```
 
 With `X-Client-Type: mobile` (see "Mobile client: token-based variant" below),
 `/login` and `/refresh` additionally set `accessToken`/`refreshToken` on the
 response body, alongside the cookies above rather than instead of them; and
-`/refresh` also accepts `{ refreshToken }` in the body as a fallback when the
-cookie is absent. Neither behavior is present without that header.
+`/refresh` and `/refresh/logout` also accept `{ refreshToken }` in the body as a
+fallback when the cookie is absent. Neither behavior is present without that header.
 
 JWT payload: `{ userId, jti }` — no role. Permissions are resolved from the DB on every request. The `jti` field enables server-side revocation on logout via a blacklist with TTL-based expiry, held in the shared cache store (Redis when reachable, in-process otherwise). The cookie lifetime tracks `JWT_EXPIRES_IN` so cookie and token always expire together.
 
-**Two-factor authentication**: when an account has ANY method enabled (`POST /api/auth/2fa/setup` + `/enable`, with an optional `methodType` — see the method registry below), login additionally requires `code` (and, when the enrolled method isn't TOTP, `methodType`) — that method's code/assertion, or an unused recovery code. A password-valid login without `code` answers 401 `TWO_FACTOR_REQUIRED`, whose response carries `data.methods` (the account's enabled method types, so the client knows what to offer); a wrong code answers 401 `TWO_FACTOR_INVALID`. Disabling one method (`POST /api/auth/2fa/disable`) likewise requires a valid code for that method, or a recovery code. Accepted codes are single-use: TOTP's matched time-step counter and email/WebAuthn's challenge are cleared via a compare-and-set update on verification, so an intercepted code/challenge cannot be replayed; recovery-code consumption uses the same compare-and-set pattern.
+**Two-factor authentication**: when an account has ANY method enabled (`POST /api/auth/2fa/setup` + `/enable`, with an optional `methodType` — see the method registry below), login additionally requires `code` (and, when the enrolled method isn't TOTP, `methodType`) — that method's code/assertion, or an unused recovery code. A password-valid login without `code` answers 401 `TWO_FACTOR_REQUIRED`, whose response carries `data.methods` (the account's enabled method types, so the client knows what to offer); a wrong code answers 401 `TWO_FACTOR_INVALID`. Disabling one method (`POST /api/auth/2fa/disable`) likewise requires a valid code for that method, or a recovery code. `POST /api/auth/2fa/setup` on a method that is already enabled answers 409 and changes nothing (#817) — setup used to reset the method to disabled, which let a session turn 2FA off without the code `/disable` demands; to re-enrol, disable with a code first. A setup that loses a race with a concurrent enable also answers 409 rather than returning setup data that could never be confirmed. `POST /api/auth/2fa/enable` refusals keep their own status under `TWO_FACTOR_ENABLE_FAILED` (400 wrong code, 409 no pending setup or already enabled, 404 no such user); an unexpected fault is a generic 500. Accepted codes are single-use: TOTP's matched time-step counter and email/WebAuthn's challenge are cleared via a compare-and-set update on verification, so an intercepted code/challenge cannot be replayed; recovery-code consumption uses the same compare-and-set pattern.
 
 **Method registry**: `TwoFactorService` is a dispatcher over `TwoFactorMethodProvider` implementations keyed by `TwoFactorMethodType` (`'totp' | 'webauthn' | 'email' | 'sms'`) — TOTP (`TotpProvider`), email one-time codes (`EmailCodeProvider`), WebAuthn/passkeys (`WebAuthnProvider`), and SMS one-time codes (`SmsCodeProvider`) are all registered, each slotting into the same provider map with no change to the dispatcher, the routes, or the request schema. Enrollment data is per-user-per-method in `two_factor_methods` (`secret_data` is a provider-specific JSON blob — a TOTP secret and a WebAuthn credential have nothing in common, so dedicated `users` columns per method would force a migration per provider and leave most columns NULL for most rows; the table's `UNIQUE(user_id, method_type)` also means one passkey per user, not a full passkey manager — sufficient for a second factor). Recovery codes stay OFF that table, on `users.two_factor_recovery_codes`: they authenticate "you own this account," not "you have this specific method," so there is one set per user regardless of how many methods are enrolled — generated the first time ANY method is enabled, reused (not regenerated) when a second method is added, and cleared only once the last enabled method is removed. Every public `TwoFactorService` method defaults its `methodType` parameter to `'totp'`, so a caller that only ever used TOTP (every caller before #591) is unaffected.
 
@@ -234,6 +242,17 @@ List endpoints accept `?page` and `?pageSize` (max 200, default 25). When
 either is present the response carries a `meta` block
 (`{ total, page, pageSize, pages }`) alongside `data`; when neither is present
 the plain `{ success, data }` shape is returned, for backward compatibility.
+
+Every paginated SELECT renders its window with `limitOffsetClause` in
+`backend/src/utils/sql.ts`, never `LIMIT ? OFFSET ?`: under `pool.execute()`
+MySQL's binary protocol rejects a bound LIMIT/OFFSET with ER_WRONG_ARGUMENTS,
+which made the employees, users, assignments, schedules and shifts listings
+answer 500 to any `?page` request (#824). The helper inlines integers it
+derives and clamps itself, so no caller text reaches the SQL. Each paginated
+listing — those five plus the audit log and change requests, whose entries
+routinely share a `created_at` second — orders by its `id` last, so a page
+boundary never repeats or skips a row; the notification and webhook-delivery
+feeds do the same so the rows a limit keeps are stable.
 
 Query filters are validated with `validateQuery(schema)` against a Zod schema
 in `@staff-scheduler/shared`, the same way bodies and path params are, and the
@@ -359,7 +378,7 @@ or request a page.
 | `/api/settings` | System settings | `settings.manage` |
 | `/api/health` | Health check (unauthenticated) | — |
 
-**`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives.
+**`GET /api/dashboard/attention-items`** is a shortlist, not a report: shifts in the next two weeks below their minimum staffing, and the caller's own pending approvals sorted oldest-first with counts over 24h/48h/7d. Understaffed shifts are scoped to the org units the caller belongs to (their own subtree) unless they hold `report.read`, which lifts that to everything — the same membership-bound-plus-lift shape used elsewhere in the app, applied here because nothing on the dashboard was previously scoped by org unit at all. Pending-approval aging needs no separate scoping: it is built directly on `PendingApprovalService.listForUser`, which already answers "assigned to this person, or their structure" — reusing it rather than re-deriving the same visibility rule a second time. Both lists are capped (20 items) with a `truncated` flag on the shift list when more matched; `/api/reports` and `/api/shifts` are where the full picture behind each figure lives. The SPA's Pending Approvals card shows this caller-scoped count, not `GET /api/dashboard/stats`' `pendingApprovals`, which is organisation-wide; its quick actions are gated on the permissions the server checks for the action (`shift.manage`, `employee.manage`, `schedule.optimize`, `report.read`), and the recent-activity panel is fetched and shown only with `audit.read` (#894).
 
 **Cost plans (decision-support: cost vs. plan).** A cost plan is a fixed labor-cost target an administrator sets for one department over one period (`start_date`/`end_date`, the same period shape `schedules` already uses) — a manager-entered budget figure, not derived from headcount or contracted hours. `POST /api/cost-plans` creates one; `PUT /api/cost-plans/{id}` edits its target amount; `GET /api/cost-plans` / `GET /api/cost-plans/{id}` list or read one; `DELETE /api/cost-plans/{id}` removes one. A duplicate department+period is a `409`. Reading requires `report.read`; writing requires `report.manage`, a separate, stronger permission — deciding what the organization is measured against is a different act from viewing the measurement, the same read/write split `payroll.manage` draws against its own read-side gates. `GET /api/dashboard/stats` folds the other half of the comparison into its existing response: `monthlyCostPlan` is the sum of every cost plan whose period overlaps the current month, across departments, computed in the same route alongside `monthlyCost` and gated behind the identical `report.read` check — null under the exact same condition `monthlyCost` is null.
 
@@ -411,12 +430,63 @@ both in httpOnly `SameSite=Strict` cookies (never exposed to JavaScript):
 - **Refresh token** (`refresh_token` cookie, scoped to the refresh endpoint's own path, `/api/v1/auth/refresh`): an
   opaque 256-bit token whose **hash** is stored in `refresh_tokens`, default
   30-day lifetime (`JWT_REFRESH_EXPIRES_IN`). `POST /api/auth/refresh` rotates
-  it — revoking the presented token and issuing a successor in the same family —
+  it — claiming the presented token with a conditional `UPDATE` and issuing a
+  successor in the same family only if that claim won, all in one transaction —
   and mints a new access token. It is deliberately **not** behind the auth
   middleware, so it works exactly when the access token has expired.
 - **Reuse detection**: replaying an already-rotated refresh token revokes the
   entire token family (`RefreshTokenService`), bounding a stolen token to one
-  rotation window. Logout revokes both the access JTI and the refresh token.
+  rotation window.
+- **Concurrent refreshes**: because the claim comes first, two requests racing
+  with one token can never both get a successor (that used to fork the family).
+  A token presented again within 10 seconds of its rotation is answered
+  409 `REFRESH_SUPERSEDED` — nothing issued, nothing revoked, cookies untouched —
+  rather than treated as reuse, so two tabs refreshing at once do not sign the
+  user out everywhere. The SPA avoids the race in the first place — one
+  in-flight refresh per tab, serialised across tabs with a Web Lock where the
+  browser has them — and otherwise retries after 250 ms and 1 s, by when the
+  winning refresh's cookie has landed in the shared jar. If every retry is
+  still superseded, the successor went to another client (a stolen token
+  rotated first), so the SPA calls logout, which revokes the family. A replay
+  after the window is reuse as above. Rotation locks the owning `users` row
+  before the token row — the same order a password change takes — so the two
+  cannot deadlock.
+- **Expired access token**: the SPA refreshes ahead of expiry on a timer, but a
+  timer cannot see `JWT_EXPIRES_IN` (the token is in an httpOnly cookie) nor
+  survive sleep or a throttled background tab, so the typed client also answers
+  a 401 `INVALID_TOKEN` / `MISSING_TOKEN` / `TOKEN_REVOKED` with one refresh
+  (the same single-flight, cross-tab-locked one) and one retry of the request.
+  Concurrent 401s share that refresh. The auth endpoints themselves are exempt.
+  Only a refused refresh (401, or `REFRESH_SUPERSEDED` after the retries) signs
+  the SPA out, and once however many requests were waiting; a 5xx or network
+  failure is just the request's error. The native app can read its token, so
+  there the proactive refresh is scheduled at 80% of the remaining lifetime
+  from `exp`, and runs on resume (`visibilitychange`) when the token is within
+  two minutes of expiry.
+- **Logout** is `POST /api/v1/auth/refresh/logout`: beneath the refresh cookie's
+  path, because that is the only place a browser sends the cookie, and not
+  behind the auth middleware, so it works with an expired access token. It
+  revokes the presented refresh token's whole family and blacklists the access
+  JTI if the access token is still valid; a native client passes its refresh
+  token in the body. Widening the cookie path so `/auth/logout` could receive it
+  was rejected for the exposure reason above. Before that call the SPA
+  deactivates this device's native push token (`DELETE
+  /notifications/push/device-token`, registered on every sign-in including a
+  restored session) and drops the browser's Web Push subscription, since both
+  belong to the device rather than the person and would keep delivering the
+  signed-out user's notifications to the next one. That cleanup is bounded to
+  1.5 s; the revocation is a `keepalive` request and is sent at once on
+  `pagehide`, so closing the tab after Logout still revokes. A sign-in waits
+  for a pending revocation, so it can never revoke the new session. The
+  TanStack Query cache is cleared whenever the signed-in user changes — before
+  the new user's first render on a switch, after the pages unmount on logout.
+- **Password changes and deactivation end every session**: `UserService`
+  revokes all of the user's refresh tokens, in the same transaction, whenever
+  the password is changed (via `/users` or `/employees`) or the account is
+  deactivated or deleted, and drops the cached auth context. Access tokens
+  already issued stay valid until they expire (at most `JWT_EXPIRES_IN`) after
+  a password change; a deactivated account's are rejected at once, because
+  `authenticate` checks `is_active`.
 
 The SPA refreshes proactively before expiry and falls back to a refresh on page
 load, so an active session is never interrupted. See `RefreshTokenService` and
@@ -645,6 +715,81 @@ locally it self-skips when OR-Tools is not installed. Coverage is deliberately
 not treated as a hard violation (the greedy is best-effort and may leave a shift
 short where CP-SAT would prove infeasibility); it is reported separately.
 
+Fixed fixtures only test the shapes their author thought of, so a seeded
+property suite (`backend/src/__tests__/optimizer.properties.test.ts`) runs both
+engines on random small instances — at most 6 employees, 3 days and 8 shifts,
+with half-hour boundaries, overnight shifts, external assignments on either
+side of the period, unavailability (including the day after an overnight
+shift), skills and levels, pairings, and per-employee daily/weekly/consecutive
+caps. It asserts that neither engine breaks a hard rule, that every assignment
+pairs an eligible employee and shift, that the same seed gives the same instance
+and the same greedy schedule, and that CP-SAT, when it proves optimality, fills
+at least as many seats as the greedy. The seed is fixed by default and
+overridden with `TEST_SEED`; a failure prints the seed, the instance index and
+the instance shrunk to the parts that still fail, as an `OptimizerFixture`
+literal for `optimizerFixtures.ts`. Its CP-SAT half sits behind the same
+`REQUIRE_ORTOOLS` gate as the parity suite.
+
+The validator and both engines total shift durations in exact minutes
+(`shiftMinutes` in `backend/src/optimization/shiftTime.ts` and `_shift_minutes`
+in the solver) and compare those totals with the daily and weekly caps; minimum
+rest is compared on exact timestamps. CP-SAT, an integer solver, used to model
+whole hours, so an 08:00–16:30 shift fit an 8h cap and 10.5h of required rest
+was read as 10h; the validator and the greedy used hours rounded to a tenth per
+shift, so three 2h40 shifts — exactly 8h — summed to 8.1h. Rounded hours
+(`shiftHours`) remain only for displayed figures such as an assignment's
+`hours`. `ComplianceEngine`, which checks single manual assignments outside the
+engines, totals the same exact minutes against the weekly cap (#922): it used
+to sum hours rounded per shift, so a manual assignment of a third 2h40 shift was
+refused at 8.1h that auto-scheduling, counting minutes, would have made.
+
+**Working-time limits are resolved per employee, by the same resolver
+`ComplianceEngine` uses.** Weekly hours, consecutive days and minimum rest come
+from `WorkingTimeLimitsService`, and every employee in the problem carries their
+own `max_hours_per_week`, `max_consecutive_days` and `min_hours_between_shifts`.
+The rule, per limit:
+
+- **A GLOBAL `policies` row (`max_hours_week` / `max_consecutive_days` /
+  `min_rest_hours`) is a legal ceiling.** The employment contract and
+  `user_preferences` may only tighten it — the lower cap, the longer rest —
+  never loosen it. A preference is the person's wish and a contract the
+  employer's terms; neither waives a rule the organization adopted, often a
+  jurisdiction's, applied as a preset. "First match wins" left #883 open for
+  two of its three limits: `user_preferences.max_hours_per_week` /
+  `max_consecutive_days` are `INT DEFAULT 40 / 5`, `PreferencesService` writes
+  40/5 into every row it creates, and the demo seed creates one for everyone,
+  so a 36h / 4-day policy reached nobody who had a preferences row. A stricter
+  personal value is still honoured.
+- **The contract and the preference are one personal layer, contract first**:
+  the preference speaks only where no contract states the limit, and the
+  policy ceiling is applied to that one value. Treating them as separate
+  layers (the tightest of all three) made the preference row's 40h / 5-day
+  defaults binding wherever a policy existed: under the EU preset (48h,
+  6 days) a 48h / 6-day full-time contract resolved to 40h / 5, so applying a
+  looser preset silently tightened everyone.
+- **With no policy value**, the contract, then the preference, then
+  `system_settings` (`scheduling.*`), then the defaults (40h, 5 days, 8h) —
+  the setting and the default are fallbacks, not rules anyone adopted.
+- **A contract covering only part of the period** governs only that part:
+  the tighter of its value and what applies without it is used for the whole
+  period, the same conservative choice the contract resolver makes between two
+  contracts (`EmploymentContractService.resolveForPeriod` reports which users'
+  contracts cover the whole period). An 8h-rest contract ending on the 15th
+  used to set the rest for the whole month.
+
+`ComplianceEngine` (manual assignments and swaps) follows the same rule through
+the same resolver, over the candidate's day. The problem states no
+problem-wide limit. It used to: `buildOptimizationProblem` set 8h of rest for
+everyone and the loader read `COALESCE(preference, 40)` / `COALESCE(preference,
+5)`, so an 11h-rest contract got 9h turnarounds that `ComplianceEngine` then
+flagged (#838), and an organization that applied the EU preset still got 8h
+rest from every generated schedule (#883). A manual assignment and a generated
+one are now judged against the same number. The validator's `minRestHoursFor`
+defines the precedence for a problem stated by hand (the employee's value, then
+`constraints.min_hours_between_shifts`, then 8h); the greedy calls it, and
+CP-SAT's `_rest_minutes` mirrors it, building its conflict cliques once per
+distinct rest value.
+
 ### Staffing suggestions (seasonal baseline)
 
 `DemandForecastService` (`backend/src/services/DemandForecastService.ts`)
@@ -696,7 +841,7 @@ Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.
 |---|---|---|
 | 1 | Staff cap | `shift.max_staff` — never exceeded |
 | 2 | No double-booking | Absolute-time overlap (overnight-aware, across day boundaries) |
-| 2b | Minimum rest between shifts | `min_hours_between_shifts` (default 8h), across day boundaries |
+| 2b | Minimum rest between shifts | The employee's own `min_hours_between_shifts` (else the problem-wide one, else 8h), across day boundaries |
 | 3 | Declared unavailability | `user_unavailability` rows, expanded to per-day dates |
 | 4 | Skill requirements | `shift_skills` join; employee must hold every required skill |
 | 5 | Daily hours cap | `max(8, emp.max_hours_per_week / 5)` hours per employee per day |
@@ -741,8 +886,46 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Exit code 2 (the script's `ERROR` JSON, e.g. an objective that would overflow) | Rejected promise → `optimize()` logs a warning and falls back to greedy |
 | Exit code 1 with status `INFEASIBLE`, `UNKNOWN` (time limit, no solution) or `MODEL_INVALID` | No schedule in the result → `optimize()` logs a warning and falls back to greedy; the reason names the status |
 | Any other non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
-| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
+| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s if the process has not exited → `optimize()` falls back to greedy |
+| The child exits before reading the problem (e.g. `python3` without ortools), so writing it fails with `EPIPE` | Handled on stdin → `optimize()` falls back to greedy. Unhandled, the stream error was thrown as an uncaught exception and took the backend down (#836). The error is recorded and the run settles on the child's `close`, so the degraded reason is the child's own stderr (`ModuleNotFoundError: No module named 'ortools'`), not the `EPIPE` that nearly always reaches Node first; a 2 s timer terminates the child and settles with the `EPIPE` only if it does not exit. A crash reason is the last 500 characters of stderr; on exit 0 with unreadable stdout it is the parse error, not the progress log |
+| stdout beyond 64 MB | The process is terminated → `optimize()` falls back to greedy. Only the last 64 KB of stderr is kept, as the reason for a crash that wrote no JSON |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
+
+**Time budget.** `--time-limit` is the script's **total** budget, model build
+included, and it is set strictly inside the watchdog: `OPTIMIZATION_TIMEOUT`
+minus a margin of a tenth (at least 5 s) for the interpreter start, CP-SAT
+stopping slightly late, and the result's serialisation and parse
+(`solverTimeLimitSeconds`). **Upgrade note:** `OPTIMIZATION_TIMEOUT` is a plain
+integer of milliseconds, and a value below 10 000 or a non-numeric one (such as
+`5m`, which used to be read as 5 ms) now refuses to start; check deployments
+that set it. It is refused at
+startup: under about 6 s the solver's limit (never less than 1 s) would reach the
+watchdog. The script measures, from process start — before the ortools import,
+which alone takes a few hundred milliseconds — its start-up, input parse and
+model build, and searches only for what is left (`solve_time_budget`); writing
+the result after the search falls in the caller's margin. With less than
+a second left it reports `UNKNOWN`, naming the build, rather than searching
+past the deadline. The search limit used to equal the watchdog, so a run that
+searched to its limit was always killed first and degraded, discarding the
+feasible solution it was about to return (#837). The build time is measured
+rather than estimated by the caller because it depends on the instance
+(employees × shifts, and how many pairings survive eligibility).
+
+The model build precomputes each shift's bounds, date and duration once, and
+expresses no-double-booking and minimum rest as one conflict relation: two
+shifts conflict exactly when their intervals, each extended by the required
+rest, meet. That relation is an interval graph, so one sweep finds its maximal
+cliques and each becomes a single `AddAtMostOne` — equivalent to the pairwise
+constraints, tighter for the solver, and computed once per rest value instead
+of once per employee. The former pairwise builders recomputed both shifts'
+bounds (with a date parse) on every comparison for every employee; measured in
+the toolchain container, the build went from 21.2 s to 0.4 s at 40 employees
+× 224 shifts and from 118 s to 1.5 s at 100 × 336.
+
+The SIGKILL escalation tests whether the process has **exited**
+(`exitCode`/`signalCode`), not `ChildProcess.killed`: that flag turns true as
+soon as a signal is delivered, so the escalation used to be dead code and a
+solver ignoring SIGTERM ran on.
 
 Only `OPTIMAL` and `FEASIBLE` count as an OR-Tools result. Every other solver
 status arrives with no assignments, and passing it through used to hand the
@@ -751,6 +934,16 @@ replan proposal with zero assignments (#811). The `optimize()` return status is
 therefore `GREEDY_FALLBACK` whenever the solver produced no schedule, whatever
 the cause; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
 `degraded: true` result with the reason, rather than a silent substitution.
+
+When **no** engine produces a schedule — the greedy fallback itself throws, so
+`optimize()` returns `ERROR` with zero assignments, or the explicitly selected
+greedy engine throws — the run fails with `OPTIMIZATION_FAILED` (500, a typed
+`OptimizationFailedError` with a fixed message; the reason is logged) before
+either persistence path: no replan proposal, no draft rows. That empty result
+used to become a proposal breaking every commitment on a published schedule
+and an `OK` run writing nothing on a draft (#858). Through the job queue the
+failure surfaces as the job's `failedReason` and an `optimization.failed`
+event.
 
 Before solving, the script reads the objective's worst-case magnitude back from
 the built model and refuses one at or above 2^62 with an `ERROR` result. The
@@ -781,7 +974,7 @@ as lexicographic stages.
 - **Start-time spread within a period (soft, reported).** Bounds how much an individual employee's own shift start times bounce around within a period — someone whose start time moves between 06:00, 14:00 and 22:00 across one period has their daily rhythm reshuffled week to week even though every individual shift is otherwise legal. Unlike weekend/night equity, this measures variation WITHIN one employee's own shifts, not a gap BETWEEN employees, so there is no team-wide number to report — `startTimeSpreads` in `constraintValidator.ts` reports one `max − min` figure per employee, in minutes, with no invented pass/fail threshold: there is no working-time-regulation precedent for a cutoff here the way there was for a weekly rest block, so the raw measurement is left for whoever reads it to judge.
 - **Night-then-morning turnaround (soft, reported).** The general minimum-rest hard constraint is calibrated for an ordinary turnaround, not the fatigue a night shift leaves behind — a gap that clears the general figure can still be a recognised unsafe pattern: finish a night shift, come back a few hours later for an early morning one. `illegalTurnarounds` in `constraintValidator.ts` checks the same pair of adjacent shifts `min-rest` already looks at, against a separate, normally higher, threshold (`constraints.min_hours_after_night_shift`, default 11h) that only applies when the earlier shift was night work. Only the IMMEDIATELY next shift is examined — the pattern this exists to catch is about adjacency, not general workload. Soft for the same reason as every other item in this family: made hard, an already-tight rota with one person able to cover the gap becomes unsolvable. Rotating shift TYPES across periods so nobody holds nights indefinitely is a related but separate concern, tracked separately since it needs carried history across periods rather than a same-period check.
 - **Shift-category rotation across periods (soft), on the same weekend/night categories equity already tracks.** Equity above minimises the *total* spread of category days across employees over the history horizon — it can be perfectly balanced in total while one person still works nights three straight periods running and another has the inverse pattern, since a spread has no notion of adjacency between periods. This charges *consecutive-period concentration* on the same person, independent of the running total: `AutoScheduleService` walks the same predecessor chain `resolvePredecessorId` uses, one period at a time up to a bounded lookback (6 periods), and counts how many of the most recent consecutive **published** periods had the employee working at least one day of the category — stored as `Employee.consecutive_category_periods`, a count of *periods*, not days, which is why it is a field of its own rather than a reuse of `carried_load`. `shiftRotationViolations` in `constraintValidator.ts` flags an employee assigned to a category this period whose streak already meets or exceeds `constraints.max_consecutive_category_periods` (default 2). Soft for the same reason as every other item in this family: made hard, an organization with too few night- or weekend-qualified staff to always rotate becomes unsolvable. Only the CP-SAT engine is steered by it (`_rotation_terms` in `schedule_optimizer.py`, at the same SOFT level as the equity terms it is layered on top of) — the greedy engine has no global view to balance with, the same asymmetry that already applies to weekend/night equity itself.
-- **Workload fairness (soft).** Minimises the spread between the busiest and least-busy employee, measured in minutes so half-hour shifts are not invisible. Squared deviation from the mean is the textbook form and is what Timefold uses, but CP-SAT is a linear/integer solver, so it would need a piecewise-linear approximation whose parameters are harder to justify than the thing they approximate; the spread is exactly expressible in two auxiliary variables. Its known weakness — indifference to the middle of the distribution — is stated rather than left to be discovered. The greedy engine cannot balance at all (no global view), which is why the engine is always reported.
+- **Workload fairness (soft).** Minimises the spread between the busiest and least-busy employee, measured in minutes so half-hour shifts are not invisible. Squared deviation from the mean is the textbook form and is what Timefold uses, but CP-SAT is a linear/integer solver, so it would need a piecewise-linear approximation whose parameters are harder to justify than the thing they approximate; the spread is exactly expressible in two auxiliary variables. Its known weakness — indifference to the middle of the distribution — is stated rather than left to be discovered. An employee eligible for no shift at all is left out of the balance rather than counted at zero, which would pin the minimum and make the spread a constant; that exclusion used to drop the term for everyone instead. The greedy engine cannot balance at all (no global view), which is why the engine is always reported.
 - **Surplus staffing is charged (soft), at a derived weight.** Fairness rewards over-staffing *indirectly*, because adding people flattens the distribution: when the term first landed, a 3-shift / 4-employee fixture went from 6 assignments to 8, buying an even split with two extra shifts of wages. One extra assignment can improve the spread by at most the longest shift's duration, so surplus is charged strictly more than that — over-staffing is never worth a fairness gain, while remaining available when coverage needs it, since shortfall sits at MEDIUM and outranks both.
 - **A published assignment is a commitment, not a proposal.** `generate` used to solve from scratch every time, so re-running it on a published schedule could legally reshuffle everyone — wrong in a way no scheduling metric can see, since a published assignment is something a person has arranged their life around. **Publishing is what writes the pin**, in the same transaction as the status change — "published" and "committed" are one fact, and a crash between them would leave a live schedule the optimizer is free to reshuffle. Only `pending` and `confirmed` assignments are pinned: nobody is relying on work they declined. An assignment added to an *already published* schedule is pinned on creation, with the schedule's status read inside the `INSERT` rather than fetched first, so a schedule published between the read and the write cannot produce an unpinned commitment. Assignments on a published schedule carry `is_pinned`, enter the model as commitments, and are rewarded at **their own objective level between coverage and the soft terms**: above preferences and fairness, so a commitment is never broken to satisfy a preference however many accumulate; below coverage, so it *is* broken rather than leave a shift unstaffed. Pinning is a stored column, not inferred from schedule status, because a planner deliberately unpinning one person is the normal way to use this and an inferred rule leaves nowhere to record it. **The diff is the deliverable**: every run reports `keptCommitments` and `brokenCommitments`, and a broken one is logged with the affected users named — reporting both halves matters because an empty broken list on its own is indistinguishable from a diff that was never computed. Re-solving with unchanged inputs returns zero changes, which the previous implementation could not do at all.
 - **Re-solving a published schedule PROPOSES; approving is what applies it.** `generate` used to write its result and report the diff afterwards, so a planner learned that fourteen people had moved by reading the response — the change to their commitments had already happened before anyone could judge whether it was worth making. On a published schedule the run now writes nothing: it records the whole solved plan in `schedule_replan_proposals` and returns `status: 'PROPOSED'` with a `proposalId`, and `POST /schedules/:id/replan-proposals/:proposalId/apply` (or `/reject`) decides it. Drafts keep the immediate path — nobody has been told anything about a draft. **Applying is what makes the diff true**: the old persist path was `INSERT IGNORE` and nothing else, so assignments the optimizer dropped survived the run and `brokenCommitments` named people who were still assigned in every read path the app has; a schedule solved twice was the union of both solves. Applying removes what the approved plan leaves out and writes what it adds, pinned, in one transaction. **Staleness is handled by verify-at-apply**: the stored plan is checked against live data (the shifts still exist and still belong to this schedule, the people are still active) and refused *whole* if anything moved, because a plan that is 95% still valid is not 95% approved. Re-solving at approval time was rejected — a solver is not required to return the same optimum twice, so an approved diff could legitimately fail to reproduce and the planner would have approved a decision the system then declines to make. A second re-solve **supersedes** any undecided proposal rather than leaving two. Deciding is gated on `schedule.publish`, deliberately stronger than `schedule.optimize`: applying a plan changes commitments people were already told about, and gating it on the weaker permission would let anyone who can press "generate" rearrange a live schedule. **Everyone whose commitment the applied plan breaks is notified inside the same transaction** — the removal and the message commit together, so nobody is left unassigned and uninformed, which is what the outbox exists to rule out. One message per person listing every shift they lost, not one per shift: a re-solve that moves forty people can take several from the same one, and forty separate emails bury the fact that their week changed. Only *pinned* losses are announced — an unpinned assignment on a published schedule is one nobody was told about, and announcing it would claim a shift was taken away that the person never knew they had. One audit row per broken commitment, attributed to the **approver**: the optimizer produced the plan but a person decided to apply it, and recording a machine actor would now be the synthetic attribution.
@@ -877,11 +1070,12 @@ Device management uses the same `canManageDepartment` access rule as geofences. 
 |---|---|---|---|
 | `PolicyService` | CRUD + scoped lookup on the `policies` table itself. No enforcement logic — it stores and retrieves rows, and `listApplicable`/`getGlobalValues` answer "which rows apply here", never "is this legal". | `routes/policies.ts`, `PolicyValidator`, `ComplianceEngine`, `CompliancePresetService` | Deciding whether a policy is breached — that is every caller's own job once it has the rows. |
 | `PolicyValidator` | One candidate `(user, shift)` pair against every applicable **non-hours** policy (`manual_assignment_locked`, `skill_required`). Reports blocking violations plus whether an approved `PolicyExceptionRequest` already covers each one. | `routes/policies.ts` (`POST /validate/assignment`), `AssignmentService.createAssignment` | Rest-hours/weekly-hours/consecutive-days policies — explicitly routed to `ComplianceEngine` instead (see its own resolution chain below); whole-schedule legality — that's `constraintValidator`'s scope, not a single candidate's. |
-| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through a fixed precedence: employment contract → `user_preferences` → GLOBAL `policies` row → legacy `system_settings` → hardcoded default. Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through `WorkingTimeLimitsService` — a GLOBAL `policies` row is a ceiling the contract and `user_preferences` may only tighten; legacy `system_settings` and the default fill in only where no policy exists — the same resolver the optimizer's problem is built from (#883). Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `WorkingTimeLimitsService` | Resolves weekly hours, consecutive days and minimum rest for a set of users over a period, in four queries for any number of users. A GLOBAL `policies` value is a ceiling the contract and `user_preferences` may only tighten; without one, contract → `user_preferences` → `system_settings` → default; a contract covering only part of the period is combined with what applies without it (tightest). Returns the contracts it read, so a caller needing their other limits does not read them twice. | `ComplianceEngine.evaluateAssignmentCompliance` (one user, one day), `AutoScheduleInputLoader` (the candidate pool, the schedule's period) | Enforcing anything — it answers "what is this person's limit", and both callers decide what breaks it. |
 | `CompliancePresetService` | Applies a **named bundle** of `min_rest_hours`/`max_hours_week`/`max_consecutive_days` policy rows in one call (e.g. `eu_working_time_directive`), upserting by key. Pure convenience over `PolicyService.create` — it contains no rule logic of its own. | `routes/policies.ts` (`POST /presets/:code/apply`) | Enforcement — applying a preset only creates ordinary `policies` rows; `ComplianceEngine` is what makes them count. |
 | `constraintValidator` (facade over `optimization/constraints/*`) | A **whole solved schedule** — every employee, every shift, symmetric all-pairs checks (staff caps, double-booking, skills, unavailability, and its own copies of min-rest/max-consecutive-days/max-weekly-hours scoped to the OPTIMIZATION PROBLEM, not the `policies` table). The one authority both scheduling engines (CP-SAT and greedy) are measured against; drift between them is a red test (`optimizer.parity.test.ts`). | `ScheduleOptimizerORTools`, the greedy engine, `optimizer.parity.test.ts` | Reading the `policies` table at all — a solved schedule's legality is judged against the `OptimizationProblem`'s own per-employee contract fields (`max_hours_per_week`, `max_consecutive_days`, …), resolved into that shape once at problem-build time, not against `policies` rows directly. |
 
-**Why `ComplianceEngine` and `constraintValidator` both have a min-rest/max-consecutive-days/max-weekly-hours check, and this is not the duplication it looks like.** They judge different things at different scopes: `ComplianceEngine` is an asymmetric, backward-looking check — one NEW candidate shift against a user's shifts that already exist, called synchronously outside any solve (a manual assignment, a shift swap); `constraintValidator` is a symmetric, whole-schedule check — every pairing among every shift ANY employee holds in one proposed solution, called only from inside the two scheduling engines and their parity suite. Forcing one shape onto the other would not simplify either: `ComplianceEngine` has no "whole schedule" to iterate, and `constraintValidator` has no "candidate vs. existing" asymmetry to preserve. What WAS genuine, accidental duplication — the overnight-aware shift-bounds/duration arithmetic each had reimplemented privately, the exact defect class `optimization/shiftTime.ts`'s own header warns about — is fixed: `ComplianceEngine` now imports `shiftBoundsMs`/`shiftHours` from that module instead of keeping a fourth private copy of overnight-shift math.
+**Why `ComplianceEngine` and `constraintValidator` both have a min-rest/max-consecutive-days/max-weekly-hours check, and this is not the duplication it looks like.** They judge different things at different scopes: `ComplianceEngine` is an asymmetric, backward-looking check — one NEW candidate shift against a user's shifts that already exist, called synchronously outside any solve (a manual assignment, a shift swap); `constraintValidator` is a symmetric, whole-schedule check — every pairing among every shift ANY employee holds in one proposed solution, called only from inside the two scheduling engines and their parity suite. Forcing one shape onto the other would not simplify either: `ComplianceEngine` has no "whole schedule" to iterate, and `constraintValidator` has no "candidate vs. existing" asymmetry to preserve. What WAS genuine, accidental duplication — the overnight-aware shift-bounds/duration arithmetic each had reimplemented privately, the exact defect class `optimization/shiftTime.ts`'s own header warns about — is fixed: `ComplianceEngine` now imports `shiftBoundsMs`/`shiftMinutes`/`exceedsHours` from that module instead of keeping a fourth private copy of overnight-shift math.
 
 `policyKey` is a free-text field on the `policies` table — the catalog is not a fixed enum — but `PolicyValidator.evaluate()` only assigns real blocking behavior to specific keys:
 
@@ -892,7 +1086,7 @@ Device management uses the same `canManageDepartment` access rule as geofences. 
 | `skill_required` | **Enforced.** `policy_value: { skillIds: number[] }`. `PolicyValidator.evaluate()` checks the candidate user's `user_skills` against the list and blocks the assignment (surfacing a `PolicyExceptionRequest` prompt like any other blocking policy) when any are missing. |
 | `staffing_min` | **Rejected at creation**, not silently accepted. It has no per-assignment meaning — adding one person to a shift can only move it toward a minimum, never away — and the actual minimum-staffing check already exists per-shift as `shifts.min_staff` / `shift_templates.min_staff`, enforced by both scheduling engines' `coverageShortfalls`. `PolicyService.create`/`update` reject this key outright (`ConflictError`) rather than storing a policy that would do nothing; the error message points the caller at `minStaff` on the shift/template instead. |
 
-**Configurable compliance rule sets, seeded from a jurisdiction preset.** `ComplianceEngine.evaluateAssignmentCompliance`'s policy resolution used to stop at the user's employment contract, `user_preferences`, and the legacy `system_settings` keys — never the `policies` table, even though `PolicyValidator` had documented since its own introduction that "the heavy lifting... is performed by the existing ComplianceEngine." An organization's own rule set genuinely participates now: a GLOBAL, active `policies` row for `min_rest_hours` / `max_hours_week` / `max_consecutive_days` slots into the chain between `user_preferences` and `system_settings` — an org-wide regulatory default that a personal contract or preference still overrides, but which now beats the old system-wide fallback. **Not a hardcoded jurisdiction implementation**: the rule is an ordinary row created through the existing `POST/PUT/DELETE /api/policies` CRUD, editable or removable individually like any other policy. `CompliancePresetService` (`GET /api/policies/presets`, `POST /api/policies/presets/:code/apply`, both `policy.manage`-gated) is a convenience for loading a **named bundle** of these rows in one call rather than typing three by hand — the only preset is `eu_working_time_directive` (11h daily rest, 48h average week, 6 consecutive working days), upserting by key so re-applying never duplicates a row and a rule under a different key the organization already customized is left untouched. A preset is data, not enforcement code: each is an entry in `COMPLIANCE_PRESETS` over the same three policy keys. There is no FLSA or Fair Workweek preset.
+**Configurable compliance rule sets, seeded from a jurisdiction preset.** `ComplianceEngine.evaluateAssignmentCompliance`'s policy resolution used to stop at the user's employment contract, `user_preferences`, and the legacy `system_settings` keys — never the `policies` table, even though `PolicyValidator` had documented since its own introduction that "the heavy lifting... is performed by the existing ComplianceEngine." An organization's own rule set genuinely participates now: a GLOBAL, active `policies` row for `min_rest_hours` / `max_hours_week` / `max_consecutive_days` is a ceiling: a personal contract or preference may tighten it but never loosen it (every `user_preferences` row carries 40h / 5 days by default, so letting the preference win had made the policy reach almost nobody), and it beats the old system-wide fallback. **Not a hardcoded jurisdiction implementation**: the rule is an ordinary row created through the existing `POST/PUT/DELETE /api/policies` CRUD, editable or removable individually like any other policy. `CompliancePresetService` (`GET /api/policies/presets`, `POST /api/policies/presets/:code/apply`, both `policy.manage`-gated) is a convenience for loading a **named bundle** of these rows in one call rather than typing three by hand — the only preset is `eu_working_time_directive` (11h daily rest, 48h average week, 6 consecutive working days), upserting by key so re-applying never duplicates a row and a rule under a different key the organization already customized is left untouched. A preset is data, not enforcement code: each is an entry in `COMPLIANCE_PRESETS` over the same three policy keys. There is no FLSA or Fair Workweek preset.
 
 **Every violation `evaluateAssignmentCompliance` detects is now persisted**, one row per rule broken (not per check — a single candidate can fail more than one rule at once) in `compliance_violations`, written at the single point every caller already routes through rather than at each call site. This exists because a rejected attempt previously left no trace anywhere: the caller saw an error and nothing was written, so a "compliance violations trend" had no data to be a trend of. `GET /api/reports/compliance-violations-trend` (`report.read`, same gate as the rest of the reports router) aggregates the count per day and rule code over a range — day-and-code granularity rather than a single running total, since a planner needs to see *which* rule is recurring and *when*. No frontend view consumes it.
 
@@ -1020,12 +1214,19 @@ manages the override rows.
 **RTL**: `frontend/src/i18n/DirectionSync.tsx`, mounted once in `App.tsx`, reactively sets
 `dir` and `lang` on `<html>` from the active i18next locale (`dir="rtl"` for Arabic). It
 targets `<html>` rather than a nested wrapper so anything rendered outside the React tree
-(Bootstrap modals, portals) still inherits the correct writing direction. Bootstrap 5's
-utility classes (`ms-*`, `me-*`, `text-start`, `text-end`, ...) are logical properties
-already, so most of the app mirrors correctly with zero extra CSS. `frontend/src/index.css`
+(Bootstrap modals, portals) still inherits the correct writing direction. `dir` alone
+does not mirror Bootstrap: its default build defines the utilities (`ms-*`, `me-*`,
+`text-start`, `text-end`, ...) as physical properties (`.ms-2` is `margin-left`). So
+Bootstrap is linked, not bundled: `index.tsx` imports both `bootstrap.min.css` and
+`bootstrap.rtl.min.css` as URLs, and `i18n/bootstrapStylesheet.ts` attaches the one
+matching the direction — at startup, before the first render, and again from
+`DirectionSync` on every locale change, keeping the old sheet until the new one has
+loaded (#845). The link is the first stylesheet in `<head>`, so the app's own CSS still
+overrides it. `frontend/src/index.css`
 carries a documented `[dir='rtl']` override block for the handful of physical (non-logical)
 properties the app's own CSS still uses (`.sidebar`'s `left`/`border-right`,
-`.main-content`'s `margin-left`) — new custom CSS should prefer logical properties
+`.main-content`'s `margin-left`, and their phone-width variants: the closed drawer
+slides out to the right and the content takes the full width, #947) — new custom CSS should prefer logical properties
 (`margin-inline-start`, ...) over adding to that list. **RTL is verified end-to-end on one
 page today: Login** (`pages/Auth/Login.tsx`), chosen because it is small, always mounted,
 and its form/label/button layout visibly breaks if RTL CSS is wrong. Every other page is
@@ -1511,8 +1712,23 @@ docker compose --profile ops up -d
 ```
 
 Starts Prometheus, Grafana, Loki and Promtail (config under `ops/`), all on the
-internal network with only Grafana published (`GRAFANA_PORT`, default `3002`;
-login `admin` / `GRAFANA_ADMIN_PASSWORD`):
+internal network with only Grafana published, and on the host's loopback
+interface only (`127.0.0.1:GRAFANA_PORT`, default `3002`; login `admin` /
+`GRAFANA_ADMIN_PASSWORD`). From another machine, tunnel to it
+(`ssh -L 3002:127.0.0.1:3002 <host>`) rather than publishing the login page.
+
+`GRAFANA_ADMIN_PASSWORD` has no default: Compose refuses to start **any**
+service from `docker-compose.yml` without it, profile or not, because Compose
+interpolates every service before it filters by profile. Grafana can read every
+log line through Loki, so the former `admin/admin` fallback was a credential
+for the whole log stream. Grafana applies the variable only when it first
+initialises its `grafana_data` volume; to rotate it later, run
+`docker compose exec grafana grafana cli admin reset-admin-password <new>`.
+
+The `dev` profile's phpMyAdmin follows the same rules: loopback only
+(`127.0.0.1:PHPMYADMIN_PORT`, default `8080`) and no auto-login — it shows its
+login form and you sign in with a MySQL account, instead of every visitor being
+logged in as the application's database user.
 
 - **Prometheus** scrapes `backend:3001/metrics` every 15s and loads the alert
   rules in `ops/prometheus/alerts.yml` (high 5xx rate, high p95 latency, DB pool
@@ -1539,10 +1755,34 @@ docker compose --profile backup up -d
 ```
 
 It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
-`backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
-dumps older than `BACKUP_RETENTION_DAYS` (default 14). A dump smaller than 1 KB
-is treated as a failure and removed, so an empty/failed dump never masquerades as
-a good backup.
+host directory `BACKUP_HOST_DIR` (default `./backups`, gitignored) every
+`BACKUP_INTERVAL_SECONDS` (default daily) and prunes dumps older than
+`BACKUP_RETENTION_DAYS` (default 14).
+
+The backups are deliberately **not** a named volume. A named volume belongs to
+the compose project, so the `docker compose down -v` that deletes `mysql_data`
+used to delete the backups in the same command. A host directory survives
+`down -v`; for backups that also survive the machine, point `BACKUP_HOST_DIR` at
+another disk or a mount that is synced off-host. The same incident shaped the
+two scripts that remove things: `scripts/demo.sh` runs as its own compose
+project (`staffscheduler-demo`), so `demo.sh down` can delete only the demo's
+volumes, and `./stop.sh -c` removes containers and networks but keeps volumes —
+only `./stop.sh -p` deletes volumes, and only after `DELETE` is typed.
+`scripts/stack-scripts.test.mjs` runs both scripts against a recording `docker`
+stub to pin this.
+
+A dump is kept only once it is proven complete. Each run writes to a
+`*.sql.gz.tmp` file under `pipefail`, so a `mysqldump` that dies mid-stream fails
+the run instead of being hidden behind gzip's success; the file must then end in
+mysqldump's own `-- Dump completed` trailer, which only a finished dump writes;
+only then is it renamed to its final `*.sql.gz` name, and **only after that** are
+old dumps pruned. A failed run therefore leaves no file behind and deletes
+nothing, and `restore.sh --latest` (which matches `*.sql.gz` only) can never pick
+a partial dump. `restore.sh` applies the same check before it touches the
+database — a corrupt or truncated archive is refused while the target is still
+intact — and fails if the replay itself fails. Watch the sidecar's log for
+`[backup] run failed`: the loop keeps its schedule after a failure, so a run of
+failures is visible only there and in the age of the newest dump.
 
 **Restore runbook** (recovering into the running stack):
 
@@ -1574,7 +1814,10 @@ job runs weekly (and whenever the backup scripts or migrations change): it appli
 the migrations, seeds a marker row, runs the real `backup.sh`, DROPs the database,
 runs the real `restore.sh --latest`, and asserts the marker survived the
 round-trip. A broken restore path is therefore a red CI check, not a discovery
-made during an incident.
+made during an incident. The failure paths, which a healthy server never
+produces, are covered by `scripts/backup-scripts.test.mjs` (part of
+`npm run test:scripts`): both scripts run against stub `mysqldump`/`mysql`
+clients that die mid-dump, truncate silently, or reject the replay.
 
 ### Deployment hardening and scaling
 
@@ -1587,9 +1830,18 @@ override:
   access goes through the `dev`-profile phpMyAdmin or a temporary, explicit port
   forward — the database is never exposed to the host by default.
 - **`caching_sha2_password`.** MySQL uses its 8.x default authentication plugin;
-  the legacy `mysql_native_password` (deprecated, removed in MySQL 9) is no longer
-  forced. Both the backend driver (`mysql2`) and the migration runner
-  (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+  the legacy `mysql_native_password` (disabled by default in 8.4, removed in
+  MySQL 9) is not used. Both the backend driver (`mysql2`) and the migration
+  runner (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+- **One pinned MySQL release everywhere.** The deployment, its backup sidecar,
+  the verification stack and every CI service run the same exact 8.4 LTS tag
+  (8.0 reached end of life in April 2026). A floating tag in CI meant the
+  migrations, the integration suite and the backup round-trip were proven on
+  whatever the registry served that day rather than on what is deployed;
+  `scripts/mysql-version.test.mjs` fails if any file names a different tag. To
+  upgrade, change every occurrence in one pull request and let CI run the
+  migration round-trip, integration suite and backup-restore job on it. The 9.x
+  innovation line was rejected: each release is supported only until the next.
 
 ### Hardware-aware defaults
 
@@ -1626,15 +1878,23 @@ serve traffic. The default compose file runs a single backend; the
 docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2
 ```
 
-**Set `TRUST_PROXY_HOPS=1` whenever this overlay is in use.** Express does not
+**`TRUST_PROXY_HOPS` is `1` in both compose layouts.** Express does not
 trust `X-Forwarded-For`/`X-Forwarded-Proto` by default, so without it every
-request's `req.ip` resolves to the load balancer's own address rather than the
+request's `req.ip` resolves to the proxy's own address rather than the
 real client — collapsing IP-keyed rate limiting (including the login
 brute-force limiter) into one shared bucket across every caller, and making
-audit-log IPs useless. Left at its default of `0` for any directly-exposed
-instance (dev, or a single, unscaled backend): with no proxy actually in
-front, trusting the hop would let a client set its own `X-Forwarded-For` and
-spoof its IP to dodge rate limiting.
+audit-log IPs useless. Compose forwards `${TRUST_PROXY_HOPS:-1}` to the backend
+because every network request crosses exactly one nginx: the frontend's `/api`
+proxy, or `backend-lb` under this overlay (the two are siblings, not chained, so
+the overlay stays at one). Raise it by one for each further proxy chained in
+front, e.g. `2` behind a TLS terminator in front of the frontend. For the same
+reason the base file publishes the backend's own port on `127.0.0.1` only: a
+client that reached it directly could write its own `X-Forwarded-For` and pick
+the address it is limited under. The backend's built-in default stays `0`, for
+a process run with no proxy in front (`npm run dev`), where trusting a hop
+would let any client spoof its IP.
+`scripts/compose-config.test.mjs` asserts both, on the configuration Compose
+actually resolves.
 
 The overlay clears the backend's published port (several replicas cannot share
 one host port) and puts `backend-lb` (nginx, `ops/nginx/backend-lb.conf`) in
@@ -1651,13 +1911,47 @@ Rolling deploy:
 ops/deploy/rolling-deploy.sh 2      # replica count (default 2)
 ```
 
-Compose has no native per-replica rolling update, so the script does the standard
-scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
-start alongside the old), wait until the load balancer answers, then scale back
-**down** to N — Compose removes the oldest containers, i.e. the previous image.
-Throughout, a poller hits `/api/v1/health` twice a second and the script **fails the
-deploy if a single request was dropped**, so "zero downtime" is verified rather
-than asserted.
+Compose has no native per-replica rolling update, so the script starts the new
+replicas beside the old ones and retires the old ones **by id**:
+
+1. build the new image and record the ids of the replicas running now;
+2. `up --no-recreate --scale backend=<old + N>`: the old replicas are left
+   untouched and only the added ones start, on the new image;
+3. wait until every **new** replica's own healthcheck reports `healthy` (an
+   unhealthy or exited one aborts the deploy and removes the new replicas, so
+   the old ones keep serving as before);
+4. wait `DRAIN_SECONDS` (default 15, longer than the 10 s resolver TTL of the
+   frontend proxy and the 5 s of `backend-lb`) so both proxies route to the new
+   replicas;
+5. `docker stop` the recorded old ids — SIGTERM makes each stop accepting while
+   its in-flight requests complete, and a refused connection is one nginx
+   retries on another replica, POSTs included, because nothing was sent — then
+   remove them;
+6. wait `DRAIN_SECONDS` again, so the proxies forget the old addresses.
+
+Throughout, a poller sends a GET (`/health`) and a POST (`/auth/refresh` with
+no token, answered 401 without touching the database) every second, and the
+script **fails the deploy if a single one was dropped** — no answer, or a 5xx —
+so "zero downtime" is verified rather than asserted. The POST matters because
+nginx never re-sends a non-idempotent request that already reached a replica:
+a GET-only probe cannot see the drop a careless switch causes.
+
+The former scale-up/scale-down version was wrong in four ways (#848): without
+`--no-recreate` the scale-up recreated the old replicas too; its wait passed as
+soon as the load balancer answered, which the old replicas did, so an unhealthy
+new image went unnoticed; the scale-down removed whichever containers Compose
+chose, an order Compose does not document; and nothing waited out the proxies'
+DNS cache. Both proxies also bound their connect timeout to 2 s, so an address
+still cached after its replica is gone costs a quick retry rather than nginx's
+60 s default.
+
+The script reads `COMPOSE_FILE`/`COMPOSE_PROJECT_NAME` like Compose itself
+(default: the base file plus this overlay), `API_URL` for where clients reach
+the API (default the load balancer on `BACKEND_PORT`), and expects to run from
+the repository root. The backend's healthcheck probes every 2 s while a
+container starts (`start_interval`, Docker Engine 25 or newer), so step 3 takes
+seconds rather than the 30 s healthcheck interval. As before, every later `up`
+must pass `--scale backend=N`, or Compose scales back to one replica.
 
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.

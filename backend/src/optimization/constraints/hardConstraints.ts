@@ -15,7 +15,7 @@
  */
 
 import type { OptimizationProblem } from '../types';
-import { DAY_MS, dateToMs, shiftBoundsMs, shiftHours } from '../shiftTime';
+import { DAY_MS, dateToMs, exceedsHours, formatHours, shiftBoundsMs, shiftMinutes } from '../shiftTime';
 import type { ShiftTimes } from '../shiftTime';
 
 /**
@@ -58,6 +58,24 @@ export interface ValidatedAssignment {
 const DEFAULT_MIN_REST_HOURS = 8;
 
 /**
+ * The rest an employee must have between two shifts: their own requirement
+ * when the problem states one (#838), otherwise the problem-wide figure, then
+ * 8 h. One definition, which the greedy engine calls too, so the two cannot
+ * read the precedence differently; schedule_optimizer.py's `_rest_minutes`
+ * is held to it by the parity suite.
+ */
+export const minRestHoursFor = (
+  problem: OptimizationProblem,
+  employee: OptimizationProblem['employees'][number]
+): number => {
+  if (typeof employee.min_hours_between_shifts === 'number') return employee.min_hours_between_shifts;
+  if (typeof problem.constraints?.min_hours_between_shifts === 'number') {
+    return problem.constraints.min_hours_between_shifts;
+  }
+  return DEFAULT_MIN_REST_HOURS;
+};
+
+/**
  * Report every hard-constraint violation in a proposed solution.
  *
  * An empty array means the solution is legal under the canonical model. The
@@ -80,11 +98,6 @@ export function findConstraintViolations(
   const violations: ConstraintViolation[] = [];
   const shiftsById = new Map(problem.shifts.map((s) => [s.id, s]));
   const employeesById = new Map(problem.employees.map((e) => [e.id, e]));
-
-  const minRestHours =
-    typeof problem.constraints?.min_hours_between_shifts === 'number'
-      ? problem.constraints.min_hours_between_shifts
-      : DEFAULT_MIN_REST_HOURS;
 
   // Group the decision assignments by employee, resolving each to its shift.
   const shiftsByEmployee = new Map<string, IdentifiedShift[]>();
@@ -167,7 +180,10 @@ export function findConstraintViolations(
       }
     }
 
-    // Pairwise rules: double-booking (time overlap) and minimum rest.
+    // Pairwise rules: double-booking (time overlap) and minimum rest. Rest is
+    // the employee's own requirement — their contract can ask for more than
+    // the organization's default (#838) — and only then the problem's.
+    const minRestHours = minRestHoursFor(problem, emp);
     for (let i = 0; i < worked.length; i++) {
       const [aStart, aEnd] = shiftBoundsMs(worked[i]);
       for (let j = i + 1; j < worked.length; j++) {
@@ -203,18 +219,21 @@ export function findConstraintViolations(
     // against real people. It stays only so an un-migrated caller keeps its
     // existing behaviour, and should be removed once every problem carries a
     // contract-derived cap.
+    //
+    // Both caps total exact minutes, never hours rounded per shift: three
+    // 2h40 shifts are 8h, which rounded tenths read as 8.1h (see shiftMinutes).
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const hoursByDate = new Map<string, number>();
+    const minutesByDate = new Map<string, number>();
     for (const shift of worked) {
-      hoursByDate.set(shift.date, (hoursByDate.get(shift.date) ?? 0) + shiftHours(shift));
+      minutesByDate.set(shift.date, (minutesByDate.get(shift.date) ?? 0) + shiftMinutes(shift));
     }
-    for (const [date, hours] of hoursByDate) {
-      if (hours > dailyBudget + 1e-9) {
+    for (const [date, minutes] of minutesByDate) {
+      if (exceedsHours(minutes, dailyBudget)) {
         violations.push({
           rule: 'daily-hours',
           employeeId: emp.id,
           shiftIds: worked.filter((s) => s.date === date).map((s) => s.id),
-          detail: `employee ${emp.id} works ${hours}h on ${date}, exceeds daily budget ${dailyBudget}h`,
+          detail: `employee ${emp.id} works ${formatHours(minutes)}h on ${date}, exceeds daily budget ${dailyBudget}h`,
         });
       }
     }
@@ -226,12 +245,12 @@ export function findConstraintViolations(
       const days = [...new Set(worked.map((s) => s.date))].sort();
       for (const anchor of days) {
         const anchorMs = dateToMs(anchor);
-        let total = 0;
+        let totalMinutes = 0;
         for (const shift of worked) {
           const diff = (dateToMs(shift.date) - anchorMs) / DAY_MS;
-          if (diff >= 0 && diff < 7) total += shiftHours(shift);
+          if (diff >= 0 && diff < 7) totalMinutes += shiftMinutes(shift);
         }
-        if (total > emp.max_hours_per_week + 1e-9) {
+        if (exceedsHours(totalMinutes, emp.max_hours_per_week)) {
           violations.push({
             rule: 'weekly-hours',
             employeeId: emp.id,
@@ -241,7 +260,7 @@ export function findConstraintViolations(
                 return diff >= 0 && diff < 7;
               })
               .map((s) => s.id),
-            detail: `employee ${emp.id} works ${total}h in the week starting ${anchor}, exceeds ${emp.max_hours_per_week}h`,
+            detail: `employee ${emp.id} works ${formatHours(totalMinutes)}h in the week starting ${anchor}, exceeds ${emp.max_hours_per_week}h`,
           });
           break; // one weekly violation per employee is enough to fail
         }

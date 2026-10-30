@@ -36,6 +36,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { migrationUpSql } from '../helpers/schema';
 import { expectErrorEnvelope, expectSuccessEnvelope } from '../helpers/openapiEnvelope';
+import { totp } from '../../utils/totp';
 
 const DB = {
   host: process.env.DB_HOST || 'localhost',
@@ -168,7 +169,7 @@ describe('auth (real DB)', () => {
     expect(me.body.data.email).toBe(ADMIN_EMAIL);
     expect(me.body.data.permissions).toContain('assignment.manage');
 
-    const out = await request(app).post('/api/v1/auth/logout').set('Cookie', cookie);
+    const out = await request(app).post('/api/v1/auth/refresh/logout').set('Cookie', cookie);
     expect(out.status).toBe(200);
 
     const afterLogout = await request(app).get('/api/v1/auth/verify').set('Cookie', cookie);
@@ -199,8 +200,18 @@ describe('auth (real DB)', () => {
     expect(secondRefresh).toBeDefined();
     expect(secondRefresh).not.toBe(firstRefresh);
 
-    // Replaying the now-spent first token is reuse: it is rejected AND revokes
+    // Replayed at once, the spent token is indistinguishable from a second tab
+    // refreshing concurrently (#820): answered 409, nothing issued or revoked.
+    const immediate = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
+    expect(immediate.status).toBe(409);
+    expect(immediate.body.error.code).toBe('REFRESH_SUPERSEDED');
+
+    // Past the grace window, replaying it is reuse: it is rejected AND revokes
     // the whole family, so the legitimately-rotated second token stops working.
+    await admin.query(
+      'UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 1 MINUTE WHERE user_id = ? AND revoked_at IS NOT NULL',
+      [userId]
+    );
     const reuse = await request(app).post('/api/v1/auth/refresh').set('Cookie', firstRefresh!);
     expect(reuse.status).toBe(401);
     expect(reuse.body.error.code).toBe('REFRESH_INVALID');
@@ -2152,6 +2163,141 @@ describe('employment contracts run against the real schema', () => {
   });
 });
 
+describe('TOTP two-factor authentication against the real schema (#899)', () => {
+  const PASSWORD = 'itest-totp-password-1';
+
+  // Codes are derived from one fixed instant so the test controls which time
+  // step each code belongs to. Starting near the end of a step could let the
+  // clock cross into the next one mid-test and push the oldest code out of
+  // the ±1 window, so wait for a fresh step first.
+  const freshStep = async (): Promise<number> => {
+    const into = Math.floor(Date.now() / 1000) % 30;
+    if (into > 20) await new Promise((r) => setTimeout(r, (31 - into) * 1000));
+    return Math.floor(Date.now() / 1000);
+  };
+
+  it('accepts a code once, rejects its replay, and lets a newer code disable the method', async () => {
+    const email = `itest-totp-${Date.now()}@example.com`;
+    await admin.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, ?, 'Totp', 'User', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    const cookie = await loginCookie(email, PASSWORD);
+
+    const setup = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    expect(setup.status).toBe(200);
+    const secret = setup.body.data.secret as string;
+
+    const now = await freshStep();
+    const previous = totp(secret, { nowSeconds: now - 30 });
+    const current = totp(secret, { nowSeconds: now });
+
+    const enable = await request(app).post('/api/v1/auth/2fa/enable').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(enable.status).toBe(200);
+
+    const first = await request(app).post('/api/v1/auth/2fa/verify').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(first.body.data).toEqual({ valid: true });
+
+    const replay = await request(app).post('/api/v1/auth/2fa/verify').set('Cookie', cookie).send({ methodType: 'totp', code: previous });
+    expect(replay.body.data).toEqual({ valid: false });
+
+    const disable = await request(app).post('/api/v1/auth/2fa/disable').set('Cookie', cookie).send({ methodType: 'totp', code: current });
+    expect(disable.status).toBe(200);
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ? AND tf.method_type = 'totp'`,
+      [email]
+    );
+    expect(rows[0].n).toBe(0);
+  });
+
+  it('refuses setup on an enabled method with 409 and leaves 2FA enabled (#817)', async () => {
+    // Setup used to upsert `enabled = 0` with a fresh secret, so a stolen
+    // session could turn 2FA off without the code /2fa/disable demands — and
+    // lock the owner out by enrolling its own authenticator.
+    const email = `itest-totp-resetup-${Date.now()}@example.com`;
+    await admin.query(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, ?, 'Totp', 'Resetup', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    const cookie = await loginCookie(email, PASSWORD);
+
+    const setup = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    const secret = setup.body.data.secret as string;
+    const enable = await request(app)
+      .post('/api/v1/auth/2fa/enable')
+      .set('Cookie', cookie)
+      .send({ methodType: 'totp', code: totp(secret, { nowSeconds: Math.floor(Date.now() / 1000) }) });
+    expect(enable.status).toBe(200);
+    const [before] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+
+    const again = await request(app).post('/api/v1/auth/2fa/setup').set('Cookie', cookie).send({ methodType: 'totp' });
+    expect(again.status).toBe(409);
+    expectErrorEnvelope(again.body);
+    expect(again.body.data).toBeUndefined();
+
+    const [after] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT tf.enabled, tf.secret_data FROM two_factor_methods tf JOIN users u ON u.id = tf.user_id WHERE u.email = ?`,
+      [email]
+    );
+    expect(after).toHaveLength(1);
+    expect(after[0].enabled).toBe(1);
+    expect(after[0].secret_data).toEqual(before[0].secret_data);
+
+    // Backstop: even a provider call that slips past the dispatcher's check
+    // (a race with a concurrent enable) cannot disable or re-key the row.
+    const { TotpProvider } = require('../../services/TotpProvider');
+    const { database } = require('../../config/database');
+    const [[owner]] = await admin.query<mysql.RowDataPacket[]>('SELECT id FROM users WHERE email = ?', [email]);
+    await new TotpProvider(database.getPool()).beginSetup(owner.id, email);
+    const [raced] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT enabled, secret_data FROM two_factor_methods WHERE user_id = ?`,
+      [owner.id]
+    );
+    expect(raced[0].enabled).toBe(1);
+    expect(raced[0].secret_data).toEqual(before[0].secret_data);
+  });
+});
+
+describe('internal faults are not disclosed to the client (#895)', () => {
+  it('renders a real MySQL driver error as the generic 500 with the request id', async () => {
+    // Force a genuine driver failure on one statement rather than mounting a
+    // throwing route (which production code must not carry): the skills list
+    // query is swapped for one naming a column that does not exist, so MySQL
+    // itself answers ER_BAD_FIELD_ERROR with schema detail in the message —
+    // the class of text #895 saw on screen.
+    // The marker is a column alias only SkillService.list selects, so the
+    // statements `authenticate` issues (the user's own skills among them)
+    // pass through untouched.
+    const marker = 'AS shift_requirement_count';
+    const cookie = await authCookie();
+    const { database } = require('../../config/database');
+    const pool = database.getPool();
+    const original = pool.execute.bind(pool);
+    const spy = jest.spyOn(pool, 'execute').mockImplementation(((...args: unknown[]) =>
+      typeof args[0] === 'string' && args[0].includes(marker)
+        ? original('SELECT s.no_such_column FROM skills s')
+        : original(...args)) as never);
+    try {
+      const res = await request(app).get('/api/v1/skills').set('Cookie', cookie);
+
+      expect(res.status).toBe(500);
+      expectErrorEnvelope(res.body);
+      expect(res.body.error).toEqual({
+        code: 'INTERNAL_ERROR',
+        message: 'An internal error occurred',
+        requestId: res.headers['x-request-id'],
+      });
+      expect(JSON.stringify(res.body)).not.toMatch(/no_such_column|ER_|field list|skills/);
+      expect(spy.mock.calls.some(([sql]) => String(sql).includes(marker))).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe('user-management authority (#809, #810)', () => {
   const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
   const PASSWORD = 'itest-authority-1';
@@ -2373,5 +2519,632 @@ describe('user-management authority (#809, #810)', () => {
       .send({ csv: `email,firstName,lastName,role\n${csvEmail},O,K,Employee`, defaultPassword: 'Password1!' });
     expect(csv.status).toBe(200);
     expect(await roleNamesOf((await userByEmail(csvEmail))!)).toEqual(['Employee']);
+  });
+});
+
+/**
+ * Regression for #824: every paginated listing bound `LIMIT ? OFFSET ?` through
+ * `execute()`, which MySQL's binary protocol rejects with ER_WRONG_ARGUMENTS —
+ * so each of these routes answered 200 unpaginated and 500 the moment a client
+ * asked for a page. The mocked unit suites asserted the bound parameters and so
+ * certified the bug; only a real server can tell.
+ */
+describe('paginated listings run against the real schema (#824)', () => {
+  const PAGE_SIZE = 2;
+  // Odd and larger than PAGE_SIZE, so every page boundary of a walk over the
+  // tie group falls INSIDE it at least once.
+  const ROWS = 5;
+  const TIE_TAG = 'itest.paging.tie';
+  // Every seeded row of a resource is identical on that listing's primary
+  // sort, so their relative order is decided by the `id` tiebreaker alone:
+  // drop it and MySQL is free to repeat a row on two pages and skip another.
+  // Measured on 8.0: removing it makes the schedules, shifts and change-request
+  // cases fail; for users, assignments and the audit log the server's plan
+  // happens to yield id order anyway, so there the tests pin the contract
+  // rather than catch a removal.
+  const seeded: Record<string, { ids: number[]; idOrder: 'asc' | 'desc' }> = {};
+
+  beforeAll(async () => {
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active) VALUES ('Itest Paging Dept', 'pagination', 1)`
+    );
+    // One shift slot, far from every other fixture's dates.
+    const slot = { offsetDays: 400, start: '08:00:00', end: '12:00:00' };
+    const users: number[] = [];
+    const schedules: number[] = [];
+    const shifts: number[] = [];
+    const assignments: number[] = [];
+    const audit: number[] = [];
+    const changeRequests: number[] = [];
+    for (let i = 0; i < ROWS; i++) {
+      const [user] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+         VALUES (?, 'x', 'Paging', 'Twin', 1)`,
+        [`itest-paging-${i}@example.com`]
+      );
+      users.push(user.insertId);
+      const [sched] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+         VALUES (?, CURDATE() + INTERVAL ? DAY, CURDATE() + INTERVAL ? DAY, ?, 'draft', ?)`,
+        [`Itest Paging ${i}`, slot.offsetDays, slot.offsetDays + 6, dept.insertId, userId]
+      );
+      schedules.push(sched.insertId);
+      const [shift] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, ?, ?, 1, 2, 'open')`,
+        [sched.insertId, dept.insertId, slot.offsetDays, slot.start, slot.end]
+      );
+      shifts.push(shift.insertId);
+      const [assignment] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shift_assignments (shift_id, user_id, status) VALUES (?, ?, 'confirmed')`,
+        [shift.insertId, user.insertId]
+      );
+      assignments.push(assignment.insertId);
+      // Same second, as a burst of writes from one request produces.
+      const [log] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO audit_logs (user_id, action, entity_type, created_at)
+         VALUES (?, ?, 'paging', '2030-01-01 00:00:00')`,
+        [userId, TIE_TAG]
+      );
+      audit.push(log.insertId);
+      const [cr] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO change_requests (change_type, proposer_user_id, target_entity_type, proposed_payload, created_at)
+         VALUES (?, ?, 'paging', '{}', '2030-01-01 00:00:00')`,
+        [TIE_TAG, userId]
+      );
+      changeRequests.push(cr.insertId);
+    }
+    seeded.employees = { ids: users, idOrder: 'asc' };
+    seeded.users = { ids: users, idOrder: 'asc' };
+    seeded.assignments = { ids: assignments, idOrder: 'asc' };
+    seeded.schedules = { ids: schedules, idOrder: 'desc' };
+    seeded.shifts = { ids: shifts, idOrder: 'asc' };
+    seeded.audit = { ids: audit, idOrder: 'desc' };
+    seeded.changeRequests = { ids: changeRequests, idOrder: 'desc' };
+  });
+
+  const sortedIds = (ids: number[], order: 'asc' | 'desc'): number[] =>
+    [...ids].sort((a, b) => (order === 'asc' ? a - b : b - a));
+
+  it.each(['employees', 'users', 'assignments', 'schedules', 'shifts'])(
+    'GET /api/v1/%s pages through tied rows by id, without repeats or gaps',
+    async (resource) => {
+      const cookie = await authCookie();
+      const all = await request(app).get(`/api/v1/${resource}`).set('Cookie', cookie);
+      expect(all.status).toBe(200);
+      const total = all.body.data.length;
+
+      const walked: number[] = [];
+      for (let n = 1; n <= Math.ceil(total / PAGE_SIZE); n++) {
+        const res = await request(app)
+          .get(`/api/v1/${resource}?page=${n}&pageSize=${PAGE_SIZE}`)
+          .set('Cookie', cookie);
+        expect(res.status).toBe(200);
+        walked.push(...res.body.data.map((row: { id: number }) => row.id));
+      }
+
+      // Every row exactly once, in the listing's order.
+      expect(walked).toEqual(all.body.data.map((row: { id: number }) => row.id));
+      const { ids, idOrder } = seeded[resource];
+      expect(walked.filter((id) => ids.includes(id))).toEqual(sortedIds(ids, idOrder));
+    }
+  );
+
+  it('GET /api/v1/audit-logs pages through same-second entries newest id first', async () => {
+    const cookie = await authCookie();
+    const walked: number[] = [];
+    for (let n = 1; n <= Math.ceil(ROWS / PAGE_SIZE); n++) {
+      const res = await request(app)
+        .get(`/api/v1/audit-logs?action=${TIE_TAG}&page=${n}&pageSize=${PAGE_SIZE}`)
+        .set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.meta.total).toBe(ROWS);
+      walked.push(...res.body.data.map((row: { id: number }) => row.id));
+    }
+    expect(walked).toEqual(sortedIds(seeded.audit.ids, 'desc'));
+  });
+
+  it('GET /api/v1/change-requests pages through same-second requests newest id first', async () => {
+    const cookie = await authCookie();
+    const walked: number[] = [];
+    for (let offset = 0; offset < ROWS; offset += PAGE_SIZE) {
+      const res = await request(app)
+        .get(`/api/v1/change-requests?changeType=${TIE_TAG}&limit=${PAGE_SIZE}&offset=${offset}`)
+        .set('Cookie', cookie);
+      expect(res.status).toBe(200);
+      expect(res.body.data.total).toBe(ROWS);
+      walked.push(...res.body.data.items.map((row: { id: number }) => row.id));
+    }
+    expect(walked).toEqual(sortedIds(seeded.changeRequests.ids, 'desc'));
+  });
+
+  it.each(['employees', 'users', 'assignments', 'schedules', 'shifts'])(
+    'GET /api/v1/%s serves page 1 and page 2',
+    async (resource) => {
+      const cookie = await authCookie();
+      const all = await request(app).get(`/api/v1/${resource}`).set('Cookie', cookie);
+      expect(all.status).toBe(200);
+      const total = all.body.data.length;
+      expect(total).toBeGreaterThanOrEqual(2 * PAGE_SIZE);
+
+      const page = (n: number) =>
+        request(app).get(`/api/v1/${resource}?page=${n}&pageSize=${PAGE_SIZE}`).set('Cookie', cookie);
+      const first = await page(1);
+      const second = await page(2);
+
+      for (const [res, n] of [[first, 1], [second, 2]] as const) {
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.data).toHaveLength(PAGE_SIZE);
+        // The count query and the page query apply the same filters, so the
+        // total must agree with the unpaginated listing.
+        expect(res.body.meta).toEqual({
+          total,
+          page: n,
+          pageSize: PAGE_SIZE,
+          pages: Math.ceil(total / PAGE_SIZE),
+        });
+      }
+
+      const ids = (res: request.Response): number[] => res.body.data.map((row: { id: number }) => row.id);
+      // OFFSET is really applied, and the order is total: the two pages are
+      // consecutive slices of the full listing, with no row on both.
+      expect(ids(second).some((id) => ids(first).includes(id))).toBe(false);
+      expect([...ids(first), ...ids(second)]).toEqual(ids(all).slice(0, 2 * PAGE_SIZE));
+    }
+  );
+});
+
+// Session lifecycle against the real refresh_tokens table, with REAL cookie
+// handling: a supertest agent keeps a cookie jar that honours each cookie's
+// Path, exactly as a browser does. The earlier logout test set the Cookie
+// header by hand, sending the refresh cookie to an endpoint a browser never
+// sends it to — which is how a logout that revoked nothing passed (#816).
+describe('session lifecycle (#816, #818, #820)', () => {
+  const LOGOUT = '/api/v1/auth/refresh/logout';
+  const REFRESH = '/api/v1/auth/refresh';
+  const PASSWORD = 'itest-session-1';
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  type Jar = { setCookie(cookie: string, domain: string, path: string): void };
+  const jarOf = (agent: ReturnType<typeof request.agent>): Jar => (agent as unknown as { jar: Jar }).jar;
+
+  const makeUser = async (): Promise<{ id: number; email: string }> => {
+    const email = `session-${tag()}@example.com`;
+    const [res] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, ?, 'Session', 'User', 1)`,
+      [email, await bcrypt.hash(PASSWORD, 4)]
+    );
+    await admin.query(
+      `INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE name = 'Employee'`,
+      [res.insertId]
+    );
+    return { id: res.insertId, email };
+  };
+
+  /** The raw value of a cookie a response set, if it set one. */
+  const setCookieValue = (res: request.Response, name: string): string | undefined => {
+    const raw = res.headers['set-cookie'];
+    const all = Array.isArray(raw) ? raw : raw ? [raw] : [];
+    return all
+      .map((c: string) => c.split(';')[0])
+      .find((c) => c.startsWith(`${name}=`))
+      ?.slice(name.length + 1);
+  };
+
+  /** Logs in through a cookie-jar agent; returns the agent and the refresh token it was given. */
+  const browserLogin = async (email: string) => {
+    const agent = request.agent(app);
+    const login = await agent.post('/api/v1/auth/login').send({ email, password: PASSWORD });
+    expect(login.status).toBe(200);
+    const refreshToken = setCookieValue(login, 'refresh_token');
+    expect(refreshToken).toBeDefined();
+    return { agent, refreshToken: refreshToken! };
+  };
+
+  // Presenting a captured token on /refresh by header is faithful: /refresh is
+  // the one path a browser does send the refresh cookie to. It models the
+  // token surviving somewhere the logout did not reach (another tab's jar, a
+  // copy an attacker took) — the case revocation exists for.
+  const refreshWith = (token: string) => request(app).post(REFRESH).set('Cookie', `refresh_token=${token}`);
+
+  const liveTokens = async (userId: number): Promise<number> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      'SELECT COUNT(*) AS n FROM refresh_tokens WHERE user_id = ? AND revoked_at IS NULL',
+      [userId]
+    );
+    return Number(rows[0].n);
+  };
+
+  describe('logout revokes the refresh token', () => {
+    it('with a valid access token', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+
+      const out = await agent.post(LOGOUT);
+      expect(out.status).toBe(200);
+
+      expect((await agent.get('/api/v1/auth/verify')).status).toBe(401);
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('with an expired access token', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+      // The jar now holds an access token past its expiry — what a browser
+      // presents after the 15-minute window — next to the real refresh cookie.
+      const jwt = require('jsonwebtoken') as typeof import('jsonwebtoken');
+      const { config } = require('../../config') as typeof import('../../config');
+      const expired = jwt.sign(
+        { userId: user.id, jti: `expired-${tag()}`, exp: Math.floor(Date.now() / 1000) - 60 },
+        config.jwt.secret
+      );
+      jarOf(agent).setCookie(`token=${expired}; Path=/`, '127.0.0.1', '/');
+
+      const out = await agent.post(LOGOUT);
+      expect(out.status).toBe(200);
+
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('for a native client presenting its tokens by value', async () => {
+      const user = await makeUser();
+      const login = await request(app)
+        .post('/api/v1/auth/login')
+        .set('X-Client-Type', 'mobile')
+        .send({ email: user.email, password: PASSWORD });
+      expect(login.status).toBe(200);
+      const { accessToken, refreshToken } = login.body.data as { accessToken: string; refreshToken: string };
+
+      // No cookies at all: a native WebView cannot rely on its jar.
+      const out = await request(app)
+        .post(LOGOUT)
+        .set('X-Client-Type', 'mobile')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ refreshToken });
+      expect(out.status).toBe(200);
+
+      const verify = await request(app).get('/api/v1/auth/verify').set('Authorization', `Bearer ${accessToken}`);
+      expect(verify.status).toBe(401);
+      const refresh = await request(app).post(REFRESH).set('X-Client-Type', 'mobile').send({ refreshToken });
+      expect(refresh.status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+  });
+
+  describe('changing the password or deactivating ends every session', () => {
+    it('an administrator resetting the password via /users', async () => {
+      const user = await makeUser();
+      const { agent, refreshToken } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/users/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ password: 'a-brand-new-password' });
+      expect(res.status).toBe(200);
+
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('an administrator resetting the password via /employees', async () => {
+      const user = await makeUser();
+      const { agent } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/employees/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ password: 'a-brand-new-password' });
+      expect(res.status).toBe(200);
+
+      expect((await agent.post(REFRESH)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('deactivating the account, so reactivating it does not resurrect the old session', async () => {
+      const user = await makeUser();
+      const { refreshToken } = await browserLogin(user.email);
+      const cookie = await authCookie();
+      const off = await request(app).put(`/api/v1/users/${user.id}`).set('Cookie', cookie).send({ isActive: false });
+      expect(off.status).toBe(200);
+      expect(await liveTokens(user.id)).toBe(0);
+
+      const on = await request(app).put(`/api/v1/users/${user.id}`).set('Cookie', cookie).send({ isActive: true });
+      expect(on.status).toBe(200);
+      expect((await refreshWith(refreshToken)).status).toBe(401);
+    });
+
+    it('deleting (soft-deleting) the account', async () => {
+      const user = await makeUser();
+      await browserLogin(user.email);
+      const del = await request(app).delete(`/api/v1/users/${user.id}`).set('Cookie', await authCookie());
+      expect(del.status).toBe(200);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('leaves sessions alone on an edit that changes neither', async () => {
+      const user = await makeUser();
+      const { agent } = await browserLogin(user.email);
+      const res = await request(app)
+        .put(`/api/v1/users/${user.id}`)
+        .set('Cookie', await authCookie())
+        .send({ firstName: 'Renamed' });
+      expect(res.status).toBe(200);
+      expect((await agent.post(REFRESH)).status).toBe(200);
+    });
+  });
+
+  describe('concurrent rotation of one refresh token', () => {
+    const service = () => {
+      const { RefreshTokenService } = require('../../services/RefreshTokenService') as typeof import('../../services/RefreshTokenService');
+      const { database } = require('../../config/database');
+      return new RefreshTokenService(database.getPool());
+    };
+
+    it('lets exactly one of two parallel rotate() calls succeed, without forking the family', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+
+      const results = await Promise.all([tokens.rotate(token), tokens.rotate(token)]);
+
+      expect(results.filter((r) => r.status === 'rotated')).toHaveLength(1);
+      expect(results.filter((r) => r.status === 'superseded')).toHaveLength(1);
+      // One live token in the family — the winner's successor — not two.
+      expect(await liveTokens(user.id)).toBe(1);
+    });
+
+    it('answers the loser of a parallel HTTP refresh with 409 and leaves the winner usable', async () => {
+      const user = await makeUser();
+      const { refreshToken } = await browserLogin(user.email);
+
+      const [a, b] = await Promise.all([refreshWith(refreshToken), refreshWith(refreshToken)]);
+      expect([a.status, b.status].sort()).toEqual([200, 409]);
+      const loser = a.status === 409 ? a : b;
+      const winner = a.status === 200 ? a : b;
+      expect(loser.body.error.code).toBe('REFRESH_SUPERSEDED');
+      // The loser must not clear the cookie: in a browser the jar is shared,
+      // and it may already hold the winner's successor.
+      expect(setCookieValue(loser, 'refresh_token')).toBeUndefined();
+
+      const successor = setCookieValue(winner, 'refresh_token')!;
+      expect((await refreshWith(successor)).status).toBe(200);
+    });
+
+    it("lets a victim left with a superseded token end the thief's session by logging out", async () => {
+      const user = await makeUser();
+      const { refreshToken: stolen } = await browserLogin(user.email);
+
+      // The thief rotates first and holds the live successor...
+      const thief = await refreshWith(stolen);
+      expect(thief.status).toBe(200);
+      const thiefSuccessor = setCookieValue(thief, 'refresh_token')!;
+      // ...so the victim, inside the grace window, only ever sees 409.
+      expect((await refreshWith(stolen)).status).toBe(409);
+
+      // The victim's client gives up and logs out with the cookie it still
+      // holds — sent to the logout path exactly as a browser would.
+      const out = await request(app).post(LOGOUT).set('Cookie', `refresh_token=${stolen}`);
+      expect(out.status).toBe(200);
+      expect((await refreshWith(thiefSuccessor)).status).toBe(401);
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+
+    it('cannot deadlock with a password change that revokes the same tokens', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+      const other = await mysql.createConnection({ ...DB, database: ITEST_DB });
+      try {
+        // What updateUser does: lock the users row, then revoke the tokens.
+        await other.beginTransaction();
+        await other.query('UPDATE users SET first_name = ? WHERE id = ?', ['Locked', user.id]);
+        const rotation = tokens.rotate(token);
+        await new Promise((resolve) => setTimeout(resolve, 300)); // let the rotation block on its locks
+        await other.query(
+          'UPDATE refresh_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = ? AND revoked_at IS NULL',
+          [user.id]
+        );
+        await other.commit();
+        // The rotation waited for the password change and then found its token revoked.
+        await expect(rotation).resolves.toEqual({ status: 'invalid' });
+      } finally {
+        await other.end();
+      }
+    });
+
+    it('still treats a replay outside the grace window as reuse and revokes the family', async () => {
+      const user = await makeUser();
+      const tokens = service();
+      const { token } = await tokens.issue(user.id);
+      expect((await tokens.rotate(token)).status).toBe('rotated');
+      await admin.query(
+        'UPDATE refresh_tokens SET revoked_at = revoked_at - INTERVAL 1 MINUTE WHERE user_id = ? AND revoked_at IS NOT NULL',
+        [user.id]
+      );
+
+      expect((await tokens.rotate(token)).status).toBe('invalid');
+      expect(await liveTokens(user.id)).toBe(0);
+    });
+  });
+});
+
+/**
+ * Working-time limits reach the optimizer through the chain ComplianceEngine
+ * uses (#838, #883), against the real schema and the real engine.
+ *
+ * The problem used to state 8 h of rest for everyone and COALESCE(..., 40) /
+ * COALESCE(..., 5) for anyone without a preference row, so neither an 11 h
+ * contract nor the organization's own policy changed what was generated —
+ * and ComplianceEngine then flagged the turnarounds the optimizer produced.
+ *
+ * Each case is a department of one person and two shifts leaving a 9 h
+ * turnaround, generated through the endpoint. Under 8 h that person works
+ * both; under 11 h, only one.
+ */
+describe('working-time limits reach the optimizer (#838, #883)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  /** The default two shifts: 14:00-22:00, then 07:00-15:00 the next day — 9 h between them. */
+  const TURNAROUND: Array<[number, string, string]> = [
+    [61, '14:00:00', '22:00:00'],
+    [62, '07:00:00', '15:00:00'],
+  ];
+
+  /**
+   * A draft schedule whose only candidate is a new user, with the given shifts
+   * as [days from today, start, end]; returns both ids.
+   */
+  const loneCandidateSchedule = async (
+    shifts: Array<[number, string, string]> = TURNAROUND
+  ): Promise<{ scheduleId: number; personId: number }> => {
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active) VALUES (?, 'limits', 1)`,
+      [`limits-${tag()}`]
+    );
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Rest', 'Limited', 1)`,
+      [`limits-${tag()}@example.com`]
+    );
+    await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [
+      person.insertId,
+      dept.insertId,
+    ]);
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE() + INTERVAL 60 DAY, CURDATE() + INTERVAL 66 DAY, ?, 'draft', ?)`,
+      [`limits-${tag()}`, dept.insertId, userId]
+    );
+    for (const [days, start, end] of shifts) {
+      await admin.query(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, ?, ?, 1, 1, 'open')`,
+        [sc.insertId, dept.insertId, days, start, end]
+      );
+    }
+    return { scheduleId: sc.insertId, personId: person.insertId };
+  };
+
+  /** Runs `body` with a global policy in force, removing it afterwards. */
+  const withPolicy = async (key: string, value: object, body: () => Promise<void>): Promise<void> => {
+    const [policy] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO policies (scope_type, scope_id, policy_key, policy_value, imposed_by_user_id, is_active)
+       VALUES ('global', NULL, ?, ?, ?, 1)`,
+      [key, JSON.stringify(value), userId]
+    );
+    try {
+      await body();
+    } finally {
+      // Global: left in place it would hold every later test to it.
+      await admin.query('DELETE FROM policies WHERE id = ?', [policy.insertId]);
+    }
+  };
+
+  /** A preferences row as PreferencesService creates one: 40 h, 5 days. */
+  const defaultPreferences = (personId: number) =>
+    admin.query(`INSERT INTO user_preferences (user_id) VALUES (?)`, [personId]);
+
+  const assignContract = async (
+    personId: number,
+    restHours: number,
+    until: string | null = null
+  ): Promise<void> => {
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, min_hours_between_shifts, is_active) VALUES (?, ?, 1)`,
+      [`${restHours}h rest ${tag()}`, restHours]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from, effective_to)
+       VALUES (?, ?, CURDATE(), ${until ?? 'NULL'})`,
+      [personId, contract.insertId]
+    );
+  };
+
+  const generate = async (scheduleId: number) => {
+    const res = await request(app)
+      .post(`/api/v1/schedules/${scheduleId}/generate`)
+      .set('Cookie', await authCookie())
+      .send({});
+    expect(res.status).toBe(200);
+    return res.body.data as { assignmentsCreated: number; engine: string };
+  };
+
+  it('gives the 9 h turnaround to someone with nothing configured beyond the 8 h setting', async () => {
+    const { scheduleId } = await loneCandidateSchedule();
+    expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+  });
+
+  it('refuses it to someone whose contract requires 11 h of rest', async () => {
+    const { scheduleId, personId } = await loneCandidateSchedule();
+    await assignContract(personId, 11);
+
+    expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+  });
+
+  it("refuses it under the organization's 11 h rest policy", async () => {
+    const { scheduleId } = await loneCandidateSchedule();
+    await withPolicy('min_rest_hours', { hours: 11 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+    });
+  });
+
+  it('refuses it under an 11 h policy to someone whose 8 h contract ends before the turnaround', async () => {
+    // The contract covers the first shift's day but not the second's; the
+    // policy governs the day it does not cover — and is a ceiling anyway.
+    const { scheduleId, personId } = await loneCandidateSchedule();
+    await assignContract(personId, 8, 'CURDATE() + INTERVAL 61 DAY');
+    await withPolicy('min_rest_hours', { hours: 11 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+    });
+  });
+
+  it("does not let a default preferences row lift the organization's weekly-hours policy", async () => {
+    // Three 8 h day shifts, two days apart, under a 16 h week.
+    const { scheduleId, personId } = await loneCandidateSchedule([
+      [61, '09:00:00', '17:00:00'],
+      [63, '09:00:00', '17:00:00'],
+      [65, '09:00:00', '17:00:00'],
+    ]);
+    await defaultPreferences(personId);
+    await withPolicy('max_hours_week', { hours: 16 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+    });
+  });
+
+  it('does not let a default preferences row tighten a contract that matches the policy', async () => {
+    // EU-preset shape: 48 h policy, 48 h contract, and the 40 h every
+    // preferences row carries. Five 9 h shifts are 45 h — legal under the
+    // contract, refused at the fifth under the preference default.
+    const { scheduleId, personId } = await loneCandidateSchedule(
+      [61, 62, 63, 64, 65].map((d): [number, string, string] => [d, '08:00:00', '17:00:00'])
+    );
+    await defaultPreferences(personId);
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, max_hours_per_week, is_active) VALUES (?, 48, 1)`,
+      [`48h week ${tag()}`]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE())`,
+      [personId, contract.insertId]
+    );
+    await withPolicy('max_hours_week', { hours: 48 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(5);
+    });
+  });
+
+  it("does not let a default preferences row lift the organization's consecutive-days policy", async () => {
+    const { scheduleId, personId } = await loneCandidateSchedule([
+      [61, '09:00:00', '17:00:00'],
+      [62, '09:00:00', '17:00:00'],
+      [63, '09:00:00', '17:00:00'],
+    ]);
+    await defaultPreferences(personId);
+    await withPolicy('max_consecutive_days', { days: 2 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+    });
   });
 });

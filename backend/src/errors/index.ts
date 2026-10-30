@@ -11,7 +11,7 @@
  *   { success: false, error: { code, message } }
  *
  * Non-AppError exceptions remain internal faults: logged and rendered as a
- * generic 500 (message hidden in production).
+ * generic 500 carrying the request id, in every environment (#895).
  *
  * @author Luca Ostinelli
  */
@@ -74,5 +74,22 @@ export class NotFoundError extends AppError {
 export class ConflictError extends AppError {
   constructor(message = 'Request conflicts with the current state') {
     super(message, 409, 'CONFLICT');
+  }
+}
+
+/**
+ * 500 — schedule generation produced no schedule from any engine.
+ *
+ * A server fault, but typed rather than a plain `Error` because the planner
+ * must be TOLD: rendered as the generic internal error, a failed run reads
+ * like any other crash, and the code is what lets a client say "generation
+ * failed, nothing was changed" (#858). The message is fixed and carries no
+ * internal detail; the reason is logged where the failure is detected.
+ */
+export class OptimizationFailedError extends AppError {
+  constructor(
+    message = 'Schedule generation failed: no engine produced a schedule. Nothing was proposed or changed.'
+  ) {
+    super(message, 500, 'OPTIMIZATION_FAILED');
   }
 }

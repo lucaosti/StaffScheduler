@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import i18n, { isRtl, isSupportedLocale } from './index';
 import { applyOrganizationOverrides } from './organizationOverrides';
 import DirectionSync from './DirectionSync';
+import { configureBootstrapStylesheets } from './bootstrapStylesheet';
 
 const Probe: React.FC = () => {
   const { t, i18n: instance } = useTranslation();
@@ -118,5 +119,24 @@ describe('DirectionSync', () => {
 
     await waitFor(() => expect(document.documentElement.getAttribute('dir')).toBe('rtl'));
     expect(document.documentElement.getAttribute('lang')).toBe('ar');
+  });
+
+  /**
+   * #845: `dir="rtl"` alone does not mirror Bootstrap — its LTR build defines
+   * `.ms-*`/`.me-*` as physical margins. The RTL build has to be the one
+   * loaded while the document is right-to-left.
+   */
+  it('swaps in the matching Bootstrap build for the direction', async () => {
+    configureBootstrapStylesheets({ ltr: '/bootstrap.ltr.css', rtl: '/bootstrap.rtl.css' });
+    const hrefs = () =>
+      Array.from(document.head.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"]')).map((l) =>
+        l.getAttribute('href')
+      );
+    render(<DirectionSync />);
+    await waitFor(() => expect(hrefs()).toContain('/bootstrap.ltr.css'));
+
+    await i18n.changeLanguage('ar');
+
+    await waitFor(() => expect(hrefs()).toContain('/bootstrap.rtl.css'));
   });
 });

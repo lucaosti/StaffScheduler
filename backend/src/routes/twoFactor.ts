@@ -24,6 +24,7 @@ import { validateBody } from '../middleware/validation';
 import { twoFactorChallengeBody, twoFactorCodeBody, twoFactorSetupBody } from '../schemas';
 import { TwoFactorService } from '../services/TwoFactorService';
 import { TwoFactorMethodType } from '../services/TwoFactorMethodProvider';
+import { AppError } from '../errors';
 
 const respondError = (res: Response, status: number, code: string, message: string): void => {
   res.status(status).json({ success: false, error: { code, message } });
@@ -63,7 +64,13 @@ export const createTwoFactorRouter = (pool: Pool): Router => {
       await invalidateAuthContext(req.user!.id);
       res.json({ success: true, data });
     } catch (err) {
-      respondError(res, 400, 'TWO_FACTOR_ENABLE_FAILED', (err as Error).message);
+      // Typed refusals (wrong code 400, no pending setup / already enabled
+      // 409, no such user 404) keep their own status under this route's
+      // historical code. Anything else is an internal fault and goes to the
+      // central errorHandler: rendering its message here sent driver text to
+      // the client as a 4xx the UI displays (#895).
+      if (!(err instanceof AppError)) throw err;
+      respondError(res, err.status, 'TWO_FACTOR_ENABLE_FAILED', err.message);
     }
   });
 

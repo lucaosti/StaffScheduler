@@ -9,7 +9,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Employee, Shift, ShiftAssignment } from '../../types';
-import { toLocalDateString } from '../../utils/format';
+import { formatTime, toLocalDateString } from '../../utils/format';
 
 interface Props {
   isNarrow: boolean;
@@ -58,7 +58,7 @@ const WeekView: React.FC<Props> = ({
                   return (
                     <li className="list-group-item" key={shift.id}>
                       <div className="d-flex justify-content-between align-items-start gap-2">
-                        <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
+                        <small className="text-muted">{`${formatTime(shift.startTime)} - ${formatTime(shift.endTime)}`}</small>
                         {deptName && <span className="badge bg-primary">{deptName}</span>}
                       </div>
                       {dayAssignments.length > 0 ? (
@@ -127,7 +127,7 @@ const WeekView: React.FC<Props> = ({
                         <div>
                           <strong>{toLocalDateString(shift.date)}</strong>
                           <br />
-                          <small className="text-muted">{`${shift.startTime} - ${shift.endTime}`}</small>
+                          <small className="text-muted">{`${formatTime(shift.startTime)} - ${formatTime(shift.endTime)}`}</small>
                           <br />
                           {deptName && <span className="badge bg-primary">{deptName}</span>}
                         </div>

@@ -16,7 +16,8 @@
  * Constraints enforced by the greedy fallback (see evaluateCandidate, in
  * evaluation order — the numbering matches that method's inline comments):
  *   1. Staff cap — assignments per shift are capped at max_staff
- *   2. No double-booking — time-overlap detection within a calendar day
+ *   2. No double-booking — absolute-time overlap, across midnight and against
+ *      external assignments
  *   2b. Minimum rest between shifts — same rule as ComplianceEngine's
  *       checkMinRest, including across different (typically adjacent) days
  *   3. Declared unavailability — date-level blocks from user_unavailability
@@ -43,11 +44,11 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
-import { coverageShortfalls, findOverCommitments } from './constraintValidator';
+import { coverageShortfalls, findOverCommitments, minRestHoursFor } from './constraintValidator';
 // The overnight-aware time arithmetic these engines share. It used to be four
 // private helpers here and equivalent copies in constraintValidator, kept in
 // step by a comment — see ./shiftTime for why that was not good enough.
-import { dateToMs, shiftBoundsMs, shiftHours, timeToMinutes } from './shiftTime';
+import { dateToMs, exceedsHours, shiftBoundsMs, shiftHours, shiftMinutes } from './shiftTime';
 import type { OverCommitment } from './constraintValidator';
 
 // Re-exported so every existing import site keeps working unchanged; the
@@ -137,8 +138,11 @@ export interface CandidateContext {
   assignedShiftIds: Set<string>;
   /** All shifts in the problem (needed for overlap detection). */
   allShifts: Shift[];
-  /** Hours already scheduled per employee per date key "empId|date". */
-  dailyHoursMap: Map<string, number>;
+  /**
+   * Minutes already scheduled per employee per date key "empId|date".
+   * Minutes, not hours: rounded hours drift when summed (see shiftMinutes).
+   */
+  dailyMinutesMap: Map<string, number>;
   /** Assignments already committed to this shift (for max_staff check). */
   currentShiftAssignmentCount: number;
   /**
@@ -151,7 +155,10 @@ export interface CandidateContext {
   currentShiftAssignees: Set<string>;
   /** Pairing rules in force, if any. */
   pairings?: OptimizationProblem['pairings'];
-  /** Minimum rest hours required between two shifts (mirrors ComplianceEngine's policy). */
+  /**
+   * Minimum rest hours this employee needs between two shifts — their own
+   * requirement (see `minRestHoursFor`), as ComplianceEngine resolves it.
+   */
   minRestHoursBetweenShifts: number;
 }
 
@@ -171,6 +178,16 @@ export interface CandidateContext {
  * Defensive defaults rather than throwing: an older solver build that predates
  * the shortfall fields should degrade to "nothing reported", not take down a
  * run that otherwise produced a usable schedule.
+ *
+ * EVERY FIELD IS MAPPED; NOTHING IS SPREAD. The result used to start with
+ * `...raw`, which carried the script's snake_case `assignments`
+ * (`employee_id`, `shift_id`, `start_time`, …), `objective_value` and
+ * `solve_time_seconds` through under a type promising camelCase. Every CP-SAT
+ * plan therefore reached AutoScheduleService with undefined ids and was
+ * persisted as NaN (#919); the greedy path builds camelCase itself, which is
+ * why nothing noticed while production ran greedy only. With no spread, a key
+ * the solver adds later is absent until it is mapped here, rather than present
+ * under the wrong name.
  */
 const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   const stats = (raw.statistics ?? {}) as Record<string, unknown>;
@@ -178,7 +195,18 @@ const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
   const understaffed = (coverage.understaffed_shifts ?? []) as Array<Record<string, unknown>>;
 
   return {
-    ...(raw as unknown as SolverResult),
+    status: raw.status as SolverStatus,
+    objectiveValue: typeof raw.objective_value === 'number' ? raw.objective_value : undefined,
+    solveTimeSeconds: typeof raw.solve_time_seconds === 'number' ? raw.solve_time_seconds : 0,
+    error: typeof raw.error === 'string' ? raw.error : undefined,
+    assignments: ((raw.assignments ?? []) as Array<Record<string, unknown>>).map((a) => ({
+      employeeId: String(a.employee_id),
+      shiftId: String(a.shift_id),
+      date: String(a.date),
+      startTime: String(a.start_time),
+      endTime: String(a.end_time),
+      hours: Number(a.hours),
+    })),
     overCommittedEmployees: ((raw.over_committed_employees ?? []) as Array<Record<string, unknown>>).map(
       (o) => ({
         employeeId: String(o.employee_id),
@@ -207,6 +235,69 @@ const mapPythonResult = (raw: Record<string, unknown>): SolverResult => {
     },
   };
 };
+
+/** How long a child that was sent SIGTERM gets to exit before SIGKILL. */
+export const KILL_GRACE_MS = 5000;
+
+/**
+ * Ceiling on the solver's stdout. Its result is one JSON document whose size
+ * grows with the assignments: a 100-employee, 336-shift month is well under
+ * 2 MB. Sixty-four is far beyond any legitimate result and far below what
+ * would threaten the backend's heap.
+ */
+export const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
+
+/**
+ * How long after a failed write to the solver's stdin the run waits for the
+ * child's own exit before giving up on it: long enough for a crashing python
+ * to flush its traceback and exit.
+ */
+export const STDIN_ERROR_GRACE_MS = 2000;
+
+/** How much of the solver's stderr is kept, from the end, as a crash reason. */
+export const MAX_STDERR_TAIL_CHARS = 64 * 1024;
+
+/** The least of the watchdog kept back from the solver's budget, in ms. */
+const MIN_SOLVER_MARGIN_MS = 5000;
+
+/** The share of the watchdog kept back from the solver's budget. */
+const SOLVER_MARGIN_SHARE = 0.1;
+
+/**
+ * The `--time-limit` handed to the solver: the watchdog minus a margin, in
+ * whole seconds, and never more than a caller asked for.
+ *
+ * WHY IT IS NOT THE WATCHDOG ITSELF. The limit used to be 300 s against a
+ * 300 000 ms watchdog, while the script spent part of that building its model
+ * before searching at all — so a run that searched to its limit was always
+ * killed first and degraded to greedy, throwing away the feasible solution it
+ * was about to return (#837).
+ *
+ * The limit is the script's TOTAL budget. The model build, whose length
+ * depends on the instance and cannot be estimated from here, is the script's
+ * to subtract: it measures its own build time and searches only for what is
+ * left (`solve_time_budget` in schedule_optimizer.py). What this margin covers
+ * is what happens outside that budget — the interpreter and ortools import
+ * before the clock starts, CP-SAT stopping slightly after its limit, and the
+ * result's serialisation, transfer and parse. A tenth of the watchdog, and at
+ * least five seconds, leaves room for all of it at every size this runs at.
+ */
+export const solverTimeLimitSeconds = (watchdogMs: number, requestedSeconds?: number): number => {
+  const margin = Math.max(MIN_SOLVER_MARGIN_MS, watchdogMs * SOLVER_MARGIN_SHARE);
+  const available = Math.floor((watchdogMs - margin) / 1000);
+  const limit = requestedSeconds === undefined ? available : Math.min(requestedSeconds, available);
+  return Math.max(1, limit);
+};
+
+/**
+ * How much of stderr becomes a degraded run's reason. The reason reaches the
+ * planner's banner; the end of a traceback says what failed, and 64 KB of
+ * progress log above it says nothing they can use.
+ */
+export const MAX_REASON_CHARS = 500;
+
+/** The end of the solver's stderr, as a crash reason a person can read. */
+const crashReason = (stderr: string): string => stderr.trim().slice(-MAX_REASON_CHARS);
 
 /** The `error` of the script's ERROR JSON, or undefined when stdout is not one. */
 const errorReason = (stdout: string): string | undefined => {
@@ -263,7 +354,7 @@ export class ScheduleOptimizer {
       // Call Python optimizer
       const result = await this._callPythonOptimizer(
         problemData,
-        optimizationConfig.timeLimitSeconds || 300
+        solverTimeLimitSeconds(config.optimization.timeout, optimizationConfig.timeLimitSeconds)
       );
 
       const elapsedTime = (Date.now() - startTime) / 1000;
@@ -278,7 +369,10 @@ export class ScheduleOptimizer {
       // signalled fallback as a missing python3, rather than a second path
       // every caller would have to know to check for.
       if (result.status !== 'OPTIMAL' && result.status !== 'FEASIBLE') {
-        throw new Error(`OR-Tools solver finished with status ${result.status} and no schedule`);
+        throw new Error(
+          `OR-Tools solver finished with status ${result.status} and no schedule` +
+            (result.error ? `: ${result.error}` : '')
+        );
       }
 
       if (result.statistics.coverageStats) {
@@ -384,13 +478,19 @@ export class ScheduleOptimizer {
         timeLimitSeconds.toString(),
       ]);
 
-      let stdoutData = '';
-      let stderrData = '';
+      // stdout is collected as raw chunks and decoded once: decoding each
+      // chunk on its own splits a multi-byte character that straddles two
+      // chunks, and string concatenation copies the whole buffer per chunk.
+      const stdoutChunks: Buffer[] = [];
+      let stdoutBytes = 0;
+      let stderrTail = '';
       let settled = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let stdinError: Error | undefined;
+      let stdinErrorHandle: ReturnType<typeof setTimeout> | undefined;
 
-      // Ensure the Promise settles exactly once and the watchdog timer is
-      // always cleared, so it can never fire after the process has finished.
+      // Ensure the Promise settles exactly once and the timers are always
+      // cleared, so neither can fire after the process has finished.
       const finalize = (action: () => void): void => {
         if (settled) {
           return;
@@ -400,7 +500,24 @@ export class ScheduleOptimizer {
           clearTimeout(timeoutHandle);
           timeoutHandle = undefined;
         }
+        if (stdinErrorHandle) clearTimeout(stdinErrorHandle);
         action();
+      };
+
+      // Whether the child is still running. NOT `pythonProcess.killed`: that
+      // flag turns true as soon as kill() has DELIVERED a signal, not when the
+      // process exits, so the old `if (!killed) kill('SIGKILL')` after a
+      // SIGTERM could never fire — a solver ignoring SIGTERM ran on unbounded
+      // (#836). exitCode/signalCode stay null until the process has gone.
+      const stillRunning = (): boolean =>
+        pythonProcess.exitCode === null && pythonProcess.signalCode === null;
+
+      // Request graceful termination, then force-kill if it ignores SIGTERM.
+      const terminate = (): void => {
+        pythonProcess.kill('SIGTERM');
+        setTimeout(() => {
+          if (stillRunning()) pythonProcess.kill('SIGKILL');
+        }, KILL_GRACE_MS).unref?.();
       };
 
       // Watchdog: kill the process and reject if it never settles, so a
@@ -411,32 +528,43 @@ export class ScheduleOptimizer {
           return;
         }
         logger.error(`Python optimizer timed out after ${timeoutMs}ms; killing process`);
-        // Request graceful termination, then force-kill if it ignores SIGTERM.
-        pythonProcess.kill('SIGTERM');
-        setTimeout(() => {
-          if (!pythonProcess.killed) {
-            pythonProcess.kill('SIGKILL');
-          }
-        }, 5000).unref?.();
+        terminate();
         finalize(() => reject(new Error(`Python optimizer timed out after ${timeoutMs}ms`)));
       }, timeoutMs);
       timeoutHandle.unref?.();
 
-      // Collect stdout (JSON result)
-      pythonProcess.stdout.on('data', (data) => {
-        stdoutData += data.toString();
+      // Collect stdout (JSON result), bounded. A runaway or corrupted child
+      // printing without end would otherwise grow this buffer until the
+      // backend itself ran out of memory; past the cap the output cannot be a
+      // result anyone should parse, so the run is abandoned to the fallback.
+      pythonProcess.stdout.on('data', (data: Buffer) => {
+        if (settled) return;
+        stdoutBytes += data.length;
+        if (stdoutBytes > MAX_STDOUT_BYTES) {
+          logger.error(`Python optimizer output exceeded ${MAX_STDOUT_BYTES} bytes; killing process`);
+          terminate();
+          finalize(() =>
+            reject(new Error(`Python optimizer output exceeded ${MAX_STDOUT_BYTES} bytes`))
+          );
+          return;
+        }
+        stdoutChunks.push(data);
       });
 
-      // Collect stderr (logs)
-      pythonProcess.stderr.on('data', (data) => {
+      // Collect stderr (logs). Only the tail is kept: stderr is a progress
+      // log, read solely as the reason for a crash that wrote no JSON, and a
+      // crash's reason (a traceback) is at its end.
+      pythonProcess.stderr.on('data', (data: Buffer) => {
         const message = data.toString();
-        stderrData += message;
+        stderrTail = (stderrTail + message).slice(-MAX_STDERR_TAIL_CHARS);
         // Log Python script output
         logger.debug(`[Python Optimizer] ${message.trim()}`);
       });
 
       // Handle process completion
       pythonProcess.on('close', (code) => {
+        const stdoutData = Buffer.concat(stdoutChunks).toString('utf8');
+        const stderrData = stderrTail;
         finalize(() => {
           if (code === 0 || code === 1) {
             // A parsed result: a schedule (0) or a status without one (1),
@@ -444,11 +572,15 @@ export class ScheduleOptimizer {
             try {
               resolve(mapPythonResult(JSON.parse(stdoutData)));
             } catch (parseError) {
-              reject(
-                new Error(
-                  `Failed to parse optimizer output: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
-                )
-              );
+              // No JSON. On exit 1 the child died before answering (python
+              // exits 1 on an import error), so the end of its stderr is the
+              // reason. On exit 0 it claimed success and wrote something
+              // unreadable: the parse error is the reason, and stderr is only
+              // its progress log, which does not belong in a planner's banner.
+              const parseReason = parseError instanceof Error ? parseError.message : 'Unknown error';
+              const reason =
+                code === 0 ? parseReason : crashReason(stderrData) || stdinError?.message || parseReason;
+              reject(new Error(`Failed to parse optimizer output (exit ${code}): ${reason}`));
             }
           } else {
             // Non-zero exit — treat as hard error so optimize() can fall back.
@@ -457,7 +589,11 @@ export class ScheduleOptimizer {
             // only its progress log. Rejecting with stderr alone handed the
             // planner "Building CP-SAT model..." as the reason for a degraded
             // run. stderr stays the fallback for a crash that wrote no JSON.
-            reject(new Error(`Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? stderrData}`));
+            reject(
+              new Error(
+                `Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? (crashReason(stderrData) || stdinError?.message)}`
+              )
+            );
           }
         });
       });
@@ -467,9 +603,35 @@ export class ScheduleOptimizer {
         finalize(() => reject(new Error(`Failed to start Python optimizer: ${err.message}`)));
       });
 
+      // A child that exits before reading all of its input (python3 without
+      // ortools fails on import) closes the pipe while a problem larger than
+      // the pipe buffer is still being written, and the write fails with
+      // EPIPE. With no listener, a stream 'error' is THROWN by the emitter —
+      // as an uncaught exception that took the whole backend down rather than
+      // this one run (#836). Handled here, it is one more reason to fall back.
+      //
+      // RECORDED, NOT SETTLED ON. The EPIPE almost always arrives before the
+      // child's 'close', and settling on it made every such run's degraded
+      // reason "write EPIPE" — true, and useless — while the reason the child
+      // gave on stderr ("ModuleNotFoundError: No module named 'ortools'") was
+      // dropped. 'close' settles with that stderr; the timer only covers a
+      // child that keeps running after closing its stdin.
+      pythonProcess.stdin.on('error', (err) => {
+        // The first error sets the deadline; a later one on the same stream
+        // must neither push it back nor leave a second timer behind.
+        if (stdinError) return;
+        stdinError = err;
+        stdinErrorHandle = setTimeout(() => {
+          if (settled) return;
+          // Abandoned, so stopped: otherwise the child runs on unwatched.
+          terminate();
+          finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`)));
+        }, STDIN_ERROR_GRACE_MS);
+        stdinErrorHandle.unref?.();
+      });
+
       // Send problem data to stdin
-      pythonProcess.stdin.write(JSON.stringify(problem));
-      pythonProcess.stdin.end();
+      pythonProcess.stdin.end(JSON.stringify(problem));
     });
   }
 
@@ -530,22 +692,23 @@ export class ScheduleOptimizer {
    * @returns true if the employee can be assigned to ctx.shift
    */
   evaluateCandidate(emp: Employee, ctx: CandidateContext): boolean {
-    const { shift, assignedShiftIds, allShifts, dailyHoursMap, currentShiftAssignmentCount } = ctx;
+    const { shift, assignedShiftIds, allShifts, dailyMinutesMap, currentShiftAssignmentCount } = ctx;
 
     // 1. Staff cap — never exceed max_staff for this shift
     if (shift.max_staff !== undefined && currentShiftAssignmentCount >= shift.max_staff) {
       return false;
     }
 
-    // 2. No double-booking — reject if already on an overlapping shift today
+    // 2. No double-booking — reject if already on an overlapping shift, whatever
+    //    date either starts on
     if (this._hasOverlappingShift(shift, assignedShiftIds, allShifts)) {
       return false;
     }
 
     // 2b. Minimum rest between shifts — same rule as ComplianceEngine's
     //     checkMinRest, e.g. an overnight shift ending 07:00 followed
-    //     immediately by a 07:00 shift the next day is a same-day-overlap
-    //     miss (different dates) but a real rest-hours violation.
+    //     immediately by a 07:00 shift the next day does not overlap
+    //     but is a real rest-hours violation.
     if (this._wouldViolateMinRest(shift, ctx)) {
       return false;
     }
@@ -574,10 +737,11 @@ export class ScheduleOptimizer {
     // Contract cap when present; otherwise the historical derived formula.
     // Kept in lock-step with constraintValidator, which is the authority.
     const dailyBudget = emp.max_hours_per_day ?? Math.max(8, emp.max_hours_per_week / 5);
-    const hours = shiftHours(shift);
+    // Exact minutes: three 2h40 shifts are 8h, which per-shift rounded hours
+    // read as 8.1h and refused (#834).
     const dailyKey = `${emp.id}|${shift.date}`;
-    const hoursAlreadyToday = dailyHoursMap.get(dailyKey) ?? 0;
-    if (hoursAlreadyToday + hours > dailyBudget) {
+    const minutesAlreadyToday = dailyMinutesMap.get(dailyKey) ?? 0;
+    if (exceedsHours(minutesAlreadyToday + shiftMinutes(shift), dailyBudget)) {
       return false;
     }
 
@@ -638,12 +802,12 @@ export class ScheduleOptimizer {
 
     const anchors = [shift, ...assigned.filter((s) => withinWeek(s, shift))];
     for (const anchor of anchors) {
-      let total = shiftHours(anchor);
+      let totalMinutes = shiftMinutes(anchor);
       for (const other of assigned) {
-        if (other !== anchor && withinWeek(anchor, other)) total += shiftHours(other);
+        if (other !== anchor && withinWeek(anchor, other)) totalMinutes += shiftMinutes(other);
       }
-      if (anchor !== shift && withinWeek(anchor, shift)) total += shiftHours(shift);
-      if (total > emp.max_hours_per_week) return true;
+      if (anchor !== shift && withinWeek(anchor, shift)) totalMinutes += shiftMinutes(shift);
+      if (exceedsHours(totalMinutes, emp.max_hours_per_week)) return true;
     }
     return false;
   }
@@ -711,7 +875,12 @@ export class ScheduleOptimizer {
       let restMs: number;
       if (candEnd <= otherStart) restMs = otherStart - candEnd;
       else if (otherEnd <= candStart) restMs = candStart - otherEnd;
-      else continue; // overlap is handled by _hasOverlappingShift, not double-flagged here
+      // Overlapping: no rest at all. This used to `continue`, on the
+      // assumption that the overlap check had already refused the pair — but
+      // that check only compared same-date shifts, so a cross-midnight
+      // overlap passed both and was assigned (#835). Refusing here too means
+      // this rule no longer depends on the other one being complete.
+      else return true;
       if (restMs / 3_600_000 < ctx.minRestHoursBetweenShifts) return true;
     }
     return false;
@@ -731,11 +900,6 @@ export class ScheduleOptimizer {
    * Known limitations:
    * - No backtracking — a locally greedy choice may block a later shift from
    *   being staffed. The CP-SAT path handles this globally.
-   * - Same-day overlap detection (_hasOverlappingShift) only compares shifts
-   *   sharing the same date, so an overnight shift is checked against
-   *   same-date shifts but not a next-day shift it spills into. This is a
-   *   separate concern from minimum rest between shifts, which
-   *   _wouldViolateMinRest does check across day boundaries.
    */
   async generateGreedySchedule(problem: OptimizationProblem): Promise<ScheduleAssignment[]> {
     logger.info('Generating greedy schedule as fallback');
@@ -774,19 +938,14 @@ export class ScheduleOptimizer {
       employeeAssignments.set(emp.id, new Set(externalShiftsByEmployee.get(emp.id)!.map((s) => s.id)))
     );
 
-    // Track hours already assigned per employee per date ("empId|date" -> hours)
-    const dailyHoursMap = new Map<string, number>();
+    // Track minutes already assigned per employee per date ("empId|date" -> minutes)
+    const dailyMinutesMap = new Map<string, number>();
     for (const emp of problem.employees) {
       for (const stub of externalShiftsByEmployee.get(emp.id) ?? []) {
         const key = `${emp.id}|${stub.date}`;
-        dailyHoursMap.set(key, (dailyHoursMap.get(key) ?? 0) + shiftHours(stub));
+        dailyMinutesMap.set(key, (dailyMinutesMap.get(key) ?? 0) + shiftMinutes(stub));
       }
     }
-
-    const minRestHoursBetweenShifts: number =
-      typeof problem.constraints?.min_hours_between_shifts === 'number'
-        ? problem.constraints.min_hours_between_shifts
-        : 8;
 
     // Assign employees to shifts greedily
     for (const shift of sortedShifts) {
@@ -798,8 +957,9 @@ export class ScheduleOptimizer {
           shift,
           assignedShiftIds: employeeAssignments.get(emp.id)!,
           allShifts: allShiftsForLookup,
-          dailyHoursMap,
-          minRestHoursBetweenShifts,
+          dailyMinutesMap,
+          // The employee's own rest requirement, by the validator's rule.
+          minRestHoursBetweenShifts: minRestHoursFor(problem, emp),
           // Pass 0 here — max_staff is re-enforced in the assignment loop below
           // so we collect all eligible candidates first.
           currentShiftAssignmentCount: 0,
@@ -835,12 +995,12 @@ export class ScheduleOptimizer {
 
         // Two different constraints, so two different indexes: employeeAssignments
         // (which shifts this employee already holds) feeds the overlap check above,
-        // while dailyHoursMap (cumulative hours per employee per day) feeds the
-        // max-daily-hours check elsewhere in this loop — neither can be derived
-        // from the other without re-scanning `assignments`.
+        // while dailyMinutesMap (cumulative minutes per employee per day) feeds
+        // the max-daily-hours check elsewhere in this loop — neither can be
+        // derived from the other without re-scanning `assignments`.
         employeeAssignments.get(emp.id)!.add(shift.id);
         const dailyKey = `${emp.id}|${shift.date}`;
-        dailyHoursMap.set(dailyKey, (dailyHoursMap.get(dailyKey) ?? 0) + hours);
+        dailyMinutesMap.set(dailyKey, (dailyMinutesMap.get(dailyKey) ?? 0) + shiftMinutes(shift));
       }
     }
 
@@ -848,42 +1008,32 @@ export class ScheduleOptimizer {
     return assignments;
   }
 
+  /**
+   * Whether the candidate overlaps anything the employee already holds,
+   * external assignments included, compared on absolute bounds.
+   *
+   * It used to compare only shifts sharing a start DATE, on times of day. A
+   * 22:00–06:00 night shift and the next day's 05:00–13:00 start on different
+   * dates, so the pair was never compared and both went to one person — and
+   * the same for a night shift held on another schedule (#835). Absolute
+   * bounds are what the validator and CP-SAT already compare, so this is the
+   * same rule rather than a closer approximation of it; there is no "same
+   * day" left to get wrong.
+   */
   private _hasOverlappingShift(
     shift: Shift,
     assignedShiftIds: Set<string>,
     allShifts: Shift[]
   ): boolean {
     const shiftsById = this._getShiftsById(allShifts);
+    const [start, end] = shiftBoundsMs(shift);
     for (const shiftId of assignedShiftIds) {
-      const assignedShift = shiftsById.get(shiftId);
-      if (assignedShift && assignedShift.date === shift.date) {
-        if (
-          this._timesOverlap(
-            shift.start_time,
-            shift.end_time,
-            assignedShift.start_time,
-            assignedShift.end_time
-          )
-        ) {
-          return true;
-        }
-      }
+      const other = shiftsById.get(shiftId);
+      if (!other) continue;
+      const [otherStart, otherEnd] = shiftBoundsMs(other);
+      if (start < otherEnd && otherStart < end) return true;
     }
     return false;
-  }
-
-  private _timesOverlap(start1: string, end1: string, start2: string, end2: string): boolean {
-    const s1 = timeToMinutes(start1);
-    let e1 = timeToMinutes(end1);
-    const s2 = timeToMinutes(start2);
-    let e2 = timeToMinutes(end2);
-
-    // Normalize overnight ranges (e.g. 22:00–06:00) so a shift crossing
-    // midnight is still detected as overlapping same-date shifts.
-    if (e1 <= s1) e1 += 24 * 60;
-    if (e2 <= s2) e2 += 24 * 60;
-
-    return !(e1 <= s2 || e2 <= s1);
   }
 
 

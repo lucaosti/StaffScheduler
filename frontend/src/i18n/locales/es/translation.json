@@ -9,6 +9,9 @@
   "common.dashboard": "Panel",
   "common.tryAgain": "Reintentar",
   "common.close": "Cerrar",
+  "common.somethingWentWrong": "Algo salió mal. Inténtalo de nuevo.",
+  "common.serverError": "Algo salió mal por nuestra parte. Inténtalo de nuevo en unos momentos.",
+  "common.serverErrorWithReference": "Algo salió mal por nuestra parte. Inténtalo de nuevo en unos momentos. Referencia: {{requestId}}",
   "auth.signIn": "Iniciar sesión",
   "auth.signOut": "Cerrar sesión",
   "auth.email": "Correo electrónico",
@@ -1238,5 +1241,13 @@
   "schedule.stats.shiftCount_one": "{{count}} turno",
   "schedule.stats.shiftCount_other": "{{count}} turnos",
   "schedule.stats.employeeCount": "{{count}} empleados",
-  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}"
+  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}",
+  "settings.work.title": "Preferencias de trabajo",
+  "settings.work.constraints": "Restricciones de planificación",
+  "settings.work.limitsNote": "Tus límites de jornada los fija tu responsable. Se muestran aquí porque determinan los turnos que se te pueden asignar.",
+  "settings.work.maxHoursPerWeek": "Horas máximas por semana",
+  "settings.work.maxConsecutiveDays": "Días consecutivos máximos",
+  "settings.work.noLimits": "No constan límites de jornada registrados para ti.",
+  "settings.work.loading": "Cargando tus límites de jornada…",
+  "dashboard.stats.unavailable": "No disponible"
 }

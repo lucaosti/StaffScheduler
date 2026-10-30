@@ -22,7 +22,7 @@ name: staffscheduler-verify
 
 services:
   db:
-    image: mysql:8.0.42
+    image: mysql:8.4.11
     environment:
       MYSQL_ROOT_PASSWORD: verify
       MYSQL_DATABASE: staff_scheduler

@@ -22,7 +22,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { join } from 'path';
+import { PYTHON_SCRIPT, describeOrtools, runPython, solveCpSat } from './helpers/cpSat';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import {
   findConstraintViolations,
@@ -43,8 +43,9 @@ import {
   qualifiedStaffShortfalls,
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
-import { shiftBoundsMs, shiftHours } from '../optimization/shiftTime';
-import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
+import { exceedsHours, formatHours, shiftBoundsMs, shiftHours, shiftMinutes } from '../optimization/shiftTime';
+import { allFixtures, fairnessBystanderFixture, feasibleFixtures } from './fixtures/optimizerFixtures';
+import { buildOptimizationProblem } from '../services/autoScheduleProblem';
 
 const toValidated = (
   assignments: Array<{ employeeId: string; shiftId: string }>
@@ -652,43 +653,7 @@ describe('greedy engine respects the canonical constraints', () => {
   });
 });
 
-// --- CP-SAT parity (Python) -------------------------------------------------
-
-const PYTHON_SCRIPT = join(__dirname, '../../optimization-scripts/schedule_optimizer.py');
-const REQUIRE_ORTOOLS = process.env.REQUIRE_ORTOOLS === '1';
-
-/** Probe whether python3 + ortools are importable in this environment. */
-const ortoolsAvailable = (): boolean => {
-  const probe = spawnSync('python3', ['-c', 'import ortools'], { encoding: 'utf8' });
-  return probe.status === 0;
-};
-
-interface PythonAssignment {
-  employee_id: string;
-  shift_id: string;
-}
-
-/** Run the Python CP-SAT engine on a problem and return its assignments. */
-const runPython = (problem: unknown): ValidatedAssignment[] => {
-  const res = spawnSync(
-    'python3',
-    [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', '10'],
-    { input: JSON.stringify(problem), encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
-  );
-  if (res.status !== 0 && res.status !== 1) {
-    throw new Error(`Python optimizer failed (status ${res.status}): ${res.stderr}`);
-  }
-  const parsed = JSON.parse(res.stdout) as { status: string; assignments?: PythonAssignment[] };
-  if (parsed.status !== 'OPTIMAL' && parsed.status !== 'FEASIBLE') {
-    throw new Error(`Python optimizer returned ${parsed.status} for a feasible fixture`);
-  }
-  return (parsed.assignments ?? []).map((a) => ({
-    employeeId: String(a.employee_id),
-    shiftId: String(a.shift_id),
-  }));
-};
-
-const describeOrtools = REQUIRE_ORTOOLS || ortoolsAvailable() ? describe : describe.skip;
+// --- CP-SAT parity (Python): gate and runner in ./helpers/cpSat -------------
 
 describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
   it.each(allFixtures)('produces no violations on: $name', ({ problem }) => {
@@ -722,6 +687,31 @@ describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
  *   - 1e12: a coefficient itself leaves int64, and ortools silently switches
  *     to a floating-point objective, which Validate() accepts.
  */
+// The parity blocks above run the script directly. This one goes through
+// optimize(), the path production takes, so the mapping of the script's
+// snake_case output onto ScheduleAssignment is exercised against the real
+// solver: it was missing and every CP-SAT plan reached the planner with
+// undefined ids (#919).
+describeOrtools('CP-SAT results through optimize()', () => {
+  it('returns camelCase assignments the persistence layer can read', async () => {
+    const fixture = feasibleFixtures[0];
+    const result = await new ScheduleOptimizer().optimize(fixture.problem);
+
+    expect(['OPTIMAL', 'FEASIBLE']).toContain(result.status);
+    expect(result.assignments.length).toBeGreaterThan(0);
+    const shiftIds = new Set(fixture.problem.shifts.map((s) => s.id));
+    const employeeIds = new Set(fixture.problem.employees.map((e) => e.id));
+    for (const a of result.assignments) {
+      expect(shiftIds.has(a.shiftId)).toBe(true);
+      expect(employeeIds.has(a.employeeId)).toBe(true);
+      expect(a).toEqual(
+        expect.objectContaining({ date: expect.any(String), startTime: expect.any(String), endTime: expect.any(String), hours: expect.any(Number) })
+      );
+      expect(a).not.toHaveProperty('employee_id');
+    }
+  });
+});
+
 describeOrtools('CP-SAT objective overflow guard', () => {
   const overflowingProblem = (hourlyRate: number) => {
     const employee = (id: string) => ({
@@ -1048,6 +1038,13 @@ describeOrtools('CP-SAT engine balances workload', () => {
     expect(findConstraintViolations(splittable, runPython(splittable))).toEqual([]);
   });
 
+  it('keeps balancing when one employee is eligible for nothing (#839)', () => {
+    const assignments = runPython(fairnessBystanderFixture);
+    const shiftsOf = (id: string) => assignments.filter((a) => a.employeeId === id).length;
+    expect(assignments).toHaveLength(6);
+    expect([shiftsOf('e1'), shiftsOf('e2')]).toEqual([3, 3]);
+  });
+
   /**
    * Fairness sits at SOFT, so it must never buy an unstaffed seat — and the
    * temptation is real: with one employee and three shifts, working none of
@@ -1290,6 +1287,28 @@ describeOrtools('CP-SAT engine explains an over-committed employee', () => {
     // to carry what is wrong and by how much.
     expect(findings[0].detail).toMatch(/23h on 2033-03-01/);
     expect(findings[0].detail).toMatch(/8h daily limit/);
+  });
+
+  it('counts a half-hour external toward the daily limit, as the validator does (#834)', () => {
+    // 08:00–16:30 elsewhere against an 8h cap: over by half an hour. Read as
+    // whole hours it was exactly 8, so the engine kept the employee in the
+    // model and its own daily constraint then had to be the one to object.
+    const halfHourOver = {
+      ...overCommitted,
+      employees: [
+        {
+          ...overCommitted.employees[0],
+          max_hours_per_week: 40,
+          max_hours_per_day: 8,
+          existing_assignments: [{ date: '2033-03-01', start_time: '08:00', end_time: '16:30' }],
+        },
+        overCommitted.employees[1],
+      ],
+    };
+    expect(findOverCommitments(halfHourOver).map((f) => f.employeeId)).toEqual(['e1']);
+    const result = solveCpSat(halfHourOver);
+    expect(result.status).toBe('OPTIMAL');
+    expect(result.overCommittedIds).toEqual(['e1']);
   });
 
   it('reports nothing for an employee within their limits', () => {
@@ -2272,3 +2291,223 @@ describe('zero-length shifts are read consistently', () => {
     expect(violations.map((v) => v.rule)).toContain('daily-hours');
   });
 });
+
+/**
+ * Caps are judged in exact minutes, the unit CP-SAT has to use (#834).
+ *
+ * Hours rounded to a tenth per shift do not survive a sum: three 2h40 shifts
+ * are 8h, and 3 x 2.7 is 8.1h. The validator then rejected a legal day that
+ * CP-SAT, counting minutes, had produced.
+ */
+describe('shift durations are counted in exact minutes', () => {
+  const day = (start_time: string, end_time: string) => ({ date: '2033-12-01', start_time, end_time });
+
+  it('measures minutes exactly, overnight and zero-length included', () => {
+    expect(shiftMinutes(day('06:00', '08:40'))).toBe(160);
+    expect(shiftMinutes(day('22:00', '06:00'))).toBe(480);
+    expect(shiftMinutes(day('08:00', '08:00'))).toBe(1440);
+  });
+
+  it('allows exactly the cap and refuses one minute over', () => {
+    expect(exceedsHours(480, 8)).toBe(false);
+    expect(exceedsHours(481, 8)).toBe(true);
+    // 7.3h is 437.99999... in binary; the cap must not lose the minute it has.
+    expect(exceedsHours(438, 7.3)).toBe(false);
+  });
+
+  it('formats minutes as hours for messages', () => {
+    expect(formatHours(510)).toBe('8.5');
+    expect(formatHours(480)).toBe('8');
+    expect(formatHours(160)).toBe('2.67');
+  });
+});
+
+/**
+ * Rest is the EMPLOYEE's requirement, resolved like ComplianceEngine resolves
+ * it (#838, #883).
+ *
+ * Both engines used to read a single problem-wide figure the builder
+ * hard-coded to 8 h, so neither a contract nor the organization's policy could
+ * change what they produced. The problem is built here the way production
+ * builds it — through buildOptimizationProblem, from resolved working-time
+ * limits — so the test covers the hand-off as well as the engines: changing
+ * the resolved rest from 8 h to 11 h must change both engines' output.
+ */
+describe('per-employee rest reaches both engines', () => {
+  const restProblem = (restHours: number) =>
+    buildOptimizationProblem({
+      schedule: { id: 1, department_id: 1, start_date: '2026-03-02', end_date: '2026-03-03' },
+      // 14:00-22:00 then 07:00-15:00 the next day: a 9 h turnaround.
+      shifts: [
+        { id: 1, date: '2026-03-02', start_time: '14:00', end_time: '22:00', min_staff: 1, max_staff: 1 },
+        { id: 2, date: '2026-03-03', start_time: '07:00', end_time: '15:00', min_staff: 1, max_staff: 1 },
+      ],
+      employees: [{ id: 7, min_hours_per_week: 0 }],
+      pinned: [],
+      pairings: [],
+      contractLimits: new Map(),
+      workingTimeLimits: new Map([
+        [7, { maxHoursPerWeek: 40, maxConsecutiveDays: 5, minRestHoursBetweenShifts: restHours }],
+      ]),
+      unavailableByUser: new Map(),
+      externalAssignmentsByUser: new Map(),
+      carried: new Map(),
+      rotationHistory: new Map(),
+    });
+
+  it('the validator holds an employee to their own rest, not the problem default', () => {
+    const problem = { ...restProblem(11), constraints: { min_hours_between_shifts: 8 } };
+    const both = [
+      { employeeId: '7', shiftId: '1' },
+      { employeeId: '7', shiftId: '2' },
+    ];
+    expect(findConstraintViolations(problem, both).map((v) => v.rule)).toEqual(['min-rest']);
+    expect(findConstraintViolations(restProblem(8), both)).toEqual([]);
+  });
+
+  it('the greedy engine gives the turnaround under 8 h and refuses it under 11 h', async () => {
+    const optimizer = new ScheduleOptimizer();
+    const at8 = toValidated(await optimizer.generateGreedySchedule(restProblem(8)));
+    const at11 = toValidated(await optimizer.generateGreedySchedule(restProblem(11)));
+
+    expect(at8).toHaveLength(2);
+    expect(at11).toHaveLength(1);
+    expect(findConstraintViolations(restProblem(11), at11)).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it('gives the turnaround under 8 h and refuses it under 11 h', () => {
+      const at8 = runPython(restProblem(8));
+      const at11 = runPython(restProblem(11));
+
+      expect(at8).toHaveLength(2);
+      expect(at11).toHaveLength(1);
+      expect(findConstraintViolations(restProblem(11), at11)).toEqual([]);
+    });
+  });
+});
+
+/**
+ * CP-SAT's conflict cliques against the pairwise rule they replace (#837).
+ *
+ * The model states no-double-booking and minimum rest as one AddAtMostOne per
+ * maximal clique of the rest-extended interval graph. That is equivalent to
+ * the pairwise rule only if the sweep finds exactly the right cliques: one too
+ * few lets a conflicting pair through (a violation the validator sees), one
+ * too broad forbids a legal pair (a schedule with fewer seats than possible,
+ * which validity alone cannot see). So each adversarial case is checked both
+ * ways: CP-SAT's answer breaks no rule, AND it fills as many seats as the best
+ * legal schedule found by brute force over the validator.
+ */
+describe('conflict cliques match the pairwise rule', () => {
+  const employee = (id: string, rest: number) => ({
+    id,
+    max_hours_per_week: 168,
+    max_hours_per_day: 24,
+    min_hours_between_shifts: rest,
+    skills: [],
+    unavailable_dates: [],
+  });
+  const shift = (id: string, date: string, start_time: string, end_time: string) => ({
+    id,
+    date,
+    start_time,
+    end_time,
+    min_staff: 1,
+    max_staff: 1,
+  });
+
+  const cases: Array<[string, OptimizationProblemLike]> = [
+    [
+      'nested intervals under zero rest',
+      {
+        shifts: [
+          shift('outer', '2026-03-02', '08:00', '20:00'),
+          shift('inner1', '2026-03-02', '10:00', '12:00'),
+          shift('inner2', '2026-03-02', '14:00', '16:00'),
+          shift('after', '2026-03-02', '20:00', '23:00'),
+        ],
+        employees: [employee('e1', 0)],
+      },
+    ],
+    [
+      'a gap exactly equal to the rest, and one minute short of it',
+      {
+        shifts: [
+          shift('a', '2026-03-02', '06:00', '14:00'),
+          shift('b', '2026-03-02', '22:00', '06:00'),
+          shift('c', '2026-03-03', '14:00', '22:00'),
+          shift('d', '2026-03-04', '06:01', '10:00'),
+        ],
+        employees: [employee('e1', 8)],
+      },
+    ],
+    [
+      'back-to-back shifts under zero rest',
+      {
+        shifts: [
+          shift('a', '2026-03-02', '08:00', '12:00'),
+          shift('b', '2026-03-02', '12:00', '16:00'),
+          shift('c', '2026-03-02', '16:00', '20:00'),
+        ],
+        employees: [employee('e1', 0)],
+      },
+    ],
+    [
+      'an overnight shift across a week boundary',
+      {
+        // 2026-03-08 is a Sunday.
+        shifts: [
+          shift('sun-night', '2026-03-08', '22:00', '06:00'),
+          shift('mon-early', '2026-03-09', '05:00', '13:00'),
+          shift('mon-late', '2026-03-09', '14:00', '22:00'),
+        ],
+        employees: [employee('e1', 8)],
+      },
+    ],
+    [
+      'mixed rest values in one problem',
+      {
+        shifts: [
+          shift('late', '2026-03-02', '14:00', '22:00'),
+          shift('early', '2026-03-03', '07:00', '15:00'),
+          shift('late2', '2026-03-03', '22:00', '06:00'),
+          shift('mid', '2026-03-04', '15:00', '20:00'),
+        ],
+        employees: [employee('strict', 11), employee('lenient', 0)],
+      },
+    ],
+  ];
+
+  /** The most seats any legal schedule fills, by trying every assignment set. */
+  const bestLegalSeats = (problem: OptimizationProblemLike): number => {
+    const pairs = problem.employees.flatMap((e) => problem.shifts.map((s) => ({ employeeId: e.id, shiftId: s.id })));
+    let best = 0;
+    for (let mask = 0; mask < 1 << pairs.length; mask++) {
+      const chosen = pairs.filter((_, i) => mask & (1 << i));
+      if (chosen.length > best && findConstraintViolations(problem, chosen).length === 0) best = chosen.length;
+    }
+    return best;
+  };
+
+  it.each(cases)('the validator and the brute force agree on the shape: %s', (_name, problem) => {
+    // A sanity floor: every case admits a schedule better than one seat, so
+    // "CP-SAT matched the optimum" cannot pass by both being trivial.
+    expect(bestLegalSeats(problem)).toBeGreaterThan(1);
+  });
+
+  it.each(cases)('the greedy breaks no rule on: %s', async (_name, problem) => {
+    const assignments = toValidated(await new ScheduleOptimizer().generateGreedySchedule(problem));
+    expect(findConstraintViolations(problem, assignments)).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it.each(cases)('breaks no rule and fills the most legal seats on: %s', (_name, problem) => {
+      const assignments = runPython(problem);
+      expect(findConstraintViolations(problem, assignments)).toEqual([]);
+      expect(assignments).toHaveLength(bestLegalSeats(problem));
+    });
+  });
+});
+
+type OptimizationProblemLike = Parameters<typeof findConstraintViolations>[0];

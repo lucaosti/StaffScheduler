@@ -31,7 +31,7 @@ jest.mock('@capacitor/push-notifications', () => ({
 }));
 
 jest.mock('../api/client', () => ({
-  apiClient: { post: jest.fn() },
+  apiClient: { post: jest.fn(), delete: jest.fn() },
 }));
 
 const navigateBrowserMock = jest.fn();
@@ -39,10 +39,11 @@ jest.mock('../utils/navigateBrowser', () => ({
   navigateBrowser: (...a: unknown[]) => navigateBrowserMock(...a),
 }));
 
-import { registerForNativePush, resetNativePushListeners } from './nativePushService';
+import { registerForNativePush, resetNativePushListeners, unregisterNativePush } from './nativePushService';
 
 const isNativePlatformMock = jest.spyOn(mobileAuthStorage, 'isNativePlatform');
 const postMock = apiClient.post as jest.Mock;
+const deleteMock = apiClient.delete as jest.Mock;
 
 const registrationHandler = () =>
   addListenerMock.mock.calls.find((c) => c[0] === 'registration')?.[1] as
@@ -171,5 +172,61 @@ describe('registerForNativePush — native platform', () => {
     await registerForNativePush();
     const registrationCalls = addListenerMock.mock.calls.filter((c) => c[0] === 'registration');
     expect(registrationCalls).toHaveLength(1);
+  });
+});
+
+/**
+ * Logout must stop the device receiving the signed-out user's notifications
+ * (#841): the backend keeps sending to every active token it holds for that
+ * user, so the next person to sign in on the device would get them.
+ */
+describe('unregisterNativePush', () => {
+  beforeEach(() => {
+    isNativePlatformMock.mockReturnValue(true);
+    process.env.REACT_APP_NATIVE_PUSH = 'true';
+    requestPermissionsMock.mockResolvedValue({ receive: 'granted' });
+    postMock.mockResolvedValue({ success: true });
+    deleteMock.mockResolvedValue({ success: true });
+  });
+
+  it('deactivates the token this session registered', async () => {
+    await registerForNativePush();
+    await registrationHandler()!({ value: 'device-token-123' });
+
+    const controller = new AbortController();
+    await unregisterNativePush(controller.signal);
+
+    // Abortable, and never a trigger for a session refresh: it can run while
+    // the next user signs in (#841 re-review).
+    expect(deleteMock).toHaveBeenCalledWith('/notifications/push/device-token', {
+      body: { token: 'device-token-123' },
+      signal: controller.signal,
+      sessionRecovery: false,
+    });
+  });
+
+  it('forgets the token, so a second logout sends nothing', async () => {
+    await registerForNativePush();
+    await registrationHandler()!({ value: 'device-token-123' });
+    await unregisterNativePush();
+    deleteMock.mockClear();
+
+    await unregisterNativePush();
+
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing when no token was registered', async () => {
+    await unregisterNativePush();
+    expect(deleteMock).not.toHaveBeenCalled();
+  });
+
+  it('does not throw when the backend call fails', async () => {
+    await registerForNativePush();
+    await registrationHandler()!({ value: 'device-token-123' });
+    deleteMock.mockRejectedValue(new Error('offline'));
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await expect(unregisterNativePush()).resolves.toBeUndefined();
   });
 });

@@ -53,6 +53,19 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
+/*
+ * Stacking order — one scale, Bootstrap's own (#892):
+ *   999   sticky header, drawer backdrop
+ *   1000  fixed sidebar
+ *   1020  demo banner (`.sticky-top`)
+ *   1050  modal backdrop / 1055 modal
+ *   1090  toasts
+ * The banner used to sit at 1080, above the modals, and hid every modal's
+ * title and close button. It is sticky in the normal flow, so the fixed shell
+ * starts below it: DemoBanner publishes its height as `--demo-banner-height`
+ * (unset, i.e. 0, outside demo mode or once dismissed).
+ */
+
 /* Layout */
 .app-container {
   display: flex;
@@ -66,9 +79,9 @@ code {
   color: var(--bs-body-color);
   border-right: 1px solid var(--bs-border-color);
   position: fixed;
-  height: 100vh;
+  height: calc(100vh - var(--demo-banner-height, 0px));
   left: 0;
-  top: 0;
+  top: var(--demo-banner-height, 0px);
   overflow-y: auto;
   z-index: 1000;
   transition: transform 0.3s ease;
@@ -82,6 +95,10 @@ code {
 
 .main-content {
   flex: 1;
+  /* A flex item defaults to min-width: auto, i.e. never narrower than its
+     content's min-content width; with the longer Arabic header that made the
+     page wider than a phone (#947). Content wraps or scrolls inside instead. */
+  min-width: 0;
   margin-left: var(--sidebar-width);
   transition: margin-left 0.3s ease;
 }
@@ -99,7 +116,7 @@ code {
   align-items: center;
   padding: 0 1rem;
   position: sticky;
-  top: 0;
+  top: var(--demo-banner-height, 0px);
   z-index: 999;
 }
 
@@ -300,12 +317,11 @@ code {
  * RTL support (i18n).
  *
  * `<html dir="rtl">` is set reactively by `DirectionSync` when the active
- * locale is Arabic. Bootstrap 5's utility classes (`ms-*`, `me-*`,
- * `text-start`, `text-end`, ...) are logical properties already, so most of
- * the app mirrors correctly with no extra CSS — confirmed on the Login page
- * (`pages/Auth/Login.tsx`), which uses only those utilities and needed no
- * overrides here. This block exists for the cases Bootstrap's utilities
- * don't cover: physical (non-logical) properties defined above, like
+ * locale is Arabic, and the RTL build of Bootstrap is linked in its place
+ * (`i18n/bootstrapStylesheet.ts`; the default build's utilities are physical,
+ * `.ms-2` being `margin-left`). That mirrors Bootstrap's own classes. This
+ * block exists for what Bootstrap does not ship: physical properties in the
+ * app's own CSS above, like
  * `.sidebar`'s `left`/`border-right` and `.main-content`'s `margin-left`.
  * Physical properties only make sense for LTR, so keep new custom CSS on
  * logical properties (`margin-inline-start`, `inset-inline-start`, ...)
@@ -329,6 +345,51 @@ code {
 
 [dir='rtl'] .main-content.expanded {
   margin-right: 0;
+}
+
+/*
+ * The unread badge on the header's bell, centred on its top end corner.
+ * Not Bootstrap's `top-0 start-100 translate-middle`: the RTL build flips
+ * `start-100` to `right: 100%` but leaves `translate-middle` at
+ * translate(-50%, -50%), so in Arabic the badge sat a further half-width
+ * past the bell — beyond the screen's left edge on a phone, widening the page
+ * (#947). A logical offset plus a direction-aware translate keeps it centred
+ * on the corner either way.
+ */
+.notification-badge {
+  position: absolute;
+  top: 0;
+  inset-inline-start: 100%;
+  transform: translate(-50%, -50%);
+  font-size: 0.6rem;
+}
+
+[dir='rtl'] .notification-badge {
+  transform: translate(50%, -50%);
+}
+
+/*
+ * The phone layout, mirrored (#947). The mobile query above resets
+ * `.main-content`'s LEFT margin and parks the closed drawer at
+ * translateX(-100%) — right for LTR only. In Arabic the desktop
+ * `margin-right` survived, so every page was pushed a sidebar's width off
+ * screen (571–1214 px wide on a 390 px phone), and the drawer slid left from
+ * the right edge into the middle of the page, over the headings. This block
+ * must follow the `[dir='rtl']` rules above: same specificity, so the later
+ * one wins.
+ */
+@media (max-width: 768px) {
+  [dir='rtl'] .main-content {
+    margin-right: 0;
+  }
+
+  [dir='rtl'] .sidebar {
+    transform: translateX(100%);
+  }
+
+  [dir='rtl'] .sidebar.show {
+    transform: translateX(0);
+  }
 }
 
 /*

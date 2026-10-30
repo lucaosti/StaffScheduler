@@ -9,7 +9,7 @@ Staff Scheduler is an enterprise workforce management system.
 - **Backend**: Node.js/Express/TypeScript REST API — runs on port **3001**
 - **Frontend**: React 18/TypeScript SPA (Vite) — runs on port **3000**
 - **Mobile**: Capacitor wrapping the built frontend for iOS and Android (`mobile/`)
-- **Database**: MySQL 8.0 (schema in `backend/db/migrations/` — dbmate SQL migrations)
+- **Database**: MySQL 8.4 LTS (schema in `backend/db/migrations/` — dbmate SQL migrations)
 - **Optimizer**: Python 3.8+ with Google OR-Tools CP-SAT, invoked via `child_process` from `backend/src/optimization/ScheduleOptimizerORTools.ts`
 
 ## Commands
@@ -263,6 +263,10 @@ CORS_ORIGIN=http://localhost:3000
 and revokes the whole family on reuse of a spent token. `POST /api/auth/refresh`
 is NOT behind `authenticate` — it works precisely when the access token has
 expired. The frontend refreshes proactively (`AuthContext`) and on mount.
+Logout is `POST <prefix>/auth/refresh/logout` for the same path reason (the
+only other place the cookie is sent), likewise not behind `authenticate`; it
+revokes the token's family. Password changes and deactivation revoke every
+refresh token of the user (`UserService`).
 
 Frontend optionally uses `REACT_APP_API_URL` — the full API base including the version prefix, e.g. `http://localhost:3001/api/v1`; default `/api/v1`, which the dev proxy handles. It is injected at build time from the process environment.
 

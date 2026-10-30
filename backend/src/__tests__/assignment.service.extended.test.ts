@@ -331,9 +331,10 @@ describe('AssignmentService read paths', () => {
     await svc.getAllAssignments({ userId: 7 }, { limit: 25, offset: 50 });
 
     const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toMatch(/LIMIT \? OFFSET \?/);
+    // Inlined, never bound: MySQL rejects a bound LIMIT/OFFSET under execute() (#824).
+    expect(sql).toMatch(/LIMIT 25 OFFSET 50$/);
     expect(sql).not.toMatch(/LIMIT 5001/);
-    expect(params).toEqual([7, 25, 50]);
+    expect(params).toEqual([7]);
   });
 
   it('countAssignments applies the same filters as the listing', async () => {

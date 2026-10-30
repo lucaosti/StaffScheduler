@@ -8,12 +8,12 @@
 import {
   CandidateShift,
   checkCompliance,
-  CompliancePolicy,
   evaluateAssignmentCompliance,
   ExistingAssignment,
 } from '../services/ComplianceEngine';
+import type { WorkingTimeLimits } from '../services/WorkingTimeLimitsService';
 
-const policy: CompliancePolicy = {
+const policy: WorkingTimeLimits = {
   maxConsecutiveDays: 3,
   minRestHoursBetweenShifts: 8,
   maxHoursPerWeek: 40,
@@ -94,13 +94,13 @@ describe('evaluateAssignmentCompliance', () => {
   ) => {
     const execute = jest
       .fn()
-      .mockResolvedValueOnce([prefRows, null])
+      .mockResolvedValueOnce([prefRows.map((r) => ({ user_id: 42, ...r })), null])
       .mockResolvedValueOnce([settingRows, null])
       // `PolicyService.getGlobalValues` — an organization's own configured
       // regulatory rule set; empty by default so existing cases exercise the
       // pre-policy fallback chain unchanged.
       .mockResolvedValueOnce([globalPolicyRows, null])
-      // `EmploymentContractService.resolveLimitsForPeriod` — checked ahead of
+      // `EmploymentContractService.resolveForPeriod` — checked ahead of
       // user_preferences/system_settings; empty by default so existing cases
       // exercise the pre-contract fallback chain unchanged.
       .mockResolvedValueOnce([contractRows, null])
@@ -269,6 +269,59 @@ describe('evaluateAssignmentCompliance', () => {
       }
     });
 
+    it('does not let a preference or contract loosen the global policy', async () => {
+      // Every user_preferences row carries 40 h by default; under a 1 h policy
+      // that row must not lift the cap. The same for a 40 h contract.
+      const pool = makePool(
+        [{ max_hours_per_week: 40, max_consecutive_days: 5 }],
+        [],
+        [],
+        [
+          {
+            user_id: 42,
+            id: 1,
+            name: 'Full-time',
+            is_active: 1,
+            max_hours_per_week: 40,
+            min_hours_between_shifts: null,
+          },
+        ],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 1 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.violations.find((v) => v.code === 'MAX_WEEKLY_HOURS')?.details.limit).toBe(1);
+      }
+    });
+
+    it("does not let the preference row's 40 h default override a contract that matches the policy", async () => {
+      // 48 h policy and 48 h contract, default 40 h preference: an 8 h
+      // candidate on top of 40 h already worked is 48 h, which is legal.
+      const pool = makePool(
+        [{ max_hours_per_week: 40, max_consecutive_days: 5 }],
+        [],
+        [1, 2, 3, 4, 5].map((d) => ({
+          id: d,
+          date: `2026-06-0${d}`,
+          start_time: '09:00',
+          end_time: '17:00',
+        })),
+        [{ user_id: 42, id: 1, name: 'Full-time', is_active: 1, max_hours_per_week: 48 }],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 48 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-06',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.violations ?? []).not.toContainEqual(expect.objectContaining({ code: 'MAX_WEEKLY_HOURS' }));
+    });
+
     it('enforces a global min_rest_hours policy', async () => {
       const pool = makePool(
         [],
@@ -333,7 +386,7 @@ describe('evaluateAssignmentCompliance', () => {
       // (weekly hours); a fixture with two rules failing is below.
       const execute = jest
         .fn()
-        .mockResolvedValueOnce([[{ max_hours_per_week: 1, max_consecutive_days: 5 }], null])
+        .mockResolvedValueOnce([[{ user_id: 42, max_hours_per_week: 1, max_consecutive_days: 5 }], null])
         .mockResolvedValueOnce([[], null])
         .mockResolvedValueOnce([[], null]) // global policies
         .mockResolvedValueOnce([[], null])
@@ -360,7 +413,7 @@ describe('evaluateAssignmentCompliance', () => {
       const execute = jest
         .fn()
         .mockResolvedValueOnce([
-          [{ max_hours_per_week: 1, max_consecutive_days: 1 }],
+          [{ user_id: 42, max_hours_per_week: 1, max_consecutive_days: 1 }],
           null,
         ])
         .mockResolvedValueOnce([[], null])

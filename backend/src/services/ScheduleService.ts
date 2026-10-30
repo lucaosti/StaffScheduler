@@ -21,6 +21,7 @@
 
 import { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { ConflictError, NotFoundError } from '../errors';
 import {
   Schedule,
@@ -215,10 +216,11 @@ export class ScheduleService {
       }
 
       if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-      query += ' GROUP BY s.id ORDER BY s.start_date DESC';
+      // `s.id` breaks start-date ties, so a page boundary never repeats or
+      // skips a schedule.
+      query += ' GROUP BY s.id ORDER BY s.start_date DESC, s.id DESC';
       if (pagination) {
-        query += ' LIMIT ? OFFSET ?';
-        params.push(pagination.limit, pagination.offset);
+        query += ` ${limitOffsetClause(pagination)}`;
       } else {
         query += ' LIMIT 1000';
       }

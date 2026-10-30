@@ -152,6 +152,8 @@ export interface ApiResponse<T = unknown> {
     code: string;
     message: string;
     details?: unknown;
+    /** Sent on INTERNAL_ERROR: the id the fault is logged under. */
+    requestId?: string;
   };
   meta?: {
     total?: number;

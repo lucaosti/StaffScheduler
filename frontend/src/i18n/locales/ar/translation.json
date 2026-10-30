@@ -9,6 +9,9 @@
   "common.dashboard": "لوحة المعلومات",
   "common.tryAgain": "أعد المحاولة",
   "common.close": "إغلاق",
+  "common.somethingWentWrong": "حدث خطأ ما. يرجى المحاولة مرة أخرى.",
+  "common.serverError": "حدث خطأ ما من جانبنا. يرجى المحاولة مرة أخرى بعد قليل.",
+  "common.serverErrorWithReference": "حدث خطأ ما من جانبنا. يرجى المحاولة مرة أخرى بعد قليل. المرجع: {{requestId}}",
   "auth.signIn": "تسجيل الدخول",
   "auth.signOut": "تسجيل الخروج",
   "auth.email": "البريد الإلكتروني",
@@ -1238,5 +1241,13 @@
   "schedule.stats.shiftCount_one": "نوبة {{count}}",
   "schedule.stats.shiftCount_other": "{{count}} نوبات",
   "schedule.stats.employeeCount": "{{count}} موظفين",
-  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}"
+  "schedule.stats.summary": "{{shiftText}} · {{employeeText}}",
+  "settings.work.title": "تفضيلات العمل",
+  "settings.work.constraints": "قيود الجدولة",
+  "settings.work.limitsNote": "يحدد مديرك حدود وقت عملك. تُعرض هنا لأنها تحدد المناوبات التي يمكن جدولتك فيها.",
+  "settings.work.maxHoursPerWeek": "الحد الأقصى للساعات أسبوعيًا",
+  "settings.work.maxConsecutiveDays": "الحد الأقصى للأيام المتتالية",
+  "settings.work.noLimits": "لا توجد حدود لوقت العمل مسجلة لك.",
+  "settings.work.loading": "جارٍ تحميل حدود وقت عملك…",
+  "dashboard.stats.unavailable": "غير متاح"
 }

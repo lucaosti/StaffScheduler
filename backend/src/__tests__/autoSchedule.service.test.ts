@@ -23,6 +23,7 @@ import { config } from '../config';
 import { logger } from '../config/logger';
 import { spawn } from 'child_process';
 import { driverDate } from './helpers/driverDate';
+import { OptimizationFailedError } from '../errors';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
 // Only the #811 test below reaches a real optimize(); everywhere else the
@@ -56,6 +57,10 @@ interface Fixtures {
   pinned?: Rows;
   pairings?: Rows;
   contracts?: Rows;
+  /** WorkingTimeLimitsService's three organization- and person-level reads. */
+  preferences?: Rows;
+  settings?: Rows;
+  policies?: Rows;
   unavailability?: Rows;
   history?: Rows;
   predecessor?: Rows;
@@ -85,6 +90,9 @@ const MATCHERS: Array<[keyof Fixtures, string]> = [
   ['pinned', 'sa.is_pinned = 1'],
   ['pairings', 'employee_pairings'],
   ['contracts', 'user_employment_contracts'],
+  ['preferences', 'FROM user_preferences'],
+  ['settings', 'FROM system_settings'],
+  ['policies', 'FROM policies'],
   ['unavailability', 'user_unavailability'],
   ['history', 'INTERVAL 90 DAY'],
   ['external', "sc.status = 'published' OR sc.id = ?"],
@@ -114,9 +122,7 @@ const SHIFT_ROW = {
 const EMPLOYEE_ROW = {
   id: 1,
   skill_names: '',
-  max_hours_per_week: 40,
   min_hours_per_week: 0,
-  max_consecutive_days: 5,
 };
 
 /**
@@ -294,6 +300,61 @@ describe('AutoScheduleService.generate', () => {
    * one shape where the old conversion happened to be right — which is exactly
    * why 933 lines of tests never saw it. These feed the driver's real shape.
    */
+  /**
+   * The limits the problem carries come from the chain ComplianceEngine uses
+   * (#838, #883). They were `COALESCE(preference, 40)`, `COALESCE(preference,
+   * 5)` and a constant 8 h of rest for everyone, so neither a contract's rest
+   * nor the organization's policies and settings reached either engine.
+   */
+  describe('working-time limits (#838, #883)', () => {
+    it('resolves each limit through preference, policy and system setting', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        preferences: [{ user_id: 1, max_hours_per_week: 30, max_consecutive_days: null }],
+        policies: [{ policy_key: 'min_rest_hours', policy_value: '{"hours": 11}' }],
+        settings: [{ key: 'max_consecutive_days', value: '4' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      const problem = lastProblemGiven();
+      expect(problem.employees[0]).toMatchObject({
+        max_hours_per_week: 30,
+        max_consecutive_days: 4,
+        min_hours_between_shifts: 11,
+      });
+      expect(problem.constraints).toEqual({});
+    });
+
+    it("gives an 11 h-rest contract 11 h, above the organization's policy", async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute, {
+        contracts: [{ user_id: 1, id: 9, name: 'Night nurse', is_active: 1, min_hours_between_shifts: 11 }],
+        policies: [{ policy_key: 'min_rest_hours', policy_value: '{"hours": 9}' }],
+      });
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(lastProblemGiven().employees[0].min_hours_between_shifts).toBe(11);
+    });
+
+    it('falls back to the defaults ComplianceEngine uses when nothing is configured', async () => {
+      const { pool, conn, execute } = makePool();
+      primeQueries(execute);
+      conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+      await new AutoScheduleService(pool).generate(1, 7);
+
+      expect(lastProblemGiven().employees[0]).toMatchObject({
+        max_hours_per_week: 40,
+        max_consecutive_days: 5,
+        min_hours_between_shifts: 8,
+      });
+    });
+  });
+
   describe('schedule period conversion (mysql2 hands DATE columns over as Date)', () => {
     // Local midnight, matching how mysql2 materialises a DATE, so the
     // assertion does not depend on the machine's timezone.
@@ -323,7 +384,7 @@ describe('AutoScheduleService.generate', () => {
 
       await new AutoScheduleService(pool).generate(1, 7);
 
-      // resolveLimitsForPeriod binds [endDate, startDate].
+      // resolveForPeriod binds [endDate, startDate].
       expect(queryFor(execute, 'contracts')[1]).toEqual(['2026-05-31', '2026-05-01']);
     });
 
@@ -860,6 +921,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       proc.stderr = new EventEmitter();
       proc.stdin = {
         write: jest.fn(),
+        on: jest.fn(),
         end: jest.fn(() =>
           setImmediate(() => {
             // The shape schedule_optimizer.py really writes for this status.
@@ -882,6 +944,56 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(out.degraded).toBe(true);
     expect(out.degradedReason).toContain('MODEL_INVALID');
     expect(out.assignmentsCreated).toBe(1);
+  });
+
+  // The same real hand-off for a successful solve: the script's snake_case
+  // assignments must reach the INSERT as numeric ids. They were passed through
+  // unmapped and every CP-SAT plan was persisted with NaN ids (#919).
+  it('persists a CP-SAT result with the ids the solver returned', async () => {
+    config.optimization.engine = 'or-tools';
+    const { ScheduleOptimizer: RealOptimizer } = jest.requireActual(
+      '../optimization/ScheduleOptimizerORTools'
+    );
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => new RealOptimizer());
+    (spawn as unknown as jest.Mock).mockImplementation(() => {
+      const { EventEmitter } = jest.requireActual('events');
+      const proc = new EventEmitter();
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = {
+        write: jest.fn(),
+        on: jest.fn(),
+        end: jest.fn(() =>
+          setImmediate(() => {
+            const output = {
+              status: 'OPTIMAL',
+              objective_value: 0,
+              solve_time_seconds: 0.01,
+              assignments: [
+                { employee_id: '1', shift_id: '10', date: '2026-03-02', start_time: '09:00', end_time: '17:00', hours: 8 },
+              ],
+              statistics: { is_optimal: true, total_assigned_shifts: 1 },
+            };
+            proc.stdout.emit('data', Buffer.from(JSON.stringify(output)));
+            proc.emit('close', 0);
+          })
+        ),
+      };
+      return proc;
+    });
+
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute);
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(out.engine).toBe('or-tools');
+    expect(out.degraded).toBe(false);
+    expect(out.assignmentsCreated).toBe(1);
+    const insert = conn.execute.mock.calls.find(([sql]: [string]) => /INSERT\s+IGNORE\s+INTO\s+shift_assignments|INSERT INTO shift_assignments/i.test(sql));
+    expect(insert).toBeDefined();
+    expect(insert![1]).toEqual([10, 1, 'pending', 7]);
   });
 
   it('uses the greedy draft engine directly (not degraded) when selected explicitly', async () => {
@@ -1043,5 +1155,73 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       expect(JSON.stringify(result)).not.toContain('99');
       expect(result).not.toHaveProperty('hourly_rate');
     });
+  });
+});
+
+/**
+ * When NO engine produced a schedule, the run must fail — never turn the
+ * empty result into a plan (#858).
+ *
+ * optimize() returns ERROR with zero assignments when the greedy fallback
+ * itself throws. On a published schedule that became a replan proposal
+ * breaking every commitment, and on a draft an "OK" run that wrote nothing:
+ * the harm #811 closed for solver statuses, through another door.
+ */
+describe('AutoScheduleService.generate — when no engine produces a schedule (#858)', () => {
+  const originalEngine = config.optimization.engine;
+  const published = { schedule: [{ ...SCHEDULE_ROW, status: 'published' }] };
+
+  afterEach(() => {
+    config.optimization.engine = originalEngine;
+  });
+
+  it.each([
+    ['a published schedule', published],
+    ['a draft', {}],
+  ])('fails with a typed error and writes nothing for %s when optimize() reports ERROR', async (_label, fixtures) => {
+    config.optimization.engine = 'or-tools';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn().mockResolvedValue({ status: 'ERROR', assignments: [], error: 'greedy blew up' }),
+      generateGreedySchedule: jest.fn(),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, fixtures);
+
+    const run = new AutoScheduleService(pool).generate(1, 7);
+
+    await expect(run).rejects.toBeInstanceOf(OptimizationFailedError);
+    await expect(run).rejects.toMatchObject({ code: 'OPTIMIZATION_FAILED' });
+    // Neither a proposal (its own transaction) nor an INSERT was attempted.
+    expect(conn.execute).not.toHaveBeenCalled();
+  });
+
+  it('fails with a typed error and writes nothing when the explicit greedy engine throws', async () => {
+    config.optimization.engine = 'greedy';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn(),
+      generateGreedySchedule: jest.fn().mockRejectedValue(new Error('greedy blew up')),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, published);
+
+    await expect(new AutoScheduleService(pool).generate(1, 7)).rejects.toBeInstanceOf(OptimizationFailedError);
+    expect(conn.execute).not.toHaveBeenCalled();
+  });
+
+  it('logs the internal reason without handing it to the planner', async () => {
+    config.optimization.engine = 'or-tools';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn().mockResolvedValue({ status: 'ERROR', assignments: [], error: 'TypeError at greedy.ts:42' }),
+      generateGreedySchedule: jest.fn(),
+    }));
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const { pool, execute } = makePool();
+    primeQueries(execute, published);
+
+    const error = await new AutoScheduleService(pool).generate(1, 7).catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(OptimizationFailedError);
+    expect((error as Error).message).not.toContain('greedy.ts');
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('TypeError at greedy.ts:42'));
   });
 });

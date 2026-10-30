@@ -25,6 +25,7 @@
 
 import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
+import { limitOffsetClause } from '../utils/sql';
 import { NotFoundError } from '../errors';
 import {
   Shift,
@@ -297,10 +298,11 @@ export class ShiftService {
         query += ' WHERE ' + conditions.join(' AND ');
       }
 
-      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC';
+      // `s.id` breaks ties between shifts in the same slot, so a page boundary
+      // never repeats or skips a shift.
+      query += ' GROUP BY s.id ORDER BY s.date ASC, s.start_time ASC, s.id ASC';
       if (pagination) {
-        query += ' LIMIT ? OFFSET ?';
-        params.push(pagination.limit, pagination.offset);
+        query += ` ${limitOffsetClause(pagination)}`;
       } else {
         query += ' LIMIT 2000';
       }

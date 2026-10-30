@@ -50,7 +50,7 @@ Working on the host instead is possible but not the reference setup:
 |---|---|---|
 | Node.js | 22.12 or newer | everything (CI and both images run Node 22) |
 | npm | 10 or newer | workspace install |
-| MySQL | 8.0 | running the backend, integration tests, e2e |
+| MySQL | 8.4 LTS (the exact tag in `docker-compose.yml`) | running the backend, integration tests, e2e |
 | Python | 3.11 (CI) with a virtual environment | the CP-SAT optimizer and its tests |
 | Redis | 7 | optional; the backend falls back to in-process state without it |
 
@@ -219,13 +219,14 @@ Step-by-step recipes for adding an endpoint, a page or a migration are in
 | Backend unit — services | a mocked `Pool` | `cd backend && npm test` | Backend |
 | Backend unit — routes | Supertest, mocked services and auth middleware | `cd backend && npm test` | Backend |
 | Optimizer parity | both engines against one validator; the CP-SAT half needs OR-Tools | `cd backend && npm test` | Backend (`REQUIRE_ORTOOLS=1`) |
+| Optimizer properties | both engines on seeded random instances; replay one with `TEST_SEED=<n>` | `cd backend && npx jest optimizer.properties` | Backend (`REQUIRE_ORTOOLS=1`) |
 | OpenAPI contract | generated spec versus routes and schemas | `cd backend && npm run openapi:generate` | Backend (drift check) |
 | Backend integration | a real MySQL, throwaway database | `cd backend && npm run test:integration` | e2e |
 | Migrations | apply, roll back, re-apply on a clean database | `npm run db:migrate` / `db:migrate:rollback` | e2e |
 | Frontend unit | jsdom, React Testing Library, mocked services or MSW | `cd frontend && npm test` | Frontend |
 | End to end | Playwright, real backend, seeded MySQL and Redis | `cd frontend && npm run test:e2e` | e2e |
 | Backup and restore | real dump, drop, restore | `backup-restore` workflow | weekly and on change |
-| Repository scripts | the audit gate's decision, the mobile build's API-URL check and native-plugin list | `npm run test:scripts` (root) | Backend |
+| Repository scripts | the audit gate's decision, the mobile build's API-URL check and native-plugin list, the resolved compose configuration (needs the Docker CLI, no daemon) | `npm run test:scripts` (root) | Backend |
 | Simulation harness | a seeded MySQL; not part of CI | `cd backend && npm run sim:run` | — |
 
 Details of the integration suite, the dead-code tools and the simulation
@@ -319,7 +320,7 @@ Run this before opening a pull request. It is what CI runs.
 ```
 
 The verification stack (`docker-compose.verify.yml`) is a separate compose
-project with a disposable MySQL 8.0 on tmpfs, Redis, and a toolchain image
+project with a disposable MySQL 8.4 on tmpfs, Redis, and a toolchain image
 (`ops/toolchain/Dockerfile`) holding Node 22, the pinned OR-Tools, ruff and the
 Playwright Chromium. The repository is bind-mounted, so regenerated
 `openapi.json` and `src/api/schema.ts` appear in the working tree; the

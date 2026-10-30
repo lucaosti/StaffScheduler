@@ -22,13 +22,18 @@
  * @author Luca Ostinelli
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, formatPercentage as fmtPct, formatTime } from '../../utils/format';
-import { useDashboardData, useAttentionItems } from '../../hooks/useDashboard';
+import { useDashboardData, useAttentionItems, useRecentActivity } from '../../hooks/useDashboard';
 import QueryState from '../../components/QueryState';
+import ErrorAlert from '../../components/ErrorAlert';
+import { ApiError } from '../../services/apiUtils';
+
+/** Shown in a count's place until the count it stands for has loaded. */
+const NOT_LOADED = '—';
 
 /**
  * Dashboard component that displays the main overview of the scheduling system
@@ -39,12 +44,31 @@ const Dashboard: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
   const permissionDenied = (location.state as { permissionDenied?: boolean } | null)?.permissionDenied === true;
+  // React state, not Bootstrap's `data-bs-dismiss="alert"`: Bootstrap's
+  // JavaScript is never loaded (see components/Dropdown.tsx for why).
+  const [deniedDismissed, setDeniedDismissed] = useState(false);
 
-  // Server state (stats + recent activity) is owned by TanStack Query; the retry
-  // button calls refetch() directly instead of a hand-written reload.
+  // Server state is owned by TanStack Query; the retry button calls refetch()
+  // directly instead of a hand-written reload.
   const dashboardQuery = useDashboardData();
-  const stats = dashboardQuery.data?.stats ?? null;
-  const recentActivity = dashboardQuery.data?.recentActivity ?? [];
+  const stats = dashboardQuery.data ?? null;
+
+  // Gating follows the permissions the server checks for the action itself,
+  // not the matching read permission (#894): a reader offered "Add Employee"
+  // or "Generate Schedule" is offered a button the server then refuses.
+  const can = (code: string) => user?.permissions?.includes(code) ?? false;
+  const canCreateShift = can('shift.manage');
+  const canAddEmployee = can('employee.manage');
+  const canGenerateSchedule = can('schedule.optimize');
+  const canViewReports = can('report.read');
+  const canReadAudit = can('audit.read');
+  const activityQuery = useRecentActivity(canReadAudit);
+  const recentActivity = activityQuery.data ?? [];
+  // A 404 from the audit endpoint means the audit module is disabled for this
+  // organisation: there is no feed to show, so the panel goes, as it does
+  // without audit.read. Any other failure is shown as an error in the panel.
+  const auditModuleOff = activityQuery.error instanceof ApiError && activityQuery.error.status === 404;
+  const showActivityPanel = canReadAudit && !auditModuleOff;
 
   // Kept off the main loading/error gate above: a slow or failed attention-items
   // fetch should not block the stat cards, which is what one combined query would do.
@@ -56,14 +80,14 @@ const Dashboard: React.FC = () => {
   return (
     <div className="container-fluid py-4">
       {/* Permission denied banner — shown when redirected from a guarded route */}
-      {permissionDenied && (
-        <div className="alert alert-warning alert-dismissible fade show mb-4" role="alert">
+      {permissionDenied && !deniedDismissed && (
+        <div className="alert alert-warning alert-dismissible mb-4" role="alert">
           <i className="bi bi-shield-exclamation me-2" aria-hidden="true"></i>
           <strong>{t('dashboard.accessDeniedTitle')}</strong> {t('dashboard.accessDeniedBody')}
           <button
             type="button"
             className="btn-close"
-            data-bs-dismiss="alert"
+            onClick={() => setDeniedDismissed(true)}
             aria-label={t('common.close')}
           ></button>
         </div>
@@ -163,7 +187,18 @@ const Dashboard: React.FC = () => {
                   </div>
                   <div className="flex-grow-1 ms-3">
                     <h6 className="card-title text-muted mb-1">{t('dashboard.stats.pendingApprovals')}</h6>
-                    <h3 className="mb-0">{stats.pendingApprovals}</h3>
+                    {/* The caller's own queue (#894). `stats.pendingApprovals`
+                        is organisation-wide: it read 248 to a manager whose
+                        queue was empty. The attention items carry the count of
+                        what this caller can decide; until they load, a dash
+                        rather than a number that may be wrong. */}
+                    <h3 className="mb-0">
+                      {attention
+                        ? attention.pendingApprovalsAging.count
+                        : attentionQuery.isError
+                          ? t('dashboard.stats.unavailable')
+                          : NOT_LOADED}
+                    </h3>
                   </div>
                 </div>
               </div>
@@ -319,25 +354,25 @@ const Dashboard: React.FC = () => {
             </div>
             <div className="card-body">
               <div className="d-grid gap-3">
-                {user?.permissions?.includes('shift.manage') && (
+                {canCreateShift && (
                   <Link to="/shifts" className="btn btn-outline-primary text-start">
                     <i className="bi bi-plus-circle me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.createShift')}
                   </Link>
                 )}
-                {user?.permissions?.includes('employee.read') && (
+                {canAddEmployee && (
                   <Link to="/employees" className="btn btn-outline-success text-start">
                     <i className="bi bi-person-plus me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.addEmployee')}
                   </Link>
                 )}
-                {user?.permissions?.includes('schedule.read') && (
+                {canGenerateSchedule && (
                   <Link to="/schedule" className="btn btn-outline-info text-start">
                     <i className="bi bi-calendar-plus me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.generateSchedule')}
                   </Link>
                 )}
-                {user?.permissions?.includes('report.read') && (
+                {canViewReports && (
                   <Link to="/reports" className="btn btn-outline-warning text-start">
                     <i className="bi bi-graph-up me-2" aria-hidden="true"></i>
                     {t('dashboard.quickActions.viewReports')}
@@ -348,13 +383,20 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
 
+        {/* Hidden without audit.read or with the audit module off: "No recent
+            activity" would be a false statement about the organisation (#894). */}
+        {showActivityPanel && (
         <div className="col-md-6">
           <div className="card border-0 shadow-sm h-100">
             <div className="card-header bg-transparent border-bottom">
               <h5 className="card-title mb-0">{t('dashboard.recentActivity.title')}</h5>
             </div>
             <div className="card-body p-0">
-              {recentActivity.length === 0 ? (
+              {activityQuery.isError ? (
+                <div className="p-3">
+                  <ErrorAlert error={activityQuery.error} onRetry={() => activityQuery.refetch()} />
+                </div>
+              ) : recentActivity.length === 0 ? (
                 <div className="d-flex align-items-center justify-content-center text-center py-5 text-muted">
                   <div>
                     <i className="bi bi-clock-history fs-3 mb-2 d-block" aria-hidden="true"></i>
@@ -381,6 +423,7 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
         </div>
+        )}
       </div>
       </QueryState>
     </div>

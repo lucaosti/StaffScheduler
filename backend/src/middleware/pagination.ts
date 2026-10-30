@@ -15,6 +15,10 @@
 
 import { Request, Response } from 'express';
 import type { PaginationMeta } from '@staff-scheduler/shared';
+// The page-size bounds live beside `limitOffsetClause`, which renders the
+// window into SQL, so what is parsed here and what is enforced there cannot
+// drift apart.
+import { PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX } from '../utils/sql';
 
 // Declared once in the shared package, from which the OpenAPI component is
 // generated: the hand-written component had drifted to `limit`/`totalPages`
@@ -28,9 +32,6 @@ export interface PaginationParams {
   offset: number;
 }
 
-const DEFAULT_PAGE_SIZE = 25;
-const MAX_PAGE_SIZE = 200;
-
 /** Parses `?page` and `?pageSize` from the query string. Returns null if neither is present. */
 export const parsePagination = (req: Request): PaginationParams | null => {
   const rawPage = req.query.page;
@@ -43,10 +44,10 @@ export const parsePagination = (req: Request): PaginationParams | null => {
   // to 1, so NaN is checked explicitly rather than relying on truthiness.
   const parsedPage = parseInt(String(rawPage ?? '1'), 10);
   const page = Math.max(1, Number.isNaN(parsedPage) ? 1 : parsedPage);
-  const parsedSize = parseInt(String(rawSize ?? DEFAULT_PAGE_SIZE), 10);
+  const parsedSize = parseInt(String(rawSize ?? PAGE_SIZE_DEFAULT), 10);
   const pageSize = Math.min(
-    MAX_PAGE_SIZE,
-    Math.max(1, Number.isNaN(parsedSize) ? DEFAULT_PAGE_SIZE : parsedSize)
+    PAGE_SIZE_MAX,
+    Math.max(1, Number.isNaN(parsedSize) ? PAGE_SIZE_DEFAULT : parsedSize)
   );
   const offset = (page - 1) * pageSize;
 

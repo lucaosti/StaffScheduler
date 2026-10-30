@@ -107,6 +107,35 @@ interface JWTPayload {
 export const userHasPermission = (user: User | undefined, code: string): boolean =>
   Boolean(user?.permissions?.includes(code));
 
+/** The access token a request presents: the httpOnly cookie first, then `Authorization: Bearer`. */
+const readAccessToken = (req: Request): string | undefined => {
+  const cookieToken: string | undefined = req.cookies?.token;
+  const authHeader = req.headers.authorization;
+  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
+  return cookieToken || bearerToken;
+};
+
+/**
+ * Blacklists the access token a request presents, if it is still a valid one.
+ *
+ * For logout, which deliberately does not sit behind `authenticate` (#816): a
+ * logout must succeed — and revoke the refresh session — when the access
+ * token has already expired, which is exactly when `authenticate` would 401.
+ * An expired or forged token is skipped rather than rejected: the first is
+ * already dead, the second was never alive, so there is nothing to revoke.
+ */
+export const revokePresentedAccessToken = async (req: Request): Promise<void> => {
+  const token = readAccessToken(req);
+  if (!token) return;
+  let decoded: JWTPayload;
+  try {
+    decoded = jwt.verify(token, config.jwt.secret) as JWTPayload;
+  } catch {
+    return;
+  }
+  if (decoded.jti) await addToBlacklist(decoded.jti, decoded.exp ? decoded.exp * 1000 : undefined);
+};
+
 /**
  * Main Authentication Middleware
  *
@@ -115,11 +144,7 @@ export const userHasPermission = (user: User | undefined, code: string): boolean
  */
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // Accept token from httpOnly cookie first, then Authorization header.
-    const cookieToken: string | undefined = req.cookies?.token;
-    const authHeader = req.headers.authorization;
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : undefined;
-    const token = cookieToken || bearerToken;
+    const token = readAccessToken(req);
 
     if (!token) {
       return res.status(401).json({

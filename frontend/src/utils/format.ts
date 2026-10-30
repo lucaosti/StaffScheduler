@@ -125,6 +125,30 @@ export const formatTime = (
   return date.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
+const CLOCK_TIME = /^(\d{2}):(\d{2})(?::\d{2})?$/;
+
+/**
+ * A shift's length as "8h" / "8h 30m", from `HH:MM` or `HH:MM:SS` clock times.
+ *
+ * Arithmetic on minutes rather than `Date`: the Shifts page built
+ * `2000-01-01T${time}:00`, which for the API's `HH:MM:SS` became
+ * `07:00:00:00`, an Invalid Date, and rendered "Duration: NaNh" (#891). An
+ * end at or before the start crosses midnight — so equal times are a 24-hour
+ * shift, matching how the backend reads a wrapping shift. Unusable input
+ * yields '' rather than NaN.
+ */
+export const formatShiftDuration = (start?: string | null, end?: string | null): string => {
+  const s = CLOCK_TIME.exec(start ?? '');
+  const e = CLOCK_TIME.exec(end ?? '');
+  if (!s || !e) return '';
+  const startMin = Number(s[1]) * 60 + Number(s[2]);
+  let endMin = Number(e[1]) * 60 + Number(e[2]);
+  if (endMin <= startMin) endMin += 24 * 60;
+  const total = endMin - startMin;
+  const minutes = total % 60;
+  return `${Math.floor(total / 60)}h${minutes > 0 ? ` ${minutes}m` : ''}`;
+};
+
 /**
  * Formats a numeric amount as currency.
  */
