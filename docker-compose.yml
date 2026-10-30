@@ -1,7 +1,13 @@
 services:
   # Database Service
   mysql:
-    image: mysql:8.0.42
+    # The 8.4 LTS line, pinned to an exact release (#849): 8.0 reached end of
+    # life in April 2026, and an exact tag is what makes a build reproducible.
+    # The verification stack, the CI services and the backup sidecar below use
+    # this same tag; scripts/mysql-version.test.mjs fails on any drift. 9.x
+    # innovation releases were rejected: they are supported only until the
+    # next one, which would turn every quarter into a forced upgrade.
+    image: mysql:8.4.11
     container_name: staff_scheduler_mysql
     restart: unless-stopped
     environment:
@@ -17,9 +23,9 @@ services:
       - mysql_data:/var/lib/mysql
       - ./mysql/conf.d:/etc/mysql/conf.d:ro
     # Use MySQL 8's default caching_sha2_password (the legacy
-    # mysql_native_password plugin is deprecated and removed in MySQL 9). mysql2
-    # (backend) and go-sql-driver (dbmate) both support it over the internal
-    # network.
+    # mysql_native_password plugin is disabled by default in 8.4 and removed in
+    # MySQL 9). mysql2 (backend) and go-sql-driver (dbmate) both support it
+    # over the internal network.
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
@@ -116,8 +122,20 @@ services:
       DB_POOL_LIMIT: ${DB_POOL_LIMIT:-30}
       DB_QUEUE_LIMIT: ${DB_QUEUE_LIMIT:-100}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # Every request from the network reaches the backend through exactly one
+      # nginx: the frontend's /api proxy here, or backend-lb in the scale
+      # overlay. Without this Express sees that nginx as the client, so the
+      # IP-keyed limiters (login included) become one bucket shared by every
+      # caller and audit-log IPs are all the proxy's (#822). The backend's own
+      # default stays 0 for a process run without a proxy in front.
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    # Loopback only, because of the trusted hop above: a client reaching this
+    # port directly could write its own X-Forwarded-For and choose the address
+    # it is rate-limited under. The network-facing path is the frontend's /api
+    # proxy; this port is for local tooling and health checks. Not dropped
+    # outright: the API docs and curl-based runbooks use it from the host.
     ports:
-      - "${BACKEND_PORT:-3001}:3001"
+      - "127.0.0.1:${BACKEND_PORT:-3001}:3001"
     volumes:
       # Under /app/backend, not /app: the image's WORKDIR is /app/backend and
       # LOG_FILE defaults to the relative ./logs/app.log, so the process writes
@@ -136,6 +154,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+      # Probe every 2s while starting, so a new replica is reported healthy as
+      # soon as it is: ops/deploy/rolling-deploy.sh waits on exactly this
+      # status, and at the 30s interval each deploy spent half a minute idle.
+      start_interval: 2s
 
   # Frontend Service
   frontend:
@@ -174,12 +196,14 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # No PMA_USER/PMA_PASSWORD: with them phpMyAdmin logs every visitor in as
+    # the application's database user, so reaching the port was the whole
+    # authentication (#823). It shows its login form instead; sign in with a
+    # MySQL account. Loopback only — from another machine, use an SSH tunnel.
     environment:
       PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER:-scheduler_user}
-      PMA_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
     ports:
-      - "${PHPMYADMIN_PORT:-8080}:80"
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8080}:80"
     networks:
       - staff_scheduler_network
 
@@ -189,7 +213,7 @@ services:
   # `ops` profile so the observability bring-up includes backups.
   backup:
     profiles: ["backup", "ops"]
-    image: mysql:8.0.42
+    image: mysql:8.4.11
     container_name: staff_scheduler_backup
     restart: unless-stopped
     depends_on:
@@ -216,7 +240,12 @@ services:
         done
     volumes:
       - ./ops/backup:/scripts:ro
-      - backup_data:/backups
+      # A host directory, not a named volume (#847): a named volume belongs to
+      # this compose project, so the `down -v` that deletes mysql_data deleted
+      # the backups in the same command. Point BACKUP_HOST_DIR at a different
+      # disk (or a mount synced off-host) for backups that also survive the
+      # machine; the default keeps them beside the checkout, gitignored.
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
     networks:
       - staff_scheduler_network
     mem_limit: 256m
@@ -247,15 +276,26 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+    # Required, with no fallback: Grafana reads every log line through Loki,
+    # and the old `:-admin` default published admin/admin (#823). Compose
+    # interpolates every service whatever the active profiles, so this binds
+    # deployments that never start Grafana too; the alternative — an
+    # entrypoint check that fails only when Grafana starts — was rejected
+    # because a missing secret should stop `config`/`up` before anything runs,
+    # the way MYSQL_PASSWORD and JWT_SECRET already do. Note that Grafana
+    # applies it only when it first initialises grafana_data; afterwards, change
+    # it with `grafana cli admin reset-admin-password`.
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
+    # Loopback only: reach it from another machine through an SSH tunnel
+    # (ssh -L 3002:127.0.0.1:3002 host) rather than exposing the login page.
     ports:
-      - "${GRAFANA_PORT:-3002}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
     networks:
       - staff_scheduler_network
     mem_limit: 512m
@@ -307,8 +347,6 @@ volumes:
   grafana_data:
     driver: local
   loki_data:
-    driver: local
-  backup_data:
     driver: local
 
 # Network configuration

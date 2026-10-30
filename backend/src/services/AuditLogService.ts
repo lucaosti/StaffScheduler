@@ -21,6 +21,7 @@ import { logger } from '../config/logger';
 import { ValidationError } from '../errors';
 import { getRequestId, getRequestIp, getRequestUserAgent } from '../middleware/requestContext';
 import { CsvColumn, toCsv } from '../utils/csv';
+import { limitOffsetClause } from '../utils/sql';
 
 /**
  * Hard ceiling on a single audit export. Sized so a full export still fits
@@ -107,15 +108,8 @@ const mapRow = (row: RowDataPacket): AuditLogEntry => ({
   createdAt: row.created_at as string,
 });
 
-const clampLimit = (raw: number | undefined): number => {
-  if (raw === undefined || Number.isNaN(raw)) return 100;
-  return Math.max(1, Math.min(500, Math.trunc(raw)));
-};
-
-const clampOffset = (raw: number | undefined): number => {
-  if (raw === undefined || Number.isNaN(raw) || raw < 0) return 0;
-  return Math.trunc(raw);
-};
+// Wider than the general page bounds: an audit trail is read in long runs.
+const AUDIT_PAGE_BOUNDS = { defaultLimit: 100, maxLimit: 500 };
 
 export class AuditLogService {
   // list/getById/exportAll are read-only and go through readPool (a replica
@@ -168,17 +162,14 @@ export class AuditLogService {
     );
     const total = (countRows[0] as { c: number }).c;
 
-    // Inlined rather than bound: MySQL's binary prepared-statement protocol
-    // rejects placeholders for LIMIT/OFFSET, so `execute()` failed every call
-    // with ER_WRONG_ARGUMENTS — GET /api/audit-logs returned 500 unconditionally.
-    // Both values are clamped integers, never caller-supplied text, which is
-    // the same reasoning the export query and OutboxWorker already rely on.
-    const limit = clampLimit(filters.limit);
-    const offset = clampOffset(filters.offset);
+    // Inlined rather than bound — see limitOffsetClause for why a placeholder
+    // fails under `execute()` and why the rendered integers are safe. `id`
+    // breaks ties: one request writes several entries within the same second,
+    // and without a total order a page boundary could repeat or skip one.
     const [rows] = await this.readPool.execute<RowDataPacket[]>(
       `SELECT * FROM audit_logs${where}
-        ORDER BY created_at DESC
-        LIMIT ${limit} OFFSET ${offset}`,
+        ORDER BY created_at DESC, id DESC
+        ${limitOffsetClause(filters, AUDIT_PAGE_BOUNDS)}`,
       params
     );
 

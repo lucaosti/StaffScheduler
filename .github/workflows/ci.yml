@@ -251,7 +251,7 @@ jobs:
     needs: [backend, frontend]
     services:
       mysql:
-        image: mysql:8.0
+        image: mysql:8.4.11
         env:
           MYSQL_ROOT_PASSWORD: demo1234
           MYSQL_DATABASE: staff_scheduler
