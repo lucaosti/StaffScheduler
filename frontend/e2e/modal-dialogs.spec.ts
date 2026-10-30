@@ -12,17 +12,18 @@
  *
  * The steps form one serial chain because each dialog needs data the previous
  * one creates: the workflow routes the change request to the manager's
- * Pending Approvals queue. Each role signs in once, in a page shared by its
- * steps: the login limiter allows ten attempts per address per fifteen
- * minutes, and the whole e2e suite runs from one address. A per-run stamp
- * keeps the change types unique across repeated runs.
+ * Pending Approvals queue. Both roles reuse the sessions global-setup.ts
+ * signs in once per run: the login limiter allows ten attempts per address
+ * per fifteen minutes, and the suite runs one chain per browser project from
+ * one address, so per-spec logins exhausted it on the WebKit pass. A per-run
+ * stamp keeps the change types unique across repeated runs and projects.
  *
  * @author Luca Ostinelli
  */
 
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { ADMIN, MANAGER, login } from './helpers';
+import { adminPage, managerPage } from './helpers';
 
 const stamp = Date.now().toString(36);
 const DECISION_TYPE = `E2E.Decision.${stamp}`;
@@ -57,12 +58,11 @@ test.describe.serial('modal dialogs accept clicks', () => {
   let admin: Page;
 
   test.beforeAll(async ({ browser }) => {
-    admin = await browser.newPage();
-    await login(admin, ADMIN.email, ADMIN.password);
+    admin = await adminPage(browser);
   });
 
   test.afterAll(async () => {
-    await admin.close();
+    await admin.context().close();
   });
 
   test('approval workflow modal creates a workflow', async () => {
@@ -87,8 +87,8 @@ test.describe.serial('modal dialogs accept clicks', () => {
     await expect(row).toContainText(/approved/i);
   });
 
-  test('decision modal approves a pending approval', async ({ page }) => {
-    await login(page, MANAGER.email, MANAGER.password);
+  test('decision modal approves a pending approval', async ({ browser }) => {
+    const page = await managerPage(browser);
     await page.goto('/approvals/pending');
 
     const row = page.getByRole('row').filter({ hasText: DECISION_TYPE });
@@ -98,6 +98,7 @@ test.describe.serial('modal dialogs accept clicks', () => {
 
     await expect(dialog(page)).toBeHidden();
     await expect(row).toBeHidden();
+    await page.context().close();
   });
 
   test('delete confirm removes a workflow', async () => {

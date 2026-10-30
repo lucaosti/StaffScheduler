@@ -22,19 +22,30 @@ export const MANAGER = {
 /** Where `global-setup.ts` saves the ADMIN session (outside the repository). */
 export const ADMIN_STATE_FILE = path.join(os.tmpdir(), 'staff-scheduler-e2e-admin.json');
 
-/**
- * A page already signed in as ADMIN, from the one login `global-setup.ts`
- * performs per run — see there for why specs do not each log in.
- */
-export async function adminPage(
-  browser: Browser,
-  options: { viewport?: { width: number; height: number } } = {}
-): Promise<Page> {
-  const context = await browser.newContext({ storageState: ADMIN_STATE_FILE, ...options });
+/** Where `global-setup.ts` saves the MANAGER session (outside the repository). */
+export const MANAGER_STATE_FILE = path.join(os.tmpdir(), 'staff-scheduler-e2e-manager.json');
+
+type PageOptions = { viewport?: { width: number; height: number } };
+
+async function sessionPage(browser: Browser, storageState: string, options: PageOptions): Promise<Page> {
+  const context = await browser.newContext({ storageState, ...options });
   const page = await context.newPage();
   await page.goto('/dashboard');
   await expect(page).toHaveURL(/\/dashboard$/);
   return page;
+}
+
+/**
+ * A page already signed in as ADMIN, from the one login `global-setup.ts`
+ * performs per run — see there for why specs do not each log in.
+ */
+export async function adminPage(browser: Browser, options: PageOptions = {}): Promise<Page> {
+  return sessionPage(browser, ADMIN_STATE_FILE, options);
+}
+
+/** A page already signed in as MANAGER, from the same once-per-run login. */
+export async function managerPage(browser: Browser, options: PageOptions = {}): Promise<Page> {
+  return sessionPage(browser, MANAGER_STATE_FILE, options);
 }
 
 /**
