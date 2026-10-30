@@ -37,6 +37,10 @@ export const getAttentionItems = (): Promise<ApiResponse<AttentionItems>> =>
  * the stat cards down with it, which was the reason for swallowing.
  */
 export const getRecentActivity = async (limit = 5): Promise<AuditLogEntry[]> => {
-  const res = await listAuditLogs({ limit });
+  // page + pageSize, not `limit` (#942): GET /audit-logs answers `?limit=`
+  // with `{ total, items }` but page+pageSize with the paginated envelope,
+  // whose `data` is the entry array the Audit Logs page also reads. Asked
+  // with `limit` and checked for an array, the panel was empty for everyone.
+  const res = await listAuditLogs({ page: 1, pageSize: limit });
   return res.success && Array.isArray(res.data) ? res.data : [];
 };

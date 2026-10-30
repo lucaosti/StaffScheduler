@@ -331,7 +331,9 @@ describe('dashboardService', () => {
     );
   });
 
-  it('getRecentActivity GETs /audit-logs with the given limit', async () => {
+  // page+pageSize, which GET /audit-logs answers with the entry array (#942);
+  // `?limit=` alone gets `{ total, items }` instead.
+  it('getRecentActivity asks for the first page of the given size', async () => {
     const items = [{ id: 1, action: 'login' }];
     global.fetch = jest.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true, data: items }), {
@@ -343,7 +345,7 @@ describe('dashboardService', () => {
     const result = await dashboardService.getRecentActivity(3);
     expect(result).toEqual(items);
     expect(fetchMock()).toHaveBeenCalledWith(
-      expect.stringMatching(/audit-logs\?limit=3$/),
+      expect.stringMatching(/audit-logs\?page=1&pageSize=3$/),
       expect.anything()
     );
   });

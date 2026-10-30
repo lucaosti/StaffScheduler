@@ -196,6 +196,39 @@ describe('<Dashboard />', () => {
       expect(within(panel).queryByText(/no recent activity/i)).not.toBeInTheDocument();
     });
 
+    /**
+     * #942: the panel was empty for every role. The service asked for
+     * `?limit=5`, which GET /audit-logs answers with `{ total, items }`, and
+     * then looked for an array. This handler answers exactly as
+     * routes/auditLogs.ts does — the paginated envelope only for
+     * page+pageSize, the `{ total, items }` object otherwise.
+     */
+    it('lists the recent entries the audit endpoint returns', async () => {
+      permissions = ['audit.read'];
+      const entry = {
+        id: 41, userId: 1, action: 'update', entityType: 'shift', entityId: 7,
+        description: 'Shift 7 rescheduled', createdAt: '2026-10-30T08:00:00.000Z',
+      };
+      server.use(
+        http.get(`${API_URL}/audit-logs`, ({ request }) => {
+          const url = new URL(request.url);
+          const page = url.searchParams.get('page');
+          const pageSize = url.searchParams.get('pageSize');
+          if (page && pageSize) {
+            return HttpResponse.json({
+              success: true,
+              data: [entry],
+              meta: { total: 1, page: Number(page), pageSize: Number(pageSize), pages: 1 },
+            });
+          }
+          return HttpResponse.json({ success: true, data: { total: 1, items: [entry] } });
+        })
+      );
+      await renderLoaded();
+
+      expect(await screen.findByText('Shift 7 rescheduled')).toBeInTheDocument();
+    });
+
     it('shows the activity panel with audit.read', async () => {
       permissions = ['audit.read'];
       await renderLoaded();
