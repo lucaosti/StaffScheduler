@@ -87,13 +87,15 @@ describe('<Schedule />', () => {
     };
     mockGetShifts.mockResolvedValue(ok([monthShiftFixture]));
 
+    // Wide enough to cover whatever week a test shows: the page loads only
+    // the assignments of schedules overlapping the visible week (#844).
     mockGetSchedules.mockResolvedValue(
       ok([
         {
           id: 1,
           name: 'Week 1',
-          startDate: '2026-04-01',
-          endDate: '2026-04-07',
+          startDate: '2020-01-01',
+          endDate: '2099-12-31',
           status: 'draft',
           createdAt: 'x',
           updatedAt: 'x',
@@ -225,6 +227,38 @@ describe('<Schedule />', () => {
     const cells = within(shiftRow).getAllByRole('cell');
     expect(within(cells[thursdayIndex]).getByText('Ada Lovelace')).toBeInTheDocument();
     expect(within(cells[sundayIndex]).queryByText('Ada Lovelace')).not.toBeInTheDocument();
+  });
+
+  // #844: only `schedules[0]`'s assignments were loaded, so a week staffed
+  // under any other schedule rendered as empty.
+  it("shows an assignment that belongs to the second schedule", async () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-08-05T12:00:00.000Z')); // Wednesday, midday UTC
+    // This suite does not reset mocks between tests; the call assertions
+    // below are about this render only.
+    mockGetScheduleWithShifts.mockClear();
+    mockGetSchedules.mockResolvedValue(
+      ok([
+        { id: 1, name: 'July', startDate: '2026-07-01', endDate: '2026-07-31', status: 'published', createdAt: 'x', updatedAt: 'x' },
+        { id: 2, name: 'August', startDate: '2026-08-01', endDate: '2026-08-31', status: 'draft', createdAt: 'x', updatedAt: 'x' },
+      ])
+    );
+    mockGetScheduleWithShifts.mockImplementation((id: number) =>
+      ok({
+        id,
+        shifts:
+          id === 2
+            ? [{ id: 100, assignments: [{ id: 501, shiftId: 100, userId: 1, shiftDate: '2026-08-06', status: 'pending' }] }]
+            : [],
+      })
+    );
+
+    render(<Schedule />);
+
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(mockGetScheduleWithShifts).toHaveBeenCalledWith(2);
+    // July does not overlap the visible week, so it is not fetched at all.
+    expect(mockGetScheduleWithShifts).not.toHaveBeenCalledWith(1);
   });
 
   const findChevron = (className: string): HTMLElement => {

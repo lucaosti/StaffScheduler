@@ -1,30 +1,36 @@
 /**
  * useScheduleActions — the create/generate/publish/archive flows for the
- * Schedule page: local modal + error state, the optimization-job polling
- * loop, and the mutating calls themselves. Extracted out of Schedule.tsx so
- * the page component is left with data wiring and layout.
+ * Schedule page: local modal and banner state around the mutations in
+ * `hooks/useSchedulePage`. Extracted out of Schedule.tsx so the page
+ * component is left with data wiring and layout.
+ *
+ * Only UI state lives here. The calls, their pending flags, the optimization
+ * polling and the cache invalidation are the mutations' (#844): this hook
+ * used to keep its own `isCreating`/`isGenerating` flags and re-run a manual
+ * reload that refreshed this page alone.
  *
  * @author Luca Ostinelli
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import * as scheduleService from '../../services/scheduleService';
 import { ApiError } from '../../services/apiUtils';
+import { useScheduleMutations, type OptimizationOutcome } from '../../hooks/useSchedulePage';
 import type { CreateScheduleValues } from '../Schedule/CreateScheduleModal';
 
-/**
- * The engine-provenance subset of an optimization result the UI cares about.
- * Enough to tell the user whether they got the optimum or a signalled draft.
- */
-interface OptimizationOutcome {
-  engine?: 'or-tools' | 'greedy';
-  degraded?: boolean;
-  degradedReason?: string;
-}
+const isAbort = (err: unknown) => err instanceof DOMException && err.name === 'AbortError';
 
-export function useScheduleActions(loadData: () => Promise<unknown>) {
+/**
+ * The message to show for a failed action. Only an ApiError's own text is
+ * trusted for display (a raw Error's message may be an unhelpful runtime
+ * string), and an empty one means the server gave none.
+ */
+const failureMessage = (err: unknown, fallback: string) =>
+  err instanceof ApiError && err.message ? err.message : fallback;
+
+export function useScheduleActions() {
   const { t } = useTranslation();
+  const mutations = useScheduleMutations();
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
@@ -32,9 +38,13 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
   const [showGenerateModal, setShowGenerateModal] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [generateError, setGenerateError] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | number | null>(null);
+
+  // Optimization polling outlives a render but not the page: leaving it
+  // aborts the poll instead of letting it run for up to five minutes against
+  // an unmounted screen. The job itself keeps running server-side.
+  const pollController = useRef<AbortController | null>(null);
+  useEffect(() => () => pollController.current?.abort(), []);
 
   const openCreateModal = () => {
     setCreateError(null);
@@ -48,60 +58,22 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
   };
 
   // Values arrive already validated against the shared createScheduleBody schema
-  // (the modal uses it via zodResolver), so this handler only performs the API
-  // call and its async bookkeeping — no re-validation needed.
+  // (the modal uses it via zodResolver), so this handler only performs the call.
   const handleCreateSchedule = async (values: CreateScheduleValues) => {
     setCreateError(null);
-    setIsCreating(true);
     try {
-      const response = await scheduleService.createSchedule({
+      await mutations.create.mutateAsync({
         name: values.name,
         startDate: values.startDate,
         endDate: values.endDate,
         departmentId: values.departmentId,
         notes: values.notes,
       });
-      if (response.success) {
-        setShowCreateModal(false);
-        setInfo(t('schedule.createdMessage', { name: values.name }));
-        await loadData();
-      } else {
-        setCreateError(response.error?.message || t('schedule.createFailed'));
-      }
+      setShowCreateModal(false);
+      setInfo(t('schedule.createdMessage', { name: values.name }));
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : t('schedule.createFailed');
-      setCreateError(message);
-    } finally {
-      setIsCreating(false);
+      setCreateError(failureMessage(err, t('schedule.createFailed')));
     }
-  };
-
-  // Polls the optimization job until it finishes. Bounded so a stuck job never
-  // hangs the UI forever; the 2s interval keeps status requests light while
-  // still feeling responsive. Throws on failure/timeout so the caller surfaces
-  // an error; on the terminal 'completed' state it returns the job result so
-  // the caller can tell the user which engine ran (optimal vs degraded draft).
-  const waitForOptimization = async (
-    scheduleId: number
-  ): Promise<OptimizationOutcome | undefined> => {
-    const POLL_MS = 2000;
-    const MAX_ATTEMPTS = 150; // ~5 minutes, matching the solver time limit
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-      const status = await scheduleService.getOptimizationStatus(scheduleId);
-      const state = status.data?.state;
-      if (state === 'completed') return status.data?.result;
-      if (state === 'failed') {
-        // ApiError, not a plain Error: handleGenerateSchedule's catch only
-        // trusts ApiError messages for display (a raw Error's message might
-        // be an unhelpful JS runtime string), and the reason the job itself
-        // reports is exactly the kind of safe, human-readable message that
-        // trust is for.
-        throw new ApiError(status.data?.failedReason || t('schedule.optimizationFailedDefault'));
-      }
-      // 'waiting' / 'active' / 'unknown' → keep polling.
-    }
-    throw new ApiError(t('schedule.optimizationTimedOut'));
   };
 
   // A completion message that makes the engine unmistakable: the optimal run is
@@ -110,10 +82,7 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
   const describeOutcome = (outcome?: OptimizationOutcome): { message: string; degraded: boolean } => {
     if (outcome?.degraded) {
       const reason = outcome.degradedReason ? ` (${outcome.degradedReason})` : '';
-      return {
-        degraded: true,
-        message: t('schedule.draftOutcome', { reason }),
-      };
+      return { degraded: true, message: t('schedule.draftOutcome', { reason }) };
     }
     if (outcome?.engine === 'greedy') {
       return { degraded: false, message: t('schedule.greedyOutcome') };
@@ -130,75 +99,52 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
       return;
     }
 
-    setIsGenerating(true);
+    pollController.current?.abort();
+    const controller = new AbortController();
+    pollController.current = controller;
     try {
-      const response = await scheduleService.generateSchedule(selectedScheduleId);
-      if (!response.success) {
-        setGenerateError(response.error?.message || t('schedule.generateFailed'));
-        return;
-      }
-
-      // Async path: the backend queued the solve (202 { jobId }). Poll the job
-      // status until it finishes, so the UI reflects the real result rather
-      // than the "queued" acknowledgement. Sync path (no Redis): the result is
-      // already present, so we skip polling.
-      const data = response.data as ({ jobId?: string } & OptimizationOutcome) | undefined;
-      const outcome = data?.jobId
-        ? await waitForOptimization(Number(selectedScheduleId))
-        : data;
-
+      const outcome = await mutations.generate.mutateAsync({
+        scheduleId: selectedScheduleId,
+        signal: controller.signal,
+        messages: {
+          failed: t('schedule.optimizationFailedDefault'),
+          timedOut: t('schedule.optimizationTimedOut'),
+        },
+      });
       setShowGenerateModal(false);
       const { message, degraded } = describeOutcome(outcome);
       // Surface a degraded (draft) run in the prominent page-level alert so it
       // stays visible after the modal closes and is impossible to miss; an
       // optimal run uses the normal info banner.
-      if (degraded) {
-        setError(message);
-      } else {
-        setInfo(message);
-      }
-      await loadData();
+      if (degraded) setError(message);
+      else setInfo(message);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : t('schedule.generateFailed');
-      setGenerateError(message);
-    } finally {
-      setIsGenerating(false);
+      if (isAbort(err)) return; // the page went away; nobody to tell
+      setGenerateError(failureMessage(err, t('schedule.generateFailed')));
     }
   };
 
-  const handlePublish = async (id: string | number) => {
+  const runStatusChange = async (
+    mutate: (id: string | number) => Promise<unknown>,
+    id: string | number,
+    successMessage: string,
+    failedMessage: string
+  ) => {
     setError(null);
     setInfo(null);
     try {
-      const response = await scheduleService.publishSchedule(id);
-      if (response.success) {
-        setInfo(t('schedule.publishSuccess'));
-        await loadData();
-      } else {
-        setError(response.error?.message || t('schedule.publishFailed'));
-      }
+      await mutate(id);
+      setInfo(successMessage);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : t('schedule.publishFailed');
-      setError(message);
+      setError(failureMessage(err, failedMessage));
     }
   };
 
-  const handleArchive = async (id: string | number) => {
-    setError(null);
-    setInfo(null);
-    try {
-      const response = await scheduleService.archiveSchedule(id);
-      if (response.success) {
-        setInfo(t('schedule.archiveSuccess'));
-        await loadData();
-      } else {
-        setError(response.error?.message || t('schedule.archiveFailed'));
-      }
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : t('schedule.archiveFailed');
-      setError(message);
-    }
-  };
+  const handlePublish = (id: string | number) =>
+    runStatusChange(mutations.publish.mutateAsync, id, t('schedule.publishSuccess'), t('schedule.publishFailed'));
+
+  const handleArchive = (id: string | number) =>
+    runStatusChange(mutations.archive.mutateAsync, id, t('schedule.archiveSuccess'), t('schedule.archiveFailed'));
 
   return {
     error,
@@ -207,8 +153,8 @@ export function useScheduleActions(loadData: () => Promise<unknown>) {
     showGenerateModal,
     createError,
     generateError,
-    isCreating,
-    isGenerating,
+    isCreating: mutations.create.isPending,
+    isGenerating: mutations.generate.isPending,
     selectedScheduleId,
     setSelectedScheduleId,
     openCreateModal,
