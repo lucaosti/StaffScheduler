@@ -22,7 +22,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { join } from 'path';
+import { PYTHON_SCRIPT, describeOrtools, runPython, solveCpSat } from './helpers/cpSat';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import {
   findConstraintViolations,
@@ -44,7 +44,7 @@ import {
   type ValidatedAssignment,
 } from '../optimization/constraintValidator';
 import { shiftBoundsMs, shiftHours } from '../optimization/shiftTime';
-import { allFixtures, feasibleFixtures } from './fixtures/optimizerFixtures';
+import { allFixtures, fairnessBystanderFixture, feasibleFixtures } from './fixtures/optimizerFixtures';
 
 const toValidated = (
   assignments: Array<{ employeeId: string; shiftId: string }>
@@ -652,43 +652,7 @@ describe('greedy engine respects the canonical constraints', () => {
   });
 });
 
-// --- CP-SAT parity (Python) -------------------------------------------------
-
-const PYTHON_SCRIPT = join(__dirname, '../../optimization-scripts/schedule_optimizer.py');
-const REQUIRE_ORTOOLS = process.env.REQUIRE_ORTOOLS === '1';
-
-/** Probe whether python3 + ortools are importable in this environment. */
-const ortoolsAvailable = (): boolean => {
-  const probe = spawnSync('python3', ['-c', 'import ortools'], { encoding: 'utf8' });
-  return probe.status === 0;
-};
-
-interface PythonAssignment {
-  employee_id: string;
-  shift_id: string;
-}
-
-/** Run the Python CP-SAT engine on a problem and return its assignments. */
-const runPython = (problem: unknown): ValidatedAssignment[] => {
-  const res = spawnSync(
-    'python3',
-    [PYTHON_SCRIPT, '--stdin', '--stdout', '--time-limit', '10'],
-    { input: JSON.stringify(problem), encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
-  );
-  if (res.status !== 0 && res.status !== 1) {
-    throw new Error(`Python optimizer failed (status ${res.status}): ${res.stderr}`);
-  }
-  const parsed = JSON.parse(res.stdout) as { status: string; assignments?: PythonAssignment[] };
-  if (parsed.status !== 'OPTIMAL' && parsed.status !== 'FEASIBLE') {
-    throw new Error(`Python optimizer returned ${parsed.status} for a feasible fixture`);
-  }
-  return (parsed.assignments ?? []).map((a) => ({
-    employeeId: String(a.employee_id),
-    shiftId: String(a.shift_id),
-  }));
-};
-
-const describeOrtools = REQUIRE_ORTOOLS || ortoolsAvailable() ? describe : describe.skip;
+// --- CP-SAT parity (Python): gate and runner in ./helpers/cpSat -------------
 
 describeOrtools('CP-SAT engine respects the same canonical constraints', () => {
   it.each(allFixtures)('produces no violations on: $name', ({ problem }) => {
@@ -1048,6 +1012,13 @@ describeOrtools('CP-SAT engine balances workload', () => {
     expect(findConstraintViolations(splittable, runPython(splittable))).toEqual([]);
   });
 
+  it('keeps balancing when one employee is eligible for nothing (#839)', () => {
+    const assignments = runPython(fairnessBystanderFixture);
+    const shiftsOf = (id: string) => assignments.filter((a) => a.employeeId === id).length;
+    expect(assignments).toHaveLength(6);
+    expect([shiftsOf('e1'), shiftsOf('e2')]).toEqual([3, 3]);
+  });
+
   /**
    * Fairness sits at SOFT, so it must never buy an unstaffed seat — and the
    * temptation is real: with one employee and three shifts, working none of
@@ -1290,6 +1261,28 @@ describeOrtools('CP-SAT engine explains an over-committed employee', () => {
     // to carry what is wrong and by how much.
     expect(findings[0].detail).toMatch(/23h on 2033-03-01/);
     expect(findings[0].detail).toMatch(/8h daily limit/);
+  });
+
+  it('counts a half-hour external toward the daily limit, as the validator does (#834)', () => {
+    // 08:00–16:30 elsewhere against an 8h cap: over by half an hour. Read as
+    // whole hours it was exactly 8, so the engine kept the employee in the
+    // model and its own daily constraint then had to be the one to object.
+    const halfHourOver = {
+      ...overCommitted,
+      employees: [
+        {
+          ...overCommitted.employees[0],
+          max_hours_per_week: 40,
+          max_hours_per_day: 8,
+          existing_assignments: [{ date: '2033-03-01', start_time: '08:00', end_time: '16:30' }],
+        },
+        overCommitted.employees[1],
+      ],
+    };
+    expect(findOverCommitments(halfHourOver).map((f) => f.employeeId)).toEqual(['e1']);
+    const result = solveCpSat(halfHourOver);
+    expect(result.status).toBe('OPTIMAL');
+    expect(result.overCommittedIds).toEqual(['e1']);
   });
 
   it('reports nothing for an employee within their limits', () => {

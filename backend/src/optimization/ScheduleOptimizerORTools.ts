@@ -16,7 +16,8 @@
  * Constraints enforced by the greedy fallback (see evaluateCandidate, in
  * evaluation order — the numbering matches that method's inline comments):
  *   1. Staff cap — assignments per shift are capped at max_staff
- *   2. No double-booking — time-overlap detection within a calendar day
+ *   2. No double-booking — absolute-time overlap, across midnight and against
+ *      external assignments
  *   2b. Minimum rest between shifts — same rule as ComplianceEngine's
  *       checkMinRest, including across different (typically adjacent) days
  *   3. Declared unavailability — date-level blocks from user_unavailability
@@ -47,7 +48,7 @@ import { coverageShortfalls, findOverCommitments } from './constraintValidator';
 // The overnight-aware time arithmetic these engines share. It used to be four
 // private helpers here and equivalent copies in constraintValidator, kept in
 // step by a comment — see ./shiftTime for why that was not good enough.
-import { dateToMs, shiftBoundsMs, shiftHours, timeToMinutes } from './shiftTime';
+import { dateToMs, shiftBoundsMs, shiftHours } from './shiftTime';
 import type { OverCommitment } from './constraintValidator';
 
 // Re-exported so every existing import site keeps working unchanged; the
@@ -537,15 +538,16 @@ export class ScheduleOptimizer {
       return false;
     }
 
-    // 2. No double-booking — reject if already on an overlapping shift today
+    // 2. No double-booking — reject if already on an overlapping shift, whatever
+    //    date either starts on
     if (this._hasOverlappingShift(shift, assignedShiftIds, allShifts)) {
       return false;
     }
 
     // 2b. Minimum rest between shifts — same rule as ComplianceEngine's
     //     checkMinRest, e.g. an overnight shift ending 07:00 followed
-    //     immediately by a 07:00 shift the next day is a same-day-overlap
-    //     miss (different dates) but a real rest-hours violation.
+    //     immediately by a 07:00 shift the next day does not overlap
+    //     but is a real rest-hours violation.
     if (this._wouldViolateMinRest(shift, ctx)) {
       return false;
     }
@@ -711,7 +713,12 @@ export class ScheduleOptimizer {
       let restMs: number;
       if (candEnd <= otherStart) restMs = otherStart - candEnd;
       else if (otherEnd <= candStart) restMs = candStart - otherEnd;
-      else continue; // overlap is handled by _hasOverlappingShift, not double-flagged here
+      // Overlapping: no rest at all. This used to `continue`, on the
+      // assumption that the overlap check had already refused the pair — but
+      // that check only compared same-date shifts, so a cross-midnight
+      // overlap passed both and was assigned (#835). Refusing here too means
+      // this rule no longer depends on the other one being complete.
+      else return true;
       if (restMs / 3_600_000 < ctx.minRestHoursBetweenShifts) return true;
     }
     return false;
@@ -731,11 +738,6 @@ export class ScheduleOptimizer {
    * Known limitations:
    * - No backtracking — a locally greedy choice may block a later shift from
    *   being staffed. The CP-SAT path handles this globally.
-   * - Same-day overlap detection (_hasOverlappingShift) only compares shifts
-   *   sharing the same date, so an overnight shift is checked against
-   *   same-date shifts but not a next-day shift it spills into. This is a
-   *   separate concern from minimum rest between shifts, which
-   *   _wouldViolateMinRest does check across day boundaries.
    */
   async generateGreedySchedule(problem: OptimizationProblem): Promise<ScheduleAssignment[]> {
     logger.info('Generating greedy schedule as fallback');
@@ -848,42 +850,32 @@ export class ScheduleOptimizer {
     return assignments;
   }
 
+  /**
+   * Whether the candidate overlaps anything the employee already holds,
+   * external assignments included, compared on absolute bounds.
+   *
+   * It used to compare only shifts sharing a start DATE, on times of day. A
+   * 22:00–06:00 night shift and the next day's 05:00–13:00 start on different
+   * dates, so the pair was never compared and both went to one person — and
+   * the same for a night shift held on another schedule (#835). Absolute
+   * bounds are what the validator and CP-SAT already compare, so this is the
+   * same rule rather than a closer approximation of it; there is no "same
+   * day" left to get wrong.
+   */
   private _hasOverlappingShift(
     shift: Shift,
     assignedShiftIds: Set<string>,
     allShifts: Shift[]
   ): boolean {
     const shiftsById = this._getShiftsById(allShifts);
+    const [start, end] = shiftBoundsMs(shift);
     for (const shiftId of assignedShiftIds) {
-      const assignedShift = shiftsById.get(shiftId);
-      if (assignedShift && assignedShift.date === shift.date) {
-        if (
-          this._timesOverlap(
-            shift.start_time,
-            shift.end_time,
-            assignedShift.start_time,
-            assignedShift.end_time
-          )
-        ) {
-          return true;
-        }
-      }
+      const other = shiftsById.get(shiftId);
+      if (!other) continue;
+      const [otherStart, otherEnd] = shiftBoundsMs(other);
+      if (start < otherEnd && otherStart < end) return true;
     }
     return false;
-  }
-
-  private _timesOverlap(start1: string, end1: string, start2: string, end2: string): boolean {
-    const s1 = timeToMinutes(start1);
-    let e1 = timeToMinutes(end1);
-    const s2 = timeToMinutes(start2);
-    let e2 = timeToMinutes(end2);
-
-    // Normalize overnight ranges (e.g. 22:00–06:00) so a shift crossing
-    // midnight is still detected as overlapping same-date shifts.
-    if (e1 <= s1) e1 += 24 * 60;
-    if (e2 <= s2) e2 += 24 * 60;
-
-    return !(e1 <= s2 || e2 <= s1);
   }
 
 

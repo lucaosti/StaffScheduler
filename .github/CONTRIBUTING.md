@@ -219,6 +219,7 @@ Step-by-step recipes for adding an endpoint, a page or a migration are in
 | Backend unit — services | a mocked `Pool` | `cd backend && npm test` | Backend |
 | Backend unit — routes | Supertest, mocked services and auth middleware | `cd backend && npm test` | Backend |
 | Optimizer parity | both engines against one validator; the CP-SAT half needs OR-Tools | `cd backend && npm test` | Backend (`REQUIRE_ORTOOLS=1`) |
+| Optimizer properties | both engines on seeded random instances; replay one with `TEST_SEED=<n>` | `cd backend && npx jest optimizer.properties` | Backend (`REQUIRE_ORTOOLS=1`) |
 | OpenAPI contract | generated spec versus routes and schemas | `cd backend && npm run openapi:generate` | Backend (drift check) |
 | Backend integration | a real MySQL, throwaway database | `cd backend && npm run test:integration` | e2e |
 | Migrations | apply, roll back, re-apply on a clean database | `npm run db:migrate` / `db:migrate:rollback` | e2e |
