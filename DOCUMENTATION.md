@@ -1605,8 +1605,23 @@ docker compose --profile ops up -d
 ```
 
 Starts Prometheus, Grafana, Loki and Promtail (config under `ops/`), all on the
-internal network with only Grafana published (`GRAFANA_PORT`, default `3002`;
-login `admin` / `GRAFANA_ADMIN_PASSWORD`):
+internal network with only Grafana published, and on the host's loopback
+interface only (`127.0.0.1:GRAFANA_PORT`, default `3002`; login `admin` /
+`GRAFANA_ADMIN_PASSWORD`). From another machine, tunnel to it
+(`ssh -L 3002:127.0.0.1:3002 <host>`) rather than publishing the login page.
+
+`GRAFANA_ADMIN_PASSWORD` has no default: Compose refuses to start **any**
+service from `docker-compose.yml` without it, profile or not, because Compose
+interpolates every service before it filters by profile. Grafana can read every
+log line through Loki, so the former `admin/admin` fallback was a credential
+for the whole log stream. Grafana applies the variable only when it first
+initialises its `grafana_data` volume; to rotate it later, run
+`docker compose exec grafana grafana cli admin reset-admin-password <new>`.
+
+The `dev` profile's phpMyAdmin follows the same rules: loopback only
+(`127.0.0.1:PHPMYADMIN_PORT`, default `8080`) and no auto-login — it shows its
+login form and you sign in with a MySQL account, instead of every visitor being
+logged in as the application's database user.
 
 - **Prometheus** scrapes `backend:3001/metrics` every 15s and loads the alert
   rules in `ops/prometheus/alerts.yml` (high 5xx rate, high p95 latency, DB pool
@@ -1633,10 +1648,34 @@ docker compose --profile backup up -d
 ```
 
 It writes a consistent (`--single-transaction`), gzipped, timestamped dump to the
-`backup_data` volume every `BACKUP_INTERVAL_SECONDS` (default daily) and prunes
-dumps older than `BACKUP_RETENTION_DAYS` (default 14). A dump smaller than 1 KB
-is treated as a failure and removed, so an empty/failed dump never masquerades as
-a good backup.
+host directory `BACKUP_HOST_DIR` (default `./backups`, gitignored) every
+`BACKUP_INTERVAL_SECONDS` (default daily) and prunes dumps older than
+`BACKUP_RETENTION_DAYS` (default 14).
+
+The backups are deliberately **not** a named volume. A named volume belongs to
+the compose project, so the `docker compose down -v` that deletes `mysql_data`
+used to delete the backups in the same command. A host directory survives
+`down -v`; for backups that also survive the machine, point `BACKUP_HOST_DIR` at
+another disk or a mount that is synced off-host. The same incident shaped the
+two scripts that remove things: `scripts/demo.sh` runs as its own compose
+project (`staffscheduler-demo`), so `demo.sh down` can delete only the demo's
+volumes, and `./stop.sh -c` removes containers and networks but keeps volumes —
+only `./stop.sh -p` deletes volumes, and only after `DELETE` is typed.
+`scripts/stack-scripts.test.mjs` runs both scripts against a recording `docker`
+stub to pin this.
+
+A dump is kept only once it is proven complete. Each run writes to a
+`*.sql.gz.tmp` file under `pipefail`, so a `mysqldump` that dies mid-stream fails
+the run instead of being hidden behind gzip's success; the file must then end in
+mysqldump's own `-- Dump completed` trailer, which only a finished dump writes;
+only then is it renamed to its final `*.sql.gz` name, and **only after that** are
+old dumps pruned. A failed run therefore leaves no file behind and deletes
+nothing, and `restore.sh --latest` (which matches `*.sql.gz` only) can never pick
+a partial dump. `restore.sh` applies the same check before it touches the
+database — a corrupt or truncated archive is refused while the target is still
+intact — and fails if the replay itself fails. Watch the sidecar's log for
+`[backup] run failed`: the loop keeps its schedule after a failure, so a run of
+failures is visible only there and in the age of the newest dump.
 
 **Restore runbook** (recovering into the running stack):
 
@@ -1668,7 +1707,10 @@ job runs weekly (and whenever the backup scripts or migrations change): it appli
 the migrations, seeds a marker row, runs the real `backup.sh`, DROPs the database,
 runs the real `restore.sh --latest`, and asserts the marker survived the
 round-trip. A broken restore path is therefore a red CI check, not a discovery
-made during an incident.
+made during an incident. The failure paths, which a healthy server never
+produces, are covered by `scripts/backup-scripts.test.mjs` (part of
+`npm run test:scripts`): both scripts run against stub `mysqldump`/`mysql`
+clients that die mid-dump, truncate silently, or reject the replay.
 
 ### Deployment hardening and scaling
 
@@ -1681,9 +1723,18 @@ override:
   access goes through the `dev`-profile phpMyAdmin or a temporary, explicit port
   forward — the database is never exposed to the host by default.
 - **`caching_sha2_password`.** MySQL uses its 8.x default authentication plugin;
-  the legacy `mysql_native_password` (deprecated, removed in MySQL 9) is no longer
-  forced. Both the backend driver (`mysql2`) and the migration runner
-  (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+  the legacy `mysql_native_password` (disabled by default in 8.4, removed in
+  MySQL 9) is not used. Both the backend driver (`mysql2`) and the migration
+  runner (`dbmate`/go-sql-driver) authenticate with it over the internal network.
+- **One pinned MySQL release everywhere.** The deployment, its backup sidecar,
+  the verification stack and every CI service run the same exact 8.4 LTS tag
+  (8.0 reached end of life in April 2026). A floating tag in CI meant the
+  migrations, the integration suite and the backup round-trip were proven on
+  whatever the registry served that day rather than on what is deployed;
+  `scripts/mysql-version.test.mjs` fails if any file names a different tag. To
+  upgrade, change every occurrence in one pull request and let CI run the
+  migration round-trip, integration suite and backup-restore job on it. The 9.x
+  innovation line was rejected: each release is supported only until the next.
 
 ### Hardware-aware defaults
 
@@ -1720,15 +1771,23 @@ serve traffic. The default compose file runs a single backend; the
 docker compose -f docker-compose.yml -f docker-compose.scale.yml up -d --scale backend=2
 ```
 
-**Set `TRUST_PROXY_HOPS=1` whenever this overlay is in use.** Express does not
+**`TRUST_PROXY_HOPS` is `1` in both compose layouts.** Express does not
 trust `X-Forwarded-For`/`X-Forwarded-Proto` by default, so without it every
-request's `req.ip` resolves to the load balancer's own address rather than the
+request's `req.ip` resolves to the proxy's own address rather than the
 real client — collapsing IP-keyed rate limiting (including the login
 brute-force limiter) into one shared bucket across every caller, and making
-audit-log IPs useless. Left at its default of `0` for any directly-exposed
-instance (dev, or a single, unscaled backend): with no proxy actually in
-front, trusting the hop would let a client set its own `X-Forwarded-For` and
-spoof its IP to dodge rate limiting.
+audit-log IPs useless. Compose forwards `${TRUST_PROXY_HOPS:-1}` to the backend
+because every network request crosses exactly one nginx: the frontend's `/api`
+proxy, or `backend-lb` under this overlay (the two are siblings, not chained, so
+the overlay stays at one). Raise it by one for each further proxy chained in
+front, e.g. `2` behind a TLS terminator in front of the frontend. For the same
+reason the base file publishes the backend's own port on `127.0.0.1` only: a
+client that reached it directly could write its own `X-Forwarded-For` and pick
+the address it is limited under. The backend's built-in default stays `0`, for
+a process run with no proxy in front (`npm run dev`), where trusting a hop
+would let any client spoof its IP.
+`scripts/compose-config.test.mjs` asserts both, on the configuration Compose
+actually resolves.
 
 The overlay clears the backend's published port (several replicas cannot share
 one host port) and puts `backend-lb` (nginx, `ops/nginx/backend-lb.conf`) in
@@ -1745,13 +1804,47 @@ Rolling deploy:
 ops/deploy/rolling-deploy.sh 2      # replica count (default 2)
 ```
 
-Compose has no native per-replica rolling update, so the script does the standard
-scale-up/scale-down dance: build the new image, scale **up** to 2N (new replicas
-start alongside the old), wait until the load balancer answers, then scale back
-**down** to N — Compose removes the oldest containers, i.e. the previous image.
-Throughout, a poller hits `/api/v1/health` twice a second and the script **fails the
-deploy if a single request was dropped**, so "zero downtime" is verified rather
-than asserted.
+Compose has no native per-replica rolling update, so the script starts the new
+replicas beside the old ones and retires the old ones **by id**:
+
+1. build the new image and record the ids of the replicas running now;
+2. `up --no-recreate --scale backend=<old + N>`: the old replicas are left
+   untouched and only the added ones start, on the new image;
+3. wait until every **new** replica's own healthcheck reports `healthy` (an
+   unhealthy or exited one aborts the deploy and removes the new replicas, so
+   the old ones keep serving as before);
+4. wait `DRAIN_SECONDS` (default 15, longer than the 10 s resolver TTL of the
+   frontend proxy and the 5 s of `backend-lb`) so both proxies route to the new
+   replicas;
+5. `docker stop` the recorded old ids — SIGTERM makes each stop accepting while
+   its in-flight requests complete, and a refused connection is one nginx
+   retries on another replica, POSTs included, because nothing was sent — then
+   remove them;
+6. wait `DRAIN_SECONDS` again, so the proxies forget the old addresses.
+
+Throughout, a poller sends a GET (`/health`) and a POST (`/auth/refresh` with
+no token, answered 401 without touching the database) every second, and the
+script **fails the deploy if a single one was dropped** — no answer, or a 5xx —
+so "zero downtime" is verified rather than asserted. The POST matters because
+nginx never re-sends a non-idempotent request that already reached a replica:
+a GET-only probe cannot see the drop a careless switch causes.
+
+The former scale-up/scale-down version was wrong in four ways (#848): without
+`--no-recreate` the scale-up recreated the old replicas too; its wait passed as
+soon as the load balancer answered, which the old replicas did, so an unhealthy
+new image went unnoticed; the scale-down removed whichever containers Compose
+chose, an order Compose does not document; and nothing waited out the proxies'
+DNS cache. Both proxies also bound their connect timeout to 2 s, so an address
+still cached after its replica is gone costs a quick retry rather than nginx's
+60 s default.
+
+The script reads `COMPOSE_FILE`/`COMPOSE_PROJECT_NAME` like Compose itself
+(default: the base file plus this overlay), `API_URL` for where clients reach
+the API (default the load balancer on `BACKEND_PORT`), and expects to run from
+the repository root. The backend's healthcheck probes every 2 s while a
+container starts (`start_interval`, Docker Engine 25 or newer), so step 3 takes
+seconds rather than the 30 s healthcheck interval. As before, every later `up`
+must pass `--scale backend=N`, or Compose scales back to one replica.
 
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.

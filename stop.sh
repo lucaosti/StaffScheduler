@@ -7,9 +7,19 @@
 # and optionally cleans up volumes and networks.
 #
 # Usage:
-#   ./stop.sh            # Stop containers (keep volumes)
-#   ./stop.sh -c         # Clean: remove containers and volumes
-#   ./stop.sh -p         # Purge: remove everything including networks
+#   ./stop.sh            # Stop containers (keep everything)
+#   ./stop.sh -c         # Clean: remove containers and networks (keep volumes)
+#   ./stop.sh -p         # Purge: also delete every volume — the database
+#                        # included — after you type DELETE
+#
+# WHY ONLY -p TOUCHES VOLUMES, AND ONLY AFTER A TYPED CONFIRMATION (#847).
+# -c used to run `down -v` while the help text said it removed containers, so
+# a routine clean-up deleted the production database. Volume deletion is the
+# one irreversible action here; it now needs its own flag and a typed word
+# that cannot be given by accident or by a stray `yes |`. A --force flag for
+# scripts was rejected: automation that means to destroy a database can run
+# `docker compose down -v` itself, visibly. Backups are a host directory
+# (BACKUP_HOST_DIR, default ./backups), not a volume, so -p leaves them.
 #
 # Author: Luca Ostinelli
 # License: MIT
@@ -76,17 +86,26 @@ main() {
     echo ""
     
     if [ "$PURGE_MODE" = true ]; then
-        print_warning "PURGE mode: Removing all containers, volumes, and networks..."
+        print_warning "PURGE mode: this deletes every volume, including the database."
+        print_warning "Backups in ${BACKUP_HOST_DIR:-./backups} are kept."
+        printf 'Type DELETE to continue: '
+        local answer=""
+        read -r answer || true
+        if [ "$answer" != "DELETE" ]; then
+            echo ""
+            print_error "Not confirmed; nothing was removed."
+            exit 1
+        fi
         echo ""
         docker-compose -f "$DOCKER_COMPOSE_FILE" down -v
         print_success "All containers, volumes, and networks have been removed"
-        
+
     elif [ "$CLEAN_MODE" = true ]; then
-        print_warning "CLEAN mode: Removing containers and volumes..."
+        print_warning "CLEAN mode: Removing containers and networks (volumes are kept)..."
         echo ""
-        docker-compose -f "$DOCKER_COMPOSE_FILE" down -v
-        print_success "Containers and volumes have been removed"
-        
+        docker-compose -f "$DOCKER_COMPOSE_FILE" down
+        print_success "Containers and networks have been removed; volumes are intact"
+
     else
         print_info "Stopping Staff Scheduler services..."
         echo ""

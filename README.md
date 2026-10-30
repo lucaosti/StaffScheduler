@@ -224,8 +224,11 @@ After `npm run db:init`, choose one:
 ```
 
 ```bash
-./scripts/demo.sh down     # stop the stack and drop its volumes
+./scripts/demo.sh down     # stop the demo stack and drop its volumes
 ```
+
+The demo is its own compose project (`staffscheduler-demo`), so `down` never
+touches a deployment's volumes.
 
 Login: `admin@demo.staffscheduler.local` / `demo1234`, plus seeded managers
 and employees in the same domain. Demo credentials only.
@@ -318,7 +321,7 @@ npm run test:scripts          # tests of the audit gate and the mobile build che
 ```bash
 ./start.sh                    # all services, production mode
 ./start-dev.sh                # development mode with volume mounts
-./stop.sh
+./stop.sh                     # stop; -c also removes containers, -p deletes volumes (asks first)
 ./build.sh
 ```
 
@@ -327,6 +330,11 @@ docker compose --profile dev up -d      # the stack plus phpMyAdmin
 docker compose --profile ops up -d      # plus Prometheus, Grafana, Loki, Promtail, backups
 docker compose --profile backup up -d   # plus scheduled backups only
 ```
+
+Compose reads the root `.env` (start from [`.env.example`](./.env.example)) and
+refuses to start without `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `JWT_SECRET`
+and `GRAFANA_ADMIN_PASSWORD`, whichever profiles are active. phpMyAdmin and
+Grafana listen on `127.0.0.1` only.
 
 ## Configuration
 
