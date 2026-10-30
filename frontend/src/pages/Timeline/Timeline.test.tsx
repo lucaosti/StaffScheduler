@@ -12,6 +12,7 @@
 import { screen } from '@testing-library/react';
 import { render } from '../../test-utils/renderWithClient';
 import Timeline from './Timeline';
+import { todayIso } from '../../utils/format';
 
 const okResponse = <T,>(data: T) => Promise.resolve({ success: true as const, data });
 
@@ -24,12 +25,11 @@ jest.mock('../../services/timelineService', () => ({
   getTimelineSources: (...args: unknown[]) => getTimelineSources(...args),
 }));
 
-const WINDOW_START = new Date();
-const isoDay = (offset = 0): string => {
-  const d = new Date(WINDOW_START);
-  d.setDate(d.getDate() + offset);
-  return d.toISOString().slice(0, 10);
-};
+// The page opens on the LOCAL calendar week (`todayIso`), so the fixtures must
+// name the same days. Rendering them through `toISOString()` gave the UTC day,
+// which differs from the local one in the evening west of UTC — and with a DST
+// change inside the week, "day 6" landed one day past the page's window (#857).
+const isoDay = (offset = 0): string => todayIso(offset);
 
 const timelineWith = (bars: Array<Record<string, unknown>>) => ({
   from: isoDay(),
