@@ -104,6 +104,9 @@ export const handleResponse = async <T>(response: Response): Promise<ApiResponse
     }
     // Replaced here, at the one place every API error is built, so the many
     // call sites that render `err.message` directly get the friendly text too.
+    // Every 5xx is masked today because none carries an actionable message;
+    // a future deliberate one (say, a 503 telling the user what to do) needs
+    // an exception here keyed on its `code`, never on the message text.
     if (response.status >= 500) errorMessage = serverErrorMessage(requestId);
     throw new ApiError(errorMessage, response.status, errorCode, errorData, requestId);
   }

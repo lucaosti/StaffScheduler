@@ -176,6 +176,10 @@ export function buildApp(pool: Pool, options: BuildAppOptions = {}): express.Exp
       // leaving it out made the browser fail every mobile login and refresh
       // preflight before the request was ever sent.
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Type'],
+      // A cross-origin script can read only CORS-safelisted response headers
+      // unless they are exposed. The SPA falls back to X-Request-Id to quote
+      // the reference of a 5xx whose body carries none (#895).
+      exposedHeaders: ['X-Request-Id'],
     })
   );
 

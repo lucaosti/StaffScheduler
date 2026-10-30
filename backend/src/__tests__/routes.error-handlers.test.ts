@@ -65,7 +65,7 @@ import { createPreferencesRouter } from '../routes/preferences';
 import { createEmployeesRouter } from '../routes/employees';
 import { createAuthRouter } from '../routes/auth';
 import { errorHandler } from '../middleware/errorHandler';
-import { ConflictError } from '../errors';
+import { ConflictError, NotFoundError, ValidationError } from '../errors';
 
 const fakePool = {} as never;
 
@@ -236,6 +236,30 @@ describe('twoFactor route error handlers', () => {
     (TwoFactorService.prototype.requestChallenge as jest.Mock).mockRejectedValueOnce(new Error('db'));
     const res = await request(app()).post('/api/auth/2fa/challenge').send({ methodType: 'email' });
     expect(res.status).toBe(500);
+  });
+
+  // #895: /enable used to catch everything and answer 400 with the raw
+  // message, so a driver fault reached the client verbatim (as a 4xx the UI
+  // shows) and a typed 404/409 was flattened to 400.
+  it.each([
+    [new ValidationError('Invalid verification code'), 400],
+    [new ConflictError('2FA setup has not been started'), 409],
+    [new NotFoundError('User not found'), 404],
+  ])('POST /enable renders %p with its own status and TWO_FACTOR_ENABLE_FAILED', async (err, status) => {
+    (TwoFactorService.prototype.confirmEnable as jest.Mock).mockRejectedValueOnce(err);
+    const res = await request(app()).post('/api/auth/2fa/enable').send({ code: '123456' });
+    expect(res.status).toBe(status);
+    expect(res.body.error).toEqual({ code: 'TWO_FACTOR_ENABLE_FAILED', message: err.message });
+  });
+
+  it('POST /enable sends an unexpected fault to the error handler, not its message', async () => {
+    (TwoFactorService.prototype.confirmEnable as jest.Mock).mockRejectedValueOnce(
+      Object.assign(new Error("Unknown column 'secret_data' in 'field list'"), { code: 'ER_BAD_FIELD_ERROR' })
+    );
+    const res = await request(app()).post('/api/auth/2fa/enable').send({ code: '123456' });
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+    expect(JSON.stringify(res.body)).not.toMatch(/secret_data|ER_BAD_FIELD/);
   });
 });
 

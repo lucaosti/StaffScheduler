@@ -86,9 +86,24 @@ export class TwoFactorService {
    * before email/SMS setup would deliver a code nobody should receive. Each
    * provider's upsert also leaves an enabled row untouched, as the backstop
    * for a setup racing a concurrent enable past this check.
+   *
+   * That backstop means a setup losing such a race stored nothing, so the
+   * method is re-read after the provider runs and the same 409 is returned
+   * instead of setup data (a TOTP secret/QR, WebAuthn options) that could
+   * never be confirmed. Email/SMS will already have sent their code by then;
+   * that is accepted rather than reordered, because the code is useless —
+   * `confirmEnable` refuses an enabled row — and checking before sending is
+   * exactly what the first read already does for every non-racing call.
    */
   async beginSetup(userId: number, accountLabel: string, methodType: TwoFactorMethodType = 'totp'): Promise<TwoFactorSetupPayload> {
     const provider = this.resolveProvider(methodType);
+    await this.assertNotEnabled(userId, methodType);
+    const payload = await provider.beginSetup(userId, accountLabel);
+    await this.assertNotEnabled(userId, methodType);
+    return payload;
+  }
+
+  private async assertNotEnabled(userId: number, methodType: TwoFactorMethodType): Promise<void> {
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT enabled FROM two_factor_methods WHERE user_id = ? AND method_type = ? LIMIT 1`,
       [userId, methodType]
@@ -96,7 +111,6 @@ export class TwoFactorService {
     if (rows[0]?.enabled) {
       throw new ConflictError('2FA is already enabled for this method — disable it before setting it up again');
     }
-    return provider.beginSetup(userId, accountLabel);
   }
 
   /**

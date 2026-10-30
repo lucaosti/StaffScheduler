@@ -22,7 +22,8 @@ describe('TwoFactorService.beginSetup', () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[], null]) // dispatcher: no enabled method of this type
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // TotpProvider upsert
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // TotpProvider upsert
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]); // dispatcher: still pending after the upsert
 
     const service = new TwoFactorService(pool);
     const out = await service.beginSetup(7, 'jane@example.com');
@@ -53,11 +54,27 @@ describe('TwoFactorService.beginSetup', () => {
     }
   );
 
+  it('answers 409, not a secret, when a concurrent enable wins the race past the check', async () => {
+    // The upsert leaves the now-enabled row untouched, so the freshly generated
+    // secret was never stored: returning it would hand the client a QR code
+    // that can never be confirmed.
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]) // guard: still pending
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // provider upsert (no-op on the enabled row)
+      .mockResolvedValueOnce([[{ enabled: 1 }], null]); // re-check: enabled meanwhile
+
+    const service = new TwoFactorService(pool);
+    await expect(service.beginSetup(7, 'jane@example.com', 'totp')).rejects.toMatchObject({ status: 409 });
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+
   it('lets setup restart while the method is still pending', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[{ enabled: 0 }], null])
-      .mockResolvedValueOnce([{ affectedRows: 2 }, null]);
+      .mockResolvedValueOnce([{ affectedRows: 2 }, null])
+      .mockResolvedValueOnce([[{ enabled: 0 }], null]);
 
     const service = new TwoFactorService(pool);
     await expect(service.beginSetup(7, 'jane@example.com', 'totp')).resolves.toHaveProperty('secret');

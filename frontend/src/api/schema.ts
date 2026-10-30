@@ -1137,7 +1137,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Invalid code or 2FA not in setup state. */
+                /** @description Invalid code (`TWO_FACTOR_ENABLE_FAILED`). */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1145,6 +1145,20 @@ export interface paths {
                     content?: never;
                 };
                 401: components["responses"]["Unauthorized"];
+                /** @description User not found (`TWO_FACTOR_ENABLE_FAILED`). */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Setup has not been started, or the method is already enabled (`TWO_FACTOR_ENABLE_FAILED`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         delete?: never;

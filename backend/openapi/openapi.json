@@ -2872,10 +2872,16 @@
             "description": "2FA enabled. Recovery codes returned."
           },
           "400": {
-            "description": "Invalid code or 2FA not in setup state."
+            "description": "Invalid code (`TWO_FACTOR_ENABLE_FAILED`)."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "User not found (`TWO_FACTOR_ENABLE_FAILED`)."
+          },
+          "409": {
+            "description": "Setup has not been started, or the method is already enabled (`TWO_FACTOR_ENABLE_FAILED`)."
           }
         }
       }
