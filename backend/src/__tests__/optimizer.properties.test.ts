@@ -17,7 +17,10 @@
  *       greedy. Sound because the greedy's output is legal under CP-SAT's own
  *       model and CP-SAT minimises the coverage shortfall above everything
  *       else — so a greedy that out-covers an OPTIMAL CP-SAT means CP-SAT's
- *       model forbids something the validator allows.
+ *       model forbids something the validator allows;
+ *   (f) when CP-SAT proves OPTIMAL within its limit with one search worker,
+ *       solving the same instance again yields the same schedule (#922) —
+ *       what makes a failing seed replayable on the CP-SAT side too.
  *
  * SEEDS. `TEST_SEED` overrides the fixed default. A failure first prints the
  * base seed, the instance index and the unshrunk instance — before anything
@@ -49,6 +52,8 @@ const CPSAT_INSTANCES = 120;
 const CPSAT_CONCURRENCY = 4;
 const CPSAT_ENV = { ...process.env, OPTIMIZATION_SEARCH_WORKERS: '1' };
 const CPSAT_TIME_LIMIT_SECONDS = 5;
+/** How many OPTIMAL instances are solved a second time for property (f). */
+const DETERMINISM_INSTANCES = 40;
 /** How long a failure may spend shrinking; the property tests' timeout sits above it. */
 const SHRINK_BUDGET_MS = 120_000;
 const PROPERTY_TIMEOUT_MS = SHRINK_BUDGET_MS + 60_000;
@@ -180,6 +185,16 @@ describe('seeded instance generator', () => {
     expect(some((p) => p.employees.some((e) => e.max_hours_per_day !== undefined))).toBe(true);
     expect(some((p) => p.employees.some((e) => e.max_consecutive_days !== undefined))).toBe(true);
     expect(some((p) => p.constraints?.min_hours_between_shifts === 10.5)).toBe(true);
+    // An employee whose own rest differs from the problem's (#838).
+    expect(
+      some((p) =>
+        p.employees.some(
+          (e) =>
+            e.min_hours_between_shifts !== undefined &&
+            e.min_hours_between_shifts !== (p.constraints?.min_hours_between_shifts ?? 8)
+        )
+      )
+    ).toBe(true);
     // Durations that are not whole tenths of an hour (2h40 is 2.666...h).
     expect(some((p) => p.shifts.some((s) => /:[1245]0$/.test(s.start_time) || /:[1245]0$/.test(s.end_time)))).toBe(
       true
@@ -326,6 +341,32 @@ describeOrtools('CP-SAT engine on seeded instances', () => {
       failing,
       (p) => ineligible(p, solve(p).assignments).length > 0,
       (p) => ineligible(p, solve(p).assignments)
+    );
+  });
+
+  it('returns the identical schedule for the same instance when it proves optimality (f)', async () => {
+    // Re-solved concurrently, as the first pass was: a replayed seed is only
+    // useful if the engine gives the answer it gave before.
+    const optimal = sample.filter((_, i) => results[i].status === 'OPTIMAL').slice(0, DETERMINISM_INSTANCES);
+    expect(optimal.length).toBe(DETERMINISM_INSTANCES);
+    const again = new Array<CpSatResult>(optimal.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < optimal.length) {
+        const i = next++;
+        again[i] = await solveCpSatAsync(optimal[i].problem, CPSAT_ENV, CPSAT_TIME_LIMIT_SECONDS);
+      }
+    };
+    await Promise.all(Array.from({ length: CPSAT_CONCURRENCY }, worker));
+
+    const pairs = (r: CpSatResult) => r.assignments.map((a) => `${a.employeeId}->${a.shiftId}`).sort();
+    const differs = (a: CpSatResult, b: CpSatResult) =>
+      a.status === 'OPTIMAL' && b.status === 'OPTIMAL' && JSON.stringify(pairs(a)) !== JSON.stringify(pairs(b));
+    await assertNoFailures(
+      'CP-SAT returns the identical schedule when it proves optimality',
+      optimal.filter((s, i) => differs(results[sample.indexOf(s)], again[i])),
+      (p) => differs(solve(p), solve(p)),
+      (p) => ({ first: pairs(solve(p)), second: pairs(solve(p)) })
     );
   });
 

@@ -24,6 +24,7 @@ import {
   type ShiftInputRow,
 } from '../services/autoScheduleProblem';
 import type { ContractLimits } from '../services/EmploymentContractService';
+import type { WorkingTimeLimits } from '../services/WorkingTimeLimitsService';
 
 const SHIFT: ShiftInputRow = {
   id: 10,
@@ -36,9 +37,14 @@ const SHIFT: ShiftInputRow = {
 
 const EMPLOYEE: EmployeeInputRow = {
   id: 1,
-  max_hours_per_week: 40,
   min_hours_per_week: 0,
-  max_consecutive_days: 5,
+};
+
+/** What WorkingTimeLimitsService resolves with nothing configured. */
+const DEFAULT_LIMITS: WorkingTimeLimits = {
+  maxHoursPerWeek: 40,
+  maxConsecutiveDays: 5,
+  minRestHoursBetweenShifts: 8,
 };
 
 /** The schedule row; carried by ScheduleInputs but unused by the builder. */
@@ -57,6 +63,8 @@ const inputs = (over: Partial<ScheduleInputs> = {}): ScheduleInputs => ({
   pinned: [],
   pairings: [],
   contractLimits: new Map(),
+  // Resolved for every id the tests use; the loader resolves the whole pool.
+  workingTimeLimits: new Map([1, 2, 7].map((id) => [id, DEFAULT_LIMITS])),
   unavailableByUser: new Map(),
   externalAssignmentsByUser: new Map(),
   carried: new Map(),
@@ -216,44 +224,59 @@ describe('carriedLoads', () => {
 
 describe('buildOptimizationProblem', () => {
   describe('working-time limits', () => {
-    it('lets the contract override the preference-derived row values', () => {
-      // The whole reason contracts exist: the row values come from
-      // `user_preferences`, which carries no validity period, so a person
-      // moving to part-time overwrote the old value and a schedule generated
-      // before the change appeared to violate a limit that did not apply.
+    it('takes weekly hours, consecutive days and rest from the resolved limits (#838, #883)', () => {
+      // Resolved by WorkingTimeLimitsService through the chain ComplianceEngine
+      // uses, so the problem carries the number a manual assignment for the
+      // same person would be judged against.
+      const problem = buildOptimizationProblem(
+        inputs({
+          workingTimeLimits: new Map([
+            [1, { maxHoursPerWeek: 30, maxConsecutiveDays: 4, minRestHoursBetweenShifts: 11 }],
+          ]),
+        })
+      );
+      expect(problem.employees[0]).toMatchObject({
+        max_hours_per_week: 30,
+        max_consecutive_days: 4,
+        min_hours_between_shifts: 11,
+      });
+    });
+
+    it('takes the contract-only limits from the contract', () => {
+      // These have no policy or setting layer to resolve through.
       const problem = buildOptimizationProblem(
         inputs({ contractLimits: new Map([[1, FULL_CONTRACT]]) })
       );
       expect(problem.employees[0]).toMatchObject({
-        max_hours_per_week: 20,
         min_hours_per_week: 8,
-        max_consecutive_days: 3,
         max_hours_per_day: 6,
         min_consecutive_days_off: 2,
         min_days_off_per_period: 8,
       });
     });
 
-    it('keeps the row defaults for an employee with no contract', () => {
-      // An installation that has not set contracts up must behave exactly as
-      // it did before contracts existed.
-      const problem = buildOptimizationProblem(inputs());
-      expect(problem.employees[0]).toMatchObject({
-        max_hours_per_week: 40,
-        min_hours_per_week: 0,
-        max_consecutive_days: 5,
-      });
+    it('keeps the preference row minimum for an employee with no contract', () => {
+      const problem = buildOptimizationProblem(inputs({ employees: [{ ...EMPLOYEE, min_hours_per_week: 12 }] }));
+      expect(problem.employees[0].min_hours_per_week).toBe(12);
     });
 
-    it('applies a contract only to the employee it belongs to', () => {
+    it('applies each employee their own resolved limits', () => {
       const problem = buildOptimizationProblem(
         inputs({
           employees: [EMPLOYEE, { ...EMPLOYEE, id: 2 }],
-          contractLimits: new Map([[2, FULL_CONTRACT]]),
+          workingTimeLimits: new Map([
+            [1, DEFAULT_LIMITS],
+            [2, { ...DEFAULT_LIMITS, minRestHoursBetweenShifts: 11 }],
+          ]),
         })
       );
-      expect(problem.employees[0].max_hours_per_week).toBe(40);
-      expect(problem.employees[1].max_hours_per_week).toBe(20);
+      expect(problem.employees.map((e) => e.min_hours_between_shifts)).toEqual([8, 11]);
+    });
+
+    it('refuses an employee whose limits were never resolved rather than inventing them', () => {
+      expect(() => buildOptimizationProblem(inputs({ workingTimeLimits: new Map() }))).toThrow(
+        /No working-time limits were resolved for employee 1/
+      );
     });
 
     it('omits the contract-only limits rather than sending zero when unset', () => {
@@ -404,12 +427,10 @@ describe('buildOptimizationProblem', () => {
       expect(preferences).toEqual({});
     });
 
-    it('states the baseline constraints the per-employee limits refine', () => {
-      expect(buildOptimizationProblem(inputs()).constraints).toEqual({
-        max_hours_per_week: 40,
-        max_consecutive_days: 5,
-        min_hours_between_shifts: 8,
-      });
+    it('states no problem-wide limit: every employee carries their own', () => {
+      // A problem-wide 8 h here was the defect (#838): the engines applied it
+      // to everyone, whatever their contract or the organization's policy.
+      expect(buildOptimizationProblem(inputs()).constraints).toEqual({});
     });
 
     it('does not share one constraints object between two problems', () => {

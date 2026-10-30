@@ -739,7 +739,56 @@ was read as 10h; the validator and the greedy used hours rounded to a tenth per
 shift, so three 2h40 shifts — exactly 8h — summed to 8.1h. Rounded hours
 (`shiftHours`) remain only for displayed figures such as an assignment's
 `hours`. `ComplianceEngine`, which checks single manual assignments outside the
-engines, still totals rounded hours.
+engines, totals the same exact minutes against the weekly cap (#922): it used
+to sum hours rounded per shift, so a manual assignment of a third 2h40 shift was
+refused at 8.1h that auto-scheduling, counting minutes, would have made.
+
+**Working-time limits are resolved per employee, by the same resolver
+`ComplianceEngine` uses.** Weekly hours, consecutive days and minimum rest come
+from `WorkingTimeLimitsService`, and every employee in the problem carries their
+own `max_hours_per_week`, `max_consecutive_days` and `min_hours_between_shifts`.
+The rule, per limit:
+
+- **A GLOBAL `policies` row (`max_hours_week` / `max_consecutive_days` /
+  `min_rest_hours`) is a legal ceiling.** The employment contract and
+  `user_preferences` may only tighten it — the lower cap, the longer rest —
+  never loosen it. A preference is the person's wish and a contract the
+  employer's terms; neither waives a rule the organization adopted, often a
+  jurisdiction's, applied as a preset. "First match wins" left #883 open for
+  two of its three limits: `user_preferences.max_hours_per_week` /
+  `max_consecutive_days` are `INT DEFAULT 40 / 5`, `PreferencesService` writes
+  40/5 into every row it creates, and the demo seed creates one for everyone,
+  so a 36h / 4-day policy reached nobody who had a preferences row. A stricter
+  personal value is still honoured.
+- **The contract and the preference are one personal layer, contract first**:
+  the preference speaks only where no contract states the limit, and the
+  policy ceiling is applied to that one value. Treating them as separate
+  layers (the tightest of all three) made the preference row's 40h / 5-day
+  defaults binding wherever a policy existed: under the EU preset (48h,
+  6 days) a 48h / 6-day full-time contract resolved to 40h / 5, so applying a
+  looser preset silently tightened everyone.
+- **With no policy value**, the contract, then the preference, then
+  `system_settings` (`scheduling.*`), then the defaults (40h, 5 days, 8h) —
+  the setting and the default are fallbacks, not rules anyone adopted.
+- **A contract covering only part of the period** governs only that part:
+  the tighter of its value and what applies without it is used for the whole
+  period, the same conservative choice the contract resolver makes between two
+  contracts (`EmploymentContractService.resolveForPeriod` reports which users'
+  contracts cover the whole period). An 8h-rest contract ending on the 15th
+  used to set the rest for the whole month.
+
+`ComplianceEngine` (manual assignments and swaps) follows the same rule through
+the same resolver, over the candidate's day. The problem states no
+problem-wide limit. It used to: `buildOptimizationProblem` set 8h of rest for
+everyone and the loader read `COALESCE(preference, 40)` / `COALESCE(preference,
+5)`, so an 11h-rest contract got 9h turnarounds that `ComplianceEngine` then
+flagged (#838), and an organization that applied the EU preset still got 8h
+rest from every generated schedule (#883). A manual assignment and a generated
+one are now judged against the same number. The validator's `minRestHoursFor`
+defines the precedence for a problem stated by hand (the employee's value, then
+`constraints.min_hours_between_shifts`, then 8h); the greedy calls it, and
+CP-SAT's `_rest_minutes` mirrors it, building its conflict cliques once per
+distinct rest value.
 
 ### Staffing suggestions (seasonal baseline)
 
@@ -792,7 +841,7 @@ Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.
 |---|---|---|
 | 1 | Staff cap | `shift.max_staff` — never exceeded |
 | 2 | No double-booking | Absolute-time overlap (overnight-aware, across day boundaries) |
-| 2b | Minimum rest between shifts | `min_hours_between_shifts` (default 8h), across day boundaries |
+| 2b | Minimum rest between shifts | The employee's own `min_hours_between_shifts` (else the problem-wide one, else 8h), across day boundaries |
 | 3 | Declared unavailability | `user_unavailability` rows, expanded to per-day dates |
 | 4 | Skill requirements | `shift_skills` join; employee must hold every required skill |
 | 5 | Daily hours cap | `max(8, emp.max_hours_per_week / 5)` hours per employee per day |
@@ -837,8 +886,46 @@ Bridge: `ScheduleOptimizer.optimize()` serializes the problem as JSON, spawns `p
 | Exit code 2 (the script's `ERROR` JSON, e.g. an objective that would overflow) | Rejected promise → `optimize()` logs a warning and falls back to greedy |
 | Exit code 1 with status `INFEASIBLE`, `UNKNOWN` (time limit, no solution) or `MODEL_INVALID` | No schedule in the result → `optimize()` logs a warning and falls back to greedy; the reason names the status |
 | Any other non-zero exit code | Rejected promise → `optimize()` logs a warning and falls back to greedy |
-| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s → `optimize()` falls back to greedy |
+| Timeout (`OPTIMIZATION_TIMEOUT` ms, default 300 000 ms) | SIGTERM → SIGKILL after 5 s if the process has not exited → `optimize()` falls back to greedy |
+| The child exits before reading the problem (e.g. `python3` without ortools), so writing it fails with `EPIPE` | Handled on stdin → `optimize()` falls back to greedy. Unhandled, the stream error was thrown as an uncaught exception and took the backend down (#836). The error is recorded and the run settles on the child's `close`, so the degraded reason is the child's own stderr (`ModuleNotFoundError: No module named 'ortools'`), not the `EPIPE` that nearly always reaches Node first; a 2 s timer terminates the child and settles with the `EPIPE` only if it does not exit. A crash reason is the last 500 characters of stderr; on exit 0 with unreadable stdout it is the parse error, not the progress log |
+| stdout beyond 64 MB | The process is terminated → `optimize()` falls back to greedy. Only the last 64 KB of stderr is kept, as the reason for a crash that wrote no JSON |
 | Malformed JSON output | Parse error → `optimize()` falls back to greedy |
+
+**Time budget.** `--time-limit` is the script's **total** budget, model build
+included, and it is set strictly inside the watchdog: `OPTIMIZATION_TIMEOUT`
+minus a margin of a tenth (at least 5 s) for the interpreter start, CP-SAT
+stopping slightly late, and the result's serialisation and parse
+(`solverTimeLimitSeconds`). **Upgrade note:** `OPTIMIZATION_TIMEOUT` is a plain
+integer of milliseconds, and a value below 10 000 or a non-numeric one (such as
+`5m`, which used to be read as 5 ms) now refuses to start; check deployments
+that set it. It is refused at
+startup: under about 6 s the solver's limit (never less than 1 s) would reach the
+watchdog. The script measures, from process start — before the ortools import,
+which alone takes a few hundred milliseconds — its start-up, input parse and
+model build, and searches only for what is left (`solve_time_budget`); writing
+the result after the search falls in the caller's margin. With less than
+a second left it reports `UNKNOWN`, naming the build, rather than searching
+past the deadline. The search limit used to equal the watchdog, so a run that
+searched to its limit was always killed first and degraded, discarding the
+feasible solution it was about to return (#837). The build time is measured
+rather than estimated by the caller because it depends on the instance
+(employees × shifts, and how many pairings survive eligibility).
+
+The model build precomputes each shift's bounds, date and duration once, and
+expresses no-double-booking and minimum rest as one conflict relation: two
+shifts conflict exactly when their intervals, each extended by the required
+rest, meet. That relation is an interval graph, so one sweep finds its maximal
+cliques and each becomes a single `AddAtMostOne` — equivalent to the pairwise
+constraints, tighter for the solver, and computed once per rest value instead
+of once per employee. The former pairwise builders recomputed both shifts'
+bounds (with a date parse) on every comparison for every employee; measured in
+the toolchain container, the build went from 21.2 s to 0.4 s at 40 employees
+× 224 shifts and from 118 s to 1.5 s at 100 × 336.
+
+The SIGKILL escalation tests whether the process has **exited**
+(`exitCode`/`signalCode`), not `ChildProcess.killed`: that flag turns true as
+soon as a signal is delivered, so the escalation used to be dead code and a
+solver ignoring SIGTERM ran on.
 
 Only `OPTIMAL` and `FEASIBLE` count as an OR-Tools result. Every other solver
 status arrives with no assignments, and passing it through used to hand the
@@ -847,6 +934,16 @@ replan proposal with zero assignments (#811). The `optimize()` return status is
 therefore `GREEDY_FALLBACK` whenever the solver produced no schedule, whatever
 the cause; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
 `degraded: true` result with the reason, rather than a silent substitution.
+
+When **no** engine produces a schedule — the greedy fallback itself throws, so
+`optimize()` returns `ERROR` with zero assignments, or the explicitly selected
+greedy engine throws — the run fails with `OPTIMIZATION_FAILED` (500, a typed
+`OptimizationFailedError` with a fixed message; the reason is logged) before
+either persistence path: no replan proposal, no draft rows. That empty result
+used to become a proposal breaking every commitment on a published schedule
+and an `OK` run writing nothing on a draft (#858). Through the job queue the
+failure surfaces as the job's `failedReason` and an `optimization.failed`
+event.
 
 Before solving, the script reads the objective's worst-case magnitude back from
 the built model and refuses one at or above 2^62 with an `ERROR` result. The
@@ -973,11 +1070,12 @@ Device management uses the same `canManageDepartment` access rule as geofences. 
 |---|---|---|---|
 | `PolicyService` | CRUD + scoped lookup on the `policies` table itself. No enforcement logic — it stores and retrieves rows, and `listApplicable`/`getGlobalValues` answer "which rows apply here", never "is this legal". | `routes/policies.ts`, `PolicyValidator`, `ComplianceEngine`, `CompliancePresetService` | Deciding whether a policy is breached — that is every caller's own job once it has the rows. |
 | `PolicyValidator` | One candidate `(user, shift)` pair against every applicable **non-hours** policy (`manual_assignment_locked`, `skill_required`). Reports blocking violations plus whether an approved `PolicyExceptionRequest` already covers each one. | `routes/policies.ts` (`POST /validate/assignment`), `AssignmentService.createAssignment` | Rest-hours/weekly-hours/consecutive-days policies — explicitly routed to `ComplianceEngine` instead (see its own resolution chain below); whole-schedule legality — that's `constraintValidator`'s scope, not a single candidate's. |
-| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through a fixed precedence: employment contract → `user_preferences` → GLOBAL `policies` row → legacy `system_settings` → hardcoded default. Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `ComplianceEngine` | One candidate shift against one user's **existing** assignments, for the three working-time rules (`min_rest_hours`, `max_hours_week`, `max_consecutive_days`). Resolves the applicable thresholds through `WorkingTimeLimitsService` — a GLOBAL `policies` row is a ceiling the contract and `user_preferences` may only tighten; legacy `system_settings` and the default fill in only where no policy exists — the same resolver the optimizer's problem is built from (#883). Pure rule functions (`checkCompliance`) are DB-free and unit-tested standalone; `evaluateAssignmentCompliance` is the thin DB-aware orchestrator around them. | `AssignmentService.createAssignment`, `ShiftSwapService` (both legs of a swap) | Anything not in the three rules above; whole-schedule legality (see `constraintValidator` below) — this only ever sees one user's own shifts, never staffing caps, skills, or another employee's schedule. |
+| `WorkingTimeLimitsService` | Resolves weekly hours, consecutive days and minimum rest for a set of users over a period, in four queries for any number of users. A GLOBAL `policies` value is a ceiling the contract and `user_preferences` may only tighten; without one, contract → `user_preferences` → `system_settings` → default; a contract covering only part of the period is combined with what applies without it (tightest). Returns the contracts it read, so a caller needing their other limits does not read them twice. | `ComplianceEngine.evaluateAssignmentCompliance` (one user, one day), `AutoScheduleInputLoader` (the candidate pool, the schedule's period) | Enforcing anything — it answers "what is this person's limit", and both callers decide what breaks it. |
 | `CompliancePresetService` | Applies a **named bundle** of `min_rest_hours`/`max_hours_week`/`max_consecutive_days` policy rows in one call (e.g. `eu_working_time_directive`), upserting by key. Pure convenience over `PolicyService.create` — it contains no rule logic of its own. | `routes/policies.ts` (`POST /presets/:code/apply`) | Enforcement — applying a preset only creates ordinary `policies` rows; `ComplianceEngine` is what makes them count. |
 | `constraintValidator` (facade over `optimization/constraints/*`) | A **whole solved schedule** — every employee, every shift, symmetric all-pairs checks (staff caps, double-booking, skills, unavailability, and its own copies of min-rest/max-consecutive-days/max-weekly-hours scoped to the OPTIMIZATION PROBLEM, not the `policies` table). The one authority both scheduling engines (CP-SAT and greedy) are measured against; drift between them is a red test (`optimizer.parity.test.ts`). | `ScheduleOptimizerORTools`, the greedy engine, `optimizer.parity.test.ts` | Reading the `policies` table at all — a solved schedule's legality is judged against the `OptimizationProblem`'s own per-employee contract fields (`max_hours_per_week`, `max_consecutive_days`, …), resolved into that shape once at problem-build time, not against `policies` rows directly. |
 
-**Why `ComplianceEngine` and `constraintValidator` both have a min-rest/max-consecutive-days/max-weekly-hours check, and this is not the duplication it looks like.** They judge different things at different scopes: `ComplianceEngine` is an asymmetric, backward-looking check — one NEW candidate shift against a user's shifts that already exist, called synchronously outside any solve (a manual assignment, a shift swap); `constraintValidator` is a symmetric, whole-schedule check — every pairing among every shift ANY employee holds in one proposed solution, called only from inside the two scheduling engines and their parity suite. Forcing one shape onto the other would not simplify either: `ComplianceEngine` has no "whole schedule" to iterate, and `constraintValidator` has no "candidate vs. existing" asymmetry to preserve. What WAS genuine, accidental duplication — the overnight-aware shift-bounds/duration arithmetic each had reimplemented privately, the exact defect class `optimization/shiftTime.ts`'s own header warns about — is fixed: `ComplianceEngine` now imports `shiftBoundsMs`/`shiftHours` from that module instead of keeping a fourth private copy of overnight-shift math.
+**Why `ComplianceEngine` and `constraintValidator` both have a min-rest/max-consecutive-days/max-weekly-hours check, and this is not the duplication it looks like.** They judge different things at different scopes: `ComplianceEngine` is an asymmetric, backward-looking check — one NEW candidate shift against a user's shifts that already exist, called synchronously outside any solve (a manual assignment, a shift swap); `constraintValidator` is a symmetric, whole-schedule check — every pairing among every shift ANY employee holds in one proposed solution, called only from inside the two scheduling engines and their parity suite. Forcing one shape onto the other would not simplify either: `ComplianceEngine` has no "whole schedule" to iterate, and `constraintValidator` has no "candidate vs. existing" asymmetry to preserve. What WAS genuine, accidental duplication — the overnight-aware shift-bounds/duration arithmetic each had reimplemented privately, the exact defect class `optimization/shiftTime.ts`'s own header warns about — is fixed: `ComplianceEngine` now imports `shiftBoundsMs`/`shiftMinutes`/`exceedsHours` from that module instead of keeping a fourth private copy of overnight-shift math.
 
 `policyKey` is a free-text field on the `policies` table — the catalog is not a fixed enum — but `PolicyValidator.evaluate()` only assigns real blocking behavior to specific keys:
 
@@ -988,7 +1086,7 @@ Device management uses the same `canManageDepartment` access rule as geofences. 
 | `skill_required` | **Enforced.** `policy_value: { skillIds: number[] }`. `PolicyValidator.evaluate()` checks the candidate user's `user_skills` against the list and blocks the assignment (surfacing a `PolicyExceptionRequest` prompt like any other blocking policy) when any are missing. |
 | `staffing_min` | **Rejected at creation**, not silently accepted. It has no per-assignment meaning — adding one person to a shift can only move it toward a minimum, never away — and the actual minimum-staffing check already exists per-shift as `shifts.min_staff` / `shift_templates.min_staff`, enforced by both scheduling engines' `coverageShortfalls`. `PolicyService.create`/`update` reject this key outright (`ConflictError`) rather than storing a policy that would do nothing; the error message points the caller at `minStaff` on the shift/template instead. |
 
-**Configurable compliance rule sets, seeded from a jurisdiction preset.** `ComplianceEngine.evaluateAssignmentCompliance`'s policy resolution used to stop at the user's employment contract, `user_preferences`, and the legacy `system_settings` keys — never the `policies` table, even though `PolicyValidator` had documented since its own introduction that "the heavy lifting... is performed by the existing ComplianceEngine." An organization's own rule set genuinely participates now: a GLOBAL, active `policies` row for `min_rest_hours` / `max_hours_week` / `max_consecutive_days` slots into the chain between `user_preferences` and `system_settings` — an org-wide regulatory default that a personal contract or preference still overrides, but which now beats the old system-wide fallback. **Not a hardcoded jurisdiction implementation**: the rule is an ordinary row created through the existing `POST/PUT/DELETE /api/policies` CRUD, editable or removable individually like any other policy. `CompliancePresetService` (`GET /api/policies/presets`, `POST /api/policies/presets/:code/apply`, both `policy.manage`-gated) is a convenience for loading a **named bundle** of these rows in one call rather than typing three by hand — today just `eu_working_time_directive` (11h daily rest, 48h average week, 6 consecutive working days), upserting by key so re-applying never duplicates a row and a rule under a different key the organization already customized is left untouched. Adding FLSA or Fair Workweek later means adding another entry to `COMPLIANCE_PRESETS`, not new enforcement code.
+**Configurable compliance rule sets, seeded from a jurisdiction preset.** `ComplianceEngine.evaluateAssignmentCompliance`'s policy resolution used to stop at the user's employment contract, `user_preferences`, and the legacy `system_settings` keys — never the `policies` table, even though `PolicyValidator` had documented since its own introduction that "the heavy lifting... is performed by the existing ComplianceEngine." An organization's own rule set genuinely participates now: a GLOBAL, active `policies` row for `min_rest_hours` / `max_hours_week` / `max_consecutive_days` is a ceiling: a personal contract or preference may tighten it but never loosen it (every `user_preferences` row carries 40h / 5 days by default, so letting the preference win had made the policy reach almost nobody), and it beats the old system-wide fallback. **Not a hardcoded jurisdiction implementation**: the rule is an ordinary row created through the existing `POST/PUT/DELETE /api/policies` CRUD, editable or removable individually like any other policy. `CompliancePresetService` (`GET /api/policies/presets`, `POST /api/policies/presets/:code/apply`, both `policy.manage`-gated) is a convenience for loading a **named bundle** of these rows in one call rather than typing three by hand — today just `eu_working_time_directive` (11h daily rest, 48h average week, 6 consecutive working days), upserting by key so re-applying never duplicates a row and a rule under a different key the organization already customized is left untouched. Adding FLSA or Fair Workweek later means adding another entry to `COMPLIANCE_PRESETS`, not new enforcement code.
 
 **Every violation `evaluateAssignmentCompliance` detects is now persisted**, one row per rule broken (not per check — a single candidate can fail more than one rule at once) in `compliance_violations`, written at the single point every caller already routes through rather than at each call site. This exists because a rejected attempt previously left no trace anywhere: the caller saw an error and nothing was written, so a "compliance violations trend" had no data to be a trend of. `GET /api/reports/compliance-violations-trend` (`report.read`, same gate as the rest of the reports router) aggregates the count per day and rule code over a range — day-and-code granularity rather than a single running total, since a planner needs to see *which* rule is recurring and *when*. No frontend chart consumes it yet; this is the backend shape landing first.
 
