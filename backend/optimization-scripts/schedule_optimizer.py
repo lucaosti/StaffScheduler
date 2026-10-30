@@ -22,6 +22,7 @@ Usage:
 import os
 import sys
 import json
+import math
 import argparse
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
@@ -225,23 +226,24 @@ class ScheduleOptimizerORTools:
             if not external:
                 continue
 
-            # Daily.
-            daily_budget = employee.get('max_hours_per_day') or max(
-                8, employee.get('max_hours_per_week', 40) // 5
-            )
-            hours_by_date: Dict[str, int] = {}
+            # Daily. In minutes, like the constraints this diagnosis must agree
+            # with: were it in whole hours while _add_daily_hours_constraints
+            # is in minutes, an 8.5h external under an 8h cap would pass here
+            # as 8h and then make the model INFEASIBLE there (#834).
+            daily_budget = self._daily_budget_hours(employee)
+            minutes_by_date: Dict[str, int] = {}
             for ext in external:
-                hours_by_date[ext['date']] = (
-                    hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                minutes_by_date[ext['date']] = (
+                    minutes_by_date.get(ext['date'], 0) + self._shift_minutes(ext)
                 )
-            for date, hours in sorted(hours_by_date.items()):
-                if hours > daily_budget:
+            for date, minutes in sorted(minutes_by_date.items()):
+                if minutes > self._cap_minutes(daily_budget):
                     findings.append({
                         'employee_id': employee_id,
                         'rule': 'daily-hours',
                         'detail': (
-                            f'already holds {hours}h on {date} from other schedules, '
-                            f'exceeding the {daily_budget}h daily limit'
+                            f'already holds {minutes / 60:g}h on {date} from other schedules, '
+                            f'exceeding the {daily_budget:g}h daily limit'
                         ),
                     })
 
@@ -250,17 +252,17 @@ class ScheduleOptimizerORTools:
             if weekly_cap:
                 ords = [
                     (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
-                     self._calculate_shift_hours(ext))
+                     self._shift_minutes(ext))
                     for ext in external
                 ]
                 for anchor, _ in ords:
-                    window = sum(h for o, h in ords if anchor <= o < anchor + 7)
-                    if window > weekly_cap:
+                    window = sum(m for o, m in ords if anchor <= o < anchor + 7)
+                    if window > self._cap_minutes(weekly_cap):
                         findings.append({
                             'employee_id': employee_id,
                             'rule': 'weekly-hours',
                             'detail': (
-                                f'already holds {window}h in the 7 days from '
+                                f'already holds {window / 60:g}h in the 7 days from '
                                 f'{datetime.fromordinal(anchor).date()} on other schedules, '
                                 f'exceeding the {weekly_cap}h weekly limit'
                             ),
@@ -523,8 +525,15 @@ class ScheduleOptimizerORTools:
         least `min_hours_between_shifts` of rest, across day boundaries. Same
         rule as ComplianceEngine.checkMinRest and the validator's min-rest check.
         External assignments are included as fixed neighbours.
+
+        The requirement is converted to minutes rounding UP, never through
+        `int(hours)`: that truncated 10.5h of required rest to 10h, so a 10h
+        gap passed here and failed the validator (#834). Up is the safe
+        direction for a minimum, as down is for a cap.
         """
-        min_rest_minutes = int(self.constraints_config.get('min_hours_between_shifts', 8)) * 60
+        min_rest_minutes = math.ceil(
+            float(self.constraints_config.get('min_hours_between_shifts', 8)) * 60 - 1e-9
+        )
         shift_items = list(self.shifts.items())
         for employee_id in self.employees.keys():
             externals = self.external_by_employee[employee_id]
@@ -572,38 +581,40 @@ class ScheduleOptimizerORTools:
     def _add_daily_hours_constraints(self):
         """
         HARD: an employee's assigned hours on any single date must stay within a
-        one-day budget of max(8, max_hours_per_week / 5). Mirrors the validator's
-        daily-hours rule and evaluateCandidate step 5. External hours on the date
-        are pre-charged against the budget.
+        one-day budget (see _daily_budget_hours). Mirrors the validator's
+        daily-hours rule and evaluateCandidate step 5. External hours on the
+        date are pre-charged against the budget.
+
+        Counted in MINUTES. Whole hours truncated 08:00–16:30 to 8h, so an
+        8.5h shift fit an 8h cap here while the validator and the greedy
+        rejected it (#834); and a fractional cap such as 8.5h was not even an
+        integer the model could hold, so building it raised and the run fell
+        back to greedy.
         """
         for employee_id, employee in self.employees.items():
-            # Contract cap when present; otherwise the historical derived
-            # formula. Mirrors constraintValidator, which is the authority.
-            daily_budget = employee.get('max_hours_per_day') or max(
-                8, employee.get('max_hours_per_week', 40) // 5
-            )
+            budget_minutes = self._cap_minutes(self._daily_budget_hours(employee))
 
-            # Pre-existing external hours per date.
-            external_hours_by_date: Dict[str, int] = {}
+            # Pre-existing external minutes per date.
+            external_minutes_by_date: Dict[str, int] = {}
             for ext in self.external_by_employee[employee_id]:
-                external_hours_by_date[ext['date']] = (
-                    external_hours_by_date.get(ext['date'], 0) + self._calculate_shift_hours(ext)
+                external_minutes_by_date[ext['date']] = (
+                    external_minutes_by_date.get(ext['date'], 0) + self._shift_minutes(ext)
                 )
 
-            # Decision-shift hours per date.
+            # Decision shifts per date.
             shifts_by_date: Dict[str, List[str]] = {}
             for shift_id, shift in self.shifts.items():
                 shifts_by_date.setdefault(shift['date'], []).append(shift_id)
 
-            dates = set(shifts_by_date) | set(external_hours_by_date)
+            dates = set(shifts_by_date) | set(external_minutes_by_date)
             for date in dates:
                 terms = [
-                    v * self._calculate_shift_hours(self.shifts[sid])
+                    v * self._shift_minutes(self.shifts[sid])
                     for sid in shifts_by_date.get(date, [])
                     if (v := self._var(employee_id, sid)) is not None
                 ]
                 self.model.Add(
-                    sum(terms) + external_hours_by_date.get(date, 0) <= daily_budget
+                    sum(terms) + external_minutes_by_date.get(date, 0) <= budget_minutes
                 )
 
     def _add_max_hours_constraints(self):
@@ -614,16 +625,20 @@ class ScheduleOptimizerORTools:
         which let an employee work e.g. Thu–Sun of one week and Mon–Wed of the
         next (11 days) without either "week" tripping. The forward-window form
         matches the validator exactly. External hours in the window count too.
+
+        In minutes, for the reason given in _add_daily_hours_constraints: five
+        8.5h shifts are 42.5h, which whole hours read as exactly 40 (#834).
         """
         for employee_id, employee in self.employees.items():
             max_hours = employee.get('max_hours_per_week')
             if not max_hours:
                 continue
+            cap_minutes = self._cap_minutes(max_hours)
 
             externals = self.external_by_employee[employee_id]
             external_ord = [
                 (datetime.strptime(ext['date'], '%Y-%m-%d').toordinal(),
-                 self._calculate_shift_hours(ext))
+                 self._shift_minutes(ext))
                 for ext in externals
             ]
             decision_ord = [
@@ -635,12 +650,12 @@ class ScheduleOptimizerORTools:
             for anchor in anchor_days:
                 window = range(anchor, anchor + 7)
                 terms = [
-                    v * self._calculate_shift_hours(self.shifts[sid])
+                    v * self._shift_minutes(self.shifts[sid])
                     for o, sid in decision_ord
                     if o in window and (v := self._var(employee_id, sid)) is not None
                 ]
-                fixed = sum(h for o, h in external_ord if o in window)
-                self.model.Add(sum(terms) + fixed <= max_hours)
+                fixed = sum(m for o, m in external_ord if o in window)
+                self.model.Add(sum(terms) + fixed <= cap_minutes)
 
     def _day_worked_indicators(self, employee_id: str) -> Dict[int, object]:
         """
@@ -737,37 +752,61 @@ class ScheduleOptimizerORTools:
                 window = [day_worked[o] for o in range(start, start + max_consec + 1)]
                 self.model.Add(sum(window) <= max_consec)
 
-    def _calculate_shift_hours(self, shift: Dict) -> int:
-        """Calculate shift duration in hours."""
-        start = self._parse_time(shift['start_time'])
-        end = self._parse_time(shift['end_time'])
-        
-        # `<=` and not `<`: a shift whose end equals its start spans a full
-        # day, matching _abs_bounds and the TypeScript shiftHours. The two
-        # disagreed until this was reconciled, and this is the safe direction —
-        # for a cap, over-counting refuses work that might have been allowed,
-        # while a zero-hour shift is invisible to every limit.
-        if end <= start:
-            end += 24 * 60
+    def _calculate_shift_hours(self, shift: Dict) -> float:
+        """
+        Shift duration in hours, for the `hours` field of the output only,
+        rounded to one decimal as the TypeScript shiftHours rounds it.
 
-        return (end - start) // 60  # Convert minutes to hours
-    
+        No constraint reads this. It used to be `minutes // 60`, and the caps
+        were built on it: an 08:00–16:30 shift counted as 8h, so it fit an 8h
+        daily cap and five of them fit a 40h week, while the validator — which
+        counts 8.5h — rejected both (#834). The caps now use _shift_minutes.
+        """
+        return round(self._shift_minutes(shift) / 60, 1)
+
     def _shift_minutes(self, shift: Dict) -> int:
         """
-        Shift duration in MINUTES, overnight-aware.
+        Shift duration in MINUTES, overnight-aware: the unit every cap, the
+        rest rule and fairness are modelled in.
 
-        Fairness balances on minutes rather than the integer hours used by the
-        cap constraints, because `_calculate_shift_hours` truncates: a 7.5-hour
-        shift counts as 7. For a cap that under-counts is merely conservative,
-        but for BALANCING it introduces a systematic bias — half-hour shifts
-        become invisible, so someone holding many of them looks under-loaded
-        and keeps being given more.
+        `<=` and not `<`: a shift whose end equals its start spans a full day,
+        matching _abs_bounds and the TypeScript shiftHours. This is the safe
+        direction — for a cap, over-counting refuses work that might have been
+        allowed, while a zero-length shift would be invisible to every limit.
+
+        Minutes rather than hours because hours are not integral (a 7.5h shift
+        is common) and CP-SAT is an integer solver. Truncating to whole hours
+        was wrong in both uses: for a cap it admitted work over the limit
+        (#834), and for balancing it made half-hours invisible, so someone
+        holding many of them looked under-loaded and kept being given more.
         """
         start = self._parse_time(shift['start_time'])
         end = self._parse_time(shift['end_time'])
         if end <= start:
             end += 24 * 60
         return end - start
+
+    @staticmethod
+    def _cap_minutes(hours: float) -> int:
+        """
+        A cap in hours as whole minutes, rounded DOWN — the safe direction for
+        a ceiling. The epsilon keeps a value such as 7.3h, whose float product
+        is 437.99999..., from losing a minute it does have.
+        """
+        return math.floor(float(hours) * 60 + 1e-9)
+
+    @staticmethod
+    def _daily_budget_hours(employee: Dict) -> float:
+        """
+        The contract's daily cap when present; otherwise the historical derived
+        formula. Mirrors constraintValidator, which is the authority. One
+        definition for both the constraint and the over-commitment diagnosis,
+        which must agree or an employee the diagnosis keeps makes the model
+        infeasible.
+        """
+        return employee.get('max_hours_per_day') or max(
+            8, employee.get('max_hours_per_week', 40) // 5
+        )
 
     def _fairness_terms(self, scale: int) -> Tuple[List, int]:
         """
@@ -799,10 +838,17 @@ class ScheduleOptimizerORTools:
         is intended: someone left entirely unused IS an unequal distribution.
         Where there is simply more staff than work the spread is unavoidable
         and this term cannot improve it, so it does no harm either.
-        """
-        if len(self.employees) < 2:
-            return [], 0  # Nothing to balance.
 
+        Employees eligible for NO shift are the exception: they are left out of
+        the balance rather than counted at 0. Their 0 is not a distribution
+        choice the solver made — nothing could be assigned to them — so
+        including them would pin `min` at 0 and make the spread a constant the
+        term cannot move. That exclusion used to be a `return [], 0` inside
+        this loop, which dropped the fairness term for EVERYONE the moment one
+        such employee existed: two RNs over six RN shifts split 3/3, and adding
+        a colleague without the skill turned it into 6/0 (#839).
+        """
+        upper = sum(self._shift_minutes(s) for s in self.shifts.values())
         loads = []
         for emp_id in self.employees:
             terms = [
@@ -811,13 +857,14 @@ class ScheduleOptimizerORTools:
                 if (v := self._var(emp_id, shift_id)) is not None
             ]
             if not terms:
-                return [], 0
-            upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+                continue
             load = self.model.NewIntVar(0, upper, f'load_e{emp_id}')
             self.model.Add(load == sum(terms))
             loads.append(load)
 
-        upper = sum(self._shift_minutes(s) for s in self.shifts.values())
+        if len(loads) < 2:
+            return [], 0  # Nothing to balance.
+
         max_load = self.model.NewIntVar(0, upper, 'max_load')
         min_load = self.model.NewIntVar(0, upper, 'min_load')
         self.model.AddMaxEquality(max_load, loads)

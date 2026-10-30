@@ -3,7 +3,7 @@
  *
  * The Python path is mocked away — we only test the greedy fallback,
  * evaluateCandidate(), problem validation, and the helpers
- * (_hasOverlappingShift, _timesOverlap, _calculateShiftHours) via the
+ * (_hasOverlappingShift, _calculateShiftHours) via the
  * public surface.
  */
 
@@ -239,7 +239,7 @@ describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
     shift: buildShift({ id: 's1', max_staff: 5 }) as any,
     assignedShiftIds: new Set<string>(),
     allShifts: [],
-    dailyHoursMap: new Map<string, number>(),
+    dailyMinutesMap: new Map<string, number>(),
     currentShiftAssignmentCount: 0,
     currentShiftAssignees: new Set<string>(),
     minRestHoursBetweenShifts: 8,
@@ -270,10 +270,10 @@ describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
     const opt = new ScheduleOptimizer();
     // budget = max(8, 16/5=3.2) = 8h; shift is 8h; already has 1h today → total 9h > 8h
     const emp = buildEmployee({ id: 'e1', max_hours_per_week: 16 }) as any;
-    const dailyHoursMap = new Map([['e1|2026-05-01', 1]]);
+    const dailyMinutesMap = new Map([['e1|2026-05-01', 60]]);
     const ctx = buildCtx({
       shift: buildShift({ id: 's1', start_time: '08:00', end_time: '16:00' }) as any,
-      dailyHoursMap,
+      dailyMinutesMap,
     });
     expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
   });
@@ -291,6 +291,32 @@ describe('ScheduleOptimizer.evaluateCandidate (pure unit tests)', () => {
       allShifts: [overnight, evening],
     });
     expect(opt.evaluateCandidate(buildEmployee() as any, ctx)).toBe(false);
+  });
+
+  it('returns false when a night shift overlaps a shift starting the next day (#835)', () => {
+    const opt = new ScheduleOptimizer();
+    // 22:00 → 06:00 runs an hour into the next day's 05:00 start. The two
+    // start on different dates, which is where the old same-date comparison
+    // stopped looking.
+    const night = buildShift({ id: 's1', start_time: '22:00', end_time: '06:00' });
+    const morning = buildShift({ id: 's2', date: '2026-05-02', start_time: '05:00', end_time: '13:00' });
+    const ctx = buildCtx({ shift: morning, assignedShiftIds: new Set(['s1']), allShifts: [night, morning] });
+    expect(opt.evaluateCandidate(buildEmployee() as any, ctx)).toBe(false);
+  });
+
+  it('treats an overlap as zero rest even with no rest required', () => {
+    // The rest rule must not wave an overlap through on the assumption that
+    // the overlap rule already refused it.
+    const opt = new ScheduleOptimizer();
+    const night = buildShift({ id: 's1', start_time: '22:00', end_time: '06:00' });
+    const morning = buildShift({ id: 's2', date: '2026-05-02', start_time: '05:00', end_time: '13:00' });
+    const ctx = buildCtx({
+      shift: morning,
+      assignedShiftIds: new Set(['s1']),
+      allShifts: [night, morning],
+      minRestHoursBetweenShifts: 0,
+    });
+    expect((opt as any)._wouldViolateMinRest(morning, ctx)).toBe(true);
   });
 });
 
@@ -448,7 +474,7 @@ describe('Pure TS greedy fallback — specified scenarios', () => {
     shift: buildShift({ id: 's1', date: '2026-05-01', start_time: '08:00', end_time: '16:00', max_staff: 5 }) as any,
     assignedShiftIds: new Set<string>(),
     allShifts: [],
-    dailyHoursMap: new Map<string, number>(),
+    dailyMinutesMap: new Map<string, number>(),
     currentShiftAssignmentCount: 0,
     currentShiftAssignees: new Set<string>(),
     minRestHoursBetweenShifts: 8,
@@ -466,10 +492,10 @@ describe('Pure TS greedy fallback — specified scenarios', () => {
     // max_hours_per_week=8 → daily budget = max(8, 8/5) = 8h
     // Shift is 8h; employee already has 8h logged today → adding more would exceed the cap
     const emp = buildEmployee({ id: 'e1', max_hours_per_week: 8 }) as any;
-    const dailyHoursMap = new Map([['e1|2026-05-01', 8]]);
+    const dailyMinutesMap = new Map([['e1|2026-05-01', 480]]);
     const ctx = buildCtxSimple({
       shift: buildShift({ id: 's1', date: '2026-05-01', start_time: '08:00', end_time: '16:00' }) as any,
-      dailyHoursMap,
+      dailyMinutesMap,
     });
     expect(opt.evaluateCandidate(emp, ctx)).toBe(false);
   });

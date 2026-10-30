@@ -85,12 +85,43 @@ export const shiftBoundsMs = (shift: ShiftTimes): [number, number] => {
 };
 
 /**
- * Duration in hours, overnight-aware, rounded to one decimal.
+ * Duration in whole minutes, overnight-aware: the unit every cap and every
+ * total is computed in.
  *
- * Rounding is part of the contract rather than presentation: the greedy engine
- * accumulates these into daily and weekly totals compared against integer
- * caps, so both engines must round identically or the parity suite sees a
- * difference that is really a float artefact.
+ * WHY MINUTES AND NOT shiftHours. Hours rounded to a tenth used to be the
+ * unit of the caps, and rounding per shift does not survive a sum: three
+ * 2h40 shifts are exactly 8h, but 3 x 2.7 is 8.1h, so the validator flagged a
+ * legal 8h day and the greedy refused the third shift, while CP-SAT — an
+ * integer solver, which has to count minutes — staffed it (#834). Minutes are
+ * exact for any "HH:MM" time and integral, so all three now add the same
+ * numbers and agree by construction rather than by matching their rounding.
+ */
+export const shiftMinutes = (shift: ShiftTimes): number => {
+  const start = timeToMinutes(shift.start_time);
+  let end = timeToMinutes(shift.end_time);
+  // `<=`: a zero-length shift spans a full day — see shiftHours.
+  if (end <= start) end += 24 * 60;
+  return end - start;
+};
+
+/**
+ * Whether `minutes` of work exceeds a cap expressed in hours.
+ *
+ * Compared in minutes so integer totals are never subject to float sums. The
+ * tolerance only absorbs a cap whose minute value is not exact in binary
+ * (7.3h is 437.99999...); a cap is never rounded in the worker's favour.
+ */
+export const exceedsHours = (minutes: number, capHours: number): boolean => minutes > capHours * 60 + 1e-6;
+
+/** Minutes as an hours figure for messages, e.g. 510 → "8.5". */
+export const formatHours = (minutes: number): string => String(Math.round((minutes / 60) * 100) / 100);
+
+/**
+ * Duration in hours, overnight-aware, rounded to one decimal — for DISPLAY
+ * and output fields (an assignment's `hours`, a compliance message).
+ *
+ * Not for caps or totals: rounding each shift before summing drifts, which is
+ * exactly the defect shiftMinutes exists to avoid.
  */
 export const shiftHours = (shift: ShiftTimes): number => {
   const start = timeToMinutes(shift.start_time);
