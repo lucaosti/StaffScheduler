@@ -859,6 +859,16 @@ therefore `GREEDY_FALLBACK` whenever the solver produced no schedule, whatever
 the cause; `AutoScheduleService` turns that into a surfaced `engine: "greedy"`,
 `degraded: true` result with the reason, rather than a silent substitution.
 
+When **no** engine produces a schedule — the greedy fallback itself throws, so
+`optimize()` returns `ERROR` with zero assignments, or the explicitly selected
+greedy engine throws — the run fails with `OPTIMIZATION_FAILED` (500, a typed
+`OptimizationFailedError` with a fixed message; the reason is logged) before
+either persistence path: no replan proposal, no draft rows. That empty result
+used to become a proposal breaking every commitment on a published schedule
+and an `OK` run writing nothing on a draft (#858). Through the job queue the
+failure surfaces as the job's `failedReason` and an `optimization.failed`
+event.
+
 Before solving, the script reads the objective's worst-case magnitude back from
 the built model and refuses one at or above 2^62 with an `ERROR` result. The
 objective stacks its priority levels as multiplied big-M scales, so that

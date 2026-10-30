@@ -23,6 +23,7 @@ import { config } from '../config';
 import { logger } from '../config/logger';
 import { spawn } from 'child_process';
 import { driverDate } from './helpers/driverDate';
+import { OptimizationFailedError } from '../errors';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
 // Only the #811 test below reaches a real optimize(); everywhere else the
@@ -1154,5 +1155,73 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
       expect(JSON.stringify(result)).not.toContain('99');
       expect(result).not.toHaveProperty('hourly_rate');
     });
+  });
+});
+
+/**
+ * When NO engine produced a schedule, the run must fail — never turn the
+ * empty result into a plan (#858).
+ *
+ * optimize() returns ERROR with zero assignments when the greedy fallback
+ * itself throws. On a published schedule that became a replan proposal
+ * breaking every commitment, and on a draft an "OK" run that wrote nothing:
+ * the harm #811 closed for solver statuses, through another door.
+ */
+describe('AutoScheduleService.generate — when no engine produces a schedule (#858)', () => {
+  const originalEngine = config.optimization.engine;
+  const published = { schedule: [{ ...SCHEDULE_ROW, status: 'published' }] };
+
+  afterEach(() => {
+    config.optimization.engine = originalEngine;
+  });
+
+  it.each([
+    ['a published schedule', published],
+    ['a draft', {}],
+  ])('fails with a typed error and writes nothing for %s when optimize() reports ERROR', async (_label, fixtures) => {
+    config.optimization.engine = 'or-tools';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn().mockResolvedValue({ status: 'ERROR', assignments: [], error: 'greedy blew up' }),
+      generateGreedySchedule: jest.fn(),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, fixtures);
+
+    const run = new AutoScheduleService(pool).generate(1, 7);
+
+    await expect(run).rejects.toBeInstanceOf(OptimizationFailedError);
+    await expect(run).rejects.toMatchObject({ code: 'OPTIMIZATION_FAILED' });
+    // Neither a proposal (its own transaction) nor an INSERT was attempted.
+    expect(conn.execute).not.toHaveBeenCalled();
+  });
+
+  it('fails with a typed error and writes nothing when the explicit greedy engine throws', async () => {
+    config.optimization.engine = 'greedy';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn(),
+      generateGreedySchedule: jest.fn().mockRejectedValue(new Error('greedy blew up')),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, published);
+
+    await expect(new AutoScheduleService(pool).generate(1, 7)).rejects.toBeInstanceOf(OptimizationFailedError);
+    expect(conn.execute).not.toHaveBeenCalled();
+  });
+
+  it('logs the internal reason without handing it to the planner', async () => {
+    config.optimization.engine = 'or-tools';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      optimize: jest.fn().mockResolvedValue({ status: 'ERROR', assignments: [], error: 'TypeError at greedy.ts:42' }),
+      generateGreedySchedule: jest.fn(),
+    }));
+    const errorLog = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const { pool, execute } = makePool();
+    primeQueries(execute, published);
+
+    const error = await new AutoScheduleService(pool).generate(1, 7).catch((e: Error) => e);
+
+    expect(error).toBeInstanceOf(OptimizationFailedError);
+    expect((error as Error).message).not.toContain('greedy.ts');
+    expect(errorLog).toHaveBeenCalledWith(expect.stringContaining('TypeError at greedy.ts:42'));
   });
 });
