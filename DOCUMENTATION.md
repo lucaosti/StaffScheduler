@@ -1542,8 +1542,23 @@ docker compose --profile ops up -d
 ```
 
 Starts Prometheus, Grafana, Loki and Promtail (config under `ops/`), all on the
-internal network with only Grafana published (`GRAFANA_PORT`, default `3002`;
-login `admin` / `GRAFANA_ADMIN_PASSWORD`):
+internal network with only Grafana published, and on the host's loopback
+interface only (`127.0.0.1:GRAFANA_PORT`, default `3002`; login `admin` /
+`GRAFANA_ADMIN_PASSWORD`). From another machine, tunnel to it
+(`ssh -L 3002:127.0.0.1:3002 <host>`) rather than publishing the login page.
+
+`GRAFANA_ADMIN_PASSWORD` has no default: Compose refuses to start **any**
+service from `docker-compose.yml` without it, profile or not, because Compose
+interpolates every service before it filters by profile. Grafana can read every
+log line through Loki, so the former `admin/admin` fallback was a credential
+for the whole log stream. Grafana applies the variable only when it first
+initialises its `grafana_data` volume; to rotate it later, run
+`docker compose exec grafana grafana cli admin reset-admin-password <new>`.
+
+The `dev` profile's phpMyAdmin follows the same rules: loopback only
+(`127.0.0.1:PHPMYADMIN_PORT`, default `8080`) and no auto-login — it shows its
+login form and you sign in with a MySQL account, instead of every visitor being
+logged in as the application's database user.
 
 - **Prometheus** scrapes `backend:3001/metrics` every 15s and loads the alert
   rules in `ops/prometheus/alerts.yml` (high 5xx rate, high p95 latency, DB pool

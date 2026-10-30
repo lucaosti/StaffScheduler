@@ -328,6 +328,11 @@ docker compose --profile ops up -d      # plus Prometheus, Grafana, Loki, Promta
 docker compose --profile backup up -d   # plus scheduled backups only
 ```
 
+Compose reads the root `.env` (start from [`.env.example`](./.env.example)) and
+refuses to start without `MYSQL_ROOT_PASSWORD`, `MYSQL_PASSWORD`, `JWT_SECRET`
+and `GRAFANA_ADMIN_PASSWORD`, whichever profiles are active. phpMyAdmin and
+Grafana listen on `127.0.0.1` only.
+
 ## Configuration
 
 The annotated list of every variable is

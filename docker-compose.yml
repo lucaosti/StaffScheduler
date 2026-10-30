@@ -186,12 +186,14 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    # No PMA_USER/PMA_PASSWORD: with them phpMyAdmin logs every visitor in as
+    # the application's database user, so reaching the port was the whole
+    # authentication (#823). It shows its login form instead; sign in with a
+    # MySQL account. Loopback only — from another machine, use an SSH tunnel.
     environment:
       PMA_HOST: mysql
-      PMA_USER: ${MYSQL_USER:-scheduler_user}
-      PMA_PASSWORD: ${MYSQL_PASSWORD:-scheduler_password}
     ports:
-      - "${PHPMYADMIN_PORT:-8080}:80"
+      - "127.0.0.1:${PHPMYADMIN_PORT:-8080}:80"
     networks:
       - staff_scheduler_network
 
@@ -259,15 +261,26 @@ services:
     restart: unless-stopped
     depends_on:
       - prometheus
+    # Required, with no fallback: Grafana reads every log line through Loki,
+    # and the old `:-admin` default published admin/admin (#823). Compose
+    # interpolates every service whatever the active profiles, so this binds
+    # deployments that never start Grafana too; the alternative — an
+    # entrypoint check that fails only when Grafana starts — was rejected
+    # because a missing secret should stop `config`/`up` before anything runs,
+    # the way MYSQL_PASSWORD and JWT_SECRET already do. Note that Grafana
+    # applies it only when it first initialises grafana_data; afterwards, change
+    # it with `grafana cli admin reset-admin-password`.
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set in .env}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana_data:/var/lib/grafana
+    # Loopback only: reach it from another machine through an SSH tunnel
+    # (ssh -L 3002:127.0.0.1:3002 host) rather than exposing the login page.
     ports:
-      - "${GRAFANA_PORT:-3002}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3002}:3000"
     networks:
       - staff_scheduler_network
     mem_limit: 512m

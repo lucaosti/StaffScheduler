@@ -37,6 +37,7 @@ const REQUIRED_ENV = {
   MYSQL_ROOT_PASSWORD: 'x',
   MYSQL_PASSWORD: 'x',
   JWT_SECRET: 'x',
+  GRAFANA_ADMIN_PASSWORD: 'x',
 };
 
 /** Runs `docker compose config` and returns { status, stderr, model }. */
@@ -86,4 +87,41 @@ test('the backend\'s direct port is loopback-only, so the trusted hop cannot be 
   const ports = resolved().services.backend.ports;
   assert.ok(ports.length > 0);
   for (const port of ports) assert.equal(port.host_ip, '127.0.0.1', JSON.stringify(port));
+});
+
+test('compose refuses to resolve without a Grafana admin password (#823)', () => {
+  // Grafana reads every log line through Loki, and its built-in fallback is
+  // admin/admin. Compose interpolates every service whatever the active
+  // profiles, so this binds every deployment, not only `--profile ops`.
+  const unset = { ...REQUIRED_ENV };
+  delete unset.GRAFANA_ADMIN_PASSWORD;
+  for (const env of [unset, { ...unset, GRAFANA_ADMIN_PASSWORD: '' }]) {
+    const { status, stderr } = composeConfig({ env });
+    assert.notEqual(status, 0, JSON.stringify(env));
+    assert.match(stderr, /GRAFANA_ADMIN_PASSWORD/);
+  }
+});
+
+test('Grafana takes the operator\'s password verbatim (#823)', () => {
+  const grafana = resolved({
+    profiles: ['ops'],
+    env: { ...REQUIRED_ENV, GRAFANA_ADMIN_PASSWORD: 'operator-chosen' },
+  }).services.grafana;
+  assert.equal(grafana.environment.GF_SECURITY_ADMIN_PASSWORD, 'operator-chosen');
+});
+
+test('admin consoles are published on the loopback interface only (#823)', () => {
+  const { services } = resolved({ profiles: ['ops', 'dev'] });
+  for (const name of ['grafana', 'phpmyadmin']) {
+    assert.ok(services[name].ports.length > 0, name);
+    for (const port of services[name].ports) {
+      assert.equal(port.host_ip, '127.0.0.1', `${name}: ${JSON.stringify(port)}`);
+    }
+  }
+});
+
+test('phpMyAdmin asks for credentials instead of logging every visitor in (#823)', () => {
+  const { environment } = resolved({ profiles: ['dev'] }).services.phpmyadmin;
+  assert.equal(environment.PMA_USER, undefined);
+  assert.equal(environment.PMA_PASSWORD, undefined);
 });
