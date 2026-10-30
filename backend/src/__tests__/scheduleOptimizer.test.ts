@@ -409,13 +409,17 @@ describe('ScheduleOptimizer.optimize degrades on a non-success solver status', (
     expect(result.error).toContain('Traceback: boom');
   });
 
-  it('passes a FEASIBLE solver result through unchanged', async () => {
+  it('maps a FEASIBLE solver result onto the typed assignment shape (#919)', async () => {
     mockedSpawn.mockReturnValue(
       buildFinishingProcess(
         0,
         JSON.stringify({
           status: 'FEASIBLE',
-          assignments: [{ employeeId: 'e1', shiftId: 's1' }],
+          // The script's real output shape (schedule_optimizer.py _extract_solution):
+          // snake_case keys. A camelCase double here is what hid #919.
+          assignments: [
+            { employee_id: 'e1', shift_id: 's1', date: '2026-03-02', start_time: '09:00', end_time: '17:00', hours: 8 },
+          ],
           statistics: { is_optimal: false, total_assigned_shifts: 1 },
         })
       )
@@ -424,7 +428,9 @@ describe('ScheduleOptimizer.optimize degrades on a non-success solver status', (
     const result = await new ScheduleOptimizer().optimize(problem());
 
     expect(result.status).toBe('FEASIBLE');
-    expect(result.assignments).toEqual([{ employeeId: 'e1', shiftId: 's1' }]);
+    expect(result.assignments).toEqual([
+      { employeeId: 'e1', shiftId: 's1', date: '2026-03-02', startTime: '09:00', endTime: '17:00', hours: 8 },
+    ]);
   });
 });
 

@@ -884,6 +884,55 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(out.assignmentsCreated).toBe(1);
   });
 
+  // The same real hand-off for a successful solve: the script's snake_case
+  // assignments must reach the INSERT as numeric ids. They were passed through
+  // unmapped and every CP-SAT plan was persisted with NaN ids (#919).
+  it('persists a CP-SAT result with the ids the solver returned', async () => {
+    config.optimization.engine = 'or-tools';
+    const { ScheduleOptimizer: RealOptimizer } = jest.requireActual(
+      '../optimization/ScheduleOptimizerORTools'
+    );
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => new RealOptimizer());
+    (spawn as unknown as jest.Mock).mockImplementation(() => {
+      const { EventEmitter } = jest.requireActual('events');
+      const proc = new EventEmitter();
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.stdin = {
+        write: jest.fn(),
+        end: jest.fn(() =>
+          setImmediate(() => {
+            const output = {
+              status: 'OPTIMAL',
+              objective_value: 0,
+              solve_time_seconds: 0.01,
+              assignments: [
+                { employee_id: '1', shift_id: '10', date: '2026-03-02', start_time: '09:00', end_time: '17:00', hours: 8 },
+              ],
+              statistics: { is_optimal: true, total_assigned_shifts: 1 },
+            };
+            proc.stdout.emit('data', Buffer.from(JSON.stringify(output)));
+            proc.emit('close', 0);
+          })
+        ),
+      };
+      return proc;
+    });
+
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute);
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(out.engine).toBe('or-tools');
+    expect(out.degraded).toBe(false);
+    expect(out.assignmentsCreated).toBe(1);
+    const insert = conn.execute.mock.calls.find(([sql]: [string]) => /INSERT\s+IGNORE\s+INTO\s+shift_assignments|INSERT INTO shift_assignments/i.test(sql));
+    expect(insert).toBeDefined();
+    expect(insert![1]).toEqual([10, 1, 'pending', 7]);
+  });
+
   it('uses the greedy draft engine directly (not degraded) when selected explicitly', async () => {
     config.optimization.engine = 'greedy';
     const optimize = jest.fn();
