@@ -26,7 +26,12 @@ describe('ScheduleOptimizer with a solver that exits without reading its input',
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), 'optimizer-stub-'));
     stub = join(dir, 'exits_immediately.py');
-    writeFileSync(stub, 'import sys\nsys.exit(3)\n');
+    // What python3 without ortools does: report the import error and exit 1
+    // before reading anything from stdin.
+    writeFileSync(
+      stub,
+      "import sys\nsys.stderr.write(\"ModuleNotFoundError: No module named 'ortools'\\n\")\nsys.exit(1)\n"
+    );
   });
 
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -49,6 +54,9 @@ describe('ScheduleOptimizer with a solver that exits without reading its input',
     // was an uncaught exception and the test process died.
     expect(result.status).toBe('GREEDY_FALLBACK');
     expect(result.assignments).toEqual([expect.objectContaining({ employeeId: 'e1', shiftId: 's1' })]);
+    // And the planner is told why: the child's own error, not the EPIPE that
+    // usually reaches Node first.
+    expect(result.error).toContain("ModuleNotFoundError: No module named 'ortools'");
   });
 });
 
@@ -68,5 +76,19 @@ describeOrtools('schedule_optimizer.py time budget', () => {
 
     expect(result.status).toBe('UNKNOWN');
     expect(result.error).toMatch(/building the model took .* time limit/);
+  });
+
+  it('counts the ortools import against the budget, measuring from process start', () => {
+    // The import alone takes a few hundred milliseconds; a clock started
+    // after it (as it once was) reported a few milliseconds for a tiny model.
+    const problem: OptimizationProblem = {
+      shifts: [{ id: 's1', date: '2026-03-02', start_time: '09:00', end_time: '17:00', min_staff: 1 }],
+      employees: [{ id: 'e1', max_hours_per_week: 40, skills: [], unavailable_dates: [] }],
+    };
+
+    const result = solveCpSat(problem, process.env, 0.5);
+
+    const elapsed = Number(/took ([\d.]+)s/.exec(result.error ?? '')?.[1]);
+    expect(elapsed).toBeGreaterThanOrEqual(0.1);
   });
 });

@@ -100,7 +100,7 @@ describe('evaluateAssignmentCompliance', () => {
       // regulatory rule set; empty by default so existing cases exercise the
       // pre-policy fallback chain unchanged.
       .mockResolvedValueOnce([globalPolicyRows, null])
-      // `EmploymentContractService.resolveLimitsForPeriod` — checked ahead of
+      // `EmploymentContractService.resolveForPeriod` — checked ahead of
       // user_preferences/system_settings; empty by default so existing cases
       // exercise the pre-contract fallback chain unchanged.
       .mockResolvedValueOnce([contractRows, null])
@@ -266,6 +266,36 @@ describe('evaluateAssignmentCompliance', () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.violations.some((v) => v.code === 'MAX_WEEKLY_HOURS')).toBe(true);
+      }
+    });
+
+    it('does not let a preference or contract loosen the global policy', async () => {
+      // Every user_preferences row carries 40 h by default; under a 1 h policy
+      // that row must not lift the cap. The same for a 40 h contract.
+      const pool = makePool(
+        [{ max_hours_per_week: 40, max_consecutive_days: 5 }],
+        [],
+        [],
+        [
+          {
+            user_id: 42,
+            id: 1,
+            name: 'Full-time',
+            is_active: 1,
+            max_hours_per_week: 40,
+            min_hours_between_shifts: null,
+          },
+        ],
+        [{ policy_key: 'max_hours_week', policy_value: { hours: 1 } }]
+      );
+      const result = await evaluateAssignmentCompliance(pool, 42, {
+        date: '2026-06-01',
+        startTime: '09:00',
+        endTime: '17:00',
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.violations.find((v) => v.code === 'MAX_WEEKLY_HOURS')?.details.limit).toBe(1);
       }
     });
 

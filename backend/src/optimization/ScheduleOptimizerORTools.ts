@@ -247,6 +247,13 @@ export const KILL_GRACE_MS = 5000;
  */
 export const MAX_STDOUT_BYTES = 64 * 1024 * 1024;
 
+/**
+ * How long after a failed write to the solver's stdin the run waits for the
+ * child's own exit before giving up on it: long enough for a crashing python
+ * to flush its traceback and exit.
+ */
+export const STDIN_ERROR_GRACE_MS = 2000;
+
 /** How much of the solver's stderr is kept, from the end, as a crash reason. */
 export const MAX_STDERR_TAIL_CHARS = 64 * 1024;
 
@@ -469,9 +476,11 @@ export class ScheduleOptimizer {
       let stderrTail = '';
       let settled = false;
       let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let stdinError: Error | undefined;
+      let stdinErrorHandle: ReturnType<typeof setTimeout> | undefined;
 
-      // Ensure the Promise settles exactly once and the watchdog timer is
-      // always cleared, so it can never fire after the process has finished.
+      // Ensure the Promise settles exactly once and the timers are always
+      // cleared, so neither can fire after the process has finished.
       const finalize = (action: () => void): void => {
         if (settled) {
           return;
@@ -481,6 +490,7 @@ export class ScheduleOptimizer {
           clearTimeout(timeoutHandle);
           timeoutHandle = undefined;
         }
+        if (stdinErrorHandle) clearTimeout(stdinErrorHandle);
         action();
       };
 
@@ -552,9 +562,12 @@ export class ScheduleOptimizer {
             try {
               resolve(mapPythonResult(JSON.parse(stdoutData)));
             } catch (parseError) {
+              // No JSON: the child died before answering (python exits 1 on
+              // an import error), so its stderr is the reason, not the parse.
+              const parseReason = parseError instanceof Error ? parseError.message : 'Unknown error';
               reject(
                 new Error(
-                  `Failed to parse optimizer output: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
+                  `Failed to parse optimizer output (exit ${code}): ${stderrData.trim() || stdinError?.message || parseReason}`
                 )
               );
             }
@@ -565,7 +578,11 @@ export class ScheduleOptimizer {
             // only its progress log. Rejecting with stderr alone handed the
             // planner "Building CP-SAT model..." as the reason for a degraded
             // run. stderr stays the fallback for a crash that wrote no JSON.
-            reject(new Error(`Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? stderrData}`));
+            reject(
+              new Error(
+                `Optimizer failed with code ${code}: ${errorReason(stdoutData) ?? (stderrData || stdinError?.message)}`
+              )
+            );
           }
         });
       });
@@ -581,10 +598,20 @@ export class ScheduleOptimizer {
       // EPIPE. With no listener, a stream 'error' is THROWN by the emitter —
       // as an uncaught exception that took the whole backend down rather than
       // this one run (#836). Handled here, it is one more reason to fall back.
-      // The 'close' that follows still settles first when it wins the race,
-      // which is the better reason: it carries the child's own exit status.
+      //
+      // RECORDED, NOT SETTLED ON. The EPIPE almost always arrives before the
+      // child's 'close', and settling on it made every such run's degraded
+      // reason "write EPIPE" — true, and useless — while the reason the child
+      // gave on stderr ("ModuleNotFoundError: No module named 'ortools'") was
+      // dropped. 'close' settles with that stderr; the timer only covers a
+      // child that keeps running after closing its stdin.
       pythonProcess.stdin.on('error', (err) => {
-        finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`)));
+        stdinError = err;
+        stdinErrorHandle = setTimeout(
+          () => finalize(() => reject(new Error(`Failed to send the problem to the Python optimizer: ${err.message}`))),
+          STDIN_ERROR_GRACE_MS
+        );
+        stdinErrorHandle.unref?.();
       });
 
       // Send problem data to stdin

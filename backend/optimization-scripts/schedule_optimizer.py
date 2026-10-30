@@ -27,7 +27,14 @@ import time
 import argparse
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
-from ortools.sat.python import cp_model
+
+# The caller's budget runs from process start, so the clock starts BEFORE the
+# ortools import, which alone takes a large fraction of a second (see
+# solve_time_budget). The standard-library imports above cost nothing by
+# comparison.
+PROCESS_START = time.monotonic()
+
+from ortools.sat.python import cp_model  # noqa: E402 - imported after the clock on purpose
 
 
 class ScheduleOptimizerORTools:
@@ -1676,6 +1683,12 @@ def solve_time_budget(total_seconds: float, elapsed_seconds: float) -> Optional[
     caller would be wrong at one end of the range or the other. Measured here,
     it is exact.
 
+    `elapsed_seconds` is measured from PROCESS_START, before the ortools
+    import — part of what the caller waits for, and the largest fixed cost of
+    a small run. Extracting the solution and writing it out happen after the
+    search and are not budgeted here: they are what the caller's margin
+    (solverTimeLimitSeconds in ScheduleOptimizerORTools.ts) is for.
+
     Below a second there is nothing useful left to search, so the run reports
     no schedule rather than overrunning the caller's deadline.
     """
@@ -1685,9 +1698,6 @@ def solve_time_budget(total_seconds: float, elapsed_seconds: float) -> Optional[
 
 def main():
     """Main entry point."""
-    # The budget runs from process start: reading a large problem from stdin
-    # is part of what the caller waits for.
-    started = time.monotonic()
     parser = argparse.ArgumentParser(description='Staff Schedule Optimizer using OR-Tools')
     parser.add_argument('input', nargs='?', help='Input JSON file (or use --stdin)')
     parser.add_argument('output', nargs='?', help='Output JSON file (or use --stdout)')
@@ -1714,8 +1724,9 @@ def main():
     try:
         optimizer = ScheduleOptimizerORTools(problem_data)
         optimizer.build_model()
-        elapsed = time.monotonic() - started
-        print(f'Model built in {elapsed:.2f}s', file=sys.stderr)
+        # Since process start: interpreter, ortools import, input and build.
+        elapsed = time.monotonic() - PROCESS_START
+        print(f'Ready to search {elapsed:.2f}s after start', file=sys.stderr)
         budget = solve_time_budget(args.time_limit, elapsed)
         if budget is None:
             # UNKNOWN is what CP-SAT itself reports for a limit reached with no
@@ -1723,8 +1734,8 @@ def main():
             result = {
                 'status': 'UNKNOWN',
                 'error': (
-                    f'building the model took {elapsed:.1f}s of the {args.time_limit:g}s '
-                    'time limit, leaving no time to search'
+                    f'starting, reading the input and building the model took {elapsed:.2f}s '
+                    f'of the {args.time_limit:g}s time limit, leaving no time to search'
                 ),
                 'assignments': [],
                 'over_committed_employees': optimizer.over_committed,

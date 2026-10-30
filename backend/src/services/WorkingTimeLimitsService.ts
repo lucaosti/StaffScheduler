@@ -13,19 +13,22 @@
  * (#883). Two answers to "what is this person's limit" is one answer too many;
  * both now ask here.
  *
- * Resolution order, first match wins per field:
+ * The layers, per field (see `resolveField` for the rule and why):
  *
- *   1. The employment contract in force (`EmploymentContractService
- *      .resolveLimitsForPeriod`, most restrictive across the period). FIRST
- *      because a contract is a deliberate, effective-dated limit a manager
- *      set, and a stale preference must not override it.
- *   2. `user_preferences` (weekly hours and consecutive days only; it has no
- *      rest column) — still the answer for anyone with no contract.
- *   3. An active GLOBAL `policies` row (`min_rest_hours`, `max_hours_week`,
- *      `max_consecutive_days`): the organization's own rule set, populated by
- *      hand or by applying a jurisdiction preset.
- *   4. `system_settings` (`scheduling.*`), the older non-scoped fallback.
- *   5. `DEFAULT_WORKING_TIME_LIMITS`.
+ *   - An active GLOBAL `policies` row (`min_rest_hours`, `max_hours_week`,
+ *     `max_consecutive_days`): the organization's own rule set, populated by
+ *     hand or by applying a jurisdiction preset. When present it is a
+ *     CEILING — the personal layers below may only tighten it.
+ *   - The employment contract in force (`EmploymentContractService
+ *     .resolveForPeriod`, most restrictive across the period), ahead of the
+ *     preference because it is a deliberate, effective-dated limit a manager
+ *     set. When it does not cover the whole period, what applies without it
+ *     governs the remaining days and the tighter of the two is used.
+ *   - `user_preferences` (weekly hours and consecutive days only; it has no
+ *     rest column).
+ *   - `system_settings` (`scheduling.*`), then `DEFAULT_WORKING_TIME_LIMITS`:
+ *     fallbacks used only when no policy value exists and no personal layer
+ *     states one.
  *
  * WHY BATCHED. The optimizer resolves a whole candidate pool at once and the
  * compliance check one person; four queries for either, rather than four per
@@ -109,11 +112,9 @@ export class WorkingTimeLimitsService {
       'max_hours_week',
       'max_consecutive_days',
     ]);
-    const contracts = await new EmploymentContractService(this.pool).resolveLimitsForPeriod(
-      ids,
-      startDate,
-      endDate
-    );
+    const { limits: contracts, fullyCovered } = await new EmploymentContractService(
+      this.pool
+    ).resolveForPeriod(ids, startDate, endDate);
 
     const settings: Record<string, string> = {};
     for (const row of settingRows) settings[row.key as string] = row.value as string;
@@ -124,33 +125,101 @@ export class WorkingTimeLimitsService {
       ])
     );
 
-    // The organization-wide layers, resolved once: they are the same for
-    // every person, and only the contract and preference above them vary.
-    const orgWide: WorkingTimeLimits = {
+    // The organization-wide layers, read once: the same for every person.
+    const policy = {
+      maxConsecutiveDays: policyNumber(policies.max_consecutive_days, 'days'),
+      minRestHoursBetweenShifts: policyNumber(policies.min_rest_hours, 'hours'),
+      maxHoursPerWeek: policyNumber(policies.max_hours_week, 'hours'),
+    };
+    const fallback: WorkingTimeLimits = {
       maxConsecutiveDays:
-        policyNumber(policies.max_consecutive_days, 'days') ??
-        (Number(settings.max_consecutive_days) || DEFAULT_WORKING_TIME_LIMITS.maxConsecutiveDays),
+        Number(settings.max_consecutive_days) || DEFAULT_WORKING_TIME_LIMITS.maxConsecutiveDays,
       minRestHoursBetweenShifts:
-        policyNumber(policies.min_rest_hours, 'hours') ??
-        (Number(settings.min_hours_between_shifts) ||
-          DEFAULT_WORKING_TIME_LIMITS.minRestHoursBetweenShifts),
-      maxHoursPerWeek:
-        policyNumber(policies.max_hours_week, 'hours') ??
-        (Number(settings.max_hours_per_week) || DEFAULT_WORKING_TIME_LIMITS.maxHoursPerWeek),
+        Number(settings.min_hours_between_shifts) || DEFAULT_WORKING_TIME_LIMITS.minRestHoursBetweenShifts,
+      maxHoursPerWeek: Number(settings.max_hours_per_week) || DEFAULT_WORKING_TIME_LIMITS.maxHoursPerWeek,
     };
 
     const limits = new Map<number, WorkingTimeLimits>();
     for (const id of ids) {
       const contract = contracts.get(id);
       const pref = prefs.get(id);
+      const covered = fullyCovered.has(id);
+      const field = (key: keyof WorkingTimeLimits, contractValue: Personal, prefValue: Personal) =>
+        resolveField(DIRECTION[key], {
+          contract: contractValue,
+          preference: prefValue,
+          policy: policy[key],
+          fallback: fallback[key],
+          contractCoversPeriod: covered,
+        });
       limits.set(id, {
-        maxConsecutiveDays:
-          contract?.maxConsecutiveDays ?? pref?.max_consecutive_days ?? orgWide.maxConsecutiveDays,
-        minRestHoursBetweenShifts:
-          contract?.minHoursBetweenShifts ?? orgWide.minRestHoursBetweenShifts,
-        maxHoursPerWeek: contract?.maxHoursPerWeek ?? pref?.max_hours_per_week ?? orgWide.maxHoursPerWeek,
+        maxConsecutiveDays: field('maxConsecutiveDays', contract?.maxConsecutiveDays, pref?.max_consecutive_days),
+        // user_preferences has no rest column.
+        minRestHoursBetweenShifts: field('minRestHoursBetweenShifts', contract?.minHoursBetweenShifts, null),
+        maxHoursPerWeek: field('maxHoursPerWeek', contract?.maxHoursPerWeek, pref?.max_hours_per_week),
       });
     }
     return { limits, contracts };
   }
 }
+
+type Personal = number | null | undefined;
+
+/** Which way each limit tightens: a cap by going down, a minimum rest by going up. */
+const DIRECTION: Record<keyof WorkingTimeLimits, 'cap' | 'floor'> = {
+  maxConsecutiveDays: 'cap',
+  maxHoursPerWeek: 'cap',
+  minRestHoursBetweenShifts: 'floor',
+};
+
+const tightest = (direction: 'cap' | 'floor', values: Personal[]): number => {
+  const present = values.filter((v): v is number => typeof v === 'number');
+  return direction === 'cap' ? Math.min(...present) : Math.max(...present);
+};
+
+/**
+ * One limit for one person.
+ *
+ * THE GLOBAL POLICY IS A LEGAL CEILING. When the organization states a value,
+ * a contract or a preference may only TIGHTEN it (a lower cap, more rest),
+ * never loosen it. They used to win outright, and that left #883 open for two
+ * of its three limits: `user_preferences.max_hours_per_week` and
+ * `max_consecutive_days` are `INT DEFAULT 40 / 5` and PreferencesService
+ * writes 40/5 into every row it creates, so anyone with a preferences row —
+ * the demo seed creates one for everyone — got 40 h and 5 days under a
+ * 36 h / 4-day policy. A preference is the person's wish and a contract the
+ * employer's terms; neither can waive a rule the organization adopted (often
+ * a jurisdiction's, applied as a preset). Taking "first match" instead of
+ * "tightest" was rejected for exactly that reason, and so was ignoring the
+ * preference row: a stricter personal cap (someone asking for fewer hours) is
+ * legitimate and is still honoured.
+ *
+ * With no policy value, the old order stands — contract, then preference,
+ * then the system setting or default — because the setting and the default
+ * are fallbacks, not rules anyone adopted.
+ *
+ * WHEN THE CONTRACT DOES NOT COVER THE PERIOD, its value only governs part of
+ * it. The rest of the period is governed by what applies without it, so the
+ * tighter of the two is used for the whole period — the same conservative
+ * choice EmploymentContractService already makes between two contracts
+ * (see its module note). An 8 h-rest contract ending on the 15th used to set
+ * the rest for the whole month, under an 11 h policy that governs the 20th.
+ */
+const resolveField = (
+  direction: 'cap' | 'floor',
+  layers: {
+    contract: Personal;
+    preference: Personal;
+    policy: number | undefined;
+    fallback: number;
+    contractCoversPeriod: boolean;
+  }
+): number => {
+  const resolve = (contract: Personal): number =>
+    layers.policy !== undefined
+      ? tightest(direction, [layers.policy, contract, layers.preference])
+      : (contract ?? layers.preference ?? layers.fallback);
+  const withContract = resolve(layers.contract);
+  if (layers.contract == null || layers.contractCoversPeriod) return withContract;
+  return tightest(direction, [withContract, resolve(null)]);
+};

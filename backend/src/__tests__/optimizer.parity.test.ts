@@ -2386,3 +2386,128 @@ describe('per-employee rest reaches both engines', () => {
     });
   });
 });
+
+/**
+ * CP-SAT's conflict cliques against the pairwise rule they replace (#837).
+ *
+ * The model states no-double-booking and minimum rest as one AddAtMostOne per
+ * maximal clique of the rest-extended interval graph. That is equivalent to
+ * the pairwise rule only if the sweep finds exactly the right cliques: one too
+ * few lets a conflicting pair through (a violation the validator sees), one
+ * too broad forbids a legal pair (a schedule with fewer seats than possible,
+ * which validity alone cannot see). So each adversarial case is checked both
+ * ways: CP-SAT's answer breaks no rule, AND it fills as many seats as the best
+ * legal schedule found by brute force over the validator.
+ */
+describe('conflict cliques match the pairwise rule', () => {
+  const employee = (id: string, rest: number) => ({
+    id,
+    max_hours_per_week: 168,
+    max_hours_per_day: 24,
+    min_hours_between_shifts: rest,
+    skills: [],
+    unavailable_dates: [],
+  });
+  const shift = (id: string, date: string, start_time: string, end_time: string) => ({
+    id,
+    date,
+    start_time,
+    end_time,
+    min_staff: 1,
+    max_staff: 1,
+  });
+
+  const cases: Array<[string, OptimizationProblemLike]> = [
+    [
+      'nested intervals under zero rest',
+      {
+        shifts: [
+          shift('outer', '2026-03-02', '08:00', '20:00'),
+          shift('inner1', '2026-03-02', '10:00', '12:00'),
+          shift('inner2', '2026-03-02', '14:00', '16:00'),
+          shift('after', '2026-03-02', '20:00', '23:00'),
+        ],
+        employees: [employee('e1', 0)],
+      },
+    ],
+    [
+      'a gap exactly equal to the rest, and one minute short of it',
+      {
+        shifts: [
+          shift('a', '2026-03-02', '06:00', '14:00'),
+          shift('b', '2026-03-02', '22:00', '06:00'),
+          shift('c', '2026-03-03', '14:00', '22:00'),
+          shift('d', '2026-03-04', '06:01', '10:00'),
+        ],
+        employees: [employee('e1', 8)],
+      },
+    ],
+    [
+      'back-to-back shifts under zero rest',
+      {
+        shifts: [
+          shift('a', '2026-03-02', '08:00', '12:00'),
+          shift('b', '2026-03-02', '12:00', '16:00'),
+          shift('c', '2026-03-02', '16:00', '20:00'),
+        ],
+        employees: [employee('e1', 0)],
+      },
+    ],
+    [
+      'an overnight shift across a week boundary',
+      {
+        // 2026-03-08 is a Sunday.
+        shifts: [
+          shift('sun-night', '2026-03-08', '22:00', '06:00'),
+          shift('mon-early', '2026-03-09', '05:00', '13:00'),
+          shift('mon-late', '2026-03-09', '14:00', '22:00'),
+        ],
+        employees: [employee('e1', 8)],
+      },
+    ],
+    [
+      'mixed rest values in one problem',
+      {
+        shifts: [
+          shift('late', '2026-03-02', '14:00', '22:00'),
+          shift('early', '2026-03-03', '07:00', '15:00'),
+          shift('late2', '2026-03-03', '22:00', '06:00'),
+          shift('mid', '2026-03-04', '15:00', '20:00'),
+        ],
+        employees: [employee('strict', 11), employee('lenient', 0)],
+      },
+    ],
+  ];
+
+  /** The most seats any legal schedule fills, by trying every assignment set. */
+  const bestLegalSeats = (problem: OptimizationProblemLike): number => {
+    const pairs = problem.employees.flatMap((e) => problem.shifts.map((s) => ({ employeeId: e.id, shiftId: s.id })));
+    let best = 0;
+    for (let mask = 0; mask < 1 << pairs.length; mask++) {
+      const chosen = pairs.filter((_, i) => mask & (1 << i));
+      if (chosen.length > best && findConstraintViolations(problem, chosen).length === 0) best = chosen.length;
+    }
+    return best;
+  };
+
+  it.each(cases)('the validator and the brute force agree on the shape: %s', (_name, problem) => {
+    // A sanity floor: every case admits a schedule better than one seat, so
+    // "CP-SAT matched the optimum" cannot pass by both being trivial.
+    expect(bestLegalSeats(problem)).toBeGreaterThan(1);
+  });
+
+  it.each(cases)('the greedy breaks no rule on: %s', async (_name, problem) => {
+    const assignments = toValidated(await new ScheduleOptimizer().generateGreedySchedule(problem));
+    expect(findConstraintViolations(problem, assignments)).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it.each(cases)('breaks no rule and fills the most legal seats on: %s', (_name, problem) => {
+      const assignments = runPython(problem);
+      expect(findConstraintViolations(problem, assignments)).toEqual([]);
+      expect(assignments).toHaveLength(bestLegalSeats(problem));
+    });
+  });
+});
+
+type OptimizationProblemLike = Parameters<typeof findConstraintViolations>[0];

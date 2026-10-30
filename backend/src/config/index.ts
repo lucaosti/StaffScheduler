@@ -105,6 +105,28 @@ function requireHttpOrigin(value: string): void {
   }
 }
 
+/**
+ * The least OPTIMIZATION_TIMEOUT the solver bridge can honour, in ms.
+ *
+ * The solver is given the watchdog minus a margin of at least 5 s, and never
+ * less than 1 s (`solverTimeLimitSeconds`). Below about 6 s that limit reaches
+ * the watchdog itself, so a run searching to its limit is killed first — the
+ * race #837 removed. Ten seconds keeps at least 5 s of search and 5 s of
+ * margin. Refused rather than raised: a value this small is a mistake, and
+ * silently running with a different one would hide it.
+ */
+const MIN_OPTIMIZATION_TIMEOUT_MS = 10_000;
+
+function parseOptimizationTimeout(raw: string | undefined): number {
+  const value = parseInt(raw || '300000', 10);
+  if (!Number.isFinite(value) || value < MIN_OPTIMIZATION_TIMEOUT_MS) {
+    throw new Error(
+      `[config] OPTIMIZATION_TIMEOUT must be at least ${MIN_OPTIMIZATION_TIMEOUT_MS} ms, got "${raw}"`
+    );
+  }
+  return value;
+}
+
 const corsAllowedOrigins = parseOriginList(process.env.CORS_ORIGIN, 'http://localhost:3000');
 requireHttpOrigin(corsAllowedOrigins[0]);
 
@@ -237,7 +259,7 @@ export const config = {
     // (engine/degraded surfaced in the result). 'greedy' (or legacy
     // 'javascript') selects the fast best-effort draft engine on purpose.
     engine: process.env.OPTIMIZATION_ENGINE || 'or-tools',
-    timeout: parseInt(process.env.OPTIMIZATION_TIMEOUT || '300000'), // 5 minutes
+    timeout: parseOptimizationTimeout(process.env.OPTIMIZATION_TIMEOUT), // 5 minutes by default
     maxIterations: parseInt(process.env.OPTIMIZATION_MAX_ITERATIONS || '10000'),
     populationSize: parseInt(process.env.OPTIMIZATION_POPULATION_SIZE || '100'),
     mutationRate: parseFloat(process.env.OPTIMIZATION_MUTATION_RATE || '0.1'),

@@ -2988,8 +2988,19 @@ describe('session lifecycle (#816, #818, #820)', () => {
 describe('working-time limits reach the optimizer (#838, #883)', () => {
   const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
 
-  /** A draft schedule whose only candidate is a new user; returns both ids. */
-  const loneCandidateSchedule = async (): Promise<{ scheduleId: number; personId: number }> => {
+  /** The default two shifts: 14:00-22:00, then 07:00-15:00 the next day — 9 h between them. */
+  const TURNAROUND: Array<[number, string, string]> = [
+    [61, '14:00:00', '22:00:00'],
+    [62, '07:00:00', '15:00:00'],
+  ];
+
+  /**
+   * A draft schedule whose only candidate is a new user, with the given shifts
+   * as [days from today, start, end]; returns both ids.
+   */
+  const loneCandidateSchedule = async (
+    shifts: Array<[number, string, string]> = TURNAROUND
+  ): Promise<{ scheduleId: number; personId: number }> => {
     const [dept] = await admin.query<mysql.ResultSetHeader>(
       `INSERT INTO departments (name, description, is_active) VALUES (?, 'limits', 1)`,
       [`limits-${tag()}`]
@@ -3008,14 +3019,49 @@ describe('working-time limits reach the optimizer (#838, #883)', () => {
        VALUES (?, CURDATE() + INTERVAL 60 DAY, CURDATE() + INTERVAL 66 DAY, ?, 'draft', ?)`,
       [`limits-${tag()}`, dept.insertId, userId]
     );
-    // 14:00-22:00, then 07:00-15:00 the next day: 9 h between them.
-    await admin.query(
-      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
-       VALUES (?, ?, CURDATE() + INTERVAL 61 DAY, '14:00:00', '22:00:00', 1, 1, 'open'),
-              (?, ?, CURDATE() + INTERVAL 62 DAY, '07:00:00', '15:00:00', 1, 1, 'open')`,
-      [sc.insertId, dept.insertId, sc.insertId, dept.insertId]
-    );
+    for (const [days, start, end] of shifts) {
+      await admin.query(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, ?, ?, 1, 1, 'open')`,
+        [sc.insertId, dept.insertId, days, start, end]
+      );
+    }
     return { scheduleId: sc.insertId, personId: person.insertId };
+  };
+
+  /** Runs `body` with a global policy in force, removing it afterwards. */
+  const withPolicy = async (key: string, value: object, body: () => Promise<void>): Promise<void> => {
+    const [policy] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO policies (scope_type, scope_id, policy_key, policy_value, imposed_by_user_id, is_active)
+       VALUES ('global', NULL, ?, ?, ?, 1)`,
+      [key, JSON.stringify(value), userId]
+    );
+    try {
+      await body();
+    } finally {
+      // Global: left in place it would hold every later test to it.
+      await admin.query('DELETE FROM policies WHERE id = ?', [policy.insertId]);
+    }
+  };
+
+  /** A preferences row as PreferencesService creates one: 40 h, 5 days. */
+  const defaultPreferences = (personId: number) =>
+    admin.query(`INSERT INTO user_preferences (user_id) VALUES (?)`, [personId]);
+
+  const assignContract = async (
+    personId: number,
+    restHours: number,
+    until: string | null = null
+  ): Promise<void> => {
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, min_hours_between_shifts, is_active) VALUES (?, ?, 1)`,
+      [`${restHours}h rest ${tag()}`, restHours]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from, effective_to)
+       VALUES (?, ?, CURDATE(), ${until ?? 'NULL'})`,
+      [personId, contract.insertId]
+    );
   };
 
   const generate = async (scheduleId: number) => {
@@ -3034,30 +3080,50 @@ describe('working-time limits reach the optimizer (#838, #883)', () => {
 
   it('refuses it to someone whose contract requires 11 h of rest', async () => {
     const { scheduleId, personId } = await loneCandidateSchedule();
-    const [contract] = await admin.query<mysql.ResultSetHeader>(
-      `INSERT INTO employment_contracts (name, min_hours_between_shifts, is_active) VALUES (?, 11, 1)`,
-      [`11h rest ${tag()}`]
-    );
-    await admin.query(
-      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE())`,
-      [personId, contract.insertId]
-    );
+    await assignContract(personId, 11);
 
     expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
   });
 
   it("refuses it under the organization's 11 h rest policy", async () => {
     const { scheduleId } = await loneCandidateSchedule();
-    const [policy] = await admin.query<mysql.ResultSetHeader>(
-      `INSERT INTO policies (scope_type, scope_id, policy_key, policy_value, imposed_by_user_id, is_active)
-       VALUES ('global', NULL, 'min_rest_hours', '{"hours": 11}', ?, 1)`,
-      [userId]
-    );
-    try {
+    await withPolicy('min_rest_hours', { hours: 11 }, async () => {
       expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
-    } finally {
-      // Global: left in place it would hold every later test to 11 h.
-      await admin.query('DELETE FROM policies WHERE id = ?', [policy.insertId]);
-    }
+    });
+  });
+
+  it('refuses it under an 11 h policy to someone whose 8 h contract ends before the turnaround', async () => {
+    // The contract covers the first shift's day but not the second's; the
+    // policy governs the day it does not cover — and is a ceiling anyway.
+    const { scheduleId, personId } = await loneCandidateSchedule();
+    await assignContract(personId, 8, 'CURDATE() + INTERVAL 61 DAY');
+    await withPolicy('min_rest_hours', { hours: 11 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(1);
+    });
+  });
+
+  it("does not let a default preferences row lift the organization's weekly-hours policy", async () => {
+    // Three 8 h day shifts, two days apart, under a 16 h week.
+    const { scheduleId, personId } = await loneCandidateSchedule([
+      [61, '09:00:00', '17:00:00'],
+      [63, '09:00:00', '17:00:00'],
+      [65, '09:00:00', '17:00:00'],
+    ]);
+    await defaultPreferences(personId);
+    await withPolicy('max_hours_week', { hours: 16 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+    });
+  });
+
+  it("does not let a default preferences row lift the organization's consecutive-days policy", async () => {
+    const { scheduleId, personId } = await loneCandidateSchedule([
+      [61, '09:00:00', '17:00:00'],
+      [62, '09:00:00', '17:00:00'],
+      [63, '09:00:00', '17:00:00'],
+    ]);
+    await defaultPreferences(personId);
+    await withPolicy('max_consecutive_days', { days: 2 }, async () => {
+      expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
+    });
   });
 });

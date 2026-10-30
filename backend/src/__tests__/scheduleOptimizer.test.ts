@@ -18,6 +18,7 @@ import {
   MAX_STDERR_TAIL_CHARS,
   MAX_STDOUT_BYTES,
   solverTimeLimitSeconds,
+  STDIN_ERROR_GRACE_MS,
 } from '../optimization/ScheduleOptimizerORTools';
 
 jest.mock('child_process', () => ({
@@ -668,18 +669,37 @@ describe('ScheduleOptimizer subprocess failures (#836)', () => {
     jest.useRealTimers();
   });
 
-  it('falls back to greedy when writing the problem fails with EPIPE', async () => {
+  it('falls back to greedy when writing the problem fails with EPIPE and the child never exits', async () => {
+    jest.useFakeTimers();
     const proc = buildHangingProcess();
     mockedSpawn.mockReturnValue(proc);
 
     const resultPromise = new ScheduleOptimizer().optimize(problem());
     // What a real pipe emits when the child exits before reading the payload.
     proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    jest.advanceTimersByTime(STDIN_ERROR_GRACE_MS);
     const result = await resultPromise;
 
     expect(result.status).toBe('GREEDY_FALLBACK');
     expect(result.error).toContain('EPIPE');
     expect(result.assignments).toEqual([expect.objectContaining({ employeeId: 'e1', shiftId: 's1' })]);
+  });
+
+  it("reports the child's own reason, not the EPIPE that preceded its exit", async () => {
+    // The EPIPE nearly always wins the race with 'close'; settling on it made
+    // every such degraded reason "write EPIPE" and dropped the traceback.
+    const proc = buildHangingProcess();
+    mockedSpawn.mockReturnValue(proc);
+
+    const resultPromise = new ScheduleOptimizer().optimize(problem());
+    proc.stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }));
+    proc.stderr.emit('data', Buffer.from("ModuleNotFoundError: No module named 'ortools'\n"));
+    proc.emit('close', 1);
+    const result = await resultPromise;
+
+    expect(result.status).toBe('GREEDY_FALLBACK');
+    expect(result.error).toContain("ModuleNotFoundError: No module named 'ortools'");
+    expect(result.error).not.toContain('EPIPE');
   });
 
   it('escalates to SIGKILL when the solver ignores SIGTERM', async () => {

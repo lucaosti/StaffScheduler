@@ -384,7 +384,7 @@ describe('AutoScheduleService.generate', () => {
 
       await new AutoScheduleService(pool).generate(1, 7);
 
-      // resolveLimitsForPeriod binds [endDate, startDate].
+      // resolveForPeriod binds [endDate, startDate].
       expect(queryFor(execute, 'contracts')[1]).toEqual(['2026-05-31', '2026-05-01']);
     });
 
