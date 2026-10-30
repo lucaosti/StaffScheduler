@@ -99,14 +99,14 @@ describe('Sidebar', () => {
 describe('Header', () => {
   it('toggles sidebar via the button', async () => {
     const onToggle = jest.fn();
-    render(wrap(<Header onToggleSidebar={onToggle} />));
+    render(wrap(<Header onToggleSidebar={onToggle} sidebarExpanded />));
     fireEvent.click(screen.getByLabelText(/toggle sidebar/i));
     expect(onToggle).toHaveBeenCalled();
     await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
   });
 
   it('shows no badge and the empty state when there are no notifications', async () => {
-    render(wrap(<Header onToggleSidebar={jest.fn()} />));
+    render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
     await waitFor(() =>
       expect(notificationService.getUnreadCount).toHaveBeenCalled()
     );
@@ -126,7 +126,7 @@ describe('Header', () => {
       ],
     });
 
-    render(wrap(<Header onToggleSidebar={jest.fn()} />));
+    render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
     expect(await screen.findByLabelText('Notifications (2 unread)')).toBeInTheDocument();
     const item = await screen.findByText('Shift assigned');
@@ -149,7 +149,7 @@ describe('Header', () => {
       ],
     });
 
-    render(wrap(<Header onToggleSidebar={jest.fn()} />));
+    render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
     const markAll = await screen.findByRole('button', { name: /mark all read/i });
     fireEvent.click(markAll);
@@ -164,7 +164,7 @@ describe('Header', () => {
     (notificationService.getUnreadCount as jest.Mock).mockRejectedValue(new Error('network'));
     (notificationService.listNotifications as jest.Mock).mockRejectedValue(new Error('network'));
 
-    render(wrap(<Header onToggleSidebar={jest.fn()} />));
+    render(wrap(<Header onToggleSidebar={jest.fn()} sidebarExpanded />));
 
     await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
     expect(screen.getByText('No new notifications')).toBeInTheDocument();
@@ -185,6 +185,67 @@ describe('Layout', () => {
     expect(screen.getByText('OUTLET')).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText(/toggle sidebar/i));
     await waitFor(() => expect(notificationService.getUnreadCount).toHaveBeenCalled());
+  });
+
+  // Below the shell breakpoint the sidebar is off-canvas and only the `show`
+  // class reveals it; the toggle used to flip `collapsed` instead, so on a
+  // phone no other page could be reached (#890).
+  describe('on a phone-width viewport', () => {
+    const realMatchMedia = window.matchMedia;
+    beforeEach(() => {
+      window.matchMedia = ((query: string) => ({
+        ...realMatchMedia(query),
+        matches: query.includes('max-width'),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      })) as typeof window.matchMedia;
+    });
+    afterEach(() => {
+      window.matchMedia = realMatchMedia;
+    });
+
+    const renderShell = () =>
+      render(
+        wrap(
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<div>OUTLET</div>} />
+              <Route path="/employees" element={<div>EMPLOYEES</div>} />
+            </Route>
+          </Routes>
+        )
+      );
+    const sidebar = (container: HTMLElement) => container.querySelector('.sidebar') as HTMLElement;
+
+    it('opens the off-canvas sidebar from the menu button', () => {
+      const { container } = renderShell();
+      const toggle = screen.getByLabelText(/toggle sidebar/i);
+      expect(sidebar(container)).not.toHaveClass('show');
+      expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+      fireEvent.click(toggle);
+      expect(sidebar(container)).toHaveClass('show');
+      expect(sidebar(container)).not.toHaveClass('collapsed');
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('closes on the backdrop, on Escape, and after navigating', () => {
+      const { container } = renderShell();
+      const toggle = screen.getByLabelText(/toggle sidebar/i);
+
+      fireEvent.click(toggle);
+      fireEvent.click(container.querySelector('.sidebar-backdrop') as HTMLElement);
+      expect(sidebar(container)).not.toHaveClass('show');
+
+      fireEvent.click(toggle);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(sidebar(container)).not.toHaveClass('show');
+
+      fireEvent.click(toggle);
+      fireEvent.click(screen.getByRole('link', { name: /employees/i }));
+      expect(screen.getByText('EMPLOYEES')).toBeInTheDocument();
+      expect(sidebar(container)).not.toHaveClass('show');
+    });
   });
 });
 
