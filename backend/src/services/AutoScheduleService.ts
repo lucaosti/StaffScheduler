@@ -1,11 +1,12 @@
 /**
  * Auto-schedule orchestrator (F09).
  *
- * Glues the optimization engine to the database as five named steps:
+ * Glues the optimization engine to the database as six named steps:
  *
  *   load    → AutoScheduleInputLoader, which owns every read
  *   build   → buildOptimizationProblem, a pure function over those rows
  *   solve   → the selected engine, with any degradation surfaced
+ *   check   → ComplianceEngine over what the run would add; violators withheld
  *   diff    → which published commitments this run kept and which it broke
  *   persist → a replan proposal for a published schedule, rows for a draft
  *
@@ -45,7 +46,8 @@ import { config } from '../config';
 import { OptimizationFailedError } from '../errors';
 import { ReplanProposalService } from './ReplanProposalService';
 import { AutoScheduleInputLoader } from './AutoScheduleInputLoader';
-import { buildOptimizationProblem, type ScheduleInputs } from './autoScheduleProblem';
+import { buildOptimizationProblem, fixedOnThisSchedule, type ScheduleInputs } from './autoScheduleProblem';
+import { describeWithheld, withholdNonCompliant } from './generatedScheduleCompliance';
 
 export interface AutoScheduleResult {
   scheduleId: number;
@@ -78,9 +80,10 @@ export interface AutoScheduleResult {
   brokenCommitments: Array<{ userId: number; shiftId: number }>;
   /**
    * True when the optimal engine (or-tools) was requested but the run fell back
-   * to greedy (Python unavailable/timed out, or the solver errored). Always
-   * false for an intentionally-selected greedy draft. Lets the UI flag "this is
-   * a draft, not the optimum" clearly rather than silently.
+   * to greedy (Python unavailable/timed out, or the solver errored), or when
+   * the post-solve compliance check withheld assignments (#963). Otherwise
+   * false, including for an intentionally-selected greedy draft. Lets the UI
+   * flag "this is a draft, not the optimum" clearly rather than silently.
    */
   degraded: boolean;
   /** Why the run degraded, when it did (for logs and the UI banner). */
@@ -144,7 +147,11 @@ export class AutoScheduleService {
     }
 
     const totalShifts = inputs.shifts.length;
-    const solved = await this.solve(buildOptimizationProblem(inputs), scheduleId);
+    const solved = this.withholdNonCompliant(
+      inputs,
+      await this.solve(buildOptimizationProblem(inputs), scheduleId),
+      scheduleId
+    );
     const diff = this.diffCommitments(inputs, solved.assignments, scheduleId);
     const { engine, degraded, degradedReason } = solved;
 
@@ -263,6 +270,39 @@ export class AutoScheduleService {
   }
 
   /**
+   * The safety check between solving and persisting (#963): an assignment
+   * ComplianceEngine would refuse is withheld rather than written or
+   * proposed, and the run says so — see `generatedScheduleCompliance` for why
+   * withholding beat refusing the whole schedule.
+   *
+   * Reported through `degraded`, the signal the UI already treats as "this is
+   * not the optimum the engine was asked for": a schedule with assignments
+   * removed after solving is exactly that, whichever engine produced it. A
+   * degraded reason the solve already carried is kept ahead of this one.
+   */
+  private withholdNonCompliant(
+    inputs: ScheduleInputs,
+    solved: SolveOutcome,
+    scheduleId: number
+  ): SolveOutcome {
+    const { kept, withheld } = withholdNonCompliant(inputs, solved.assignments);
+    if (withheld.length === 0) return solved;
+
+    const reason = describeWithheld(withheld);
+    logger.warn(
+      `Optimization for schedule=${scheduleId} (engine ${solved.engine}) produced ` +
+        `${withheld.length} assignment(s) ComplianceEngine refuses; withheld: ` +
+        withheld.map((w) => `user ${w.userId} shift ${w.shiftId} [${w.violations.join('; ')}]`).join(', ')
+    );
+    return {
+      ...solved,
+      assignments: kept,
+      degraded: true,
+      degradedReason: solved.degradedReason ? `${solved.degradedReason}; ${reason}` : reason,
+    };
+  }
+
+  /**
    * The DIFF IS THE DELIVERABLE, not the schedule.
    *
    * A planner approving a re-solve needs to know what CHANGED for whom, not to
@@ -277,7 +317,12 @@ export class AutoScheduleService {
     assignments: ScheduleAssignment[],
     scheduleId: number
   ): Pick<AutoScheduleResult, 'keptCommitments' | 'brokenCommitments'> {
-    const proposed = new Set(assignments.map((a) => `${a.employeeId}:${a.shiftId}`));
+    // A draft's held rows stay as they are — they were fixed work, not
+    // decisions — so a commitment among them is kept by construction.
+    const proposed = new Set([
+      ...assignments.map((a) => `${a.employeeId}:${a.shiftId}`),
+      ...fixedOnThisSchedule(inputs).map((h) => `${h.employee_id}:${h.shift_id}`),
+    ]);
     const brokenCommitments = inputs.pinned
       .filter((p) => !proposed.has(`${p.employee_id}:${p.shift_id}`))
       .map((p) => ({ userId: Number(p.employee_id), shiftId: Number(p.shift_id) }));

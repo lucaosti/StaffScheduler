@@ -7226,9 +7226,9 @@ export interface paths {
                              * @enum {string}
                              */
                             engine?: "or-tools" | "greedy";
-                            /** @description True when the optimal engine was requested but the run fell back to greedy (e.g. OR-Tools unavailable). The result is a draft, not the optimum. */
+                            /** @description True when the optimal engine was requested but the run fell back to greedy (e.g. OR-Tools unavailable), or when the post-solve ComplianceEngine check withheld assignments that would break a working-time limit. The result is a draft, not the optimum. */
                             degraded?: boolean;
-                            /** @description Why the run degraded to greedy, when it did. */
+                            /** @description Why the run degraded, when it did: the fallback reason, and each withheld assignment (user, shift, rule). */
                             degradedReason?: string;
                         };
                     };
@@ -10687,7 +10687,7 @@ export interface paths {
                                      * @enum {string}
                                      */
                                     engine?: "or-tools" | "greedy";
-                                    /** @description True when the optimum was requested but the run fell back to greedy. */
+                                    /** @description True when the optimum was requested but the run fell back to greedy, or when the post-solve compliance check withheld assignments. */
                                     degraded?: boolean;
                                     degradedReason?: string;
                                 };

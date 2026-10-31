@@ -102,7 +102,14 @@ export interface ScheduleInputs {
   schedule: ScheduleRow;
   shifts: ShiftInputRow[];
   employees: EmployeeInputRow[];
+  /** The held assignments that are published commitments (`is_pinned`). */
   pinned: Array<{ employee_id: string; shift_id: string }>;
+  /**
+   * Every live assignment already on this schedule, pinned or not. On a
+   * draft they are kept as they are and the run plans around them — see
+   * `fixedOnThisSchedule`.
+   */
+  held: Array<{ employee_id: string; shift_id: string }>;
   pairings: Array<{ employee_id: string; other_id: string; kind: 'apart' | 'requires' }>;
   contractLimits: Map<number, ContractLimits>;
   /**
@@ -241,53 +248,109 @@ export const carriedLoads = (
  * The contract's OTHER limits (minimum weekly hours, daily cap, days off) have
  * no policy or setting layer, so they still come from the contract directly,
  * with the preference row for minimum hours.
+ *
+ * WHAT IS ALREADY ON A DRAFT IS FIXED WORK (#963). A held assignment enters
+ * the problem twice, through features both engines already enforce rather
+ * than a new rule: as an `existing_assignment` of its holder, so it counts
+ * toward their rest, daily, weekly and consecutive-day limits (and, overlapping
+ * itself, keeps them off the same shift), and as a seat taken on its shift, by
+ * lowering the shift's min/max staff. The run then fills only what is still
+ * open, which is what the draft path's INSERT IGNORE always did — it was the
+ * solve that did not know.
  */
-export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationProblem => ({
-  shifts: inputs.shifts.map((s) => ({
-    id: String(s.id),
-    date: DateUtils.toDateString(s.date),
-    start_time: s.start_time,
-    end_time: s.end_time,
-    min_staff: s.min_staff,
-    max_staff: s.max_staff,
-    required_skills: namesOf(s.skill_names),
-    required_skill_levels: parseSkillLevels(s.skill_levels),
-    qualified_staff: parseQualifiedStaff(s.qualified_staff),
-  })),
-  employees: inputs.employees.map((e) => {
-    const limits = inputs.contractLimits.get(e.id);
-    const working = inputs.workingTimeLimits.get(e.id);
-    if (!working) throw new Error(`No working-time limits were resolved for employee ${e.id}`);
+export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationProblem => {
+  const fixed = fixedOnThisSchedule(inputs);
+  const seatsTaken = new Map<string, number>();
+  for (const h of fixed) seatsTaken.set(h.shift_id, (seatsTaken.get(h.shift_id) ?? 0) + 1);
+
+  const shifts = inputs.shifts.map((s) => {
+    const taken = seatsTaken.get(String(s.id)) ?? 0;
     return {
-      id: String(e.id),
-      max_hours_per_week: working.maxHoursPerWeek,
-      min_hours_per_week: limits?.minHoursPerWeek ?? e.min_hours_per_week,
-      max_consecutive_days: working.maxConsecutiveDays,
-      min_hours_between_shifts: working.minRestHoursBetweenShifts,
-      // Absent when no contract sets one; the engines then fall back to the
-      // historical derived formula rather than leaving the day uncapped.
-      max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
-      min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
-      min_days_off_per_period: limits?.minDaysOffPerPeriod ?? undefined,
-      // Steers the solver's search only — see the field's own doc comment
-      // in optimization/types.ts for why this must never reach a log line
-      // or an API response.
-      hourly_rate: e.hourly_rate != null ? Number(e.hourly_rate) : undefined,
-      skills: namesOf(e.skill_names),
-      skill_levels: parseSkillLevels(e.skill_levels),
-      unavailable_dates: inputs.unavailableByUser.get(e.id) ?? [],
-      existing_assignments: inputs.externalAssignmentsByUser.get(e.id) ?? [],
-      carried_load: inputs.carried.get(e.id),
-      consecutive_category_periods: inputs.rotationHistory.get(e.id),
+      id: String(s.id),
+      date: DateUtils.toDateString(s.date),
+      start_time: s.start_time,
+      end_time: s.end_time,
+      min_staff: Math.max(0, s.min_staff - taken),
+      max_staff: Math.max(0, s.max_staff - taken),
+      required_skills: namesOf(s.skill_names),
+      required_skill_levels: parseSkillLevels(s.skill_levels),
+      qualified_staff: parseQualifiedStaff(s.qualified_staff),
     };
-  }),
-  pinned_assignments: inputs.pinned,
-  pairings: inputs.pairings,
-  // An empty map rather than an empty array: `preferences` is keyed by employee
-  // id on both sides of the wire, and the array literal that used to sit here
-  // is half of why the whole problem had to be cast through `as never`. The
-  // Python solver defaults the key to `{}` and tests membership, so an empty
-  // map and an empty array behaved identically — the type was simply wrong.
-  preferences: {},
-  constraints: {},
-});
+  });
+
+  const shiftsById = new Map(shifts.map((s) => [s.id, s]));
+  const fixedWork = new Map<string, Array<{ date: string; start_time: string; end_time: string }>>();
+  for (const h of fixed) {
+    const s = shiftsById.get(h.shift_id);
+    if (!s) continue;
+    fixedWork.set(h.employee_id, [
+      ...(fixedWork.get(h.employee_id) ?? []),
+      { date: s.date, start_time: s.start_time, end_time: s.end_time },
+    ]);
+  }
+
+  return {
+    shifts,
+    employees: inputs.employees.map((e) => {
+      const limits = inputs.contractLimits.get(e.id);
+      const working = inputs.workingTimeLimits.get(e.id);
+      if (!working) throw new Error(`No working-time limits were resolved for employee ${e.id}`);
+      return {
+        id: String(e.id),
+        max_hours_per_week: working.maxHoursPerWeek,
+        min_hours_per_week: limits?.minHoursPerWeek ?? e.min_hours_per_week,
+        max_consecutive_days: working.maxConsecutiveDays,
+        min_hours_between_shifts: working.minRestHoursBetweenShifts,
+        // Absent when no contract sets one; the engines then fall back to the
+        // historical derived formula rather than leaving the day uncapped.
+        max_hours_per_day: limits?.maxHoursPerDay ?? undefined,
+        min_consecutive_days_off: limits?.minConsecutiveDaysOff ?? undefined,
+        min_days_off_per_period: limits?.minDaysOffPerPeriod ?? undefined,
+        // Steers the solver's search only — see the field's own doc comment
+        // in optimization/types.ts for why this must never reach a log line
+        // or an API response.
+        hourly_rate: e.hourly_rate != null ? Number(e.hourly_rate) : undefined,
+        skills: namesOf(e.skill_names),
+        skill_levels: parseSkillLevels(e.skill_levels),
+        unavailable_dates: inputs.unavailableByUser.get(e.id) ?? [],
+        existing_assignments: [
+          ...(inputs.externalAssignmentsByUser.get(e.id) ?? []),
+          ...(fixedWork.get(String(e.id)) ?? []),
+        ],
+        carried_load: inputs.carried.get(e.id),
+        consecutive_category_periods: inputs.rotationHistory.get(e.id),
+      };
+    }),
+    // A pin weighs keeping a commitment the solver may still move; on a draft
+    // every held row is already fixed work above, so a pin would only reward a
+    // pairing the fixed copy makes impossible.
+    pinned_assignments: inputs.schedule.status === 'published' ? inputs.pinned : [],
+    pairings: inputs.pairings,
+    // An empty map rather than an empty array: `preferences` is keyed by employee
+    // id on both sides of the wire, and the array literal that used to sit here
+    // is half of why the whole problem had to be cast through `as never`. The
+    // Python solver defaults the key to `{}` and tests membership, so an empty
+    // map and an empty array behaved identically — the type was simply wrong.
+    preferences: {},
+    constraints: {},
+  };
+};
+
+/**
+ * The assignments already on this schedule that a run must keep and plan
+ * around: every held row of a draft, none of a published schedule.
+ *
+ * The asymmetry follows the persistence paths. A draft's run inserts beside
+ * what is there and removes nothing, so whatever is held stays and the solve
+ * has to treat it as fact. A published schedule's run proposes a WHOLE new
+ * set that replaces the current one on approval, so its rows are not fixed:
+ * they are the pinned commitments the solver is asked to keep.
+ *
+ * Replacing a draft's unpinned rows on every run was the alternative, and was
+ * rejected: nothing distinguishes an earlier run's row from one a manager made
+ * by hand, and silently deleting manual work is a worse failure than planning
+ * around it. A planner who wants a clean re-run clears the draft first.
+ */
+export const fixedOnThisSchedule = (
+  inputs: Pick<ScheduleInputs, 'schedule' | 'held'>
+): ScheduleInputs['held'] => (inputs.schedule.status === 'published' ? [] : inputs.held);

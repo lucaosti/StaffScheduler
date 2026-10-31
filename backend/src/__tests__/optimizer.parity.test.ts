@@ -2344,6 +2344,7 @@ describe('per-employee rest reaches both engines', () => {
       ],
       employees: [{ id: 7, min_hours_per_week: 0 }],
       pinned: [],
+      held: [],
       pairings: [],
       contractLimits: new Map(),
       workingTimeLimits: new Map([
@@ -2383,6 +2384,53 @@ describe('per-employee rest reaches both engines', () => {
       expect(at8).toHaveLength(2);
       expect(at11).toHaveLength(1);
       expect(findConstraintViolations(restProblem(11), at11)).toEqual([]);
+    });
+  });
+});
+
+/**
+ * Work already held on a draft reaches both engines as fixed work (#963).
+ *
+ * The builder used to leave a draft's live assignments out of the problem
+ * while persisting beside them, so a morning someone already held was
+ * invisible and both engines happily gave them the night before it. Built
+ * through buildOptimizationProblem, as production builds it: the night shift
+ * then has no legal taker — the holder would have 0 h of rest, the other
+ * person is away — and the held morning has no seat left.
+ */
+describe("a draft's held work reaches both engines", () => {
+  const heldProblem = () =>
+    buildOptimizationProblem({
+      schedule: { id: 1, department_id: 1, start_date: '2026-03-02', end_date: '2026-03-03', status: 'draft' },
+      shifts: [
+        { id: 1, date: '2026-03-02', start_time: '23:00', end_time: '07:00', min_staff: 1, max_staff: 1 },
+        { id: 2, date: '2026-03-03', start_time: '07:00', end_time: '15:00', min_staff: 1, max_staff: 1 },
+      ],
+      employees: [
+        { id: 7, min_hours_per_week: 0 },
+        { id: 8, min_hours_per_week: 0 },
+      ],
+      pinned: [],
+      held: [{ employee_id: '7', shift_id: '2' }],
+      pairings: [],
+      contractLimits: new Map(),
+      workingTimeLimits: new Map(
+        [7, 8].map((id) => [id, { maxHoursPerWeek: 40, maxConsecutiveDays: 5, minRestHoursBetweenShifts: 8 }])
+      ),
+      unavailableByUser: new Map([[8, ['2026-03-02']]]),
+      externalAssignmentsByUser: new Map(),
+      carried: new Map(),
+      rotationHistory: new Map(),
+    });
+
+  it('the greedy engine assigns nothing', async () => {
+    const out = toValidated(await new ScheduleOptimizer().generateGreedySchedule(heldProblem()));
+    expect(out).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it('assigns nothing', () => {
+      expect(runPython(heldProblem())).toEqual([]);
     });
   });
 });
