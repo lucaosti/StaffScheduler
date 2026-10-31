@@ -819,9 +819,31 @@ Redis is available (`backend/src/services/OptimizationQueue.ts`, BullMQ):
   `202 { jobId }` immediately instead of holding the request open.
 - `GET /api/schedules/:id/optimization` reports the job `state`, `progress`
   and `result`.
-- `DELETE /api/schedules/:id/optimization` cancels an in-flight job.
+- `DELETE /api/schedules/:id/optimization` cancels the job: `200` when it
+  had not started (it is removed), `202` when it is running (it is asked to
+  stop, and ends in state `cancelled`), `409 OPTIMIZATION_NOT_CANCELLABLE`
+  when it already completed or failed, `404` when there is none.
 - Progress is also pushed over the SSE stream as `optimization.progress`,
-  `optimization.completed` and `optimization.failed` events.
+  `optimization.completed`, `optimization.failed` and
+  `optimization.cancelled` events.
+
+**Cancelling a running job is cooperative** (#966). BullMQ refuses to remove
+a job "locked by another worker", which used to answer 500, and removal would
+not stop a solve running in a worker process anyway — possibly on another
+replica. The request is a Redis key (`optimization:cancel:{jobId}`) that the
+worker running the job checks every 500 ms; on seeing it, the worker aborts
+the run's cancellation signal, carried to the engines through
+`AsyncLocalStorage` (`optimization/cancellation.ts`) rather than as a
+parameter through every layer, the way the request id travels. The CP-SAT
+child is killed, the greedy engine stops between shifts, and neither falls
+back to the other — a fallback would produce, for the caller to persist, the
+very schedule that was cancelled — so the run rejects before anything is
+written and the job fails with the cancellation reason, which the status
+endpoint reports as `cancelled`. A run whose solve had already finished when
+the request arrived is past that point and completes. BullMQ's own
+`Worker.cancelJob` was rejected because it only reaches a job held by the
+worker object it is called on, i.e. only when the request happens to land on
+the replica running the job.
 
 The job id is deterministic per schedule (`schedule-{id}`; BullMQ rejects `:` in custom ids), so a second
 generate while one is in flight returns the same job rather than starting a

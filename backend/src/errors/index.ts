@@ -97,6 +97,29 @@ export class ServiceUnavailableError extends AppError {
 }
 
 /**
+ * 409 — an optimization job that cannot be cancelled any more: it already
+ * completed or failed (#966). A distinct code so a client can tell "too
+ * late, the run finished" from a generic conflict and re-read its result.
+ */
+export class OptimizationNotCancellableError extends AppError {
+  constructor(message = 'The optimization run has already finished and cannot be cancelled') {
+    super(message, 409, 'OPTIMIZATION_NOT_CANCELLABLE');
+  }
+}
+
+/**
+ * 409 — the optimization run was cancelled while it ran (#966). Raised by the
+ * engines when the run's cancellation signal fires, so the run stops before
+ * anything is persisted; in practice it ends a queued job, whose failure the
+ * status endpoint reports as `cancelled`.
+ */
+export class OptimizationCancelledError extends AppError {
+  constructor(message = 'The optimization run was cancelled') {
+    super(message, 409, 'OPTIMIZATION_CANCELLED');
+  }
+}
+
+/**
  * 500 — schedule generation produced no schedule from any engine.
  *
  * A server fault, but typed rather than a plain `Error` because the planner

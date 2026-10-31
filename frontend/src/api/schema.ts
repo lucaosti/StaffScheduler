@@ -10675,7 +10675,7 @@ export interface paths {
                             data?: {
                                 jobId?: string;
                                 /** @enum {string} */
-                                state?: "waiting" | "active" | "completed" | "failed" | "unknown";
+                                state?: "waiting" | "active" | "completed" | "failed" | "cancelled" | "unknown";
                                 progress?: number;
                                 result?: {
                                     assignmentsCreated?: number;
@@ -10705,7 +10705,7 @@ export interface paths {
         post?: never;
         /**
          * Cancel optimization job
-         * @description Cancels the schedule's in-flight or retained optimization job. Requires schedule.optimize.
+         * @description Cancels the schedule's optimization job. A job that has not started is removed (200). A running job is asked to stop (202): the solver is stopped and nothing is written, and the job then reports state `cancelled`; a run whose solve had already finished completes. A job that already completed or failed cannot be cancelled (409 `OPTIMIZATION_NOT_CANCELLABLE`). Requires schedule.optimize.
          */
         delete: {
             parameters: {
@@ -10718,7 +10718,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Cancelled. */
+                /** @description The job had not started and was removed. */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -10726,6 +10726,26 @@ export interface paths {
                     content: {
                         "application/json": {
                             success?: boolean;
+                            data?: {
+                                /** @enum {string} */
+                                state?: "cancelled";
+                            };
+                            message?: string;
+                        };
+                    };
+                };
+                /** @description The job is running; it was asked to stop and ends in state `cancelled`. */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            success?: boolean;
+                            data?: {
+                                /** @enum {string} */
+                                state?: "cancelling";
+                            };
                             message?: string;
                         };
                     };
@@ -10733,6 +10753,13 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                /** @description The job already completed or failed and cannot be cancelled (`OPTIMIZATION_NOT_CANCELLABLE`). */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
             };
         };
         options?: never;

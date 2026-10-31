@@ -138,7 +138,7 @@ interface OptimizationEnqueued {
 
 export interface OptimizationStatus {
   jobId: string;
-  state: 'waiting' | 'active' | 'completed' | 'failed' | 'unknown';
+  state: 'waiting' | 'active' | 'completed' | 'failed' | 'cancelled' | 'unknown';
   progress: number;
   result?: GenerateScheduleResponse;
   failedReason?: string;

@@ -18,6 +18,8 @@ import { join } from 'path';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem } from '../optimization/types';
 import { describeOrtools, solveCpSat } from './helpers/cpSat';
+import { runWithCancellation } from '../optimization/cancellation';
+import { OptimizationCancelledError } from '../errors';
 
 describe('ScheduleOptimizer with a solver that exits without reading its input', () => {
   let dir: string;
@@ -90,5 +92,66 @@ describeOrtools('schedule_optimizer.py time budget', () => {
 
     const elapsed = Number(/took ([\d.]+)s/.exec(result.error ?? '')?.[1]);
     expect(elapsed).toBeGreaterThanOrEqual(0.1);
+  });
+});
+
+/**
+ * Cooperative cancellation reaches the solver child (#966). A cancelled run
+ * must stop the CP-SAT process — not leave it computing a schedule nobody
+ * will read — and must not fall back to greedy, which would produce, and let
+ * the caller persist, the very schedule the planner just cancelled.
+ */
+describe('ScheduleOptimizer under a cancellation signal', () => {
+  let dir: string;
+  let stub: string;
+  const problem: OptimizationProblem = {
+    shifts: [{ id: 's1', date: '2026-03-02', start_time: '09:00', end_time: '17:00', min_staff: 1 }],
+    employees: [{ id: 'e1', max_hours_per_week: 40, skills: [], unavailable_dates: [] }],
+  };
+
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'optimizer-stub-'));
+    stub = join(dir, 'solves_forever.py');
+    // A solve that takes far longer than the test: reads its input, then waits.
+    writeFileSync(stub, 'import sys, time\nsys.stdin.read()\ntime.sleep(60)\n');
+  });
+
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  const optimizerOnStub = () => {
+    const optimizer = new ScheduleOptimizer();
+    (optimizer as unknown as { pythonScriptPath: string }).pythonScriptPath = stub;
+    return optimizer;
+  };
+
+  it('stops the running solver and rejects as cancelled, without a greedy fallback', async () => {
+    const controller = new AbortController();
+    const greedy = jest.spyOn(ScheduleOptimizer.prototype, 'generateGreedySchedule');
+    const started = Date.now();
+    setTimeout(() => controller.abort(), 300);
+
+    await expect(
+      runWithCancellation(controller.signal, () => optimizerOnStub().optimize(problem))
+    ).rejects.toBeInstanceOf(OptimizationCancelledError);
+
+    expect(Date.now() - started).toBeLessThan(10_000);
+    expect(greedy).not.toHaveBeenCalled();
+    greedy.mockRestore();
+  });
+
+  it('does not start a solve at all for a run already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runWithCancellation(controller.signal, () => optimizerOnStub().optimize(problem))
+    ).rejects.toBeInstanceOf(OptimizationCancelledError);
+  });
+
+  it('refuses a greedy run that was cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      runWithCancellation(controller.signal, () => optimizerOnStub().generateGreedySchedule(problem))
+    ).rejects.toBeInstanceOf(OptimizationCancelledError);
   });
 });

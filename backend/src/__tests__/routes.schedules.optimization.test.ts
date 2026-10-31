@@ -87,14 +87,31 @@ describe('GET /api/schedules/:id/optimization', () => {
 });
 
 describe('DELETE /api/schedules/:id/optimization', () => {
-  it('cancels an existing job', async () => {
-    (cancelOptimization as jest.Mock).mockResolvedValue(true);
+  it('answers 200 when a waiting job was removed before it started', async () => {
+    (cancelOptimization as jest.Mock).mockResolvedValue('removed');
     const res = await request(app()).delete('/api/schedules/5/optimization');
     expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ state: 'cancelled' });
+  });
+
+  // #966: a running job used to answer 500 ("locked by another worker").
+  it('answers 202 when a running job was asked to stop', async () => {
+    (cancelOptimization as jest.Mock).mockResolvedValue('cancelling');
+    const res = await request(app()).delete('/api/schedules/5/optimization');
+    expect(res.status).toBe(202);
+    expect(res.body.data).toEqual({ state: 'cancelling' });
+  });
+
+  it('answers 409 with a code when the job can no longer be cancelled', async () => {
+    const { OptimizationNotCancellableError } = jest.requireActual('../errors');
+    (cancelOptimization as jest.Mock).mockRejectedValue(new OptimizationNotCancellableError());
+    const res = await request(app()).delete('/api/schedules/5/optimization');
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('OPTIMIZATION_NOT_CANCELLABLE');
   });
 
   it('returns 404 when there is nothing to cancel', async () => {
-    (cancelOptimization as jest.Mock).mockResolvedValue(false);
+    (cancelOptimization as jest.Mock).mockResolvedValue(null);
     const res = await request(app()).delete('/api/schedules/5/optimization');
     expect(res.status).toBe(404);
   });

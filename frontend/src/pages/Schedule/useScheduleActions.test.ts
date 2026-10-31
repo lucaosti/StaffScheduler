@@ -239,6 +239,25 @@ describe('useScheduleActions', () => {
         expect(result.current.showGenerateModal).toBe(true);
       });
 
+      // #966: a job cancelled elsewhere ends in state 'cancelled'; polling it
+      // as if still running would spin until the timeout.
+      it('a cancelled job stops the polling and reports the cancellation', async () => {
+        mockGenerateSchedule.mockResolvedValue({ success: true, data: { jobId: 'job-4' } });
+        mockGetOptimizationStatus.mockResolvedValueOnce({
+          data: { state: 'cancelled', failedReason: "Cancelled at the planner's request" },
+        });
+
+        const { result } = renderActions();
+        act(() => result.current.openGenerateModal(5));
+
+        const submit = act(() => result.current.handleGenerateSchedule(formEvent()));
+        await jest.advanceTimersByTimeAsync(2000);
+        await submit;
+
+        expect(mockGetOptimizationStatus).toHaveBeenCalledTimes(1);
+        expect(result.current.generateError).toBe("Cancelled at the planner's request");
+      });
+
       it('a job that never leaves the queue times out with a translated message', async () => {
         mockGenerateSchedule.mockResolvedValue({ success: true, data: { jobId: 'job-3' } });
         mockGetOptimizationStatus.mockResolvedValue({ data: { state: 'waiting' } });

@@ -13475,6 +13475,7 @@
                             "active",
                             "completed",
                             "failed",
+                            "cancelled",
                             "unknown"
                           ]
                         },
@@ -13539,7 +13540,7 @@
           "Schedules"
         ],
         "summary": "Cancel optimization job",
-        "description": "Cancels the schedule's in-flight or retained optimization job. Requires schedule.optimize.",
+        "description": "Cancels the schedule's optimization job. A job that has not started is removed (200). A running job is asked to stop (202): the solver is stopped and nothing is written, and the job then reports state `cancelled`; a run whose solve had already finished completes. A job that already completed or failed cannot be cancelled (409 `OPTIMIZATION_NOT_CANCELLABLE`). Requires schedule.optimize.",
         "parameters": [
           {
             "$ref": "#/components/parameters/id"
@@ -13547,7 +13548,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Cancelled.",
+            "description": "The job had not started and was removed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -13555,6 +13556,46 @@
                   "properties": {
                     "success": {
                       "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "cancelled"
+                          ]
+                        }
+                      }
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The job is running; it was asked to stop and ends in state `cancelled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "cancelling"
+                          ]
+                        }
+                      }
                     },
                     "message": {
                       "type": "string"
@@ -13572,6 +13613,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The job already completed or failed and cannot be cancelled (`OPTIMIZATION_NOT_CANCELLABLE`)."
           }
         }
       }

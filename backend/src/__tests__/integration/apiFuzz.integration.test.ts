@@ -1082,7 +1082,6 @@ const KNOWN_FAILURES: Record<string, number> = {
   'DELETE /responsibility-rules/{id} | success-envelope | 200': 903,
   'DELETE /roles/{id} | success-envelope | 200': 903,
   'DELETE /roles/users/{userId}/{roleId} | success-envelope | 200': 903,
-  'DELETE /schedules/{id}/optimization | success-envelope | 200': 903,
   'DELETE /shifts/{id} | success-envelope | 200': 903,
   'DELETE /shifts/templates/{id} | success-envelope | 200': 903,
   'DELETE /skills/{id} | success-envelope | 200': 903,

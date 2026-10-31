@@ -44,6 +44,8 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { config } from '../config';
 import logger from '../config/logger';
+import { OptimizationCancelledError } from '../errors';
+import { currentCancellationSignal, throwIfCancelled } from './cancellation';
 import { coverageShortfalls, findOverCommitments, minRestHoursFor } from './constraintValidator';
 // The overnight-aware time arithmetic these engines share. It used to be four
 // private helpers here and equivalent copies in constraintValidator, kept in
@@ -340,6 +342,8 @@ export class ScheduleOptimizer {
     logger.info(`Problem size: ${problem.shifts.length} shifts, ${problem.employees.length} employees`);
 
     const startTime = Date.now();
+    // A run cancelled before it started does not start (#966).
+    throwIfCancelled();
 
     try {
       // Validate input
@@ -356,6 +360,8 @@ export class ScheduleOptimizer {
         problemData,
         solverTimeLimitSeconds(config.optimization.timeout, optimizationConfig.timeLimitSeconds)
       );
+      // Cancelled while the solver was finishing: its answer is not wanted.
+      throwIfCancelled();
 
       const elapsedTime = (Date.now() - startTime) / 1000;
 
@@ -381,6 +387,9 @@ export class ScheduleOptimizer {
 
       return { ...result, status: result.status };
     } catch (error) {
+      // A cancelled run never falls back (#966): the fallback would produce
+      // the schedule the planner just cancelled, for the caller to persist.
+      if (error instanceof OptimizationCancelledError) throw error;
       // Python not installed, process timed out, non-zero exit, or a solver
       // status without a schedule — fall back to the TypeScript greedy solver
       // so callers always get a usable result.
@@ -429,6 +438,7 @@ export class ScheduleOptimizer {
           error: reason,
         };
       } catch (greedyError) {
+        if (greedyError instanceof OptimizationCancelledError) throw greedyError;
         logger.error('Greedy fallback also failed:', greedyError);
         return {
           status: 'ERROR',
@@ -501,6 +511,7 @@ export class ScheduleOptimizer {
           timeoutHandle = undefined;
         }
         if (stdinErrorHandle) clearTimeout(stdinErrorHandle);
+        signal?.removeEventListener('abort', onCancel);
         action();
       };
 
@@ -519,6 +530,19 @@ export class ScheduleOptimizer {
           if (stillRunning()) pythonProcess.kill('SIGKILL');
         }, KILL_GRACE_MS).unref?.();
       };
+
+      // Cancellation of a queued run (#966): stop the solver now rather than
+      // let it compute a schedule nobody will read, and settle as cancelled
+      // so optimize() rethrows instead of falling back.
+      const signal = currentCancellationSignal();
+      const onCancel = (): void => {
+        if (settled) return;
+        logger.info('Optimization cancelled; stopping the solver process');
+        terminate();
+        finalize(() => reject(new OptimizationCancelledError()));
+      };
+      signal?.addEventListener('abort', onCancel, { once: true });
+      if (signal?.aborted) onCancel();
 
       // Watchdog: kill the process and reject if it never settles, so a
       // hanging Python optimizer cannot leak the child process forever.
@@ -903,6 +927,7 @@ export class ScheduleOptimizer {
    */
   async generateGreedySchedule(problem: OptimizationProblem): Promise<ScheduleAssignment[]> {
     logger.info('Generating greedy schedule as fallback');
+    throwIfCancelled();
 
     const assignments: ScheduleAssignment[] = [];
 
@@ -949,6 +974,10 @@ export class ScheduleOptimizer {
 
     // Assign employees to shifts greedily
     for (const shift of sortedShifts) {
+      // The loop is synchronous, so a cancellation can only be observed
+      // between awaits elsewhere; checking here costs one property read per
+      // shift and stops a cancelled run that is already inside the loop.
+      throwIfCancelled();
       // Candidate filtering: exclude employees that violate any constraint
       // independent of assignment order (unavailability, skills, overlap,
       // daily budget). The max_staff check is enforced per-assignment below.
