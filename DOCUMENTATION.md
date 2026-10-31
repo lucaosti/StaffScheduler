@@ -2371,6 +2371,18 @@ npm run sim:campaign   # many simulations, each on a freshly created database
 - `sim:run` simulates a whole organization in rolling rounds: employee actors file time-off / employee-loan / shift-swap requests, manager actors decide or delegate every pending approval, the period schedule is generated with the real `AutoScheduleService`, and every outcome is verified against actual database state plus the production `ComplianceEngine`.
 - `sim:campaign` fans out N runs over parallel lanes. Each run derives its org structure, pacing, and approval-authorization model deterministically from `--baseSeed`, and gets a fresh per-lane database (drop, re-create, schema init, demo seed). Requires root credentials via `DB_ROOT_PASSWORD` (or `MYSQL_ROOT_PASSWORD`). Results land in `backend/scripts/simulation/output/campaign-<timestamp>/` (`run-XX.log` per run plus `summary.log`); the exit code is non-zero if any run reports a verification failure.
 
+### Load, concurrency and chaos harness
+
+The simulation above calls services in-process; `backend/benchmarks/load/` exercises the deployed shape instead — the backend image behind the load balancer, MySQL and Redis — over HTTP:
+
+```bash
+backend/benchmarks/load/run.sh load    # N concurrent sessions (admin, managers, employees of the demo seed)
+backend/benchmarks/load/run.sh race    # many concurrent POST /assignments for one person (#829)
+backend/benchmarks/load/run.sh chaos   # MySQL, Redis and one backend replica stopped and restarted mid-load
+```
+
+Each run records per-request latency and outcome (k6), reports throughput, exact latency percentiles and error rates per operation group, and afterwards checks MySQL for double bookings, validator violations, approvals decided twice and lost writes, against a baseline taken after seeding. It runs on Docker Compose by default and on Singularity/Apptainer instances (`LOAD_DRIVER=instances`) where there is no Docker daemon. How every figure is measured is in `backend/benchmarks/load/methodology.md`.
+
 ---
 
 Planned work is tracked exclusively in [GitHub Issues](https://github.com/lucaosti/StaffScheduler/issues): every capability, refactoring or idea gets a small, atomic issue. This document describes the system as it exists; anything aspirational belongs in an issue, not here.
