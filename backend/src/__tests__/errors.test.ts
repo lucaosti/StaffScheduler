@@ -17,6 +17,7 @@ import {
   ConflictError,
   ForbiddenError,
   NotFoundError,
+  ServiceUnavailableError,
   UnauthorizedError,
   ValidationError,
 } from '../errors';
@@ -95,6 +96,29 @@ describe('errorHandler middleware', () => {
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
     expect(errorSpy).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Transient failures are 503 with Retry-After, not 500 (#964): a transaction
+ * that kept losing deadlocks says nothing wrong about the request — the
+ * client should retry.
+ */
+describe('errorHandler — transient failures answer 503 with Retry-After', () => {
+  const app = (err: unknown) => {
+    const a = express();
+    a.get('/x', async () => {
+      throw err;
+    });
+    a.use(errorHandler);
+    return a;
+  };
+
+  it('renders a ServiceUnavailableError with its Retry-After', async () => {
+    const res = await request(app(new ServiceUnavailableError('Busy, try again', 2))).get('/x');
+    expect(res.status).toBe(503);
+    expect(res.headers['retry-after']).toBe('2');
+    expect(res.body).toEqual({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Busy, try again' } });
   });
 });
 

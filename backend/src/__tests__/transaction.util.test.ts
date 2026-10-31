@@ -10,8 +10,8 @@
  * @author Luca Ostinelli
  */
 
-import { usingConnection, withTransaction } from '../utils/transaction';
-import { ConflictError } from '../errors';
+import { usingConnection, withTransaction, TRANSACTION_ATTEMPTS } from '../utils/transaction';
+import { ConflictError, ServiceUnavailableError } from '../errors';
 import { logger } from '../config/logger';
 
 const makePool = () => {
@@ -163,5 +163,46 @@ describe('withTransaction', () => {
     });
     expect(conn.execute).toHaveBeenCalledTimes(2);
     expect(conn.commit).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * A deadlock is InnoDB choosing a victim, not a fault in the request (#964):
+ * the victim's transaction is already rolled back and running it again is the
+ * documented remedy. So the helper retries the whole unit of work a bounded
+ * number of times, and only a transaction that keeps losing surfaces — as a
+ * typed 503, never as the generic 500.
+ */
+describe('withTransaction — lock-conflict retry (#964)', () => {
+  const lockError = (code: string, errno: number) => Object.assign(new Error(code), { code, errno });
+
+  it.each([
+    ['ER_LOCK_DEADLOCK', 1213],
+    ['ER_LOCK_WAIT_TIMEOUT', 1205],
+  ])('runs the work again after %s and returns its value', async (code, errno) => {
+    const { pool, conn } = makePool();
+    const work = jest.fn().mockRejectedValueOnce(lockError(code, errno)).mockResolvedValueOnce('second try');
+    await expect(withTransaction(pool, work)).resolves.toBe('second try');
+    expect(work).toHaveBeenCalledTimes(2);
+    expect(conn.rollback).toHaveBeenCalledTimes(1);
+    expect(conn.commit).toHaveBeenCalledTimes(1);
+    expect(conn.release).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after a bounded number of attempts with a 503, not a 500', async () => {
+    const { pool } = makePool();
+    const work = jest.fn().mockRejectedValue(lockError('ER_LOCK_DEADLOCK', 1213));
+    const failure = await withTransaction(pool, work).catch((e: unknown) => e);
+    expect(work).toHaveBeenCalledTimes(TRANSACTION_ATTEMPTS);
+    expect(failure).toBeInstanceOf(ServiceUnavailableError);
+    expect(failure).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+  });
+
+  it('does not retry any other failure', async () => {
+    const { pool } = makePool();
+    const original = new ConflictError('duplicate key');
+    const work = jest.fn().mockRejectedValue(original);
+    await expect(withTransaction(pool, work)).rejects.toBe(original);
+    expect(work).toHaveBeenCalledTimes(1);
   });
 });

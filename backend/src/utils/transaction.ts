@@ -47,6 +47,7 @@
 
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import { logger } from '../config/logger';
+import { ServiceUnavailableError } from '../errors';
 
 /**
  * Runs `work` with a connection borrowed from `pool`, releasing it afterwards
@@ -69,6 +70,26 @@ export const usingConnection = async <T>(
   }
 };
 
+/** How many times `withTransaction` runs a unit of work that keeps losing lock conflicts. */
+export const TRANSACTION_ATTEMPTS = 3;
+
+/** Base of the pause before a retry; each attempt waits longer, with jitter. */
+const RETRY_BASE_DELAY_MS = 20;
+
+/**
+ * InnoDB's two lock-conflict outcomes: ER_LOCK_DEADLOCK (1213) — it picked
+ * this transaction as a deadlock victim and rolled it back — and
+ * ER_LOCK_WAIT_TIMEOUT (1205) — a lock was not granted within
+ * `innodb_lock_wait_timeout`. Matched on the driver's code and errno, never
+ * on the message.
+ */
+const isLockConflict = (error: unknown): boolean => {
+  const { code, errno } = (error ?? {}) as { code?: unknown; errno?: unknown };
+  return code === 'ER_LOCK_DEADLOCK' || code === 'ER_LOCK_WAIT_TIMEOUT' || errno === 1213 || errno === 1205;
+};
+
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Runs `work` inside a transaction: commits when it resolves, rolls back and
  * rethrows when it rejects, and always releases the connection.
@@ -76,8 +97,49 @@ export const usingConnection = async <T>(
  * Used by `Database.transaction()` and available to any new call site whose
  * unit of work genuinely ends at the commit. Existing sites were deliberately
  * NOT migrated onto it — see the module header for why.
+ *
+ * WHY IT RETRIES A LOCK CONFLICT (#964). A deadlock is not a fault in the
+ * request: InnoDB detected a cycle between two correct transactions and rolled
+ * one back, and MySQL's documented remedy is to run that transaction again.
+ * Concurrent org-unit placements hit exactly this (UPDATE then INSERT on the
+ * same index ranges) and answered 500 for 61 of 130 requests at concurrency
+ * 16. Ordering locks consistently removes the cycles a service can foresee;
+ * gap locks between neighbouring keys can still produce ones it cannot, so the
+ * retry lives here, once, rather than in each service. It is safe because the
+ * whole unit of work — not one statement — is re-run on a fresh transaction,
+ * after the server has already undone the first attempt; `work` must
+ * therefore keep its side effects inside the transaction, which is the
+ * contract of this helper anyway. Bounded and jittered so contending
+ * transactions spread out instead of colliding again in lockstep; one that
+ * keeps losing is reported as a 503 (retry later), never as the generic 500.
+ *
+ * Rejected: retrying inside every call site (52 hand-written transactions
+ * would each need it, and most would not get it); retrying only the failed
+ * statement (after a deadlock the transaction is gone, there is nothing left
+ * to continue).
  */
-export const withTransaction = <T>(
+export const withTransaction = async <T>(
+  pool: Pool,
+  work: (conn: PoolConnection) => Promise<T>
+): Promise<T> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await runTransaction(pool, work);
+    } catch (error) {
+      if (!isLockConflict(error)) throw error;
+      if (attempt >= TRANSACTION_ATTEMPTS) {
+        logger.warn('Transaction kept losing lock conflicts; giving up', {
+          attempts: attempt,
+          code: (error as { code?: string }).code,
+        });
+        throw new ServiceUnavailableError('The request conflicted with concurrent changes; please retry');
+      }
+      await pause(RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) * (0.5 + Math.random()));
+    }
+  }
+};
+
+const runTransaction = <T>(
   pool: Pool,
   work: (conn: PoolConnection) => Promise<T>
 ): Promise<T> =>

@@ -6,7 +6,8 @@
  * on its own (no wrapper needed, unlike Express 4):
  *
  * - `AppError` subtypes are expected domain outcomes: rendered with their
- *   status and stable code, not logged as errors.
+ *   status and stable code, not logged as errors. A `ServiceUnavailableError`
+ *   also carries `Retry-After`, which is what makes its 503 actionable.
  * - An http-errors instance marked `expose` (what Express's own body parser
  *   raises for a malformed JSON body or an oversized payload) is a fault in
  *   the client's request: rendered with its 4xx status as `BAD_REQUEST`.
@@ -42,7 +43,7 @@
 
 import { NextFunction, Request, Response } from 'express';
 import { logger } from '../config/logger';
-import { AppError } from '../errors';
+import { AppError, ServiceUnavailableError } from '../errors';
 import { getRequestId } from './requestContext';
 
 const INTERNAL_ERROR_MESSAGE = 'An internal error occurred';
@@ -60,6 +61,7 @@ export const errorHandler = (
   _next: NextFunction
 ): void => {
   if (err instanceof AppError) {
+    if (err instanceof ServiceUnavailableError) res.setHeader('Retry-After', String(err.retryAfterSeconds));
     res.status(err.status).json({
       success: false,
       error: { code: err.code, message: err.message },

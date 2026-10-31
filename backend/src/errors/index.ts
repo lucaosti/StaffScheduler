@@ -78,6 +78,25 @@ export class ConflictError extends AppError {
 }
 
 /**
+ * 503 — a transient condition outside the request stopped it: a transaction
+ * that kept losing lock conflicts, a dependency that could not be reached.
+ *
+ * Typed rather than left to the generic 500 because the client must be able
+ * to tell "try again shortly" from "this is broken": a 500 reads as a defect
+ * and is not retried, while a 503 with `Retry-After` is the standard answer a
+ * client, a proxy and the frontend's request layer all treat as transient.
+ * `retryAfterSeconds` becomes that header in the error middleware.
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(
+    message = 'Service temporarily unavailable, please retry',
+    public readonly retryAfterSeconds = 1
+  ) {
+    super(message, 503, 'SERVICE_UNAVAILABLE');
+  }
+}
+
+/**
  * 500 — schedule generation produced no schedule from any engine.
  *
  * A server fault, but typed rather than a plain `Error` because the planner

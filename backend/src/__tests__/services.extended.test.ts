@@ -1386,15 +1386,18 @@ describe('OrgUnitService extended', () => {
     expect(await svc.getPrimaryUnitForUser(7)).toBeNull();
   });
 
-  it('addMember (primary) demotes others, returns row', async () => {
+  it('addMember (primary) locks the person, demotes others, returns row', async () => {
     const { pool, execute, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // demote
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // lock the person (#964)
+      .mockResolvedValueOnce([[{ id: 40 }], null]) // their current primary
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // demote it, by id
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // INSERT
     execute.mockResolvedValueOnce([[memberRow()], null] as Tuple);
     const svc = new OrgUnitService(pool);
     const r = await svc.addMember(7, 1, true);
     expect(r.userId).toBe(7);
+    expect(conn.execute.mock.calls[0][0]).toMatch(/FROM users WHERE id = \? FOR UPDATE/);
     expect(conn.commit).toHaveBeenCalled();
   });
 
@@ -1418,8 +1421,9 @@ describe('OrgUnitService extended', () => {
   it('addMember raises when refresh empty', async () => {
     const { pool, execute, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]);
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // lock the person
+      .mockResolvedValueOnce([[], null]) // no current primary
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // INSERT
     execute.mockResolvedValueOnce([[], null] as Tuple);
     const svc = new OrgUnitService(pool);
     await expect(svc.addMember(7, 1, true)).rejects.toThrow(/Membership not found/);
