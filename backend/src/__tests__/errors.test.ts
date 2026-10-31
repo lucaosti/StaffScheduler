@@ -100,9 +100,9 @@ describe('errorHandler middleware', () => {
 });
 
 /**
- * Transient failures are 503 with Retry-After, not 500 (#964): a transaction
- * that kept losing deadlocks says nothing wrong about the request — the
- * client should retry.
+ * Transient failures are 503 with Retry-After, not 500 (#964, #968): a
+ * transaction that kept losing deadlocks, or a database that cannot be
+ * reached, says nothing wrong about the request — the client should retry.
  */
 describe('errorHandler — transient failures answer 503 with Retry-After', () => {
   const app = (err: unknown) => {
@@ -119,6 +119,25 @@ describe('errorHandler — transient failures answer 503 with Retry-After', () =
     expect(res.status).toBe(503);
     expect(res.headers['retry-after']).toBe('2');
     expect(res.body).toEqual({ success: false, error: { code: 'SERVICE_UNAVAILABLE', message: 'Busy, try again' } });
+  });
+
+  it('renders a database connectivity error as 503, not as an internal error (#968)', async () => {
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const driverError = Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:3306'), { code: 'ECONNREFUSED', errno: -111 });
+    const res = await request(app(driverError)).get('/x');
+    expect(res.status).toBe(503);
+    expect(res.body.error.code).toBe('SERVICE_UNAVAILABLE');
+    expect(JSON.stringify(res.body)).not.toContain('10.0.0.5');
+    expect(Number(res.headers['retry-after'])).toBeGreaterThan(0);
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps a lock-wait timeout out of the outage class: it is contention, not an outage', async () => {
+    const errorSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const res = await request(app(Object.assign(new Error('Lock wait timeout'), { code: 'ER_LOCK_WAIT_TIMEOUT', errno: 1205 }))).get('/x');
+    expect(res.status).toBe(500);
+    errorSpy.mockRestore();
   });
 });
 

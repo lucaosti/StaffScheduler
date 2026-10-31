@@ -413,7 +413,7 @@ or request a page.
 | `CONFLICT` | 409 | Duplicate resource |
 | `VALIDATION_ERROR` | 400 | Invalid request body |
 | `TOO_MANY_REQUESTS` | 429 | Login rate limit exceeded |
-| `SERVICE_UNAVAILABLE` | 503 | Transient: a transaction kept losing lock conflicts with concurrent writes. Carries `Retry-After`; retry the request |
+| `SERVICE_UNAVAILABLE` | 503 | Transient: a transaction kept losing lock conflicts with concurrent writes, or a dependency (MySQL) cannot be reached — including inside `authenticate`, which answers this rather than `AUTH_ERROR` during an outage so a client does not mistake it for a broken session. Carries `Retry-After`; retry the request |
 
 ---
 

@@ -11,6 +11,9 @@
  * - An http-errors instance marked `expose` (what Express's own body parser
  *   raises for a malformed JSON body or an oversized payload) is a fault in
  *   the client's request: rendered with its 4xx status as `BAD_REQUEST`.
+ * - A driver error saying a dependency cannot be reached (see
+ *   utils/infrastructureError) is an outage: logged in full, rendered as 503
+ *   SERVICE_UNAVAILABLE with Retry-After.
  * - Anything else is an internal fault: logged in full, rendered as a 500
  *   with a fixed message, a fixed code and the request id.
  *
@@ -45,6 +48,7 @@ import { NextFunction, Request, Response } from 'express';
 import { logger } from '../config/logger';
 import { AppError, ServiceUnavailableError } from '../errors';
 import { getRequestId } from './requestContext';
+import { isInfrastructureError, OUTAGE_RETRY_AFTER_SECONDS } from '../utils/infrastructureError';
 
 const INTERNAL_ERROR_MESSAGE = 'An internal error occurred';
 
@@ -81,6 +85,22 @@ export const errorHandler = (
   // requestContext), so this line and the response below share one id.
   logger.error('Unhandled error:', err);
   const requestId = getRequestId();
+
+  // A dependency that cannot be reached is an outage, not a defect (#968):
+  // 503 with Retry-After, so clients retry instead of reporting a bug. Still
+  // logged above in full, and still with no driver detail in the body.
+  if (isInfrastructureError(err)) {
+    res.setHeader('Retry-After', String(OUTAGE_RETRY_AFTER_SECONDS));
+    res.status(503).json({
+      success: false,
+      error: {
+        code: 'SERVICE_UNAVAILABLE',
+        message: 'Service temporarily unavailable, please retry',
+        ...(requestId ? { requestId } : {}),
+      },
+    });
+    return;
+  }
   res.status(500).json({
     success: false,
     error: {

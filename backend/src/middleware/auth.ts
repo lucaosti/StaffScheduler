@@ -20,6 +20,7 @@ import { ModuleService } from '../services/ModuleService';
 import { config } from '../config';
 import { logger } from '../config/logger';
 import { database } from '../config/database';
+import { isInfrastructureError, OUTAGE_RETRY_AFTER_SECONDS } from '../utils/infrastructureError';
 import {
   blacklistJti,
   isJtiBlacklisted,
@@ -136,6 +137,9 @@ export const revokePresentedAccessToken = async (req: Request): Promise<void> =>
   if (decoded.jti) await addToBlacklist(decoded.jti, decoded.exp ? decoded.exp * 1000 : undefined);
 };
 
+/** Whether the current outage has been logged; reset by the next successful authentication. */
+let outageLogged = false;
+
 /**
  * Main Authentication Middleware
  *
@@ -233,9 +237,30 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     req.user = user;
 
     logger.debug('User authenticated', { userId: user.id });
+    outageLogged = false;
 
     next();
   } catch (error) {
+    // An outage is not a broken session (#968). With MySQL unreachable every
+    // authenticated request answered 500 AUTH_ERROR, which a client cannot
+    // tell from a fault in its own credentials. A connectivity failure
+    // answers 503 with Retry-After — transient, try again — and is logged
+    // once per outage rather than once per request, since during one every
+    // request fails the same way. Only a token problem is ever a 401.
+    if (isInfrastructureError(error)) {
+      if (!outageLogged) {
+        logger.error('Authentication unavailable: a dependency cannot be reached', {
+          code: (error as { code?: unknown }).code,
+          message: (error as Error).message,
+        });
+        outageLogged = true;
+      }
+      res.setHeader('Retry-After', String(OUTAGE_RETRY_AFTER_SECONDS));
+      return res.status(503).json({
+        success: false,
+        error: { code: 'SERVICE_UNAVAILABLE', message: 'Service temporarily unavailable, please retry' },
+      });
+    }
     logger.error('Authentication error:', error);
     return res.status(500).json({
       success: false,
