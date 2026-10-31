@@ -11,6 +11,7 @@
  */
 
 import { AssignmentService } from '../services/AssignmentService';
+import { AssignmentRuleViolationError } from '../errors';
 
 jest.mock('../services/ComplianceEngine', () => ({
   __esModule: true,
@@ -241,9 +242,17 @@ describe('AssignmentService.createAssignment guards', () => {
       .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[], null]); // no required skills
     const svc = new AssignmentService(pool);
-    await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
-      /Compliance violation/
-    );
+    // #830: a typed 409 naming the rule and carrying every violation, not a
+    // plain Error the error middleware renders as 500.
+    const failure = await svc.createAssignment({ shiftId: 10, userId: 7 } as never).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(AssignmentRuleViolationError);
+    expect(failure).toMatchObject({
+      status: 409,
+      code: 'COMPLIANCE_REST',
+      message: 'Compliance violation: Insufficient rest',
+      details: [{ code: 'REST', message: 'Insufficient rest' }],
+    });
+    expect(conn.rollback).toHaveBeenCalled();
   });
 
   it('rolls back on policy violation', async () => {
@@ -268,9 +277,15 @@ describe('AssignmentService.createAssignment guards', () => {
       .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[], null]); // no required skills
     const svc = new AssignmentService(pool);
-    await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
-      /Policy violation/
-    );
+    const failure = await svc.createAssignment({ shiftId: 10, userId: 7 } as never).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(AssignmentRuleViolationError);
+    expect(failure).toMatchObject({
+      status: 409,
+      code: 'POLICY_MANUAL_ASSIGNMENT_LOCKED',
+      message: 'Policy violation: Locked',
+      details: [expect.objectContaining({ policyKey: 'manual_assignment_locked' })],
+    });
+    expect(conn.rollback).toHaveBeenCalled();
   });
 
   it('inserts and returns assignment on success', async () => {

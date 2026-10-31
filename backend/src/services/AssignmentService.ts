@@ -42,7 +42,7 @@ import { Pool, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
 import { limitOffsetClause } from '../utils/sql';
 import { ShiftAssignment, CreateAssignmentRequest, SqlParam } from '../types';
-import { ConflictError, NotFoundError, ValidationError } from '../errors';
+import { AssignmentRuleViolationError, ConflictError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { evaluateAssignmentCompliance } from './ComplianceEngine';
 import { PolicyValidator } from './PolicyValidator';
@@ -244,15 +244,15 @@ export class AssignmentService {
           startTime: shift.start_time,
           endTime: shift.end_time,
         });
+        // Typed 409s carrying the rule (#830): a plain Error with an ad-hoc
+        // `code` reached the client as 500 INTERNAL_ERROR with no rule named.
         if (!compliance.ok) {
           const head = compliance.violations[0];
-          const err = new Error(`Compliance violation: ${head.message}`) as Error & {
-            code?: string;
-            violations?: typeof compliance.violations;
-          };
-          err.code = `COMPLIANCE_${head.code}`;
-          err.violations = compliance.violations;
-          throw err;
+          throw new AssignmentRuleViolationError(
+            `Compliance violation: ${head.message}`,
+            `COMPLIANCE_${head.code}`,
+            compliance.violations
+          );
         }
 
         const policyValidation = await this.policyValidator.validateAssignment({
@@ -262,13 +262,11 @@ export class AssignmentService {
         if (!policyValidation.ok) {
           const blocking = policyValidation.violations.filter((v) => !v.hasApprovedException);
           const head = blocking[0];
-          const err = new Error(`Policy violation: ${head?.message ?? 'Blocked by policy'}`) as Error & {
-            code?: string;
-            violations?: typeof policyValidation.violations;
-          };
-          err.code = `POLICY_${head?.policyKey ?? 'VIOLATION'}`.toUpperCase();
-          err.violations = policyValidation.violations;
-          throw err;
+          throw new AssignmentRuleViolationError(
+            `Policy violation: ${head?.message ?? 'Blocked by policy'}`,
+            `POLICY_${head?.policyKey ?? 'VIOLATION'}`.toUpperCase(),
+            policyValidation.violations
+          );
         }
 
         // Pinned when, and only when, the schedule is already published.

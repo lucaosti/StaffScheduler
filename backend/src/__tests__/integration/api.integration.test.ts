@@ -250,6 +250,51 @@ describe('assignments (real DB) — regression for the users.role column drift',
   });
 });
 
+/**
+ * #830: a compliance violation is the planner's answer, not a fault. It was
+ * thrown as a plain Error with an ad-hoc `code`, which the error middleware
+ * renders as 500 INTERNAL_ERROR with the generic message — the violated rule
+ * and its explanation never reached the client.
+ */
+describe('assignment rule violations answer 409 with the rule (#830)', () => {
+  it('refuses an assignment past the contract weekly limit with 409, the compliance code and the violations', async () => {
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES ('itest-compliance@example.com', 'x', 'Itest', 'Compliance', 1)`
+    );
+    const [contract] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, max_hours_per_week) VALUES ('Itest four hours', 4)`
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE() - INTERVAL 30 DAY)`,
+      [person.insertId, contract.insertId]
+    );
+    const [shift] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL 3 DAY, '09:00:00', '17:00:00', 1, 3, 'open')`,
+      [scheduleId, departmentId]
+    );
+
+    const res = await request(app)
+      .post('/api/v1/assignments')
+      .set('Cookie', await authCookie())
+      .send({ shiftId: shift.insertId, userId: person.insertId });
+
+    expect(res.status).toBe(409);
+    expect(res.body.error.code).toBe('COMPLIANCE_MAX_WEEKLY_HOURS');
+    expect(res.body.error.message).toMatch(/Compliance violation/);
+    expect(res.body.error.details).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: 'MAX_WEEKLY_HOURS', message: expect.any(String) })])
+    );
+    expectErrorEnvelope(res.body);
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM shift_assignments WHERE user_id = ?`,
+      [person.insertId]
+    );
+    expect(Number(rows[0].n)).toBe(0);
+  });
+});
+
 describe('delegations (real DB) — regression for the missing delegation.manage catalog entry', () => {
   let delegationId: number;
 

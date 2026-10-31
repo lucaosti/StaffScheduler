@@ -411,6 +411,7 @@ or request a page.
 | `FORBIDDEN` | 403 | Permission not held |
 | `NOT_FOUND` | 404 | Resource missing or module disabled |
 | `CONFLICT` | 409 | Duplicate resource |
+| `COMPLIANCE_<rule>` / `POLICY_<key>` | 409 | An assignment refused by a working-time rule (e.g. `COMPLIANCE_MAX_WEEKLY_HOURS`) or a business policy; `error.details` lists every violated rule, the message names the first. These used to reach the client as 500 `INTERNAL_ERROR` (#830) |
 | `VALIDATION_ERROR` | 400 | Invalid request body |
 | `TOO_MANY_REQUESTS` | 429 | Login rate limit exceeded |
 | `SERVICE_UNAVAILABLE` | 503 | Transient: a transaction kept losing lock conflicts with concurrent writes, or a dependency (MySQL) cannot be reached — including inside `authenticate`, which answers this rather than `AUTH_ERROR` during an outage so a client does not mistake it for a broken session. Carries `Retry-After`; retry the request |

@@ -335,7 +335,7 @@ export interface paths {
                 };
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
-                /** @description Compliance or policy violation. */
+                /** @description Compliance or policy violation: `COMPLIANCE_<rule>` or `POLICY_<key>`, with every violated rule in `error.details`. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -13291,9 +13291,10 @@ export interface components {
                 message: string;
                 /** @description Present on INTERNAL_ERROR (500): the request id, also sent as the X-Request-Id header, under which the fault's details are logged. The message of a 500 is always generic; quote this id to find the cause. */
                 requestId?: string;
-                /** @description Field-level validation errors (present on VALIDATION_ERROR). */
+                /** @description Field-level validation errors (present on VALIDATION_ERROR, with `field`), or every rule a refused assignment broke (present on COMPLIANCE_* and POLICY_* 409s, with the rule's `code` or `policyKey`). */
                 details?: {
                     field?: string;
+                    code?: string;
                     message?: string;
                 }[];
             };

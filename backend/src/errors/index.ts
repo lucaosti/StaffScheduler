@@ -20,7 +20,13 @@ export class AppError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly code: string
+    public readonly code: string,
+    /**
+     * Rendered as the envelope's `details` array when present: structured
+     * reasons a client can act on (the rules an assignment broke), where the
+     * message is only the first of them in prose.
+     */
+    public readonly details?: readonly object[]
   ) {
     super(message);
     this.name = new.target.name;
@@ -74,6 +80,20 @@ export class NotFoundError extends AppError {
 export class ConflictError extends AppError {
   constructor(message = 'Request conflicts with the current state') {
     super(message, 409, 'CONFLICT');
+  }
+}
+
+/**
+ * 409 — an assignment refused by a working-time rule or a business policy
+ * (#830). The code names the rule (`COMPLIANCE_MAX_WEEKLY_HOURS`,
+ * `POLICY_MANUAL_ASSIGNMENT_LOCKED`, …) and `details` lists every violation,
+ * not just the first. It used to be a plain `Error` with an ad-hoc `code`,
+ * which the error middleware rightly treats as an internal fault: the planner
+ * got 500 and a generic message instead of the rule they had run into.
+ */
+export class AssignmentRuleViolationError extends AppError {
+  constructor(message: string, code: string, violations: readonly object[]) {
+    super(message, 409, code, violations);
   }
 }
 

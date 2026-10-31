@@ -14,6 +14,7 @@ import express from 'express';
 import request from 'supertest';
 import {
   AppError,
+  AssignmentRuleViolationError,
   ConflictError,
   ForbiddenError,
   NotFoundError,
@@ -96,6 +97,34 @@ describe('errorHandler middleware', () => {
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
     expect(errorSpy).toHaveBeenCalled();
+  });
+});
+
+describe('errorHandler — details of a refused assignment (#830)', () => {
+  it('renders an AssignmentRuleViolationError as 409 with its rule code and every violation', async () => {
+    const app = express();
+    app.get('/x', async () => {
+      throw new AssignmentRuleViolationError('Compliance violation: Too many hours', 'COMPLIANCE_MAX_WEEKLY_HOURS', [
+        { code: 'MAX_WEEKLY_HOURS', message: 'Too many hours' },
+        { code: 'MIN_REST_HOURS', message: 'Too little rest' },
+      ]);
+    });
+    app.use(errorHandler);
+
+    const res = await request(app).get('/x');
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({
+      success: false,
+      error: {
+        code: 'COMPLIANCE_MAX_WEEKLY_HOURS',
+        message: 'Compliance violation: Too many hours',
+        details: [
+          { code: 'MAX_WEEKLY_HOURS', message: 'Too many hours' },
+          { code: 'MIN_REST_HOURS', message: 'Too little rest' },
+        ],
+      },
+    });
   });
 });
 

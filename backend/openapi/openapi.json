@@ -82,11 +82,14 @@
               },
               "details": {
                 "type": "array",
-                "description": "Field-level validation errors (present on VALIDATION_ERROR).",
+                "description": "Field-level validation errors (present on VALIDATION_ERROR, with `field`), or every rule a refused assignment broke (present on COMPLIANCE_* and POLICY_* 409s, with the rule's `code` or `policyKey`).",
                 "items": {
                   "type": "object",
                   "properties": {
                     "field": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     },
                     "message": {
@@ -2014,7 +2017,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "409": {
-            "description": "Compliance or policy violation."
+            "description": "Compliance or policy violation: `COMPLIANCE_<rule>` or `POLICY_<key>`, with every violated rule in `error.details`."
           }
         }
       }

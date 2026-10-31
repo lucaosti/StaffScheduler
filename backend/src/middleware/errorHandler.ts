@@ -68,7 +68,7 @@ export const errorHandler = (
     if (err instanceof ServiceUnavailableError) res.setHeader('Retry-After', String(err.retryAfterSeconds));
     res.status(err.status).json({
       success: false,
-      error: { code: err.code, message: err.message },
+      error: { code: err.code, message: err.message, ...(err.details ? { details: err.details } : {}) },
     });
     return;
   }
