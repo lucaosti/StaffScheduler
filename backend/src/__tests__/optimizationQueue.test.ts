@@ -13,12 +13,14 @@
 let redisEnabled = true;
 jest.mock('../config/redis', () => ({
   isRedisConfigured: () => redisEnabled,
+  reconnectDelay: () => 1000,
 }));
 
 // Captured BullMQ doubles.
 const queueAdd = jest.fn();
 const queueGetJob = jest.fn();
 const queueClose = jest.fn();
+const queueOn = jest.fn();
 const workerOn = jest.fn();
 const workerClose = jest.fn();
 let workerProcessor: ((job: unknown) => Promise<unknown>) | null = null;
@@ -28,6 +30,7 @@ jest.mock('bullmq', () => ({
     add: queueAdd,
     getJob: queueGetJob,
     close: queueClose,
+    on: queueOn,
     getWaitingCount: jest.fn().mockResolvedValue(0),
   })),
   Worker: jest.fn().mockImplementation((_name: string, processor: (job: unknown) => Promise<unknown>) => {
@@ -57,7 +60,7 @@ const load = () => {
 beforeEach(() => {
   redisEnabled = true;
   workerProcessor = null;
-  [queueAdd, queueGetJob, queueClose, workerOn, workerClose, publishMock, generateMock].forEach((m) =>
+  [queueAdd, queueGetJob, queueClose, queueOn, workerOn, workerClose, publishMock, generateMock].forEach((m) =>
     m.mockReset()
   );
 });
@@ -201,6 +204,41 @@ describe('worker processor', () => {
     failedHandler({ id: 'schedule-5', data: { scheduleId: 5, createdBy: 9 } }, new Error('solver blew up'));
 
     expect(publishMock).toHaveBeenCalledWith(9, expect.objectContaining({ type: 'optimization.failed' }));
+  });
+});
+
+describe('connection failures (#969)', () => {
+  it('listens for errors on the worker, so a Redis outage is logged rather than thrown', () => {
+    const q = load();
+    q.initOptimizationWorker({} as never);
+    const errorHandler = workerOn.mock.calls.find(([evt]) => evt === 'error')?.[1];
+    const activeHandler = workerOn.mock.calls.find(([evt]) => evt === 'active')?.[1];
+    expect(errorHandler).toBeDefined();
+    // Repeated errors of one outage, the recovery that re-arms the log, a new outage.
+    expect(() => {
+      errorHandler(new Error('connect ECONNREFUSED'));
+      errorHandler(new Error('connect ECONNREFUSED'));
+      activeHandler();
+      errorHandler(new Error('connect ECONNREFUSED'));
+    }).not.toThrow();
+  });
+
+  it('listens for errors on the queue too', async () => {
+    const q = load();
+    queueGetJob.mockResolvedValue(null);
+    queueAdd.mockResolvedValue({ id: 'schedule-1' });
+    await q.enqueueOptimization({ scheduleId: 1, createdBy: 2 });
+    const errorHandler = queueOn.mock.calls.find(([evt]) => evt === 'error')?.[1];
+    expect(errorHandler).toBeDefined();
+    expect(() => errorHandler(new Error('connect ECONNREFUSED'))).not.toThrow();
+  });
+
+  it('reconnects with the shared capped backoff instead of BullMQ defaults', () => {
+    const { Worker } = require('bullmq');
+    const q = load();
+    q.initOptimizationWorker({} as never);
+    const options = (Worker as jest.Mock).mock.calls[(Worker as jest.Mock).mock.calls.length - 1][2];
+    expect(options.connection.retryStrategy(50)).toBe(1000);
   });
 });
 

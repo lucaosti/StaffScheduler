@@ -9,7 +9,7 @@
  * the metric definitions in one module means every counter/gauge/histogram is
  * registered against one registry that the `/metrics` route renders.
  *
- * WHAT is measured, and why these four:
+ * WHAT is measured, and why these:
  *   - default process metrics (event-loop lag, heap, GC) — the baseline every
  *     Node service should expose;
  *   - http_request_duration_seconds — a histogram labelled by method/route/
@@ -17,7 +17,9 @@
  *   - db_pool_connections — a gauge of the mysql2 pool (total/free/queued), so a
  *     pool exhaustion (the classic cause of latency cliffs here) is visible;
  *   - optimization_queue_depth — how many optimization jobs are waiting, the
- *     signal that the single-concurrency worker is falling behind.
+ *     signal that the single-concurrency worker is falling behind;
+ *   - redis_connected / redis_reconnect_attempts_total — the shared Redis
+ *     connection's state and its attempts to come back after an outage.
  *
  * Route labels use the matched route *pattern* (e.g. `/api/v1/schedules/:id`),
  * never the concrete path, so an id per request cannot explode label
@@ -87,6 +89,31 @@ const optimizationQueueDepth = new client.Gauge({
   help: 'Number of optimization jobs waiting in the queue',
   registers: [registry],
 });
+
+/**
+ * Whether the shared Redis connection is up (1) or not (0), and how many
+ * times it has tried to come back (#969). Together they distinguish "Redis is
+ * down and we are retrying" from "Redis is down and we have stopped" — the
+ * second used to be the silent default after ~11 s of outage.
+ */
+const redisConnected = new client.Gauge({
+  name: 'redis_connected',
+  help: 'Whether the shared Redis connection is ready (1) or not (0)',
+  registers: [registry],
+});
+const redisReconnectAttempts = new client.Counter({
+  name: 'redis_reconnect_attempts_total',
+  help: 'Reconnection attempts made by the shared Redis connection',
+  registers: [registry],
+});
+
+export function setRedisConnected(connected: boolean): void {
+  redisConnected.set(connected ? 1 : 0);
+}
+
+export function countRedisReconnectAttempt(): void {
+  redisReconnectAttempts.inc();
+}
 
 /** Point the pool gauge at the live mysql2 pool (sampled lazily on each scrape). */
 export function registerPoolMetrics(pool: Pool): void {

@@ -15,11 +15,20 @@
  * Redis.
  *
  * Why a lazy singleton: the client connects only on first use, so importing
- * this module never opens a socket in tests. `lazyConnect` plus a bounded
- * retry strategy means a transiently unavailable Redis degrades to
- * reconnection attempts rather than crashing the process, and the
+ * this module never opens a socket in tests. A transiently unavailable Redis
+ * degrades to reconnection attempts rather than crashing the process, and the
  * connection-error log is emitted once (not per failed command) so a
  * Redis-less dev environment is not flooded.
+ *
+ * Why reconnection never gives up (#969): the retry strategy used to return
+ * null after ten attempts, which tells ioredis to stop for good — so a Redis
+ * outage longer than ~11 s left the shared caches, the SSE fan-out, the
+ * limiter's shared counters and the optimization queue degraded until the
+ * process was restarted, even after Redis was back. Every caller already
+ * falls back while Redis is away, so retrying costs nothing but a connection
+ * attempt; it continues forever with exponential backoff capped at
+ * RECONNECT_MAX_DELAY_MS, and with jitter so N replicas do not all reconnect
+ * in the same instant. The same strategy is given to BullMQ's connections.
  *
  * Why ioredis over node-redis: ioredis has first-class cluster/sentinel
  * support and a mature reconnection model, which matter the moment this is
@@ -30,10 +39,27 @@
 import Redis from 'ioredis';
 import { config } from './index';
 import { logger } from './logger';
+import { countRedisReconnectAttempt, setRedisConnected } from '../observability/metrics';
 
 let client: Redis | null = null;
 let subscriber: Redis | null = null;
 let errorLogged = false;
+
+/** Ceiling of the reconnection backoff. */
+export const RECONNECT_MAX_DELAY_MS = 10_000;
+const RECONNECT_BASE_DELAY_MS = 200;
+
+/**
+ * Delay before reconnection attempt `times` (1-based): exponential from
+ * RECONNECT_BASE_DELAY_MS, capped at RECONNECT_MAX_DELAY_MS, then jittered
+ * into the upper half of that ceiling ("equal jitter": never less than half
+ * the backoff, so the cap still bounds how fast a down Redis is probed).
+ * Never null — null would end reconnection permanently.
+ */
+export const reconnectDelay = (times: number): number => {
+  const ceiling = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.min(times - 1, 16));
+  return Math.max(1, Math.round(ceiling / 2 + Math.random() * (ceiling / 2)));
+};
 
 /** True when Redis is enabled; callers use this to pick Redis vs. in-process state. */
 export const isRedisConfigured = (): boolean => config.redis.enabled && Boolean(config.redis.url);
@@ -52,15 +78,22 @@ export const getRedis = (): Redis | null => {
     // side-effect-free and lets the process start even if Redis is briefly
     // unreachable.
     lazyConnect: true,
-    // Bounded backoff: retry a few times with growing delay, then stop
-    // hammering. Individual callers treat a rejected command as "fall back",
-    // so an outage degrades gracefully rather than blocking requests.
+    // A command waiting out an outage is failed after two reconnection
+    // attempts; callers treat a rejected command as "fall back", so an outage
+    // degrades gracefully rather than blocking requests.
     maxRetriesPerRequest: 2,
     // Fail a connection attempt fast so a Redis-less local run falls back to
     // in-process state in ~1s instead of hanging a request on a dead socket.
     connectTimeout: 1000,
-    retryStrategy: (times) => (times > 10 ? null : Math.min(times * 200, 2000)),
+    // Forever, with capped and jittered backoff (#969; see the header).
+    retryStrategy: reconnectDelay,
   });
+
+  // The connection state, for /metrics (#969). `close` fires on every lost
+  // connection, `reconnecting` on every attempt to restore it; `ready` is
+  // handled below, with the log reset.
+  client.on('close', () => setRedisConnected(false));
+  client.on('reconnecting', () => countRedisReconnectAttempt());
 
   client.on('error', (err) => {
     // Log once, at warn: a Redis blip (or a Redis-less local run) is expected
@@ -75,7 +108,9 @@ export const getRedis = (): Redis | null => {
     }
   });
   client.on('ready', () => {
+    if (errorLogged) logger.info('Redis connection restored');
     errorLogged = false;
+    setRedisConnected(true);
   });
 
   return client;
@@ -95,8 +130,16 @@ export const getRedisSubscriber = (): Redis | null => {
   const base = getRedis();
   if (!base) return null;
   subscriber = base.duplicate();
+  // Once per outage, like the shared client: reconnection now continues for
+  // the whole outage (#969), so logging every failed attempt would flood.
+  let subscriberErrorLogged = false;
   subscriber.on('error', (err) => {
+    if (subscriberErrorLogged) return;
     logger.warn('Redis subscriber connection error', { message: err.message });
+    subscriberErrorLogged = true;
+  });
+  subscriber.on('ready', () => {
+    subscriberErrorLogged = false;
   });
   return subscriber;
 };

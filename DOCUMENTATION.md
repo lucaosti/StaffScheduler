@@ -1688,7 +1688,14 @@ them ships as an opt-in Docker Compose profile.
   label cardinality. The `_count` series doubles as the request/error counter;
 - `db_pool_connections` — a gauge of the mysql2 pool by state
   (`total`/`free`/`in_use`/`queued`), sampled at scrape time;
-- `optimization_queue_depth` — optimization jobs waiting in the BullMQ queue.
+- `optimization_queue_depth` — optimization jobs waiting in the BullMQ queue;
+- `redis_connected` (1/0) and `redis_reconnect_attempts_total` — the shared
+  Redis connection's state, and how often it has tried to come back. The
+  connection (and BullMQ's) reconnects for as long as Redis is away, with
+  exponential backoff capped at 10 s and jitter so replicas do not reconnect
+  in lockstep; it used to stop for good after ten attempts (~11 s), leaving
+  caches, SSE fan-out, the shared limiter and the queue degraded until a
+  restart (#969).
 
 `/metrics` is mounted **outside** `/api` (a scraper is not a JWT user) and guarded
 by a static bearer token: set `METRICS_TOKEN` and scrapers must send

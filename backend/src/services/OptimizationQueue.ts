@@ -33,7 +33,7 @@
 
 import { Queue, Worker, type Job, type ConnectionOptions } from 'bullmq';
 import { config } from '../config';
-import { isRedisConfigured } from '../config/redis';
+import { isRedisConfigured, reconnectDelay } from '../config/redis';
 import { logger } from '../config/logger';
 import { eventBus } from './EventBus';
 import { setOptimizationQueueDepth } from '../observability/metrics';
@@ -93,13 +93,32 @@ const refreshQueueDepth = (): void => {
 };
 
 // BullMQ connects with its own client; give it the same URL as the caches.
-// maxRetriesPerRequest must be null for BullMQ blocking commands.
+// maxRetriesPerRequest must be null for BullMQ blocking commands. The retry
+// strategy is the shared one (#969): reconnect for as long as Redis is away,
+// capped and jittered, so the queue comes back by itself after an outage
+// exactly when the caches do.
 const connection = (): ConnectionOptions => ({
   // ioredis accepts a URL as the first positional arg, but ConnectionOptions
   // wants an object; parse the essentials from the configured URL.
   ...parseRedisUrl(config.redis.url),
   maxRetriesPerRequest: null,
+  retryStrategy: reconnectDelay,
 });
+
+/**
+ * Logs a queue/worker connection error once per outage. BullMQ re-emits its
+ * connection's errors as 'error' events, and an EventEmitter 'error' with no
+ * listener is THROWN — an uncaught exception that took the process down on
+ * the first Redis blip (#969, the queue's share of #825).
+ */
+let connectionErrorLogged = false;
+const onConnectionError = (source: string) => (err: Error): void => {
+  if (connectionErrorLogged) return;
+  connectionErrorLogged = true;
+  logger.warn(`Optimization ${source} lost its Redis connection; it reconnects on its own`, {
+    message: err.message,
+  });
+};
 
 /** Minimal redis:// URL parser sufficient for host/port/password/db. Exported for direct unit testing. */
 export const parseRedisUrl = (url: string): { host: string; port: number; password?: string; db?: number } => {
@@ -134,6 +153,7 @@ export const getOptimizationQueue = (): Queue<OptimizationJobData, OptimizationR
         attempts: 1, // a failed solve is reported, not blindly retried
       },
     });
+    queue.on('error', onConnectionError('queue'));
   }
   return queue;
 };
@@ -235,6 +255,12 @@ export const initOptimizationWorker = (pool: Pool): void => {
       concurrency: 1,
     }
   );
+
+  worker.on('error', onConnectionError('worker'));
+  // A worker that is processing again has its connection back: re-arm the log.
+  worker.on('active', () => {
+    connectionErrorLogged = false;
+  });
 
   worker.on('failed', (job, err) => {
     logger.error('Optimization job failed', { jobId: job?.id, message: err.message });

@@ -25,6 +25,13 @@ const RedisCtor = jest.fn().mockImplementation(() => ({
 
 jest.mock('ioredis', () => ({ __esModule: true, default: RedisCtor }));
 
+/** The handlers the module registered on the shared client, by event name (latest wins). */
+const clientHandlers = (): Record<string, (arg?: unknown) => void> => {
+  const handlers: Record<string, (arg?: unknown) => void> = {};
+  for (const [event, fn] of onMock.mock.calls) handlers[event as string] = fn as never;
+  return handlers;
+};
+
 const loadRedis = (opts: { enabled?: boolean } = {}) => {
   if (opts.enabled === false) process.env.REDIS_ENABLED = 'false';
   else delete process.env.REDIS_ENABLED;
@@ -114,20 +121,10 @@ describe('redis config (enabled by default)', () => {
     expect(RedisCtor).toHaveBeenCalledTimes(1);
   });
 
-  it('caps reconnection backoff and gives up after 10 attempts', () => {
-    const redis = loadRedis();
-    redis.getRedis();
-    const options = RedisCtor.mock.calls[0][1] as { retryStrategy: (n: number) => number | null };
-    expect(options.retryStrategy(1)).toBe(200);
-    expect(options.retryStrategy(10)).toBe(2000); // capped at the ceiling
-    expect(options.retryStrategy(11)).toBeNull(); // give up past 10 attempts
-  });
-
   it('logs a connection error only once, then resets on a successful reconnect', () => {
     const redis = loadRedis();
     redis.getRedis();
-    const handlers: Record<string, (arg?: unknown) => void> = {};
-    for (const [event, fn] of onMock.mock.calls) handlers[event as string] = fn as never;
+    const handlers = clientHandlers();
 
     handlers.error(new Error('boom'));
     handlers.error(new Error('boom again'));
@@ -136,6 +133,62 @@ describe('redis config (enabled by default)', () => {
     handlers.error(new Error('new outage'));
     // Two distinct outages logged, the mid-storm duplicate suppressed.
     expect(onMock).toHaveBeenCalled();
+  });
+});
+
+/**
+ * #969: returning null from retryStrategy tells ioredis to stop reconnecting
+ * for good, so an outage longer than ~11 s left caches, SSE fan-out, the
+ * shared limiter and the optimization queue degraded until a restart.
+ */
+describe('reconnection (#969)', () => {
+  it('never gives up: every attempt gets a delay, capped, however long the outage', () => {
+    const redis = loadRedis();
+    redis.getRedis();
+    const options = RedisCtor.mock.calls[RedisCtor.mock.calls.length - 1][1] as {
+      retryStrategy: (n: number) => number | null;
+    };
+    for (const attempt of [1, 2, 5, 10, 11, 50, 1000, 100_000]) {
+      const delay = options.retryStrategy(attempt);
+      expect(delay).not.toBeNull();
+      expect(delay).toBeGreaterThan(0);
+      expect(delay).toBeLessThanOrEqual(redis.RECONNECT_MAX_DELAY_MS);
+    }
+  });
+
+  it('backs off exponentially and jitters so replicas do not reconnect in lockstep', () => {
+    const { reconnectDelay, RECONNECT_MAX_DELAY_MS } = loadRedis();
+    const early = Math.max(...Array.from({ length: 50 }, () => reconnectDelay(1)));
+    const late = Math.min(...Array.from({ length: 50 }, () => reconnectDelay(30)));
+    expect(early).toBeLessThan(late);
+    expect(late).toBeGreaterThanOrEqual(RECONNECT_MAX_DELAY_MS / 2);
+    const samples = new Set(Array.from({ length: 50 }, () => reconnectDelay(30)));
+    expect(samples.size).toBeGreaterThan(1);
+  });
+
+  it('exposes the connection state and the reconnect attempts as metrics', async () => {
+    delete process.env.REDIS_ENABLED;
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    // Both from one isolated registry, so the metric read is the one the module writes.
+    let redis!: typeof import('../config/redis');
+    let registry!: typeof import('../observability/metrics')['registry'];
+    jest.isolateModules(() => {
+      redis = require('../config/redis');
+      registry = require('../observability/metrics').registry;
+    });
+    redis.getRedis();
+    const value = async (name: string) =>
+      (await registry.getSingleMetric(name)!.get()).values.reduce((sum, v) => sum + v.value, 0);
+
+    const handlers = clientHandlers();
+    handlers.close();
+    expect(await value('redis_connected')).toBe(0);
+    const before = await value('redis_reconnect_attempts_total');
+    handlers.reconnecting();
+    handlers.reconnecting();
+    expect(await value('redis_reconnect_attempts_total')).toBe(before + 2);
+    handlers.ready();
+    expect(await value('redis_connected')).toBe(1);
   });
 });
 
@@ -171,5 +224,29 @@ describe('getRedisSubscriber', () => {
       | undefined;
     expect(errorHandler).toBeDefined();
     expect(() => errorHandler!(new Error('subscriber down'))).not.toThrow();
+  });
+
+  it('logs a subscriber outage once, and again only after it recovered', () => {
+    delete process.env.REDIS_ENABLED;
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    // The logger from the same isolated registry the module logs through.
+    let redis!: typeof import('../config/redis');
+    let logger!: typeof import('../config/logger')['logger'];
+    jest.isolateModules(() => {
+      redis = require('../config/redis');
+      logger = require('../config/logger').logger;
+    });
+    redis.getRedisSubscriber();
+    const handler = (event: string) =>
+      subscriberOnMock.mock.calls.filter(([evt]) => evt === event).pop()![1] as (arg?: unknown) => void;
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+
+    handler('error')(new Error('down'));
+    handler('error')(new Error('still down'));
+    handler('ready')();
+    handler('error')(new Error('down again'));
+
+    expect(warn.mock.calls.filter(([msg]) => String(msg).includes('subscriber'))).toHaveLength(2);
+    warn.mockRestore();
   });
 });
