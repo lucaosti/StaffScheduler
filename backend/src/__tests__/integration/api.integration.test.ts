@@ -3148,3 +3148,239 @@ describe('working-time limits reach the optimizer (#838, #883)', () => {
     });
   });
 });
+
+/**
+ * A generated schedule passes the check a manual assignment gets (#963).
+ *
+ * The HTTP workforce simulation found or-tools schedules — not degraded —
+ * that ComplianceEngine flagged on the same data: 0 h of rest from a night
+ * shift into the next morning, weekly hours and consecutive days over the
+ * limit, and a loaned person planned by two units with too little rest. The
+ * engines were not at fault: each run was compliant with the problem it was
+ * given, and the problem left out work the person already had —
+ *
+ *   - live assignments already on the draft being generated (a manual one, or
+ *     an earlier run's: a second generate stacked a whole second solution on
+ *     the first), which were neither inputs nor replaced;
+ *   - assignments in ANOTHER unit's draft, which the cross-schedule read
+ *     skipped because only published schedules counted.
+ *
+ * Each case below is judged exactly as the simulation judged it: every live
+ * assignment on the generated schedule is re-checked with
+ * `evaluateAssignmentCompliance`, the ComplianceEngine entry point a manual
+ * assignment goes through.
+ */
+describe('generated schedules satisfy ComplianceEngine (#963)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  const department = async (withOrgUnit = false): Promise<{ id: number; orgUnitId: number | null }> => {
+    let unitId: number | null = null;
+    if (withOrgUnit) {
+      const [unit] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO org_units (name, description, parent_id, manager_user_id, is_active)
+         VALUES (?, 'compliance', NULL, NULL, 1)`,
+        [`compliance-${tag()}`]
+      );
+      unitId = unit.insertId;
+    }
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active, org_unit_id) VALUES (?, 'compliance', 1, ?)`,
+      [`compliance-${tag()}`, unitId]
+    );
+    return { id: dept.insertId, orgUnitId: unitId };
+  };
+
+  const person = async (deptId: number): Promise<number> => {
+    const [row] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Compliance', 'Checked', 1)`,
+      [`compliance-${tag()}@example.com`]
+    );
+    await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [
+      row.insertId,
+      deptId,
+    ]);
+    return row.insertId;
+  };
+
+  /** A draft schedule over [first, last] days from today. */
+  const draft = async (deptId: number, first: number, last: number): Promise<number> => {
+    const [sc] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+       VALUES (?, CURDATE() + INTERVAL ? DAY, CURDATE() + INTERVAL ? DAY, ?, 'draft', ?)`,
+      [`compliance-${tag()}`, first, last, deptId, userId]
+    );
+    return sc.insertId;
+  };
+
+  const shift = async (
+    onSchedule: number,
+    deptId: number,
+    day: number,
+    start: string,
+    end: string
+  ): Promise<number> => {
+    const [row] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+       VALUES (?, ?, CURDATE() + INTERVAL ? DAY, ?, ?, 1, 1, 'open')`,
+      [onSchedule, deptId, day, start, end]
+    );
+    return row.insertId;
+  };
+
+  /** A live, unpinned assignment — what a manual assignment or an earlier run leaves on a draft. */
+  const hold = (onShift: number, personId: number) =>
+    admin.query(
+      `INSERT INTO shift_assignments (shift_id, user_id, status, assigned_by) VALUES (?, ?, 'pending', ?)`,
+      [onShift, personId, userId]
+    );
+
+  /** A per-person contract, so no global policy leaks into the rest of the suite. */
+  const contract = async (
+    personId: number,
+    limits: { max_hours_per_week?: number; max_consecutive_days?: number; min_hours_between_shifts?: number }
+  ): Promise<void> => {
+    const columns = Object.keys(limits);
+    const [row] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO employment_contracts (name, ${columns.join(', ')}, is_active)
+       VALUES (?, ${columns.map(() => '?').join(', ')}, 1)`,
+      [`compliance ${tag()}`, ...Object.values(limits)]
+    );
+    await admin.query(
+      `INSERT INTO user_employment_contracts (user_id, contract_id, effective_from) VALUES (?, ?, CURDATE())`,
+      [personId, row.insertId]
+    );
+  };
+
+  const generate = async (id: number) => {
+    const res = await request(app)
+      .post(`/api/v1/schedules/${id}/generate`)
+      .set('Cookie', await authCookie())
+      .send({});
+    expect(res.status).toBe(200);
+    return res.body.data as {
+      assignmentsCreated: number;
+      engine: string;
+      degraded: boolean;
+      degradedReason?: string;
+    };
+  };
+
+  /** The simulation's re-check: every live assignment on the schedule through ComplianceEngine. */
+  const complianceViolations = async (id: number): Promise<string[]> => {
+    const { evaluateAssignmentCompliance } =
+      require('../../services/ComplianceEngine') as typeof import('../../services/ComplianceEngine');
+    const { DateUtils } = require('../../utils') as typeof import('../../utils');
+    const { database } = require('../../config/database');
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT sa.id, sa.user_id, s.date, s.start_time, s.end_time
+         FROM shift_assignments sa JOIN shifts s ON s.id = sa.shift_id
+        WHERE s.schedule_id = ? AND sa.status IN ('pending', 'confirmed')`,
+      [id]
+    );
+    const found: string[] = [];
+    for (const row of rows) {
+      const result = await evaluateAssignmentCompliance(
+        database.getPool(),
+        row.user_id as number,
+        {
+          date: DateUtils.toDateString(row.date as Date),
+          startTime: row.start_time as string,
+          endTime: row.end_time as string,
+        },
+        { excludeAssignmentId: row.id as number }
+      );
+      for (const v of result.violations) found.push(`assignment ${row.id}: ${v.code} ${v.message}`);
+    }
+    return found;
+  };
+
+  /** Produced by CP-SAT itself, so a violation is not explained by a greedy fallback. */
+  const expectOptimum = (result: { engine: string; degraded: boolean }): void => {
+    expect(result.engine).toBe('or-tools');
+    expect(result.degraded).toBe(false);
+  };
+
+  it('gives no one 0 h of rest from a night shift into a morning they already hold on the draft', async () => {
+    // The morning is held by A; B cannot work the night. Blind to A's
+    // morning, the optimum covers both shifts with A on the night and B on
+    // the morning — A then has no rest at all, and the morning two people.
+    const dept = await department();
+    const a = await person(dept.id);
+    const b = await person(dept.id);
+    const id = await draft(dept.id, 120, 121);
+    await shift(id, dept.id, 120, '23:00:00', '07:00:00');
+    const morning = await shift(id, dept.id, 121, '07:00:00', '15:00:00');
+    await hold(morning, a);
+    await admin.query(
+      `INSERT INTO user_unavailability (user_id, start_date, end_date)
+       VALUES (?, CURDATE() + INTERVAL 120 DAY, CURDATE() + INTERVAL 120 DAY)`,
+      [b]
+    );
+
+    const result = await generate(id);
+
+    expectOptimum(result);
+    expect(await complianceViolations(id)).toEqual([]);
+    expect(result.assignmentsCreated).toBe(0);
+  });
+
+  it('keeps the weekly hours under the cap, counting the hours already held on the draft', async () => {
+    const dept = await department();
+    const a = await person(dept.id);
+    await contract(a, { max_hours_per_week: 16 });
+    const id = await draft(dept.id, 130, 136);
+    const first = await shift(id, dept.id, 130, '09:00:00', '17:00:00');
+    await shift(id, dept.id, 132, '09:00:00', '17:00:00');
+    await shift(id, dept.id, 134, '09:00:00', '17:00:00');
+    await hold(first, a);
+
+    const result = await generate(id);
+
+    expectOptimum(result);
+    expect(await complianceViolations(id)).toEqual([]);
+    expect(result.assignmentsCreated).toBe(1);
+  });
+
+  it('keeps consecutive days under the cap, counting the days already held on the draft', async () => {
+    const dept = await department();
+    const a = await person(dept.id);
+    await contract(a, { max_consecutive_days: 2 });
+    const id = await draft(dept.id, 140, 142);
+    const first = await shift(id, dept.id, 140, '09:00:00', '17:00:00');
+    await shift(id, dept.id, 141, '09:00:00', '17:00:00');
+    await shift(id, dept.id, 142, '09:00:00', '17:00:00');
+    await hold(first, a);
+
+    const result = await generate(id);
+
+    expectOptimum(result);
+    expect(await complianceViolations(id)).toEqual([]);
+    expect(result.assignmentsCreated).toBe(1);
+  });
+
+  it("gives a loaned person their rest against the home unit's draft", async () => {
+    // A belongs to the home unit, whose draft has them 15:00-23:00; the
+    // borrowing unit's draft offers 07:00 the next morning — 8 h later,
+    // under an 11 h contract. Both are drafts, planned at the same time.
+    const home = await department(true);
+    const borrower = await department(true);
+    const a = await person(home.id);
+    await contract(a, { min_hours_between_shifts: 11 });
+    await admin.query(
+      `INSERT INTO employee_loans (user_id, from_org_unit_id, to_org_unit_id, start_date, end_date, status)
+       VALUES (?, ?, ?, CURDATE() + INTERVAL 150 DAY, CURDATE() + INTERVAL 151 DAY, 'approved')`,
+      [a, home.orgUnitId, borrower.orgUnitId]
+    );
+    const homeSchedule = await draft(home.id, 150, 156);
+    await hold(await shift(homeSchedule, home.id, 150, '15:00:00', '23:00:00'), a);
+    const id = await draft(borrower.id, 150, 156);
+    await shift(id, borrower.id, 151, '07:00:00', '15:00:00');
+
+    const result = await generate(id);
+
+    expectOptimum(result);
+    expect(await complianceViolations(id)).toEqual([]);
+    expect(result.assignmentsCreated).toBe(0);
+  });
+});

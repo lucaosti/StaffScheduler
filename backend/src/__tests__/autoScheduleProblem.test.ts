@@ -61,6 +61,7 @@ const inputs = (over: Partial<ScheduleInputs> = {}): ScheduleInputs => ({
   shifts: [SHIFT],
   employees: [EMPLOYEE],
   pinned: [],
+  held: [],
   pairings: [],
   contractLimits: new Map(),
   // Resolved for every id the tests use; the loader resolves the whole pool.
@@ -410,10 +411,12 @@ describe('buildOptimizationProblem', () => {
   });
 
   describe('problem-level fields', () => {
-    it('forwards pinned commitments and pairings verbatim', () => {
+    it("forwards a published schedule's pinned commitments and pairings verbatim", () => {
       const pinned = [{ employee_id: '1', shift_id: '10' }];
       const pairings = [{ employee_id: '1', other_id: '2', kind: 'requires' as const }];
-      const problem = buildOptimizationProblem(inputs({ pinned, pairings }));
+      const problem = buildOptimizationProblem(
+        inputs({ schedule: { ...SCHEDULE, status: 'published' }, pinned, pairings })
+      );
       expect(problem.pinned_assignments).toEqual(pinned);
       expect(problem.pairings).toEqual(pairings);
     });
@@ -446,5 +449,64 @@ describe('buildOptimizationProblem', () => {
       expect(problem.shifts).toEqual([]);
       expect(problem.employees).toEqual([]);
     });
+  });
+});
+
+/**
+ * A draft's held rows are fixed work (#963): left out of the problem, a
+ * manual assignment or an earlier run's output was invisible to the solve
+ * while INSERT IGNORE kept it, and a second generate stacked a second
+ * solution on the first.
+ */
+describe('held work on the schedule', () => {
+  const morning: ShiftInputRow = { ...SHIFT, id: 11, date: '2026-05-02', min_staff: 2, max_staff: 2 };
+  const held = [
+    { employee_id: '1', shift_id: '11' },
+    // A row on a shift the schedule no longer has takes no seat and no time.
+    { employee_id: '1', shift_id: '404' },
+  ];
+
+  it("takes the held seats and adds the time to the holder's existing work on a draft", () => {
+    const problem = buildOptimizationProblem(
+      inputs({
+        shifts: [SHIFT, morning],
+        held: [...held, { employee_id: '1', shift_id: '10' }],
+        pinned: [{ employee_id: '1', shift_id: '11' }],
+        externalAssignmentsByUser: new Map([
+          [1, [{ date: '2026-04-30', start_time: '08:00', end_time: '16:00' }]],
+        ]),
+      })
+    );
+    expect(problem.shifts.map((s) => [s.id, s.min_staff, s.max_staff])).toEqual([
+      ['10', 0, 4],
+      ['11', 1, 1],
+    ]);
+    expect(problem.employees[0].existing_assignments).toEqual([
+      { date: '2026-04-30', start_time: '08:00', end_time: '16:00' },
+      { date: '2026-05-02', start_time: '08:00', end_time: '16:00' },
+      { date: '2026-05-01', start_time: '08:00', end_time: '16:00' },
+    ]);
+    // Already fixed above; a pin would reward a pairing the fixed copy forbids.
+    expect(problem.pinned_assignments).toEqual([]);
+  });
+
+  it('never takes more seats than the shift has', () => {
+    const problem = buildOptimizationProblem(
+      inputs({
+        shifts: [{ ...morning, min_staff: 0, max_staff: 1 }],
+        held: [held[0], { employee_id: '2', shift_id: '11' }],
+      })
+    );
+    expect(problem.shifts[0]).toMatchObject({ min_staff: 0, max_staff: 0 });
+  });
+
+  it("leaves a published schedule's rows to the pins its proposal weighs", () => {
+    const pinned = [{ employee_id: '1', shift_id: '11' }];
+    const problem = buildOptimizationProblem(
+      inputs({ schedule: { ...SCHEDULE, status: 'published' }, shifts: [SHIFT, morning], held, pinned })
+    );
+    expect(problem.shifts[1]).toMatchObject({ min_staff: 2, max_staff: 2 });
+    expect(problem.employees[0].existing_assignments).toEqual([]);
+    expect(problem.pinned_assignments).toEqual(pinned);
   });
 });
