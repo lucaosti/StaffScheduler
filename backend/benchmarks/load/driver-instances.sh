@@ -20,6 +20,9 @@
 #   LOAD_PORT_BASE  first of the loopback ports used (default 31000); give
 #                   concurrent runs on one host disjoint ranges of 20
 #   SIF_CMD         singularity (default) or apptainer
+#   LOAD_READY_TIMEOUT_S  how long a service may take to answer (default
+#                   600; 180 proved too short on a node starting several
+#                   stacks at once)
 #
 # WHAT DIFFERS FROM COMPOSE, deliberately and only here:
 #   - no per-service CPU/memory caps (no cgroup delegation is assumed); the
@@ -68,12 +71,49 @@ driver_describe() {
   echo "runtime=$("$SIF_CMD" --version 2>/dev/null | head -1)"
 }
 
-# An instance has its own PID namespace (the runtime default for instances),
-# so stopping it ends every process inside — the daemon included, not only
-# the instance's init.
 start_instance() { S instance start -B "$SRC" -B "$WORK" "$1" "$PREFIX-$2" >/dev/null; }
-stop_instance() { S instance stop ${2:+--signal "$2"} "$PREFIX-$1" >/dev/null 2>&1 || true; }
 in_instance() { local name="$1"; shift; S exec "instance://$PREFIX-$name" "$@"; }
+
+# WHY THE DAEMON'S PIDS ARE TRACKED SEPARATELY. A daemon is started with
+# `exec instance://…`: it joins the instance's namespaces, but on the host it
+# is a descendant of that exec launcher, not of the instance's init. Signalling
+# the instance alone is therefore not enough — a first chaos run showed
+# `instance stop --signal KILL` leaving mysqld alive and holding its port, and
+# SIGSTOP sent to the instance's init freezing nothing. So the launcher's PID
+# is remembered and every fault is delivered to it and its descendants.
+remember() { mkdir -p "$WORK/pids" && echo "$2" >"$WORK/pids/$1"; }
+
+daemon_pids() {
+  local root
+  root="$(cat "$WORK/pids/$1" 2>/dev/null)" || return 0
+  [ -n "$root" ] || return 0
+  ps -e -o pid=,ppid= | awk -v root="$root" '
+    { parent[$1] = $2 }
+    END { for (p in parent) { q = p; while (q in parent && q != root && q != 1) q = parent[q]; if (q == root) print p } }'
+}
+
+any_alive() {
+  local p
+  for p in "$@"; do kill -0 "$p" 2>/dev/null && return 0; done
+  return 1
+}
+
+# stop: SIGTERM, up to 60 s to exit cleanly, then SIGKILL — `docker stop`'s
+# contract. kill: SIGKILL at once. Either way the instance goes too.
+stop_instance() {
+  local name="$1" signal="${2:-TERM}" pids waited=0
+  pids="$(daemon_pids "$name")"
+  # `|| true` throughout: a process may already be gone, and under `set -e` a
+  # failed kill at the end of an && list would abort the whole run.
+  [ -n "$pids" ] && { echo "$pids" | xargs -r kill "-$signal" 2>/dev/null || true; }
+  while [ "$waited" -lt 60 ] && any_alive $pids; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  [ -n "$pids" ] && { echo "$pids" | xargs -r kill -KILL 2>/dev/null || true; }
+  S instance stop --signal KILL "$PREFIX-$name" >/dev/null 2>&1 || true
+  rm -f "$WORK/pids/$name"
+}
 
 wait_for() {
   local what="$1" waited=0
@@ -81,8 +121,8 @@ wait_for() {
   until "$@" >/dev/null 2>&1; do
     sleep 1
     waited=$((waited + 1))
-    if [ "$waited" -gt 180 ]; then
-      echo "$what not ready within 180 s" >&2
+    if [ "$waited" -gt "${LOAD_READY_TIMEOUT_S:-600}" ]; then
+      echo "$what not ready within ${LOAD_READY_TIMEOUT_S:-600} s" >&2
       return 1
     fi
   done
@@ -101,6 +141,7 @@ mysql_ping() { in_instance db mysqladmin --socket="$WORK/mysql/sock" -uroot -p"$
 start_db() {
   start_instance "$MYSQL_SIF" db
   in_instance db mysqld "${MYSQL_OPTS[@]}" >>"$WORK/mysql/stdout.log" 2>&1 &
+  remember db $!
   wait_for mysql mysql_ping
 }
 
@@ -110,6 +151,7 @@ start_redis() {
   # what Redis held — as a stopped and restarted container does.
   in_instance redis redis-server --port "$REDIS_PORT" --bind 127.0.0.1 --dir "$WORK/redis" \
     --maxmemory 256mb --maxmemory-policy allkeys-lru >>"$WORK/redis/stdout.log" 2>&1 &
+  remember redis $!
   wait_for redis in_instance redis redis-cli -p "$REDIS_PORT" ping
 }
 
@@ -126,6 +168,7 @@ start_backend() {
     "instance://$PREFIX-backend-$i" bash -c \
     "cd '$SRC/backend'; while true; do node dist/index.js; rc=\$?; echo \"\$(date +%s%3N),exit,\$rc\" >>'$dir/exits.csv'; sleep 1; done" \
     >>"$dir/stdout.log" 2>&1 &
+  remember "backend-$i" $!
   wait_for "backend-$i" in_instance "backend-$i" curl -fsS -o /dev/null "http://127.0.0.1:$port/api/v1/health"
 }
 
@@ -165,6 +208,7 @@ write_lb_conf() {
 start_lb() {
   start_instance "$NGINX_SIF" lb
   in_instance lb nginx -p "$WORK/nginx" -c "$WORK/nginx/nginx.conf" -g 'daemon off;' >>"$WORK/nginx/stdout.log" 2>&1 &
+  remember lb $!
   wait_for lb in_instance lb wget -q -O /dev/null "http://127.0.0.1:$LB_PORT/api/v1/health"
 }
 
@@ -225,17 +269,6 @@ run_k6() {
 
 run_checker() { tc env LOG_LEVEL=error npx ts-node "benchmarks/load/check/$1" "${@:2}"; }
 
-# Host PIDs of every process inside an instance, for SIGSTOP/SIGCONT: the
-# instance's init PID comes from `instance list`, its descendants from ps.
-instance_pids() {
-  local root
-  root="$(S instance list "$PREFIX-$1" 2>/dev/null | awk -v n="$PREFIX-$1" '$1 == n { print $2 }')"
-  [ -n "$root" ] || return 0
-  ps -e -o pid=,ppid= | awk -v root="$root" '
-    { parent[$1] = $2 }
-    END { for (p in parent) { q = p; while (q in parent && q != root && q != 1) q = parent[q]; if (q == root) print p } print root }'
-}
-
 component() {
   case "$1" in
     db | redis) echo "$1" ;;
@@ -258,8 +291,8 @@ inject() {
   case "$CHAOS_MODE:$2" in
     stop:down) stop_instance "$name" ;;
     kill:down) stop_instance "$name" KILL ;;
-    pause:down) instance_pids "$name" | xargs -r kill -STOP ;;
-    pause:up) instance_pids "$name" | xargs -r kill -CONT ;;
+    pause:down) daemon_pids "$name" | xargs -r kill -STOP || true ;;
+    pause:up) daemon_pids "$name" | xargs -r kill -CONT || true ;;
     *:up) restart_component "$name" || true ;;
   esac
 }
@@ -269,7 +302,7 @@ record_components() {
   for i in $(seq 1 "$REPLICAS"); do
     exits=0
     [ -f "$WORK/backend-$i/exits.csv" ] && exits="$(wc -l <"$WORK/backend-$i/exits.csv" | tr -d ' ')"
-    echo "$1,backend-$i,$exits,$(instance_pids "backend-$i" | grep -q . && echo running || echo stopped),,," >>"$RUN_DIR/containers.csv"
+    echo "$1,backend-$i,$exits,$(daemon_pids "backend-$i" | grep -q . && echo running || echo stopped),,," >>"$RUN_DIR/containers.csv"
   done
 }
 

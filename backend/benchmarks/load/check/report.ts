@@ -73,6 +73,11 @@ const TIMEOUT_CODE = 1050;
 const percentile = (sorted: number[], p: number): number =>
   sorted.length === 0 ? 0 : sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil((p / 100) * sorted.length) - 1))];
 
+// Loops, not Math.min(...xs): spreading a few hundred thousand records as
+// arguments overflows the call stack (it did, on an 80-session run).
+const minOf = (xs: number[]): number => xs.reduce((a, b) => (b < a ? b : a), Infinity);
+const maxOf = (xs: number[]): number => xs.reduce((a, b) => (b > a ? b : a), -Infinity);
+
 const fmt = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2));
 const csvCell = (v: unknown): string => {
   const s = v === null || v === undefined ? '' : String(v);
@@ -143,8 +148,8 @@ function main(): void {
     process.stdout.write('no request records\n');
     return;
   }
-  const t0 = Math.min(...records.map((r) => r.t));
-  const tEnd = Math.max(...reqs.map((r) => r.t));
+  const t0 = minOf(records.map((r) => r.t));
+  const tEnd = maxOf(reqs.map((r) => r.t));
   const measured = reqs.filter((r) => r.t >= t0 + warmupMs);
   const windowS = (tEnd - (t0 + warmupMs)) / 1000;
 
@@ -172,8 +177,8 @@ function main(): void {
       .map(([k, list]) => [
         ...k.split('\t'),
         list.length,
-        fmt((Math.min(...list.map((r) => r.t)) - t0) / 1000),
-        fmt((Math.max(...list.map((r) => r.t)) - t0) / 1000),
+        fmt((minOf(list.map((r) => r.t)) - t0) / 1000),
+        fmt((maxOf(list.map((r) => r.t)) - t0) / 1000),
       ])
   );
 
@@ -247,8 +252,12 @@ function main(): void {
 /**
  * One row per fault injected. The outage window runs from the `down` event to
  * the `up` event; recovery is measured from `up` to the first second that
- * starts five consecutive seconds with a 200 health answer and no request
- * errors — five, so that a single lucky request does not count as recovered.
+ * starts five consecutive seconds with a 200 health answer reporting every
+ * dependency connected, and a session error rate no higher than in the 30 s
+ * before the fault plus five points. Five seconds, so a single lucky request
+ * does not count as recovered; relative to the pre-fault rate, because some
+ * endpoints fail steadily for reasons unrelated to the fault (#830) and "zero
+ * errors" would then never be reached at all.
  */
 function chaosTable(runDir: string, eventsFile: string, reqs: Req[], health: Health[], t0: number): void {
   const events = fs
@@ -268,6 +277,8 @@ function chaosTable(runDir: string, eventsFile: string, reqs: Req[], health: Hea
     const inOutage = reqs.filter((r) => r.t >= down.t && r.t < up.t);
     const healthInOutage = health.filter((h) => h.t >= down.t && h.t < up.t);
     const firstDegraded = healthInOutage.find((h) => h.s !== 200 || h.database !== 'connected' || (h.redis !== null && h.redis !== 'connected'));
+    const before = reqs.filter((r) => r.g !== 'health' && r.t >= down.t - 30_000 && r.t < down.t);
+    const allowed = (before.length ? before.filter((r) => r.o === 'error').length / before.length : 0) + 0.05;
     let recoveredAt: number | null = null;
     for (let s = up.t; s < up.t + 300_000 && recoveredAt === null; s += 1000) {
       let clean = true;
@@ -275,7 +286,12 @@ function chaosTable(runDir: string, eventsFile: string, reqs: Req[], health: Hea
         const from = s + w * 1000;
         const hs = health.filter((h) => h.t >= from && h.t < from + 1000);
         const rs = reqs.filter((r) => r.t >= from && r.t < from + 1000);
-        clean = hs.length > 0 && hs.every((h) => h.s === 200) && rs.every((r) => r.o !== 'error');
+        const sessions = rs.filter((r) => r.g !== 'health');
+        const rate = sessions.length ? sessions.filter((r) => r.o === 'error').length / sessions.length : 0;
+        clean =
+          hs.length > 0 &&
+          hs.every((h) => h.s === 200 && h.database === 'connected' && (h.redis === null || h.redis === 'connected')) &&
+          rate <= allowed;
       }
       if (clean) recoveredAt = s;
     }

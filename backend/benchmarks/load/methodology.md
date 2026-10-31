@@ -134,10 +134,19 @@ A 2-per-second health probe runs alongside. `chaos.csv` has one row per fault:
 requests, errors, timeouts and envelope violations inside the outage, the
 error kinds seen, the health answers seen, how long after the fault health
 reported degradation, recovery time (from the `up` event to the first of five
-consecutive seconds with a 200 health answer and no request error), and the
-error rate in the 30 s after recovery. A backend process crash is a restart
+consecutive seconds with a 200 health answer reporting every dependency
+connected and a session error rate no higher than in the 30 s before the fault
+plus five points — some endpoints fail steadily for reasons unrelated to the
+fault), and the error rate in the 30 s after recovery. `rps_10s_before` and
+`rps_in_outage` compare session throughput just before and during the fault:
+a dependency whose loss stalls requests shows there even when the stalled
+requests eventually succeed. A backend process crash is a restart
 counted in `containers.csv` (compose's `RestartCount`; the instance driver's
-restart loop appends to `exits.csv`) — the #825 signal.
+restart loop appends to `exits.csv`) — the #825 signal. The count includes the
+failed start-ups that follow a crash while the dependency is still down (the
+backend exits when its start-up database check fails), so it measures how long
+a replica stayed unavailable as well as whether it crashed; `backend.log`
+holds the stack of the first exit.
 
 ## Invariants (`check/invariants.ts`)
 
