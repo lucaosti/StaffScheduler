@@ -107,6 +107,23 @@ const redisReconnectAttempts = new client.Counter({
   registers: [registry],
 });
 
+/**
+ * Request-path operations served from the in-process fallback instead of
+ * Redis (#970), by why: `unavailable` (connection down), `bypassed` (inside
+ * the window after a failed command), `error` (the command itself failed or
+ * timed out). A small fixed label set, never the key or the command.
+ */
+const redisFallbacks = new client.Counter({
+  name: 'redis_fallback_total',
+  help: 'Request-path cache operations served in-process instead of by Redis',
+  labelNames: ['reason'] as const,
+  registers: [registry],
+});
+
+export function countRedisFallback(reason: 'unavailable' | 'bypassed' | 'error'): void {
+  redisFallbacks.inc({ reason });
+}
+
 export function setRedisConnected(connected: boolean): void {
   redisConnected.set(connected ? 1 : 0);
 }

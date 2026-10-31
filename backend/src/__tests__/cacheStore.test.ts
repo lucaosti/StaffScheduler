@@ -17,9 +17,12 @@ const redisMock = {
 };
 let redisConfigured = false;
 
+const reportRedisFailure = jest.fn();
 jest.mock('../config/redis', () => ({
-  isRedisConfigured: () => redisConfigured,
-  getRedis: () => (redisConfigured ? redisMock : null),
+  // The request path asks for a client only through getRequestPathRedis, which
+  // answers null when Redis is off, not ready, or recently failed (#970).
+  getRequestPathRedis: () => (redisConfigured ? redisMock : null),
+  reportRedisFailure: (...args: unknown[]) => reportRedisFailure(...args),
 }));
 
 import { blacklistJti, isJtiBlacklisted, getAuthContext, setAuthContext, invalidateAuthContext, MemoryTtlStore, incrementCounter, resetCounter } from '../services/cacheStore';
@@ -155,6 +158,14 @@ describe('cacheStore — Redis backend', () => {
     redisMock.get.mockRejectedValue(new Error('down'));
     await setAuthContext(11, '{"id":11}', 10_000);
     await expect(getAuthContext(11)).resolves.toBe('{"id":11}');
+  });
+
+  it('reports every failed command, so the request path routes around a hung Redis (#970)', async () => {
+    reportRedisFailure.mockClear();
+    const timedOut = new Error('Command timed out');
+    redisMock.exists.mockRejectedValue(timedOut);
+    await isJtiBlacklisted('jti-hung');
+    expect(reportRedisFailure).toHaveBeenCalledWith(expect.any(String), timedOut);
   });
 });
 

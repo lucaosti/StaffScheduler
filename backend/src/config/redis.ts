@@ -39,11 +39,23 @@
 import Redis from 'ioredis';
 import { config } from './index';
 import { logger } from './logger';
-import { countRedisReconnectAttempt, setRedisConnected } from '../observability/metrics';
+import { countRedisFallback, countRedisReconnectAttempt, setRedisConnected } from '../observability/metrics';
+import { settleWithin } from '../utils/timeout';
 
 let client: Redis | null = null;
 let subscriber: Redis | null = null;
 let errorLogged = false;
+/** Whether the shared connection has been ready at least once (see getRequestPathRedis). */
+let everReady = false;
+/** Until when the request path routes around Redis after a failed command. */
+let bypassUntil = 0;
+
+/** Bound on every Redis command; a frozen Redis fails a command after this. */
+export const COMMAND_TIMEOUT_MS = 500;
+/** How long the request path uses in-process state after a failed command. */
+export const REQUEST_PATH_BYPASS_MS = 5_000;
+/** Bound on the health endpoint's PING. */
+export const HEALTH_PING_TIMEOUT_MS = 1_000;
 
 /** Ceiling of the reconnection backoff. */
 export const RECONNECT_MAX_DELAY_MS = 10_000;
@@ -73,11 +85,11 @@ export const getRedis = (): Redis | null => {
   if (!isRedisConfigured()) return null;
   if (client) return client;
 
+  // Connects now, on first use rather than at import (this function is the
+  // only constructor call), so module import stays side-effect-free while
+  // the connection is already being established when the first request
+  // arrives — the request path below only uses a connection that is ready.
   client = new Redis(config.redis.url as string, {
-    // Do not open the socket until the first command: keeps module import
-    // side-effect-free and lets the process start even if Redis is briefly
-    // unreachable.
-    lazyConnect: true,
     // A command waiting out an outage is failed after two reconnection
     // attempts; callers treat a rejected command as "fall back", so an outage
     // degrades gracefully rather than blocking requests.
@@ -85,6 +97,11 @@ export const getRedis = (): Redis | null => {
     // Fail a connection attempt fast so a Redis-less local run falls back to
     // in-process state in ~1s instead of hanging a request on a dead socket.
     connectTimeout: 1000,
+    // Every command is bounded (#970). A FROZEN Redis — connected, never
+    // answering — is invisible to the two settings above: the socket is up,
+    // so nothing reconnects and nothing is refused, and a command used to
+    // wait forever (throughput fell from 183.6 to 1.5 rps, health hung).
+    commandTimeout: COMMAND_TIMEOUT_MS,
     // Forever, with capped and jittered backoff (#969; see the header).
     retryStrategy: reconnectDelay,
   });
@@ -110,10 +127,67 @@ export const getRedis = (): Redis | null => {
   client.on('ready', () => {
     if (errorLogged) logger.info('Redis connection restored');
     errorLogged = false;
+    everReady = true;
     setRedisConnected(true);
   });
 
   return client;
+};
+
+/**
+ * The client for REQUEST-PATH work (caches, limiter, revocation checks), or
+ * null when that work should use its in-process fallback right now (#970).
+ *
+ * Two cases answer null although Redis is configured:
+ *
+ *   - the connection is down (it was ready once and is now reconnecting):
+ *     a command would sit in ioredis' offline queue until the reconnect
+ *     attempts ran out, and the request with it — the "8 s worst latency"
+ *     with Redis stopped. The fallback is immediate instead. Before the
+ *     first `ready` the connection is still being established, and commands
+ *     are let through to wait for it (bounded by commandTimeout), so the
+ *     first requests after boot are not served from a cache no other
+ *     replica can see;
+ *   - a request-path command failed in the last REQUEST_PATH_BYPASS_MS: the
+ *     signature of a frozen Redis, whose connection still looks ready. One
+ *     request pays the command timeout, then the request path routes around
+ *     Redis for a few seconds and probes it again — so a hung Redis costs
+ *     one bounded wait per window, not one per command of every request.
+ *
+ * Callers outside the request path (pub/sub, the optimization queue) keep
+ * using `getRedis()`: a short wait in the offline queue is fine for them,
+ * and dropping their command would lose an event rather than a cache hit.
+ */
+export const getRequestPathRedis = (): Redis | null => {
+  const redis = getRedis();
+  if (!redis) return null;
+  const connecting = !everReady && (redis.status === 'wait' || redis.status === 'connecting' || redis.status === 'connect');
+  if (redis.status !== 'ready' && !connecting) {
+    countRedisFallback('unavailable');
+    return null;
+  }
+  if (Date.now() < bypassUntil) {
+    countRedisFallback('bypassed');
+    return null;
+  }
+  return redis;
+};
+
+/**
+ * Records that a request-path command failed and fell back in-process, and
+ * routes the request path around Redis for REQUEST_PATH_BYPASS_MS. Any
+ * failure counts, not only a timeout: whatever the cause, the fallback for
+ * the next few seconds is the same and costs nothing but the shared view.
+ */
+export const reportRedisFailure = (operation: string, err: unknown): void => {
+  countRedisFallback('error');
+  if (Date.now() >= bypassUntil) {
+    logger.warn('Redis command failed on the request path; using in-process state for a few seconds', {
+      operation,
+      message: err instanceof Error ? err.message : String(err),
+    });
+  }
+  bypassUntil = Date.now() + REQUEST_PATH_BYPASS_MS;
 };
 
 /**
@@ -144,16 +218,22 @@ export const getRedisSubscriber = (): Redis | null => {
   return subscriber;
 };
 
-/** Liveness check for the health endpoint. False when unconfigured or unreachable. */
-export const isRedisHealthy = async (): Promise<boolean> => {
+export type RedisHealth = 'connected' | 'degraded' | 'disconnected';
+
+/**
+ * Health of the shared connection, answered within HEALTH_PING_TIMEOUT_MS
+ * whatever Redis does (#970):
+ *
+ *   - `disconnected` — unconfigured, or the connection is down (reconnecting);
+ *   - `degraded` — connected, but PING did not answer PONG in time: the
+ *     frozen case, which used to hang the health check itself;
+ *   - `connected` — PING answered.
+ */
+export const getRedisHealth = async (): Promise<RedisHealth> => {
   const redis = getRedis();
-  if (!redis) return false;
-  try {
-    const pong = await redis.ping();
-    return pong === 'PONG';
-  } catch {
-    return false;
-  }
+  if (!redis || redis.status !== 'ready') return 'disconnected';
+  const pong = await settleWithin<string | null>(redis.ping(), HEALTH_PING_TIMEOUT_MS, null);
+  return pong === 'PONG' ? 'connected' : 'degraded';
 };
 
 /** Closes both clients on graceful shutdown; no-op when never connected. */
@@ -169,4 +249,6 @@ export const closeRedis = async (): Promise<void> => {
   await Promise.all(closers);
   subscriber = null;
   client = null;
+  everReady = false;
+  bypassUntil = 0;
 };

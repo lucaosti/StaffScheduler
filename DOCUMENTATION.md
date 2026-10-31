@@ -1964,6 +1964,21 @@ must pass `--scale backend=N`, or Compose scales back to one replica.
 Requires Redis (the default): with `REDIS_ENABLED=false` the caches are
 process-local and replicas would disagree with each other.
 
+**When Redis is down or hung** the request path does not wait for it (#970).
+Every Redis command is bounded (`commandTimeout`, 500 ms), which is what
+catches a *frozen* Redis — connected but never answering, a case reconnect
+logic cannot see; with it frozen, throughput used to fall from 183.6 to 1.5
+requests/s and the health check itself hung. The caches, the rate limiter's
+counters and the revocation list take their client through
+`getRequestPathRedis()`, which answers "use the in-process fallback" at once
+while the connection is down (instead of letting the command sit in ioredis'
+offline queue) and for 5 s after any request-path command fails — so a hung
+Redis costs one bounded wait per window rather than one per command of
+every request. Fallbacks are counted in `redis_fallback_total{reason}`
+(`unavailable`, `bypassed`, `error`). `GET /health` bounds each of its checks
+(2 s, in parallel) and reports `services.redis` as `connected`, `degraded`
+(connected, but PING did not answer within 1 s) or `disconnected`.
+
 ### MySQL read-replica routing for analytical reads
 
 Distinct from the backend-instance replicas above: this is a **MySQL** read

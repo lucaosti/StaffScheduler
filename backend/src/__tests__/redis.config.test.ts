@@ -5,8 +5,11 @@
  * Phase 3 relies on: Redis is enabled unless REDIS_ENABLED=false, in which
  * case the module must never construct a client or open a socket (so a
  * deployment that cannot run Redis, and the test suite, stay clean). When
- * enabled it must lazily create exactly one shared client and report health
- * from a real PING. ioredis is mocked so no network is touched.
+ * enabled it must create exactly one shared client on first use, keep
+ * reconnecting for as long as Redis is away (#969), bound every command and
+ * route the request path around a Redis that is down or hung (#970), and
+ * report health within its own time limit. ioredis is mocked so no network is
+ * touched.
  */
 
 const pingMock = jest.fn();
@@ -16,21 +19,18 @@ const onMock = jest.fn();
 // is mandatory because a client in subscriber mode cannot issue other commands.
 const subscriberOnMock = jest.fn();
 const duplicateMock = jest.fn(() => ({ on: subscriberOnMock, quit: quitMock }));
+let clientStatus = 'ready';
 const RedisCtor = jest.fn().mockImplementation(() => ({
   ping: pingMock,
   quit: quitMock,
   on: onMock,
   duplicate: duplicateMock,
+  get status() {
+    return clientStatus;
+  },
 }));
 
 jest.mock('ioredis', () => ({ __esModule: true, default: RedisCtor }));
-
-/** The handlers the module registered on the shared client, by event name (latest wins). */
-const clientHandlers = (): Record<string, (arg?: unknown) => void> => {
-  const handlers: Record<string, (arg?: unknown) => void> = {};
-  for (const [event, fn] of onMock.mock.calls) handlers[event as string] = fn as never;
-  return handlers;
-};
 
 const loadRedis = (opts: { enabled?: boolean } = {}) => {
   if (opts.enabled === false) process.env.REDIS_ENABLED = 'false';
@@ -43,6 +43,18 @@ const loadRedis = (opts: { enabled?: boolean } = {}) => {
   return mod;
 };
 
+/** The handlers the module registered on the shared client, by event name. */
+const clientHandlers = (): Record<string, (arg?: unknown) => void> => {
+  const handlers: Record<string, (arg?: unknown) => void> = {};
+  for (const [event, fn] of onMock.mock.calls) handlers[event as string] = fn as never;
+  return handlers;
+};
+
+beforeEach(() => {
+  clientStatus = 'ready';
+  onMock.mockClear();
+});
+
 describe('redis config (disabled)', () => {
   beforeEach(() => {
     RedisCtor.mockClear();
@@ -52,12 +64,13 @@ describe('redis config (disabled)', () => {
     const redis = loadRedis({ enabled: false });
     expect(redis.isRedisConfigured()).toBe(false);
     expect(redis.getRedis()).toBeNull();
+    expect(redis.getRequestPathRedis()).toBeNull();
     expect(RedisCtor).not.toHaveBeenCalled();
   });
 
-  it('reports unhealthy without touching the network', async () => {
+  it('reports disconnected without touching the network', async () => {
     const redis = loadRedis({ enabled: false });
-    await expect(redis.isRedisHealthy()).resolves.toBe(false);
+    await expect(redis.getRedisHealth()).resolves.toBe('disconnected');
     expect(pingMock).not.toHaveBeenCalled();
   });
 
@@ -80,23 +93,21 @@ describe('redis config (enabled by default)', () => {
     expect(redis.isRedisConfigured()).toBe(true);
   });
 
-  it('lazily creates a single shared client', () => {
+  it('creates no client at import, and a single shared one on first use', () => {
     const redis = loadRedis();
-    expect(redis.isRedisConfigured()).toBe(true);
+    expect(RedisCtor).not.toHaveBeenCalled();
     const a = redis.getRedis();
     const b = redis.getRedis();
     expect(a).toBe(b);
     expect(RedisCtor).toHaveBeenCalledTimes(1);
-    // lazyConnect keeps the socket closed until first command.
-    expect(RedisCtor.mock.calls[0][1]).toMatchObject({ lazyConnect: true });
   });
 
-  it('reports healthy on PONG and unhealthy on a rejected ping', async () => {
+  it('reports connected on PONG and degraded on a rejected ping', async () => {
     const redis = loadRedis();
     pingMock.mockResolvedValueOnce('PONG');
-    await expect(redis.isRedisHealthy()).resolves.toBe(true);
-    pingMock.mockRejectedValueOnce(new Error('down'));
-    await expect(redis.isRedisHealthy()).resolves.toBe(false);
+    await expect(redis.getRedisHealth()).resolves.toBe('connected');
+    pingMock.mockRejectedValueOnce(new Error('Command timed out'));
+    await expect(redis.getRedisHealth()).resolves.toBe('degraded');
   });
 
   it('closes and clears the client', async () => {
@@ -131,7 +142,6 @@ describe('redis config (enabled by default)', () => {
     // ready resets the once-flag so a later, genuinely new outage logs again.
     handlers.ready();
     handlers.error(new Error('new outage'));
-    // Two distinct outages logged, the mid-storm duplicate suppressed.
     expect(onMock).toHaveBeenCalled();
   });
 });
@@ -189,6 +199,69 @@ describe('reconnection (#969)', () => {
     expect(await value('redis_reconnect_attempts_total')).toBe(before + 2);
     handlers.ready();
     expect(await value('redis_connected')).toBe(1);
+  });
+});
+
+/**
+ * #970: with Redis frozen (connected but never answering) every command
+ * waited forever, so the request path stalled and so did the health check.
+ */
+describe('bounded commands and the request path (#970)', () => {
+  it('bounds every command with a timeout', () => {
+    const redis = loadRedis();
+    redis.getRedis();
+    const options = RedisCtor.mock.calls[RedisCtor.mock.calls.length - 1][1] as { commandTimeout?: number };
+    expect(options.commandTimeout).toEqual(expect.any(Number));
+    expect(options.commandTimeout).toBeLessThanOrEqual(1000);
+  });
+
+  it('gives the request path no client while the connection is not ready, instead of queueing', () => {
+    const redis = loadRedis();
+    clientStatus = 'reconnecting';
+    expect(redis.getRequestPathRedis()).toBeNull();
+    clientStatus = 'ready';
+    expect(redis.getRequestPathRedis()).not.toBeNull();
+  });
+
+  it('lets the first commands after boot wait for the initial connection, but not a lost one', () => {
+    const redis = loadRedis();
+    clientStatus = 'connecting';
+    // Never ready yet: still being established, so the command may wait for it.
+    expect(redis.getRequestPathRedis()).not.toBeNull();
+    clientStatus = 'ready';
+    clientHandlers().ready();
+    clientStatus = 'connecting';
+    // Ready once and now re-connecting: an outage, so fall back at once.
+    expect(redis.getRequestPathRedis()).toBeNull();
+  });
+
+  it('routes the request path around Redis for a while after a command fails, then tries again', () => {
+    jest.useFakeTimers();
+    try {
+      const redis = loadRedis();
+      expect(redis.getRequestPathRedis()).not.toBeNull();
+      redis.reportRedisFailure('cache.get', new Error('Command timed out'));
+      expect(redis.getRequestPathRedis()).toBeNull();
+      jest.advanceTimersByTime(redis.REQUEST_PATH_BYPASS_MS + 1);
+      expect(redis.getRequestPathRedis()).not.toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('answers health within its own limit when PING never returns', async () => {
+    const redis = loadRedis();
+    pingMock.mockReturnValueOnce(new Promise(() => undefined));
+    const started = Date.now();
+    await expect(redis.getRedisHealth()).resolves.toBe('degraded');
+    expect(Date.now() - started).toBeLessThan(redis.HEALTH_PING_TIMEOUT_MS + 500);
+  });
+
+  it('reports disconnected while the connection is down', async () => {
+    const redis = loadRedis();
+    clientStatus = 'reconnecting';
+    await expect(redis.getRedisHealth()).resolves.toBe('disconnected');
+    expect(pingMock).not.toHaveBeenCalled();
   });
 });
 
