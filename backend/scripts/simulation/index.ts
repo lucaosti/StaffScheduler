@@ -1,88 +1,76 @@
 #!/usr/bin/env ts-node
 /**
- * Full workforce simulation harness — rolling rounds.
+ * Full workforce simulation — every actor action through the real HTTP API.
  *
- * Simulates a whole organization from scratch, one schedule period at a
- * time, instead of pre-staffing everything upfront:
+ * Boots the real Express app in-process (`buildApp` + `app.listen(0)` on
+ * loopback, plus the optimization worker the production bootstrap starts),
+ * and simulates an organization over rolling schedule periods. Every person
+ * is an actor with their own session: they log in with their password, hold
+ * the server's cookies, get refreshed, and log out at the end. Nothing an
+ * actor does calls a service class; the database is read only by the
+ * verification step, to check that what the API answered is what happened.
  *
- *   for each period:
- *     1. employee threads file requests — time-off/loan against the
- *        upcoming (still-empty) period; shift-swap against the *previous*
- *        period's real assignments (there are none in round 1, so no
- *        shift-swap requests are possible yet — exactly like a brand new
- *        rollout);
- *     2. manager threads decide (or delegate) every pending approval, and
- *        delegate threads decide what was handed to them;
- *     3. every request's outcome is verified against the real database
- *        state;
- *     4. the period's schedule is generated for real (AutoScheduleService)
- *        — only now do assignments for this period exist, which is what
- *        the *next* round's shift-swap requests will act on;
- *     5. every resulting assignment (this period, and the previous one if
- *        it was just touched by swaps) is re-checked against the same
- *        ComplianceEngine used in production.
+ *   setup      administrator builds the structure: scoped department heads,
+ *              departments, rosters (setup.ts)
+ *   configure  administrator configures the company (adminActor.ts)
+ *   per round:
+ *     plan     heads create the period's schedule, shifts, on-call; lend people
+ *     file     employees file time-off, swaps, open offers, exceptions; clock
+ *              in/out; read their dashboard, notifications, calendar...
+ *     answer   swap targets accept or decline
+ *     decide   heads decide/keep/delegate/open; delegates decide; heads mop up;
+ *              attendance and policy exceptions; administrator reviews
+ *     manage   pairings, preferences, contracts, change requests, delegations,
+ *              reports and exports
+ *     probe    heads aim at another department — must be 403/404
+ *     verify   every request's outcome against the database
+ *     generate heads generate (queued, polled) and publish; compliance check
+ *   finally    calendars, module gate, destructive step, ledger verification,
+ *              logout of everyone, and the operation-coverage assertion
  *
- * Every employee is an independent "thread" (a concurrent async task — Node
- * is single-threaded, but the concurrency model is identical: independent
- * actors racing on the same database) that files a configurable number of
- * random requests per round. Every org-unit head is a "thread" too, waking
- * on every round to decide or delegate every pending approval; a delegate
- * becomes a deciding thread in turn.
+ * Determinism: every choice comes from the seeded PRNG (prng.ts) — same seed,
+ * same structure, same actions. The run fails (exit 1) on any verification
+ * failure, any finding, any operation in openapi.json that was not reached,
+ * and any operation reached but never successful that is not in the reviewed
+ * NEVER_SUCCEEDS list (coverage.ts).
  *
- * No AI anywhere in this file or the modules it calls: all "randomness" is a
- * seeded, deterministic PRNG (prng.ts) — same seed, same run, byte for byte.
+ * Usage (NODE_ENV=test is required: the login limiter allows 10 attempts per
+ * 15 minutes otherwise):
+ *   NODE_ENV=test npx ts-node scripts/simulation/index.ts \
+ *     [--employees=2000] [--department=Operations | --departments="Emergency:800,Surgery:700"] \
+ *     [--seed=424242] [--rounds=4] [--periodDays=14] [--requestsMin=5] [--requestsMax=8] \
+ *     [--concurrency=<hardware-derived>] \
+ *     [--adminEmail=admin@demo.staffscheduler.local] [--adminPassword=demo1234]
  *
- * Usage:
- *   npx ts-node scripts/simulation/index.ts \
- *     [--employees=2000] [--seed=42] [--concurrency=<hardware-derived>] [--rounds=4] [--periodDays=14] \
- *     [--department=Operations | --departments="Emergency:800,Surgery:700,Nursing:500"] \
- *     [--requestsMin=5] [--requestsMax=8] [--transport=service|http|mixed]
- *
- * `--transport` (default `service`) selects how actors submit requests:
- * `service` calls TypeScript service classes directly, in-process (today's
- * behavior, 0 HTTP/auth/RBAC coverage but proven correct on business rules);
- * `http`/`mixed` additionally boot the real Express app in-process
- * (`buildApp` + `app.listen(0)`) and route calls through it, exercising the
- * full auth/RBAC/validation middleware chain — requires `NODE_ENV=test`
- * (the login rate limiter otherwise rejects the volume of synthetic logins).
- *
- * `--departments` describes the whole simulated structure: a comma-separated
- * list of `name:employeeCount` pairs. Each department gets its own org unit,
- * its own approving head (created on the fly when not already seeded), its
- * own roster, and its own schedule per round — so every run can exercise a
- * different structure, different department sizes, and different approving
- * managers. `--department`+`--employees` is the single-department shorthand.
- *
- * `--requestsMin`/`--requestsMax` bound how many requests each employee
- * submits per round; times `--rounds`, they set the guaranteed per-employee
- * total (e.g. 13-16 × 4 rounds ≥ 52).
+ * The administrator account is the one thing the run does not create: it is
+ * the bootstrap credential (the demo seed's administrator by default, as the
+ * campaign seeds every lane), exactly as a real deployment starts from one.
  *
  * @author Luca Ostinelli
  */
 
-import dotenv from 'dotenv';
+import './simEnv';
 import * as path from 'path';
-import { createPool, RowDataPacket } from 'mysql2/promise';
+import { createPool } from 'mysql2/promise';
+import winston from 'winston';
 import { config } from '../../src/config';
-import { TimeOffService } from '../../src/services/TimeOffService';
-import { EmployeeLoanService } from '../../src/services/EmployeeLoanService';
-import { ShiftSwapService } from '../../src/services/ShiftSwapService';
-import { AutoScheduleService } from '../../src/services/AutoScheduleService';
+import { logger } from '../../src/config/logger';
+import { defaultSimulationConcurrency } from '../../src/config/hardware';
+import { closeOptimizationQueue, initOptimizationWorker, isOptimizationQueueEnabled } from '../../src/services/OptimizationQueue';
 import { MegaLog } from './megaLog';
-import { setupSimOrgs, DepartmentSpec, SIM_PASSWORD } from './setup';
-import { createEmptySchedulePeriod } from './schedulePeriod';
-import { runEmployeeActor, SubmittedRequest, EmployeeActorContext } from './employeeActor';
-import { runManagerActor, runDelegateCheck, Decision } from './managerActor';
-import { verifyAllRequests } from './verify';
+import { DepartmentSpec, loginEveryone, setupSimOrgs } from './setup';
+import { endSession, expireAccessToken, loadProfile, login, refresh } from './httpAuth';
+import { answerSwaps, RoundContext, runEmployeeTurn, addDays } from './employeeActor';
+import { decideOther, decideQueue, DeptRound, generateAndPublish, lendEmployee, manage, planRound, probeScope, replan, runDelegateTurn } from './managerActor';
+import { calendarFeeds, configure, destroy, importAccounts, kioskShift, moduleToggle, pushRegistration, review, twoFactor } from './adminActor';
+import { verifyLedger, verifyRequests } from './verify';
 import { verifyComplianceForSchedule } from './complianceReport';
 import { runWithConcurrency } from './concurrency';
-import { HttpClient } from './httpClient';
-import { establishSession } from './httpAuth';
-import { defaultSimulationConcurrency } from '../../src/config/hardware';
+import { newLedger } from './requests';
+import { NEVER_SUCCEEDS, summarize } from './coverage';
+import { World } from './world';
 
-dotenv.config();
-
-function parseArgs(): {
+interface Args {
   departments: DepartmentSpec[];
   seed: number;
   concurrency: number;
@@ -90,24 +78,24 @@ function parseArgs(): {
   periodDays: number;
   requestsMin: number;
   requestsMax: number;
-  transport: 'service' | 'http' | 'mixed';
-} {
+  adminEmail: string;
+  adminPassword: string;
+}
+
+function parseArgs(): Args {
   const args = process.argv.slice(2);
-  const get = (name: string, def: number): number => {
-    const arg = args.find((a) => a.startsWith(`--${name}=`));
-    return arg ? Number(arg.split('=')[1]) : def;
-  };
   const getStr = (name: string, def: string): string => {
     const arg = args.find((a) => a.startsWith(`--${name}=`));
     return arg ? arg.split('=').slice(1).join('=') : def;
   };
+  const get = (name: string, def: number): number => Number(getStr(name, String(def)));
 
-  // --departments="Name:count,Name:count" wins; --department+--employees is
-  // the single-department shorthand it degenerates to.
-  const departmentsSpec = getStr('departments', '');
+  // --departments="Name:count,..." wins; --department+--employees is the
+  // single-department shorthand.
+  const spec = getStr('departments', '');
   let departments: DepartmentSpec[];
-  if (departmentsSpec) {
-    departments = departmentsSpec.split(',').map((pair) => {
+  if (spec) {
+    departments = spec.split(',').map((pair) => {
       const [name, countStr] = pair.split(':');
       const count = Number(countStr);
       if (!name || !Number.isInteger(count) || count <= 0) {
@@ -115,10 +103,7 @@ function parseArgs(): {
       }
       return { name: name.trim(), count };
     });
-    // A duplicated name would resolve to the same department/org unit and
-    // corrupt the per-department round bookkeeping.
-    const names = new Set(departments.map((d) => d.name));
-    if (names.size !== departments.length) {
+    if (new Set(departments.map((d) => d.name)).size !== departments.length) {
       throw new Error('Duplicate department names in --departments — every department must be distinct.');
     }
   } else {
@@ -130,127 +115,42 @@ function parseArgs(): {
   if (requestsMin < 1 || requestsMax < requestsMin) {
     throw new Error(`Bad request bounds: --requestsMin=${requestsMin} --requestsMax=${requestsMax}.`);
   }
-
-  const transport = getStr('transport', 'service');
-  if (transport !== 'service' && transport !== 'http' && transport !== 'mixed') {
-    throw new Error(`Bad --transport="${transport}" — must be one of: service, http, mixed.`);
-  }
-
   return {
     departments,
     seed: get('seed', 424242),
-    // Falls back to a hardware-derived default (see src/config/hardware.ts)
-    // rather than a fixed 24 when run standalone (campaign.ts always passes
-    // --concurrency explicitly, itself hardware-derived — see its parseArgs).
     concurrency: get('concurrency', defaultSimulationConcurrency()),
     rounds: get('rounds', 4),
     periodDays: get('periodDays', 14),
-    transport: transport as 'service' | 'http' | 'mixed',
     requestsMin,
     requestsMax,
+    adminEmail: getStr('adminEmail', 'admin@demo.staffscheduler.local'),
+    adminPassword: getStr('adminPassword', 'demo1234'),
   };
 }
 
-const dateStr = (base: Date, offsetDays: number): string => {
-  const d = new Date(base);
-  d.setDate(d.getDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
-};
-
-/** One full decide phase: heads decide-or-delegate, delegates decide, heads mop up. Returns every decision made. */
-async function runDecisionPhase(
-  pool: import('mysql2/promise').Pool,
-  log: MegaLog,
-  seed: number,
-  distinctHeadUserIds: number[],
-  employeeUserIds: number[],
-  concurrency: number
-): Promise<Decision[]> {
-  const decisions: Decision[] = [];
-  for (const headUserId of distinctHeadUserIds) {
-    decisions.push(...(await runManagerActor(pool, log, seed, headUserId)));
-  }
-
-  // A head can delegate a structure-assigned item to *any* member of that
-  // structure — including a cross-department loan target's own roster,
-  // which isn't necessarily part of this run's `employeeUserIds`. Delegate
-  // threads must cover every user who currently holds a delegated item, not
-  // just our own simulated roster, or a delegated decision never gets made.
-  const [delegateRows] = await pool.query<RowDataPacket[]>(
-    `SELECT DISTINCT assigned_to_user_id AS id FROM pending_approvals
-      WHERE status = 'pending' AND assigned_to_user_id IS NOT NULL`
-  );
-  const delegateUserIds = [
-    ...new Set([...employeeUserIds, ...delegateRows.map((r) => r.id as number)]),
-  ];
-  const delegateDecisionsPerEmployee = await runWithConcurrency(delegateUserIds, concurrency, (userId) =>
-    runDelegateCheck(pool, log, userId)
-  );
-  decisions.push(...delegateDecisionsPerEmployee.flat());
-
-  // Mop-up pass: proves the queue is actually empty rather than assuming it.
-  let residual = 0;
-  for (const headUserId of distinctHeadUserIds) {
-    const leftover = await runManagerActor(pool, log, seed, headUserId, 0);
-    residual += leftover.length;
-    decisions.push(...leftover);
-  }
-  log.info(`Residual items decided in mop-up pass: ${residual} (0 expected).`);
-  return decisions;
-}
-
-async function loadAssignmentsByUser(
-  pool: import('mysql2/promise').Pool,
-  scheduleId: number
-): Promise<Map<number, number[]>> {
-  const [rows] = await pool.query(
-    `SELECT sa.id, sa.user_id
-       FROM shift_assignments sa
-       JOIN shifts s ON s.id = sa.shift_id
-      WHERE s.schedule_id = ?`,
-    [scheduleId]
-  );
-  const map = new Map<number, number[]>();
-  for (const row of rows as Array<{ id: number; user_id: number }>) {
-    const list = map.get(row.user_id) ?? [];
-    list.push(row.id);
-    map.set(row.user_id, list);
-  }
-  return map;
-}
-
-/** Per-department carry-over between rounds: last generated schedule and who
- *  owns which assignment on it (what next round's shift swaps act on). */
-interface DeptRoundState {
-  previousScheduleId: number | null;
-  previousLabel: string;
-  previousAssignmentsByUser: Map<number, number[]>;
-}
+const todayUtc = (): string => new Date().toISOString().slice(0, 10);
 
 async function main(): Promise<void> {
-  const { departments, seed, concurrency, rounds, periodDays, requestsMin, requestsMax, transport } = parseArgs();
+  const a = parseArgs();
+  if (config.server.env !== 'test') {
+    throw new Error('The simulation requires NODE_ENV=test (the login limiter allows only 10 attempts per 15 minutes otherwise).');
+  }
   const startedAt = new Date();
-  const logPath = path.join(
-    __dirname,
-    'output',
-    `sim-${startedAt.toISOString().replace(/[:.]/g, '-')}.log`
-  );
-  const log = new MegaLog(logPath);
-
-  const structureLabel = departments.map((d) => `${d.name}:${d.count}`).join(',');
+  const log = new MegaLog(path.join(__dirname, 'output', `sim-${startedAt.toISOString().replace(/[:.]/g, '-')}.log`));
+  const structure = a.departments.map((d) => `${d.name}:${d.count}`).join(',');
   log.section(
-    `FULL WORKFORCE SIMULATION (rolling) — seed=${seed}, departments=${structureLabel}, ` +
-      `concurrency=${concurrency}, rounds=${rounds}, periodDays=${periodDays}, requests/round=${requestsMin}-${requestsMax}`
+    `WORKFORCE SIMULATION over HTTP — seed=${a.seed}, departments=${structure}, rounds=${a.rounds}, ` +
+      `periodDays=${a.periodDays}, requests/round=${a.requestsMin}-${a.requestsMax}, concurrency=${a.concurrency}`
   );
-  log.info(`Log file: ${logPath}`);
-  log.info(`Started at: ${startedAt.toISOString()}`);
-  log.info('No AI is used anywhere in this run: request generation, manager decisions, and');
-  log.info('verification are all deterministic functions of the seed above.');
-  log.info(
-    'Nothing is pre-staffed: every period starts with empty shifts. Round 1 has no prior ' +
-      'assignments to swap, so only time-off/loan requests are possible — shift-swap requests ' +
-      'become possible from round 2 onward, once a real schedule exists to act on.'
-  );
+  log.info(`Log file: ${log.filePath}`);
+  // The app's logger is silent under NODE_ENV=test. A 500 the simulation
+  // reports needs the server's side of it (stack, SQL error) as evidence, so
+  // errors — and only errors — are written next to the run log; each carries
+  // the request id the finding quotes from the response.
+  const serverLog = log.filePath.replace(/\.log$/, '-server-errors.log');
+  logger.silent = false;
+  logger.add(new winston.transports.File({ filename: serverLog, level: 'error' }));
+  log.info(`Server error log: ${serverLog}`);
 
   const pool = createPool({
     host: config.database.host,
@@ -259,277 +159,183 @@ async function main(): Promise<void> {
     password: config.database.password,
     database: config.database.database,
     waitForConnections: true,
-    connectionLimit: Math.max(concurrency + 5, 10),
+    connectionLimit: Math.max(a.concurrency + 5, 10),
     queueLimit: 0,
     connectTimeout: config.database.connectTimeout,
   });
 
-  // ---- HTTP transport: boot the real Express app in-process --------------
-  // `service` transport (the default) never touches this; `http`/`mixed`
-  // route actor calls through the full middleware stack (auth, RBAC,
-  // validation) instead of calling service classes directly. Bound to an
-  // OS-assigned ephemeral port (0) so multiple campaign lanes never collide.
-  let httpBaseUrl: string | null = null;
-  let httpServer: import('http').Server | null = null;
-  if (transport !== 'service') {
-    if (config.server.env !== 'test') {
-      throw new Error(
-        `--transport=${transport} requires NODE_ENV=test (loginLimiter allows only 10 attempts/15min otherwise — ` +
-          `thousands of synthetic actor logins would 429 almost immediately).`
-      );
-    }
-    const { buildApp } = await import('../../src/app');
-    const app = buildApp(pool, { silent: true });
-    httpServer = await new Promise<import('http').Server>((resolve) => {
-      const server = app.listen(0, () => resolve(server));
-    });
-    const address = httpServer.address();
-    const port = typeof address === 'object' && address ? address.port : 0;
-    httpBaseUrl = `http://127.0.0.1:${port}/api`;
-    log.info(`HTTP transport enabled: app listening on ${httpBaseUrl} (transport=${transport}).`);
-  }
+  const { buildApp } = await import('../../src/app');
+  const app = buildApp(pool, { silent: true });
+  const server = await new Promise<import('http').Server>((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : 0;
+  // The worker runs in this process exactly as src/index.ts runs it next to
+  // the app: without it a queued generation would never complete.
+  if (isOptimizationQueueEnabled()) initOptimizationWorker(pool);
+  log.info(`App listening on http://127.0.0.1:${port}/api/v1 (optimization queue ${isOptimizationQueueEnabled() ? 'on' : 'off — generation is synchronous'}).`);
 
+  const world = new World(pool, log, a.seed, `http://127.0.0.1:${port}`);
+  const ledger = newLedger();
   try {
-    await pool.execute('SELECT 1');
+    world.admin = await login(world, 'ADMIN', a.adminEmail, a.adminPassword);
+    await refresh(world, world.admin);
+    await setupSimOrgs(world, a.departments, a.concurrency);
+    await loginEveryone(world, a.concurrency);
 
-    // ---- SETUP: org + rosters only — no schedules yet ---------------------
-    const orgs = await setupSimOrgs(pool, log, departments);
-    const allEmployeeUserIds = orgs.flatMap((o) => o.employeeUserIds);
-    log.info(
-      `Org ready: ${allEmployeeUserIds.length} employees across ${orgs.length} department(s): ` +
-        orgs.map((o) => `${o.name}=${o.employeeUserIds.length} (head #${o.headUserId})`).join(', ')
-    );
+    // A tag that is deterministic on a fresh database and still unique when a
+    // run is repeated on the same one: names of configuration entities are
+    // unique, so a second run must not collide with the first.
+    const skills = await world.admin.client.get<Array<{ name: string }>>('/skills');
+    const priorRuns = (Array.isArray(skills.body.data) ? skills.body.data : []).filter((s) => s.name.startsWith('SIM skill ')).length;
+    const tag = `${a.seed}-${priorRuns}`;
+    const adminState = await configure(world, tag);
+    await importAccounts(world, tag, ledger.imported);
+    const dept0 = world.departments[0];
+    if (dept0.employees.length > 1) await twoFactor(world, dept0.employees[1]);
+    if (dept0.employees.length > 0) await pushRegistration(world, dept0.employees[0]);
 
-    const [orgUnitRows] = await pool.query(`SELECT id, manager_user_id FROM org_units`);
-    const allOrgUnits = orgUnitRows as Array<{ id: number; manager_user_id: number | null }>;
-    const distinctHeadUserIds = [
-      ...new Set(allOrgUnits.map((u) => u.manager_user_id).filter((id): id is number => id !== null)),
-    ];
-    log.info(`Distinct org-unit heads who will run as manager threads: ${distinctHeadUserIds.join(', ')}`);
+    const rounds = new Map<number, DeptRound>();
+    const allRounds: Array<Map<number, DeptRound>> = [];
+    for (let r = 1; r <= a.rounds; r++) {
+      const periodStart = addDays(todayUtc(), 7 + (r - 1) * a.periodDays);
+      const ctx: RoundContext = {
+        round: r,
+        runSeed: a.seed + r * 1_000_003,
+        periodStart,
+        periodEnd: addDays(periodStart, a.periodDays - 1),
+        requestsMin: a.requestsMin,
+        requestsMax: a.requestsMax,
+        ledger,
+        exceptionPolicyId: adminState.exceptionPolicyId,
+      };
+      const thoroughRound = r === 1;
+      log.section(`ROUND ${r}/${a.rounds}: ${ctx.periodStart}..${ctx.periodEnd}`);
 
-    // ---- HTTP transport smoke check -----------------------------------
-    // Proves the whole chain end to end before any actor relies on it:
-    // real login against the first department head, a locally-minted
-    // bearer session, and one authenticated call through the full
-    // middleware stack.
-    if (httpBaseUrl) {
-      const smokeHeadId = orgs[0].headUserId;
-      const [headRows] = await pool.execute<RowDataPacket[]>(`SELECT email FROM users WHERE id = ?`, [smokeHeadId]);
-      const smokeClient = new HttpClient(httpBaseUrl);
-      await establishSession(smokeClient, log, headRows[0].email as string, SIM_PASSWORD);
-      const healthRes = await smokeClient.get('/health');
-      if (healthRes.status !== 200 && healthRes.status !== 503) {
-        throw new Error(`HTTP transport smoke check failed: GET /health returned ${healthRes.status}`);
+      // Everyone re-reads their profile, as the SPA does on load: roles and
+      // delegations granted since (the configure step grants some) change
+      // what an actor may do, and expectations must follow.
+      await runWithConcurrency([...world.heads(), ...world.allEmployees()], a.concurrency, (x) => loadProfile(world, x));
+
+      // PLAN
+      rounds.clear();
+      for (const dept of world.departments) {
+        const planned = await planRound(world, dept, ctx, thoroughRound);
+        if (planned) rounds.set(dept.departmentId, planned);
       }
-      const verifyRes = await smokeClient.get<{ id: number }>('/auth/verify');
-      if (verifyRes.status !== 200 || verifyRes.body.data?.id !== smokeHeadId) {
-        throw new Error(`HTTP transport smoke check failed: GET /auth/verify returned ${JSON.stringify(verifyRes)}`);
-      }
-      log.info(`HTTP transport smoke check passed: login + bearer session + authenticated call all verified.`);
-    }
+      allRounds.push(new Map(rounds));
+      const filed = [];
+      for (const dept of world.departments) filed.push(...(await lendEmployee(world, dept, ctx, thoroughRound)));
 
-    const services = {
-      timeOffService: new TimeOffService(pool),
-      loanService: new EmployeeLoanService(pool),
-      shiftSwapService: new ShiftSwapService(pool),
-    };
-    const auto = new AutoScheduleService(pool);
-
-    const allRequests: SubmittedRequest[] = [];
-    const allDecisions: Decision[] = [];
-    const deptState = new Map<number, DeptRoundState>(
-      orgs.map((o) => [
-        o.departmentId,
-        { previousScheduleId: null, previousLabel: '', previousAssignmentsByUser: new Map() },
-      ])
-    );
-    const today = new Date();
-
-    for (let round = 0; round < rounds; round++) {
-      const periodStart = dateStr(today, 7 + round * periodDays);
-      const periodEnd = dateStr(today, 7 + round * periodDays + periodDays - 1);
-      const label = `period ${round + 1}/${rounds} (${periodStart}..${periodEnd})`;
-
-      log.section(`ROUND ${round + 1}/${rounds}: ${label}`);
-
-      // One empty schedule per department, all covering the same period.
-      const scheduleIdByDept = new Map<number, number>();
-      for (const org of orgs) {
-        const scheduleId = await createEmptySchedulePeriod(
-          pool,
-          org.departmentId,
-          org.headUserId,
-          `[SIM] ${org.name} ${label}`,
-          periodStart,
-          periodEnd,
-          org.employeeUserIds.length
-        );
-        scheduleIdByDept.set(org.departmentId, scheduleId);
-        const state = deptState.get(org.departmentId)!;
-        log.info(
-          `Created empty schedule id=${scheduleId} for ${org.name} ${label}. ` +
-            (state.previousScheduleId === null
-              ? 'No prior assignments exist yet — shift-swap requests will be skipped this round.'
-              : `Shift-swap requests this round act on the ${state.previousLabel} schedule (id=${state.previousScheduleId}).`)
-        );
-      }
-
-      // ---- PHASE 1: employees file requests ------------------------------
-      log.info(
-        `PHASE 1: ${allEmployeeUserIds.length} employee threads file requests (concurrency=${concurrency}, ${requestsMin}-${requestsMax} each)`
+      // FILE — every employee in every department, globally bounded.
+      const tasks = world.departments.flatMap((dept) =>
+        dept.employees.map((e, i) => ({ e, thorough: i === 0, colleague: dept.employees[(i + 1) % dept.employees.length] ?? null }))
       );
-      // Flatten every department's roster into one task list so the global
-      // DB concurrency stays bounded at `concurrency` regardless of how many
-      // departments the structure has.
-      const actorTasks: Array<{ ctx: EmployeeActorContext; userId: number }> = [];
-      for (const org of orgs) {
-        const state = deptState.get(org.departmentId)!;
-        const ctx: EmployeeActorContext = {
-          pool,
-          log,
-          runSeed: seed + round * 1_000_003, // distinct-but-deterministic RNG stream per round
-          orgUnitId: org.orgUnitId,
-          otherOrgUnitIds: allOrgUnits.map((u) => u.id).filter((id) => id !== org.orgUnitId),
-          baselineAssignmentsByUser: state.previousAssignmentsByUser,
-          futureStartDate: periodStart,
-          futureEndDate: periodEnd,
-          requestsMin,
-          requestsMax,
-          ...services,
-        };
-        for (const userId of org.employeeUserIds) actorTasks.push({ ctx, userId });
+      const perEmployee = await runWithConcurrency(tasks, a.concurrency, (t) => {
+        const othersTimeOff = ledger.requests.find((q) => q.kind === 'time_off' && q.userId !== t.e.userId)?.id ?? null;
+        return runEmployeeTurn(world, t.e, ctx, t.thorough, t.colleague === t.e ? null : t.colleague, othersTimeOff);
+      });
+      filed.push(...perEmployee.flat());
+      ledger.requests.push(...filed);
+      log.info(`Filed ${filed.length} requests this round (${ledger.requests.length} in total).`);
+
+      // ANSWER
+      // Heads too: a swap candidate can be a shift the head works themselves.
+      await runWithConcurrency([...world.heads(), ...world.allEmployees()], a.concurrency, (e) => answerSwaps(world, e, ctx));
+
+      // MANAGE + PROBE — before the decisions, so what a head proposes or
+      // delegates this round is decided this round.
+      for (const dept of world.departments) {
+        await manage(world, dept, ctx, thoroughRound, rounds.get(dept.departmentId) ?? null);
+        await probeScope(world, dept, ctx, rounds, ledger.requests);
       }
-      const perEmployeeRequests = await runWithConcurrency(actorTasks, concurrency, (task) =>
-        runEmployeeActor(task.ctx, task.userId)
-      );
-      const requestsThisRound = perEmployeeRequests.flat();
-      allRequests.push(...requestsThisRound);
-      log.info(`Filed ${requestsThisRound.length} requests this round (${allRequests.length} total so far).`);
-
-      // ---- PHASE 2: manager + delegate threads decide --------------------
-      log.info('PHASE 2: manager threads decide (direct or delegate), then delegate threads decide');
-      const decisionsThisRound = await runDecisionPhase(
-        pool,
-        log,
-        seed + round * 1_000_003,
-        distinctHeadUserIds,
-        allEmployeeUserIds,
-        concurrency
-      );
-      allDecisions.push(...decisionsThisRound);
-      log.info(`Made ${decisionsThisRound.length} decisions this round (${allDecisions.length} total so far).`);
-
-      // ---- PHASE 3: verify this round's request outcomes -----------------
-      await verifyAllRequests(pool, log, requestsThisRound);
-
-      // ---- PHASE 4: generate every department's schedule -----------------
-      log.info(`PHASE 4: generate ${orgs.length} schedule(s) for ${label} (after this round's decisions have landed)`);
-      for (const org of orgs) {
-        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
-        const genResult = await auto.generate(scheduleId, org.headUserId);
-        log.info(
-          `Schedule generated for ${org.name} ${label}: ${genResult.assignmentsCreated}/${genResult.totalShifts} shifts filled ` +
-            `(${genResult.coveragePercentage}%), status=${genResult.status}.`
-        );
-        log.count('schedule.assignments_created', genResult.assignmentsCreated);
+      if (adminState.kioskToken) {
+        const code = (e: { email: string }): string => e.email.replace(/^sim\.([a-z0-9]+)\.(\d+)@.*$/, (_m, s, n) => `SIM-${s}-${n}`);
+        await kioskShift(world, adminState.kioskToken, dept0.employees.slice(0, 3), code, ledger);
       }
 
-      // ---- PHASE 5: verify constraints -----------------------------------
-      log.info('PHASE 5: verify scheduling constraints (compliance engine)');
-      for (const org of orgs) {
-        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
-        const state = deptState.get(org.departmentId)!;
-        await verifyComplianceForSchedule(pool, log, scheduleId, `${org.name} ${label}`);
-        if (state.previousScheduleId !== null) {
-          await verifyComplianceForSchedule(
-            pool,
-            log,
-            state.previousScheduleId,
-            `${state.previousLabel} (post-swaps this round)`
-          );
-        }
+      // DECIDE — every head's first pass takes every decision route in turn
+      // (thorough), then delegates, a mop-up, the administrator's own queue.
+      const delegates = new Set<number>();
+      for (const dept of world.departments) {
+        for (const u of await decideQueue(world, dept, ctx, true, false)) delegates.add(u);
       }
+      const delegateActors = world.allEmployees().filter((e) => delegates.has(e.userId));
+      await runWithConcurrency(delegateActors, a.concurrency, (e) => runDelegateTurn(world, e, ctx));
+      for (const dept of world.departments) await decideQueue(world, dept, ctx, false, true);
+      for (const dept of world.departments) await decideOther(world, dept, ctx);
+      // The administrator reviews on the entity routes first, then clears
+      // whatever is left in their own approval queue.
+      await review(world, ctx, thoroughRound);
+      await runDelegateTurn(world, world.admin, ctx);
 
-      // ---- prepare for next round -----------------------------------------
-      for (const org of orgs) {
-        const scheduleId = scheduleIdByDept.get(org.departmentId)!;
-        const state = deptState.get(org.departmentId)!;
-        state.previousScheduleId = scheduleId;
-        state.previousLabel = `${org.name} ${label}`;
-        state.previousAssignmentsByUser = await loadAssignmentsByUser(pool, scheduleId);
+      // VERIFY this round's requests, then GENERATE and check constraints.
+      await verifyRequests(world, ledger, filed);
+      for (const dept of world.departments) {
+        const planned = rounds.get(dept.departmentId);
+        if (!planned) continue;
+        await generateAndPublish(world, dept, planned.scheduleId, thoroughRound);
+        await verifyComplianceForSchedule(world, planned.scheduleId, `${dept.name} round ${r}`);
       }
     }
 
-    // ---- FINAL CHECK: per-employee request minimum -----------------------
-    // The actor retries until it hits its per-round target, but the retry
-    // budget is finite — make the guarantee an explicit, automatic check
-    // instead of an assumption. Every employee must have submitted at least
-    // requestsMin × rounds requests across the whole run.
-    log.section('VERIFY: per-employee request minimum');
-    const guaranteedMinimum = requestsMin * rounds;
-    const submittedByUser = new Map<number, number>();
-    for (const req of allRequests) {
-      submittedByUser.set(req.userId, (submittedByUser.get(req.userId) ?? 0) + 1);
+    // FINALLY
+    log.section('FINAL STEPS');
+    await calendarFeeds(world, dept0.head, dept0.departmentId);
+    await moduleToggle(world, dept0.head, dept0.departmentId, todayUtc(), addDays(todayUtc(), 7 + a.rounds * a.periodDays));
+    const lastSchedule = allRounds[allRounds.length - 1]?.get(dept0.departmentId)?.scheduleId ?? null;
+    if (lastSchedule) {
+      await replan(world, dept0, lastSchedule);
+      await verifyComplianceForSchedule(world, lastSchedule, `${dept0.name} after replan`);
     }
-    let belowMinimum = 0;
-    let observedMinimum = Number.POSITIVE_INFINITY;
-    for (const userId of allEmployeeUserIds) {
-      const submitted = submittedByUser.get(userId) ?? 0;
-      observedMinimum = Math.min(observedMinimum, submitted);
-      if (submitted < guaranteedMinimum) {
-        belowMinimum++;
-        log.verify(
-          false,
-          `employee #${userId}`,
-          `submitted only ${submitted} requests across the run — guaranteed minimum is ${guaranteedMinimum}`
-        );
-      }
-    }
-    if (belowMinimum === 0) {
-      log.verify(
-        true,
-        'per-employee request minimum',
-        `all ${allEmployeeUserIds.length} employees submitted at least ${guaranteedMinimum} requests (observed minimum: ${observedMinimum})`
-      );
-    }
+    await destroy(world, adminState, tag, lastSchedule);
+    await verifyLedger(world, ledger);
 
-    // ---- SUMMARY ------------------------------------------------------------
+    log.section('LOGOUT: every session ends, and stays ended');
+    await expireAccessToken(world, dept0.head);
+    if (dept0.employees[0]) await expireAccessToken(world, dept0.employees[0]);
+    await runWithConcurrency([...world.heads(), ...world.allEmployees()], a.concurrency, (actor) => endSession(world, actor));
+    await endSession(world, world.admin);
+    const refreshes = [...world.heads(), ...world.allEmployees(), world.admin].reduce((n, x) => n + x.client.refreshes, 0);
+    log.info(`Automatic access-token refreshes during the run: ${refreshes}.`);
+
+    // COVERAGE
+    log.section('COVERAGE: every operation in openapi.json');
+    const cov = summarize(world.recorder);
+    log.info(`Operations: ${cov.total}; reached ${cov.reached}; succeeded at least once ${cov.succeeded}.`);
+    for (const key of cov.unreached) world.dbFinding(`coverage ${key}`, 'operation never reached by any actor');
+    for (const [key, statuses] of cov.reachedNeverSucceeded) {
+      if (NEVER_SUCCEEDS[key]) log.info(`reached, never successful by design — ${key} ${statuses}: ${NEVER_SUCCEEDS[key]}`);
+      else world.dbFinding(`coverage ${key}`, `reached but never successful (${statuses})`);
+    }
+    for (const [req, n] of world.recorder.unmatchedRequests()) world.dbFinding(`unmounted path ${req}`, `${n} request(s) hit no route`);
+
+    // FINDINGS
     const counters = log.getCounters();
-    const failCount = counters['verify.fail'] ?? 0;
+    const failures = counters['verify.fail'] ?? 0;
+    const distinct = new Map<string, number>();
+    for (const f of world.findings) {
+      const key = `${f.kind} | ${f.operation.replace(/\/\d+/g, '/{id}').replace(/\?.*$/, '')} | ${f.note}`;
+      distinct.set(key, (distinct.get(key) ?? 0) + 1);
+    }
     log.summary([
       '',
-      failCount === 0
-        ? '  RESULT: all verifications passed — requests, decisions and every generated schedule are all consistent.'
-        : `  RESULT: ${failCount} verification(s) FAILED — see [VERIFY:FAIL] lines above for details.`,
+      `  operations reached: ${cov.reached}/${cov.total}, succeeded: ${cov.succeeded}/${cov.total}`,
+      `  distinct findings: ${distinct.size}`,
+      ...[...distinct.entries()].map(([k, n]) => `    ${n}× ${k}`),
+      failures === 0 ? '  RESULT: all verifications passed.' : `  RESULT: ${failures} verification(s) FAILED — see [VERIFY:FAIL] lines.`,
     ]);
-
     await log.close();
-    process.exitCode = failCount === 0 ? 0 : 1;
+    process.exitCode = failures === 0 ? 0 : 1;
   } finally {
-    if (httpServer) {
-      // `server.close()` alone stops accepting new connections but waits for
-      // every open one to close on its own before its callback fires — and
-      // Node's built-in `fetch` (HttpClient's transport) pools HTTP/1.1
-      // keep-alive sockets that sit idle rather than closing immediately
-      // after the last request. Without `closeAllConnections()`, a
-      // mixed/http-transport run's process never exited: it had already
-      // logged its full PASS/FAIL summary, but `close()`'s promise never
-      // resolved, so campaign.ts's `runChild` (which only resolves on the
-      // child's `close` event) waited on it until its own 3-hour timeout.
-      httpServer.closeAllConnections();
-      await new Promise<void>((resolve) => httpServer!.close(() => resolve()));
-    }
-    // Bounded, not awaited unconditionally: a run with thousands of actors
-    // racing on the pool can leave a handful of connections mysql2 does not
-    // consider idle even after every query has actually finished (observed:
-    // `pool.end()` hanging indefinitely with 1-2 connections still
-    // ESTABLISHED, long after the process had already logged its full
-    // PASS/FAIL summary and had zero CPU activity). Graceful shutdown is
-    // still given a real chance first; a script whose job is done must not
-    // hang forever on infrastructure below the layer it's testing —
-    // campaign.ts's runChild only resolves on the child process's `close`
-    // event, so a stuck simulation here stalls the whole campaign until its
-    // own 3-hour per-run timeout.
+    // closeAllConnections: fetch keeps idle keep-alive sockets, and close()
+    // alone waits for them forever (campaign.ts would hit its 3-hour timeout).
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    await closeOptimizationQueue().catch(() => undefined);
+    // Bounded: a pool that thousands of actors raced on can keep a connection
+    // mysql2 does not consider idle; the job is done, do not hang on it.
     await Promise.race([pool.end(), new Promise((resolve) => setTimeout(resolve, 10_000))]);
   }
 }
@@ -539,6 +345,4 @@ main()
     console.error('Simulation crashed:', err);
     process.exitCode = 1;
   })
-  .finally(() => {
-    process.exit(process.exitCode ?? 0);
-  });
+  .finally(() => process.exit(process.exitCode ?? 0));

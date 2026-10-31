@@ -37,7 +37,7 @@ export class MegaLog {
   }
 
   /** One log line for a specific actor's action. */
-  actor(kind: 'EMPLOYEE' | 'MANAGER', actorId: number, message: string): void {
+  actor(kind: string, actorId: number, message: string): void {
     const line = `[${this.elapsedMs().padStart(8)}] [${kind}#${actorId}] ${message}`;
     this.write(line);
   }

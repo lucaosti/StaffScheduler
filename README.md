@@ -283,7 +283,7 @@ npm run deadcode:cycles       # madge
 npm run deadcode:tests        # exports referenced only by tests
 npm run openapi:generate      # regenerate openapi/openapi.json from the schemas
 
-npm run sim:run               # workforce simulation (needs a seeded MySQL)
+NODE_ENV=test npm run sim:run # workforce simulation over the HTTP API (needs a seeded MySQL)
 npm run sim:campaign          # multi-run campaign (needs MySQL root credentials)
 ```
 

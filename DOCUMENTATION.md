@@ -2420,15 +2420,34 @@ to judge, not a gate to satisfy.
 
 ### Workforce simulation harness
 
-`backend/scripts/simulation/` contains a database-level simulation harness that complements the Playwright UI smoke tests:
+`backend/scripts/simulation/` contains a seeded workforce simulation that drives the real HTTP API, complementing the Playwright UI smoke tests:
 
 ```bash
 cd backend
-npm run sim:run        # one full simulation against the configured database
-npm run sim:campaign   # many simulations, each on a freshly created database
+NODE_ENV=test npm run sim:run -- --departments="Emergency:40,Surgery:30" --rounds=2 --seed=424242
+NODE_ENV=test npm run sim:campaign   # many simulations, each on a freshly created database
 ```
 
-- `sim:run` simulates a whole organization in rolling rounds: employee actors file time-off / employee-loan / shift-swap requests, manager actors decide or delegate every pending approval, the period schedule is generated with the real `AutoScheduleService`, and every outcome is verified against actual database state plus the production `ComplianceEngine`.
+`sim:run` boots the app in-process on loopback (with the optimization worker, as `src/index.ts` runs it) and simulates an organization over rolling schedule periods. **Every actor action is an HTTP request made with that actor's own session**: each person logs in with their password, holds the `token` and path-scoped `refresh_token` cookies the server sets, is refreshed by the real rotation (explicitly once, and automatically whenever the access token expires), and logs out at the end — after which the replayed pre-logout cookies must be refused. Each actor reads its permissions and org-unit reach from `GET /auth/verify` and derives its expectations from them, so an authorization change alters what the run expects rather than breaking it. The database is read only by the verification step.
+
+| Actor | Over its own session |
+|---|---|
+| Administrator | builds the structure (unit-scoped department heads, departments, rosters via `POST /employees/batch`); configures skills, contracts, shift templates, policies and a compliance preset, approval matrix and workflows, responsibility rules, roles, settings, modules, field policies, translations, SSO providers, kiosks, geofences; imports accounts by CSV and vCard; reviews change requests, cost plans, payroll export, audit log, escalation |
+| Department head | schedules, shifts (CSV import and by hand), on-call periods, loans; works the approval queue (decide through the entity route or the generic one, keep, delegate, open to the unit); attendance and policy-exception decisions; pairings, preferences, contracts, change requests, delegations; reports and exports; generation (queued and polled), publication, and re-planning of a published schedule (one proposal rejected, one applied) |
+| Employee | time off, direct swaps (via swap candidates), open offers and claims, answers to swaps, policy exceptions, assignment confirm/decline, clock-in/out, preferences, notifications, calendar tokens and feeds, dashboard, directory, timeline |
+| Delegate | decides what was delegated or opened to their unit |
+| Kiosk | punches people in and out with a device token (and a forged token must be refused) |
+
+**Out-of-scope attempts are part of the run.** Each head aims every operation kind at another department in the first round (and two per round after): editing its people, schedules and department, lending its staff, approving its time off, reading its swaps. The only correct answer is 403 or 404; a success is reported as a `scope_leak` finding. Each employee likewise attempts something their permissions exclude.
+
+**Verification.** Every filed request is checked against the database once decided (time off ↔ unavailability, loans in force, swaps ↔ assignment owners), every generated schedule is re-checked against the production `ComplianceEngine`, and the side effects of every other domain are re-read at the end (attendance, on-call, policy exceptions, change requests, delegations, pairings, cost plans, notifications read, calendar tokens, imported accounts, preferences), including that no approval created by the run is left pending.
+
+**Operation coverage.** Every response is attributed to its operation in `backend/openapi/openapi.json`. The run fails if any operation is never reached, or is reached but never succeeds unless it is in the reviewed `NEVER_SUCCEEDS` list in `coverage.ts` (each entry states why — e.g. the SSO callback needs a real identity provider; the run proves a forged code is refused). Requests that match no mounted route fail the run too. Destructive administrative operations run in a dedicated final step against entities created for the purpose, each read back afterwards.
+
+**Findings.** A non-2xx on an action the actor is entitled to, any 5xx, a scope leak, or a database mismatch is a finding with seed, actor, request and response; the summary lists them deduplicated. Server-side errors (normally silent under `NODE_ENV=test`) are written to `sim-<timestamp>-server-errors.log` next to the run log, keyed by the request id the finding quotes.
+
+Knobs (all on the CLI, so large runs can execute elsewhere): `--employees`/`--department` or `--departments="Name:count,..."`, `--requestsMin`/`--requestsMax` (per employee per round), `--rounds`, `--periodDays`, `--seed`, `--concurrency`, `--adminEmail`/`--adminPassword` (the bootstrap administrator; the demo seed's by default). `NODE_ENV=test` is required, and the run trusts one proxy hop so each actor's `X-Forwarded-For` address keys the login limiter (see `simEnv.ts`).
+
 - `sim:campaign` fans out N runs over parallel lanes. Each run derives its org structure, pacing, and approval-authorization model deterministically from `--baseSeed`, and gets a fresh per-lane database (drop, re-create, schema init, demo seed). Requires root credentials via `DB_ROOT_PASSWORD` (or `MYSQL_ROOT_PASSWORD`). Results land in `backend/scripts/simulation/output/campaign-<timestamp>/` (`run-XX.log` per run plus `summary.log`); the exit code is non-zero if any run reports a verification failure.
 
 ---
