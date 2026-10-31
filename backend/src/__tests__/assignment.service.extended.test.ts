@@ -93,8 +93,8 @@ describe('AssignmentService.createAssignment pinning', () => {
     const { pool, execute, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow({ schedule_id: 9 })], null] as Tuple)
-      .mockResolvedValueOnce([[{ current_assignments: 0 }], null] as Tuple)
       .mockResolvedValueOnce([[{ id: 7 }], null] as Tuple)
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null] as Tuple)
       .mockResolvedValueOnce([[], null] as Tuple) // checkConflicts
       .mockResolvedValueOnce([[], null] as Tuple) // availability
       .mockResolvedValueOnce([[], null] as Tuple) // required skills
@@ -127,6 +127,7 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow({ max_staff: 5 })], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 5 }], null]); // COUNT
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
@@ -138,20 +139,46 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
-      .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[], null]);
+      .mockResolvedValueOnce([[], null]); // user FOR UPDATE: none
     const svc = new AssignmentService(pool);
     await expect(svc.createAssignment({ shiftId: 10, userId: 7 } as never)).rejects.toThrow(
       /User not found/
     );
   });
 
+  /**
+   * #829: both rows are locked before the first plain read, shift then
+   * person. A person lock taken after the capacity COUNT would come too late:
+   * the COUNT fixes the transaction's REPEATABLE READ snapshot, and a request
+   * that then waited on the person lock would check conflicts against a view
+   * from before the booking it waited for had committed.
+   */
+  it('locks the shift and then the person before any plain read', async () => {
+    const { pool, conn, execute } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[{ current_assignments: 0 }], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([[], null])
+      .mockResolvedValueOnce([{ insertId: 42 }, null]);
+    execute.mockResolvedValueOnce([[assignmentRow({ id: 42 })], null]);
+
+    await new AssignmentService(pool).createAssignment({ shiftId: 10, userId: 7 } as never);
+
+    const sql = conn.execute.mock.calls.map(([statement]) => String(statement));
+    expect(sql[0]).toMatch(/FROM shifts WHERE id = \? FOR UPDATE/);
+    expect(sql[1]).toMatch(/FROM users WHERE id = \? AND is_active = 1 FOR UPDATE/);
+    expect(sql[2]).toMatch(/COUNT\(\*\)/);
+  });
+
   it('throws on conflicting assignment', async () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null]) // user
       .mockResolvedValueOnce([
         [
           {
@@ -174,8 +201,8 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null])
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[{ id: 99 }], null]); // availability hit
     const svc = new AssignmentService(pool);
@@ -188,8 +215,8 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null])
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[{ skill_id: 1 }, { skill_id: 2 }], null]) // shift_skills
@@ -208,8 +235,8 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null])
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[], null]); // no required skills
@@ -235,8 +262,8 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null])
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null])
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[], null]) // availability
       .mockResolvedValueOnce([[], null]); // no required skills
@@ -250,8 +277,8 @@ describe('AssignmentService.createAssignment guards', () => {
     const { pool, conn, execute } = makePool();
     conn.execute
       .mockResolvedValueOnce([[shiftRow()], null]) // shift FOR UPDATE
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // user FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT
-      .mockResolvedValueOnce([[{ id: 7 }], null]) // user
       .mockResolvedValueOnce([[], null]) // checkConflicts
       .mockResolvedValueOnce([[], null]) // checkAvailability
       .mockResolvedValueOnce([[], null]) // shift_skills empty

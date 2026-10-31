@@ -45,6 +45,8 @@ let admin: mysql.Connection;
 let server: http.Server;
 let cookie: string;
 let closeAppPool: () => Promise<void>;
+let departmentId: number;
+let scheduleId: number;
 
 /** Inserts `count` active users and returns their ids. */
 const createUsers = async (prefix: string, count: number): Promise<number[]> => {
@@ -90,6 +92,16 @@ beforeAll(async () => {
     `INSERT INTO user_roles (user_id, role_id) SELECT ?, id FROM roles WHERE name = 'Administrator'`,
     [userRes.insertId]
   );
+  const [deptRes] = await admin.query<mysql.ResultSetHeader>(
+    `INSERT INTO departments (name, description, is_active) VALUES ('Ctest Dept', 'concurrency', 1)`
+  );
+  departmentId = deptRes.insertId;
+  const [schedRes] = await admin.query<mysql.ResultSetHeader>(
+    `INSERT INTO schedules (name, start_date, end_date, department_id, status, created_by)
+     VALUES ('Ctest Schedule', CURDATE(), CURDATE() + INTERVAL 60 DAY, ?, 'draft', ?)`,
+    [departmentId, userRes.insertId]
+  );
+  scheduleId = schedRes.insertId;
 
   const { database } = require('../../config/database');
   const { buildApp } = require('../../app');
@@ -154,5 +166,80 @@ describe('POST /org/units/{id}/members under concurrency (#964)', () => {
     );
     expect(rows).toHaveLength(people.length);
     expect(rows.map((r) => Number(r.primaries))).toEqual(people.map(() => 1));
+  }, 60_000);
+});
+
+// ── #829: concurrent assignments ─────────────────────────────────────────────
+
+/**
+ * The load harness reproduced it at 8–16 concurrent requests: K requests
+ * booking one person onto K overlapping shifts all commit, because the
+ * overlap check is a plain read that cannot see the other transactions'
+ * uncommitted inserts. Exactly one may succeed. The capacity case (K people
+ * onto a one-seat shift) is the control: that path already serialized on the
+ * shift row, and must keep doing so.
+ */
+describe('POST /assignments under concurrency (#829)', () => {
+  const K = 12;
+  let dayOffset = 10;
+
+  /** Inserts `count` shifts on one day of the schedule, all 09:00-17:00. */
+  const createShifts = async (count: number, maxStaff: number): Promise<number[]> => {
+    dayOffset += 2;
+    const ids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const [res] = await admin.query<mysql.ResultSetHeader>(
+        `INSERT INTO shifts (schedule_id, department_id, date, start_time, end_time, min_staff, max_staff, status)
+         VALUES (?, ?, CURDATE() + INTERVAL ? DAY, '09:00:00', '17:00:00', 1, ?, 'open')`,
+        [scheduleId, departmentId, dayOffset, maxStaff]
+      );
+      ids.push(res.insertId);
+    }
+    return ids;
+  };
+
+  const assign = (shiftId: number, userId: number) =>
+    request(server).post('/api/v1/assignments').set('Cookie', cookie).send({ shiftId, userId });
+
+  const statusesOf = (responses: request.Response[]) =>
+    responses.map((r) => `${r.status}${r.status === 201 ? '' : `:${r.body?.error?.code}`}`).sort();
+
+  it('books one person onto K overlapping shifts at once: exactly one succeeds, the others 409', async () => {
+    const [person] = await createUsers('overlap-person', 1);
+    const shifts = await createShifts(K, 3);
+
+    const responses = await Promise.all(shifts.map((shiftId) => assign(shiftId, person)));
+
+    expect(statusesOf(responses)).toEqual(['201', ...Array(K - 1).fill('409:CONFLICT')].sort());
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM shift_assignments WHERE user_id = ? AND status IN ('pending', 'confirmed')`,
+      [person]
+    );
+    expect(Number(rows[0].n)).toBe(1);
+  }, 60_000);
+
+  it('assigns K people at once to a shift with one seat: exactly one succeeds (the capacity control)', async () => {
+    const people = await createUsers('capacity-person', K);
+    const [shift] = await createShifts(1, 1);
+
+    const responses = await Promise.all(people.map((userId) => assign(shift, userId)));
+
+    expect(statusesOf(responses)).toEqual(['201', ...Array(K - 1).fill('409:CONFLICT')].sort());
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS n FROM shift_assignments WHERE shift_id = ? AND status IN ('pending', 'confirmed')`,
+      [shift]
+    );
+    expect(Number(rows[0].n)).toBe(1);
+  }, 60_000);
+
+  it('books different people onto overlapping shifts at once without refusing any of them', async () => {
+    // The per-person lock must serialize one person's bookings only: K
+    // people, each onto their own shift of the same hours, all succeed.
+    const people = await createUsers('parallel-person', K);
+    const shifts = await createShifts(K, 3);
+
+    const responses = await Promise.all(people.map((userId, i) => assign(shifts[i], userId)));
+
+    expect(statusesOf(responses)).toEqual(Array(K).fill('201'));
   }, 60_000);
 });

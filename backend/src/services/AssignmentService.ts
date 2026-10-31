@@ -135,9 +135,41 @@ export class AssignmentService {
       try {
         await connection.beginTransaction();
 
-        // Lock the shift row for the duration of the transaction so two
-        // concurrent assignment requests for the same shift serialize on the
-        // capacity check instead of both reading the same pre-insert count.
+        // WHY TWO ROW LOCKS, TAKEN BEFORE ANY READ (#829).
+        //
+        // Every check below is "read the current state, then insert": the
+        // shift's capacity, and the person's overlapping shifts, rest,
+        // availability and working-time limits. Under concurrency such a check
+        // is only sound if no other transaction can insert what it is looking
+        // for between the read and the commit. Two locks make that so:
+        //
+        //   - the SHIFT row serializes every booking onto one shift, which is
+        //     what makes the capacity check sound;
+        //   - the PERSON's `users` row serializes every booking of one person,
+        //     which is what makes the overlap and limit checks sound. Without
+        //     it, K requests booking one person onto K overlapping shifts each
+        //     read "no conflict" — none could see the others' uncommitted
+        //     inserts — and all K committed (8–16 concurrent requests reproduced
+        //     it every round in the load harness).
+        //
+        // Both are taken FIRST, shift then person, in every booking: a fixed
+        // order, so two bookings cannot each hold the lock the other waits for.
+        // And before any plain read, because under REPEATABLE READ the
+        // transaction's snapshot is fixed by its first non-locking read — had
+        // the capacity COUNT run before the person lock, a request that waited
+        // on that lock would still check conflicts against the snapshot from
+        // before the other booking committed. Once the lock is granted, every
+        // read — the ones on this connection and the compliance and policy
+        // reads on the pool — sees everything the previous holder committed.
+        //
+        // Rejected: a unique constraint (it can express "not twice on one
+        // shift", which exists, but not "no two overlapping shifts", a
+        // relation between rows); a named lock (GET_LOCK is held per session,
+        // not per transaction, so it outlives a rollback unless released by
+        // hand on every path, and it is invisible to InnoDB's deadlock
+        // detector); SERIALIZABLE isolation (it would turn the reads into
+        // shared range locks and the concurrent bookings into deadlocks
+        // rather than queueing them).
         const [shiftRows] = await connection.execute<RowDataPacket[]>(
           'SELECT * FROM shifts WHERE id = ? FOR UPDATE',
           [assignmentData.shiftId]
@@ -146,6 +178,13 @@ export class AssignmentService {
         if (shiftRows.length === 0) throw new NotFoundError('Shift not found');
 
         const shift = shiftRows[0];
+
+        const [userRows] = await connection.execute<RowDataPacket[]>(
+          'SELECT id FROM users WHERE id = ? AND is_active = 1 FOR UPDATE',
+          [assignmentData.userId]
+        );
+
+        if (userRows.length === 0) throw new NotFoundError('User not found or inactive');
 
         const [countRows] = await connection.execute<RowDataPacket[]>(
           `SELECT COUNT(*) AS current_assignments
@@ -156,13 +195,6 @@ export class AssignmentService {
         const currentAssignments = Number((countRows[0] as any).current_assignments);
 
         if (currentAssignments >= shift.max_staff) throw new ConflictError('Shift is already at maximum capacity');
-
-        const [userRows] = await connection.execute<RowDataPacket[]>(
-          'SELECT id FROM users WHERE id = ? AND is_active = 1 LIMIT 1',
-          [assignmentData.userId]
-        );
-
-        if (userRows.length === 0) throw new NotFoundError('User not found or inactive');
 
         const conflicts = await this.validator.checkConflicts(
           assignmentData.userId,

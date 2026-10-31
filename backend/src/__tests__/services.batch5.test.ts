@@ -139,8 +139,8 @@ describe('AssignmentService.createAssignment — null after INSERT throws', () =
     const userRow = { id: 10 };
     conn.execute
       .mockResolvedValueOnce([[shiftRow], null]) // SELECT shift FOR UPDATE
+      .mockResolvedValueOnce([[userRow], null])  // SELECT users FOR UPDATE
       .mockResolvedValueOnce([[{ current_assignments: 0 }], null]) // COUNT current assignments
-      .mockResolvedValueOnce([[userRow], null])  // SELECT users
       .mockResolvedValueOnce([[], null])          // SELECT shift_skills (no required skills)
       .mockResolvedValueOnce([{ insertId: 99 }, null]); // INSERT shift_assignments
     execute.mockResolvedValueOnce([[], null] as Tuple); // getAssignmentById → null
