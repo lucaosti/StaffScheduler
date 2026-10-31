@@ -26,8 +26,12 @@ import { startPayrollExportWorker, stopPayrollExportWorker } from './services/Pa
 import { initModuleCacheInvalidation } from './services/moduleCache';
 import { shutdownTracing } from './observability/tracing';
 import { buildApp } from './app';
+import { installProcessSafetyNet } from './processSafety';
 
 export async function startServer(): Promise<void> {
+  // First, before anything can reject unobserved: a dependency outage must
+  // cost a log line, not the process (#825; see processSafety.ts).
+  installProcessSafetyNet();
   try {
     // Single process-wide pool: the same one the `database` singleton exposes
     // to health checks and the auth middleware. Creating a second pool here

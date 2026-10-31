@@ -8,6 +8,7 @@
 
 import type { RowDataPacket } from 'mysql2/promise';
 import { createPollingWorker, runPollingBatch } from '../services/PollingWorker';
+import { logger } from '../config/logger';
 
 interface Row extends RowDataPacket {
   id: number;
@@ -123,13 +124,15 @@ describe('createPollingWorker', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
-  it('polls on the given interval and unrefs the timer', () => {
+  it('polls on the given interval and unrefs the timer', async () => {
     const processOnce = jest.fn().mockResolvedValue(0);
     const worker = createPollingWorker('Test worker', processOnce);
     const setIntervalSpy = jest.spyOn(global, 'setInterval');
 
     worker.start({} as never, 1000);
-    jest.advanceTimersByTime(2500);
+    // Async: a tick that has not settled yet blocks the next one (#825), so
+    // each tick's promise must be allowed to resolve between timer firings.
+    await jest.advanceTimersByTimeAsync(2500);
 
     expect(processOnce).toHaveBeenCalledTimes(2);
     const handle = setIntervalSpy.mock.results[0].value as ReturnType<typeof setInterval>;
@@ -179,5 +182,131 @@ describe('createPollingWorker', () => {
     jest.advanceTimersByTime(1000);
     expect(processOnce).toHaveBeenCalledTimes(1);
     worker.stop();
+  });
+});
+
+/**
+ * A database outage must not take the process down through a worker (#825).
+ *
+ * Every replica runs these pollers, so a poll whose rejection escapes as an
+ * unhandled rejection crash-loops the whole fleet for as long as MySQL is
+ * down. The worker owns its tick: it catches, logs the outage once rather than
+ * once per tick, backs off, and never overlaps a tick still in flight.
+ */
+describe('createPollingWorker — failure handling (#825)', () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    unhandled.length = 0;
+    process.on('unhandledRejection', onUnhandled);
+  });
+  afterEach(() => {
+    process.off('unhandledRejection', onUnhandled);
+    jest.useRealTimers();
+  });
+
+  /** Lets the rejected tick's promise chain settle under fake timers. */
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  it('catches a rejected tick (the pool cannot connect) and logs it, leaving no unhandled rejection', async () => {
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const processOnce = jest.fn().mockRejectedValue(Object.assign(new Error('connect ECONNREFUSED'), { code: 'ECONNREFUSED' }));
+    const worker = createPollingWorker('Test worker', processOnce);
+
+    worker.start({} as never, 1000);
+    jest.advanceTimersByTime(1000);
+    await flush();
+    // Give Node a turn to report an unhandled rejection, if there is one.
+    jest.useRealTimers();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(unhandled).toEqual([]);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('Test worker'), expect.anything());
+    worker.stop();
+    error.mockRestore();
+  });
+
+  it('logs an outage once, not once per tick, and backs off between attempts', async () => {
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const processOnce = jest.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
+    const worker = createPollingWorker('Test worker', processOnce);
+
+    worker.start({} as never, 1000);
+    for (let i = 0; i < 30; i++) {
+      jest.advanceTimersByTime(1000);
+      await flush();
+    }
+
+    // Exponential backoff from the poll interval: attempts at 1, 3, 7, 15 s…
+    // rather than every one of the 30 ticks.
+    expect(processOnce.mock.calls.length).toBeLessThanOrEqual(6);
+    expect(processOnce.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(error.mock.calls.filter(([msg]) => String(msg).includes('Test worker'))).toHaveLength(1);
+    worker.stop();
+    error.mockRestore();
+  });
+
+  it('resumes the normal cadence, and logs the recovery, once a tick succeeds again', async () => {
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const info = jest.spyOn(logger, 'info').mockImplementation(() => logger);
+    const processOnce = jest.fn().mockRejectedValueOnce(new Error('down')).mockResolvedValue(0);
+    const worker = createPollingWorker('Test worker', processOnce);
+
+    worker.start({} as never, 1000);
+    for (let i = 0; i < 10; i++) {
+      jest.advanceTimersByTime(1000);
+      await flush();
+    }
+    // One failure, one backed-off tick, then every tick again.
+    expect(processOnce.mock.calls.length).toBeGreaterThanOrEqual(8);
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('recovered'));
+    worker.stop();
+    error.mockRestore();
+    info.mockRestore();
+  });
+
+  it('never starts a tick while the previous one is still running', async () => {
+    let finish!: () => void;
+    const processOnce = jest.fn().mockImplementation(
+      () => new Promise<number>((resolve) => { finish = () => resolve(0); })
+    );
+    const worker = createPollingWorker('Test worker', processOnce);
+
+    worker.start({} as never, 1000);
+    jest.advanceTimersByTime(5000);
+    await flush();
+    expect(processOnce).toHaveBeenCalledTimes(1);
+
+    finish();
+    await flush();
+    jest.advanceTimersByTime(1000);
+    await flush();
+    expect(processOnce).toHaveBeenCalledTimes(2);
+    worker.stop();
+  });
+});
+
+describe('runPollingBatch — a rollback that fails too (#825)', () => {
+  it('still resolves to 0 when the rollback after a failed claim rejects (the connection is gone)', async () => {
+    const conn = makeConn();
+    conn.rollback.mockRejectedValue(new Error('Connection lost: The server closed the connection.'));
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    await expect(
+      runPollingBatch(makePool(conn), {
+        label: 'Test',
+        attemptsOf: (r: Row) => r.attempts,
+        claim: async () => {
+          throw new Error('Connection lost');
+        },
+        deliver: async () => undefined,
+        outcome: { onSent: jest.fn(), onFailure: jest.fn() },
+      })
+    ).resolves.toBe(0);
+    expect(conn.release).toHaveBeenCalledTimes(1);
+    error.mockRestore();
   });
 });

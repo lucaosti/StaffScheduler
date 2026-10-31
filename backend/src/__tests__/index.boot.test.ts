@@ -241,6 +241,8 @@ describe('startServer()', () => {
       expect(mockStartWebhookWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartPayrollExportWorker).toHaveBeenCalledWith(mockPool);
       expect(mockStartNativePushWorker).toHaveBeenCalledWith(mockPool);
+      // #825: an unhandled rejection is logged, not allowed to exit the process.
+      expect(processOnSpy).toHaveBeenCalledWith('unhandledRejection', expect.any(Function));
     });
   });
 });
