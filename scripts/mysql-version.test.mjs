@@ -22,7 +22,7 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const workflows = readdirSync(path.join(root, '.github', 'workflows'))
   .filter((name) => /\.ya?ml$/.test(name))
   .map((name) => path.join('.github', 'workflows', name));
-const FILES = ['docker-compose.yml', 'docker-compose.verify.yml', ...workflows];
+const FILES = ['docker-compose.yml', 'docker-compose.verify.yml', 'backend/benchmarks/load/compose.yml', ...workflows];
 
 // `mysql:<tag>` as an image reference; the lookbehind skips the host:port in
 // a DATABASE_URL (`@mysql:3306`) and names like `bitnami/mysql:`.
