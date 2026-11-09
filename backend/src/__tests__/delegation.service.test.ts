@@ -31,6 +31,7 @@ describe('DelegationService.createDelegation', () => {
   it('creates a delegation when all requested codes are held by the delegator', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])      // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 42, affectedRows: 1 }, null]) // INSERT
       .mockResolvedValueOnce([[]])                                       // writeAuditLog audit insert
       .mockResolvedValueOnce([                                           // getDelegationById
@@ -50,7 +51,7 @@ describe('DelegationService.createDelegation', () => {
       ]);
 
     const service = new DelegationService(pool);
-    const result = await service.createDelegation(1, delegatorPerms, {
+    const result = await service.createDelegation({ id: 1, permissions: delegatorPerms }, {
       delegateeId: 2,
       permissionCodes: ['timeoff.approve'],
       expiresAt: new Date(Date.now() + 86400000).toISOString(),
@@ -65,7 +66,7 @@ describe('DelegationService.createDelegation', () => {
     const service = new DelegationService(pool);
 
     await expect(
-      service.createDelegation(1, delegatorPerms, {
+      service.createDelegation({ id: 1, permissions: delegatorPerms }, {
         delegateeId: 2,
         permissionCodes: ['settings.manage'], // not in delegatorPerms
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
@@ -78,12 +79,70 @@ describe('DelegationService.createDelegation', () => {
     const service = new DelegationService(pool);
 
     await expect(
-      service.createDelegation(1, delegatorPerms, {
+      service.createDelegation({ id: 1, permissions: delegatorPerms }, {
         delegateeId: 1,
         permissionCodes: ['timeoff.approve'],
         expiresAt: new Date(Date.now() + 86400000).toISOString(),
       })
     ).rejects.toThrow(/yourself/);
+  });
+
+  // #814: a delegation can never be wider than the delegator's own scope.
+  const scoped = { id: 1, permissions: delegatorPerms, allowedOrgUnitIds: [5, 6] };
+  const input = (scopeOrgUnitId: number | null) => ({
+    delegateeId: 2,
+    permissionCodes: ['timeoff.approve'],
+    expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    scopeOrgUnitId,
+  });
+
+  it('refuses an organization-wide delegation from a scoped delegator', async () => {
+    const { pool, execute } = makePool();
+    await expect(new DelegationService(pool).createDelegation(scoped, input(null))).rejects.toThrow(/organization-wide/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('refuses a scoped delegation of a code that acts organization-wide', async () => {
+    const { pool, execute } = makePool();
+    const admin = { id: 1, permissions: ['role.manage', 'timeoff.approve'] };
+    await expect(
+      new DelegationService(pool).createDelegation(admin, { ...input(5), permissionCodes: ['timeoff.approve', 'role.manage'] })
+    ).rejects.toThrow(/role.manage act organization-wide/);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('refuses re-delegating a code held only through someone else\'s delegation', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ code: 'schedule.read' }], null]); // own role codes lack timeoff.approve
+    await expect(
+      new DelegationService(pool).createDelegation({ id: 1, permissions: delegatorPerms }, input(null))
+    ).rejects.toThrow(/held only through a delegation/);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses a delegation scoped outside the delegator\'s units', async () => {
+    const { pool } = makePool();
+    await expect(new DelegationService(pool).createDelegation(scoped, input(9))).rejects.toThrow(/outside the delegator's scope/);
+  });
+
+  it('judges each code by its own scope, delegation overrides included', async () => {
+    const { pool } = makePool();
+    const delegatee = { ...scoped, allowedOrgUnitIds: null, delegationScopes: [{ permissionCode: 'timeoff.approve', allowedOrgUnitIds: [7] }] };
+    await expect(new DelegationService(pool).createDelegation(delegatee, input(5))).rejects.toThrow(/outside/);
+  });
+
+  it('accepts a delegation inside the delegator\'s scope', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ code: 'timeoff.approve' }], null])
+      .mockResolvedValueOnce([{ insertId: 42 }, null])
+      .mockResolvedValueOnce([{ insertId: 1 }, null])
+      .mockResolvedValueOnce([[{
+        id: 42, delegator_id: 1, delegatee_id: 2, permission_codes: '["timeoff.approve"]', scope_org_unit_id: 6,
+        starts_at: new Date(), expires_at: new Date(Date.now() + 86400000), is_active: 1, created_at: new Date(), updated_at: new Date(),
+      }], null]);
+    const result = await new DelegationService(pool).createDelegation(scoped, input(6));
+    expect(result.scopeOrgUnitId).toBe(6);
   });
 });
 

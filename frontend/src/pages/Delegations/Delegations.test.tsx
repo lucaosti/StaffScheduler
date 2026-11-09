@@ -13,16 +13,19 @@ jest.mock('../../services/delegationService', () => ({
   listDelegations: jest.fn(),
   createDelegation: jest.fn(),
   revokeDelegation: jest.fn(),
+  listUnitDelegableCodes: jest.fn(),
 }));
 
 const {
   listDelegations: mockList,
   createDelegation: mockCreate,
   revokeDelegation: mockRevoke,
+  listUnitDelegableCodes: mockUnitDelegable,
 } = jest.requireMock('../../services/delegationService') as {
   listDelegations: jest.Mock;
   createDelegation: jest.Mock;
   revokeDelegation: jest.Mock;
+  listUnitDelegableCodes: jest.Mock;
 };
 
 const ACTIVE = {
@@ -55,6 +58,7 @@ beforeEach(() => {
   mockList.mockResolvedValue(makeResponse());
   mockCreate.mockResolvedValue({ success: true, data: { ...ACTIVE, id: 99 } });
   mockRevoke.mockResolvedValue({ success: true, data: null });
+  mockUnitDelegable.mockResolvedValue({ success: true, data: { permissionCodes: ['schedule.read', 'timeoff.approve'] } });
 });
 
 afterEach(() => jest.clearAllMocks());
@@ -148,6 +152,44 @@ describe('<Delegations />', () => {
     await userEvent.click(screen.getByRole('button', { name: /submit delegation/i }));
 
     expect(await screen.findByText(/delegatee user id is required/i)).toBeInTheDocument();
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  // The server refuses a unit-scoped delegation of an organization-wide code;
+  // the form offers only the codes it lists and explains why (round-3 review).
+  it('offers only the server\'s unit-delegable codes once a unit is set', async () => {
+    render(<Delegations />);
+    await screen.findByText('schedule.manage');
+
+    await userEvent.click(screen.getByRole('button', { name: /new delegation/i }));
+    expect(screen.queryByTestId('unit-scope-hint')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText(/scope org unit id/i), '4');
+    expect(await screen.findByTestId('unit-scope-hint')).toHaveTextContent('schedule.read, timeoff.approve');
+
+    await userEvent.type(screen.getByLabelText(/permission code input/i), 'role.manage');
+    await userEvent.click(screen.getByRole('button', { name: /add permission code/i }));
+    expect(await screen.findByText(/role\.manage acts organization-wide/i)).toBeInTheDocument();
+
+    await userEvent.clear(screen.getByLabelText(/permission code input/i));
+    await userEvent.type(screen.getByLabelText(/permission code input/i), 'timeoff.approve');
+    await userEvent.click(screen.getByRole('button', { name: /add permission code/i }));
+    expect(screen.queryByText(/acts organization-wide/i)).not.toBeInTheDocument();
+    expect(screen.getByText('timeoff.approve')).toBeInTheDocument();
+  });
+
+  it('refuses to submit a code chosen before the unit was set', async () => {
+    render(<Delegations />);
+    await screen.findByText('schedule.manage');
+
+    await userEvent.click(screen.getByRole('button', { name: /new delegation/i }));
+    await userEvent.type(screen.getByLabelText(/delegatee user id/i), '7');
+    await userEvent.type(screen.getByLabelText(/permission code input/i), 'audit.read');
+    await userEvent.click(screen.getByRole('button', { name: /add permission code/i }));
+    await userEvent.type(screen.getByLabelText(/expires at/i), '2025-12-31T00:00');
+    await userEvent.type(screen.getByLabelText(/scope org unit id/i), '4');
+    await userEvent.click(screen.getByRole('button', { name: /submit delegation/i }));
+
+    expect(await screen.findByText(/audit\.read acts organization-wide/i)).toBeInTheDocument();
     expect(mockCreate).not.toHaveBeenCalled();
   });
 

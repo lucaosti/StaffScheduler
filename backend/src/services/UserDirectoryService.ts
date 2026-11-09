@@ -15,7 +15,7 @@ import { usingConnection } from '../utils/transaction';
 import { ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { buildVcfFile, parseVcf, VCard } from '../utils/vcard';
-import { UserAuthorityService } from './UserAuthorityService';
+import { UserAuthorityService } from './access/UserAuthorityService';
 import { User } from '../types';
 
 interface CustomField {
@@ -170,7 +170,7 @@ export class UserDirectoryService {
     const cards = parseVcf(vcfText);
     // X-ROLE grants roles by name: the whole file is held to the
     // anti-escalation rule before any card is written (#809).
-    await new UserAuthorityService(this.pool).assertCanAssignRoleNames(
+    await new UserAuthorityService(this.pool, 'user.manage').assertCanAssignRoleNames(
       options.actor,
       cards.flatMap((card) => roleNamesOf(card))
     );

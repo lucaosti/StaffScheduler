@@ -41,6 +41,15 @@ type RevokeBody = NonNullable<
 export const listDelegations = (): Promise<ApiResponse<Delegation[]>> =>
   apiClient.get<Delegation[], '/delegations'>('/delegations');
 
+/**
+ * The codes a delegation scoped to one org unit may carry. Read from the
+ * server rather than kept here, so the form offers exactly what the server will
+ * accept — the list is derived there from the authorization matrix and changes
+ * as organization-wide gaps close.
+ */
+export const listUnitDelegableCodes = (): Promise<ApiResponse<{ permissionCodes: string[] }>> =>
+  apiClient.get<{ permissionCodes: string[] }, '/delegations/delegable-for-unit'>('/delegations/delegable-for-unit');
+
 export const createDelegation = (
   body: CreateDelegationBody
 ): Promise<ApiResponse<Delegation>> => apiClient.post<Delegation, '/delegations'>('/delegations', body);

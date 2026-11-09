@@ -21,7 +21,12 @@ jest.mock('../middleware/auth', () => ({
     req.user = { ...currentUser, isActive: true, permissions: require("./helpers/permissions").permissionsForRole(currentUser.role) };
     next();
   },
-  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  // Enforces the code like the real guard: some routes now carry their gate as
+  // middleware rather than an in-handler check.
+  requirePermission: (code: string) => (req: any, res: any, next: any) =>
+    req.user?.permissions?.includes(code)
+      ? next()
+      : res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient privileges' } }),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),
@@ -36,8 +41,11 @@ import { RbacService } from '../services/RbacService';
 import { createUsersRouter } from '../routes/users';
 import { ConflictError, NotFoundError } from '../errors';
 import { errorHandler } from '../middleware/errorHandler';
+import { policyPool } from './helpers/policyPool';
 
-const fakePool = {} as never;
+// GET /:id resolves the target's units through AccessPolicy for a non-owner.
+const policy = policyPool();
+const fakePool = policy.pool;
 
 const mountApp = (): express.Express => {
   const app = express();
@@ -220,6 +228,7 @@ describe('users router GET /:id', () => {
 
   it('returns 403 for employee querying another employee', async () => {
     currentUser = { id: 5, role: 'employee', email: 'e@x' };
+    policy.row(99);
     (UserService.prototype.getUserById as jest.Mock) = jest.fn().mockResolvedValue({ id: 99 });
     const res = await request(mountApp()).get('/api/users/99');
     expect(res.status).toBe(403);

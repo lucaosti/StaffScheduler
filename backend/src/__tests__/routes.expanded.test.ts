@@ -20,7 +20,12 @@ jest.mock('../middleware/auth', () => ({
     req.user = { ...currentUser, isActive: true, permissions: require("./helpers/permissions").permissionsForRole(currentUser.role) };
     next();
   },
-  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  // Enforces the code like the real guard: some routes now carry their gate as
+  // middleware rather than an in-handler check.
+  requirePermission: (code: string) => (req: any, res: any, next: any) =>
+    req.user?.permissions?.includes(code)
+      ? next()
+      : res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient privileges' } }),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   requireModuleForUser: () => (_req: any, _res: any, next: any) => next(),
   revokePresentedAccessToken: jest.fn(),
@@ -108,6 +113,7 @@ import { RefreshTokenService } from '../services/RefreshTokenService';
 import { RbacService } from '../services/RbacService';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
+import { policyPool } from './helpers/policyPool';
 
 const fakePool = {} as never;
 
@@ -416,17 +422,9 @@ describe('assignments router (extended)', () => {
     describe(`PATCH /:id/${action}`, () => {
       const method = `${action}Assignment` as keyof typeof AssignmentService.prototype;
 
-      // confirm and decline do a pre-flight getAssignmentById check before calling
-      // the action method; complete calls the action method directly.
-      const hasPreFlight = action === 'confirm' || action === 'decline';
-
+      // Ownership and scope are AccessPolicy's (an unscoped manager passes it
+      // without a query); a missing row is the action method's to report.
       beforeEach(() => {
-        if (hasPreFlight) {
-          (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue({
-            id: 1,
-            userId: 1,
-          });
-        }
         (AssignmentService.prototype[method] as jest.Mock).mockResolvedValue({ id: 1 });
       });
 
@@ -441,15 +439,9 @@ describe('assignments router (extended)', () => {
       });
 
       it('404 not found', async () => {
-        if (hasPreFlight) {
-          // Pre-flight returns null → route short-circuits with 404 before calling action.
-          (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValue(null);
-        } else {
-          // complete has no pre-flight; trigger 404 via the action method.
-          (AssignmentService.prototype[method] as jest.Mock).mockRejectedValue(
-            new NotFoundError('Assignment not found')
-          );
-        }
+        (AssignmentService.prototype[method] as jest.Mock).mockRejectedValue(
+          new NotFoundError('Assignment not found')
+        );
         const res = await request(app()).patch(`/api/assignments/1/${action}`);
         expect(res.status).toBe(404);
       });
@@ -948,7 +940,7 @@ describe('employees router (extended)', () => {
 
     const res = await request(app()).post('/api/employees/batch').send({
       employees: [
-        { email: 'a@x.com', password: 'Password1!', firstName: 'A', lastName: 'One' },
+        { email: 'a@x.com', password: 'Password1!', firstName: 'A', lastName: 'One', departmentIds: [3] },
         { email: 'b@x.com', password: 'Password1!', firstName: 'B', lastName: 'Two' },
       ],
     });
@@ -1496,7 +1488,9 @@ describe('settings router (extended)', () => {
  * ------------------------------------------------------------------------- */
 
 describe('time-off router (extended)', () => {
-  const app = () => mountApp('/api/time-off', createTimeOffRouter(fakePool));
+  // Request ownership comes from AccessPolicy, the one query left on the pool.
+  const policy = policyPool();
+  const app = () => mountApp('/api/time-off', createTimeOffRouter(policy.pool));
 
   it('GET /:id own / forbidden / not found / 500', async () => {
     (TimeOffService.prototype.getById as jest.Mock) = jest.fn().mockResolvedValue(null);
@@ -1507,12 +1501,14 @@ describe('time-off router (extended)', () => {
     (TimeOffService.prototype.getById as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1, userId: 999 });
+    policy.row(999);
     res = await request(app()).get('/api/time-off/1');
     expect(res.status).toBe(403);
 
     (TimeOffService.prototype.getById as jest.Mock) = jest
       .fn()
       .mockResolvedValue({ id: 1, userId: 5 });
+    policy.row(5);
     res = await request(app()).get('/api/time-off/1');
     expect(res.status).toBe(200);
 

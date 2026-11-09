@@ -93,14 +93,13 @@ describe('DelegationService.createDelegation — null after insert', () => {
   it('throws Failed to retrieve created delegation when getDelegationById returns null', async () => {
     const { pool, execute } = makePool();
     execute
+      .mockResolvedValueOnce([[{ code: 'shift.read' }], null] as Tuple) // the delegator's own role codes
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)  // INSERT delegations
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // INSERT audit_log
       .mockResolvedValueOnce([[], null] as Tuple);                 // getDelegationById → null
     const svc = new DelegationService(pool);
     await expect(
-      svc.createDelegation(
-        1,
-        ['shift.read'],
+      svc.createDelegation({ id: 1, permissions: ['shift.read'] },
         { delegateeId: 2, permissionCodes: ['shift.read'], expiresAt: '2026-12-31' }
       )
     ).rejects.toThrow('Failed to retrieve created delegation');

@@ -41,12 +41,12 @@ export interface User extends SharedUser {
    */
   allowedOrgUnitIds?: number[] | null;
   /**
-   * Per-permission org-unit restrictions introduced by scoped delegations.
-   * Only populated when the user holds at least one delegation with
-   * scope_org_unit_id set. Route handlers performing org-unit gating must check
-   * this before allowing a delegated permission to act outside its scope.
+   * The org-unit scope of each code held through an active delegation (merged
+   * with the role scope when a role grants the same code; `null` =
+   * unrestricted). It overrides `allowedOrgUnitIds` for that code; read it only
+   * through `AccessPolicy.scopeFor`, never directly.
    */
-  delegationScopes?: Array<{ permissionCode: string; allowedOrgUnitIds: number[] }>;
+  delegationScopes?: Array<{ permissionCode: string; allowedOrgUnitIds: number[] | null }>;
   departments?: UserDepartment[];
   /** Convenience field: name of the user's primary department (list queries). */
   department?: string;

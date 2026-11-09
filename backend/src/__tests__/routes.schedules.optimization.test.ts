@@ -12,7 +12,7 @@ import request from 'supertest';
 const currentUser: { id: number; role: string; email: string } = { id: 1, role: 'admin', email: 'a@x' };
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.user = { ...currentUser, permissions: ['schedule.optimize', 'schedule.read', 'schedule.manage'] };
+    req.user = { ...currentUser, permissions: ['schedule.optimize', 'schedule.read', 'schedule.manage', 'schedule.publish'] };
     next();
   },
   requirePermission: () => (_req: any, _res: any, next: any) => next(),

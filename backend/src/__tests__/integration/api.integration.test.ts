@@ -2474,9 +2474,11 @@ describe('user-management authority (#809, #810)', () => {
       const ok = await request(app).put(`/api/v1/employees/${inside.id}`).set('Cookie', cookie).send({ position: 'In scope' });
       expect(ok.status).toBe(200);
       const refused = await request(app).put(`/api/v1/employees/${outside.id}`).set('Cookie', cookie).send({ position: 'Out of scope' });
-      expect(refused.status).toBe(403);
-      expect(refused.body.error.code).toBe('FORBIDDEN');
-      expect((await request(app).put(`/api/v1/users/${outside.id}`).set('Cookie', cookie).send({ password: 'Takeover-Passw0rd!' })).status).toBe(403);
+      // 404, as for an account that does not exist: an out-of-scope row is not
+      // disclosed (AccessPolicy, #813).
+      expect(refused.status).toBe(404);
+      expect(refused.body.error.code).toBe('NOT_FOUND');
+      expect((await request(app).put(`/api/v1/users/${outside.id}`).set('Cookie', cookie).send({ password: 'Takeover-Passw0rd!' })).status).toBe(404);
       await loginCookie(outside.email, PASSWORD);
     });
 
