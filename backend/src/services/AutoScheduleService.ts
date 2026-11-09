@@ -38,16 +38,17 @@
  */
 
 import { Pool, ResultSetHeader } from 'mysql2/promise';
-import { withTransaction } from '../utils/transaction';
+import { withNamedLock, withTransaction } from '../utils/transaction';
+import { recordWithheldAssignment } from '../observability/metrics';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem, ScheduleAssignment } from '../optimization/types';
 import { logger } from '../config/logger';
 import { config } from '../config';
-import { OptimizationFailedError } from '../errors';
+import { ConflictError, OptimizationFailedError } from '../errors';
 import { ReplanProposalService } from './ReplanProposalService';
 import { AutoScheduleInputLoader } from './AutoScheduleInputLoader';
 import { buildOptimizationProblem, fixedOnThisSchedule, type ScheduleInputs } from './autoScheduleProblem';
-import { describeWithheld, withholdNonCompliant } from './generatedScheduleCompliance';
+import { describeWithheld, listWithheld, withholdNonCompliant } from './generatedScheduleCompliance';
 
 export interface AutoScheduleResult {
   scheduleId: number;
@@ -108,6 +109,9 @@ interface SolveOutcome {
  */
 const INSERT_CHUNK_SIZE = 500;
 
+/** How many withheld assignments one warning names before giving a count. */
+const WITHHELD_LOG_LIMIT = 20;
+
 /**
  * An outcome, with the zeros every branch shares filled in.
  *
@@ -136,7 +140,27 @@ export class AutoScheduleService {
     this.loader = new AutoScheduleInputLoader(pool);
   }
 
+  /**
+   * One run per schedule at a time (#963).
+   *
+   * Two runs on one draft each read the same held rows, solve as if the other
+   * did not exist, and both insert: the stacking the held-work fix closes for
+   * sequential runs, reopened by concurrency. The queue path already joins a
+   * second request to the running job (its id is per schedule), but the
+   * synchronous fallback had nothing, and the two paths can also overlap each
+   * other. The lock is taken here, around load → persist, so every path is
+   * covered and a second caller gets a 409 instead of a duplicate solve.
+   */
   async generate(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
+    return withNamedLock(
+      this.pool,
+      `schedule-generate-${scheduleId}`,
+      () => new ConflictError('A generation for this schedule is already running'),
+      () => this.generateLocked(scheduleId, createdBy)
+    );
+  }
+
+  private async generateLocked(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
     // Null means the schedule holds no shifts — nothing to solve, so the loader
     // stopped before the reads that could only describe who might have worked
     // them, and there are no commitments to keep or break.
@@ -147,7 +171,7 @@ export class AutoScheduleService {
     }
 
     const totalShifts = inputs.shifts.length;
-    const solved = this.withholdNonCompliant(
+    const solved = await this.withholdNonCompliant(
       inputs,
       await this.solve(buildOptimizationProblem(inputs), scheduleId),
       scheduleId
@@ -195,10 +219,11 @@ export class AutoScheduleService {
     }
 
     const assignmentsCreated = await this.insertAssignments(solved.assignments, createdBy);
-    const coveragePercentage = Math.min(
-      100,
-      Math.round((assignmentsCreated / totalShifts) * 100)
-    );
+    // The schedule's coverage, not this run's share of it: on a re-run of a
+    // draft the rows already held are staffing too, and leaving them out
+    // reported a fully staffed draft as nearly empty.
+    const staffed = assignmentsCreated + fixedOnThisSchedule(inputs).length;
+    const coveragePercentage = Math.min(100, Math.round((staffed / totalShifts) * 100));
     logger.info(
       `Auto-schedule done for schedule=${scheduleId}: ${assignmentsCreated}/${totalShifts} (${coveragePercentage}%)`
     );
@@ -279,20 +304,27 @@ export class AutoScheduleService {
    * not the optimum the engine was asked for": a schedule with assignments
    * removed after solving is exactly that, whichever engine produced it. A
    * degraded reason the solve already carried is kept ahead of this one.
+   *
+   * Each withheld assignment is counted by rule, so a recurring disagreement
+   * between the engines and ComplianceEngine shows on a dashboard rather than
+   * only in whichever run's log someone reads. The log names the first
+   * `WITHHELD_LOG_LIMIT` with a total: a run on a broken problem could
+   * otherwise write thousands of entries into one line.
    */
-  private withholdNonCompliant(
+  private async withholdNonCompliant(
     inputs: ScheduleInputs,
     solved: SolveOutcome,
     scheduleId: number
-  ): SolveOutcome {
-    const { kept, withheld } = withholdNonCompliant(inputs, solved.assignments);
+  ): Promise<SolveOutcome> {
+    const { kept, withheld } = await withholdNonCompliant(this.pool, inputs, solved.assignments);
     if (withheld.length === 0) return solved;
 
+    for (const w of withheld) for (const rule of w.rules) recordWithheldAssignment(rule);
     const reason = describeWithheld(withheld);
     logger.warn(
       `Optimization for schedule=${scheduleId} (engine ${solved.engine}) produced ` +
         `${withheld.length} assignment(s) ComplianceEngine refuses; withheld: ` +
-        withheld.map((w) => `user ${w.userId} shift ${w.shiftId} [${w.violations.join('; ')}]`).join(', ')
+        listWithheld(withheld, WITHHELD_LOG_LIMIT)
     );
     return {
       ...solved,

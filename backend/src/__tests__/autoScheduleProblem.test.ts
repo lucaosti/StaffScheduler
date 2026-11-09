@@ -17,6 +17,7 @@
 import {
   buildOptimizationProblem,
   carriedLoads,
+  creditHeldQualified,
   parseQualifiedStaff,
   parseSkillLevels,
   type EmployeeInputRow,
@@ -508,5 +509,35 @@ describe('held work on the schedule', () => {
     expect(problem.shifts[1]).toMatchObject({ min_staff: 2, max_staff: 2 });
     expect(problem.employees[0].existing_assignments).toEqual([]);
     expect(problem.pinned_assignments).toEqual(pinned);
+  });
+});
+
+/**
+ * Held people count toward a shift's "at least N at level L" (#974): the
+ * seats they take were already subtracted, the qualification they bring was
+ * not, so a re-generation hunted for a second senior the shift did not need.
+ */
+describe('creditHeldQualified', () => {
+  const req = { Nursing: { level: 2, count: 2 }, Triage: { level: 1, count: 1 } };
+  const holder = (skill_levels: string | null | undefined) => ({ employee_id: '1', shift_id: '10', skill_levels });
+
+  it('lowers each requirement by the holders who meet it and drops one fully met', () => {
+    expect(creditHeldQualified(req, [holder('Nursing:2,Triage:1')])).toEqual({ Nursing: { level: 2, count: 1 } });
+  });
+
+  it('does not credit a lower level, an unrecorded level, another skill, or no skills at all', () => {
+    for (const levels of ['Nursing:1', 'Nursing:', 'Surgery:5', null, undefined]) {
+      expect(creditHeldQualified(req, [holder(levels)])).toEqual(req);
+    }
+  });
+
+  it('reaches the problem for a draft, and not for a published schedule', () => {
+    const shift: ShiftInputRow = { ...SHIFT, qualified_staff: 'Nursing:2:1' };
+    const held = [{ employee_id: '1', shift_id: '10', skill_levels: 'Nursing:3' }];
+    expect(buildOptimizationProblem(inputs({ shifts: [shift], held })).shifts[0].qualified_staff).toEqual({});
+    expect(
+      buildOptimizationProblem(inputs({ schedule: { ...SCHEDULE, status: 'published' }, shifts: [shift], held }))
+        .shifts[0].qualified_staff
+    ).toEqual({ Nursing: { level: 2, count: 1 } });
   });
 });

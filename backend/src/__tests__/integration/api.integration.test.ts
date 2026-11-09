@@ -3383,4 +3383,57 @@ describe('generated schedules satisfy ComplianceEngine (#963)', () => {
     expect(await complianceViolations(id)).toEqual([]);
     expect(result.assignmentsCreated).toBe(0);
   });
+
+  /**
+   * Archiving accepts drafts, so an archived schedule of the same department
+   * is a period that happened only if it was ever published. A discarded
+   * draft must not constrain the generation that replaced it; a published
+   * period must. (ComplianceEngine counts both — the one documented
+   * difference — so these cases are judged on the result, not re-checked.)
+   */
+  it.each([
+    ['a discarded draft does not', null, 1],
+    ['a period that was published does', 'CURDATE()', 0],
+  ])('archived on the same department: %s constrain the next generation', async (_label, publishedAt, created) => {
+    const dept = await department();
+    const a = await person(dept.id);
+    await contract(a, { min_hours_between_shifts: 11 });
+    const archived = await draft(dept.id, 160, 160);
+    await hold(await shift(archived, dept.id, 160, '15:00:00', '23:00:00'), a);
+    await admin.query(
+      `UPDATE schedules SET status = 'archived', published_at = ${publishedAt ?? 'NULL'} WHERE id = ?`,
+      [archived]
+    );
+    const id = await draft(dept.id, 161, 167);
+    await shift(id, dept.id, 161, '07:00:00', '15:00:00');
+
+    const result = await generate(id);
+
+    expectOptimum(result);
+    expect(result.assignmentsCreated).toBe(created);
+  });
+
+  it('runs one generation per schedule at a time and answers 409 to the second', async () => {
+    // Enough to keep the first solve busy while the second request arrives.
+    const dept = await department();
+    for (let i = 0; i < 4; i++) await person(dept.id);
+    const id = await draft(dept.id, 170, 176);
+    for (let day = 170; day <= 176; day++) {
+      for (const [start, end] of [
+        ['07:00:00', '15:00:00'],
+        ['15:00:00', '23:00:00'],
+        ['23:00:00', '07:00:00'],
+      ]) {
+        await shift(id, dept.id, day, start, end);
+      }
+    }
+    const cookie = await authCookie();
+    const fire = () => request(app).post(`/api/v1/schedules/${id}/generate`).set('Cookie', cookie).send({});
+
+    const responses = await Promise.all([fire(), fire()]);
+
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 409]);
+    expect(responses.find((r) => r.status === 409)!.body.error.code).toBe('CONFLICT');
+    expect(await complianceViolations(id)).toEqual([]);
+  });
 });

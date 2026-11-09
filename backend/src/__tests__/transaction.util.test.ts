@@ -10,7 +10,7 @@
  * @author Luca Ostinelli
  */
 
-import { usingConnection, withTransaction } from '../utils/transaction';
+import { usingConnection, withNamedLock, withTransaction } from '../utils/transaction';
 import { ConflictError } from '../errors';
 import { logger } from '../config/logger';
 
@@ -163,5 +163,45 @@ describe('withTransaction', () => {
     });
     expect(conn.execute).toHaveBeenCalledTimes(2);
     expect(conn.commit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('withNamedLock', () => {
+  const lockPool = (acquired: number | null) => {
+    const { pool, conn } = makePool();
+    const query = jest.fn().mockResolvedValueOnce([[{ acquired }], null]).mockResolvedValue([[], null]);
+    Object.assign(conn, { query });
+    return { pool, conn, query };
+  };
+  const busy = () => new ConflictError('busy');
+
+  it('runs the work holding the lock, then releases lock and connection', async () => {
+    const { pool, conn, query } = lockPool(1);
+    await expect(withNamedLock(pool, 'k', busy, async () => 'done')).resolves.toBe('done');
+    expect(query.mock.calls.map((c) => c[0])).toEqual([
+      'SELECT GET_LOCK(?, 0) AS acquired',
+      'SELECT RELEASE_LOCK(?)',
+    ]);
+    expect(query.mock.calls[0][1]).toEqual(['k']);
+    expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the lock when the work throws', async () => {
+    const { pool, query } = lockPool(1);
+    await expect(
+      withNamedLock(pool, 'k', busy, async () => {
+        throw new Error('boom');
+      })
+    ).rejects.toThrow('boom');
+    expect(query).toHaveBeenCalledWith('SELECT RELEASE_LOCK(?)', ['k']);
+  });
+
+  it.each([0, null])('throws busy() without running the work when GET_LOCK answers %p', async (acquired) => {
+    const { pool, conn, query } = lockPool(acquired);
+    const work = jest.fn();
+    await expect(withNamedLock(pool, 'k', busy, work)).rejects.toThrow(ConflictError);
+    expect(work).not.toHaveBeenCalled();
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(conn.release).toHaveBeenCalledTimes(1);
   });
 });

@@ -85,6 +85,18 @@ export interface ScheduleRow {
   previous_schedule_id?: number | null;
 }
 
+/** A live assignment already on the schedule being generated. */
+export interface HeldAssignment {
+  employee_id: string;
+  shift_id: string;
+  /**
+   * The holder's `name:level` skill list, as the employee row carries it
+   * (#974). Absent or null means no skills recorded, which qualifies the
+   * holder for no "at least N at level L" requirement.
+   */
+  skill_levels?: string | null;
+}
+
 /**
  * Everything the builder needs, and nothing about where it came from.
  *
@@ -109,7 +121,7 @@ export interface ScheduleInputs {
    * draft they are kept as they are and the run plans around them — see
    * `fixedOnThisSchedule`.
    */
-  held: Array<{ employee_id: string; shift_id: string }>;
+  held: HeldAssignment[];
   pairings: Array<{ employee_id: string; other_id: string; kind: 'apart' | 'requires' }>;
   contractLimits: Map<number, ContractLimits>;
   /**
@@ -256,15 +268,17 @@ export const carriedLoads = (
  * itself, keeps them off the same shift), and as a seat taken on its shift, by
  * lowering the shift's min/max staff. The run then fills only what is still
  * open, which is what the draft path's INSERT IGNORE always did — it was the
- * solve that did not know.
+ * solve that did not know. The same holds for the shift's "at least N at
+ * level L" requirements (#974): see `creditHeldQualified`.
  */
 export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationProblem => {
   const fixed = fixedOnThisSchedule(inputs);
-  const seatsTaken = new Map<string, number>();
-  for (const h of fixed) seatsTaken.set(h.shift_id, (seatsTaken.get(h.shift_id) ?? 0) + 1);
+  const holdersByShift = new Map<string, HeldAssignment[]>();
+  for (const h of fixed) holdersByShift.set(h.shift_id, [...(holdersByShift.get(h.shift_id) ?? []), h]);
 
   const shifts = inputs.shifts.map((s) => {
-    const taken = seatsTaken.get(String(s.id)) ?? 0;
+    const holders = holdersByShift.get(String(s.id)) ?? [];
+    const taken = holders.length;
     return {
       id: String(s.id),
       date: DateUtils.toDateString(s.date),
@@ -274,7 +288,7 @@ export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationPr
       max_staff: Math.max(0, s.max_staff - taken),
       required_skills: namesOf(s.skill_names),
       required_skill_levels: parseSkillLevels(s.skill_levels),
-      qualified_staff: parseQualifiedStaff(s.qualified_staff),
+      qualified_staff: creditHeldQualified(parseQualifiedStaff(s.qualified_staff), holders),
     };
   });
 
@@ -354,3 +368,37 @@ export const buildOptimizationProblem = (inputs: ScheduleInputs): OptimizationPr
 export const fixedOnThisSchedule = (
   inputs: Pick<ScheduleInputs, 'schedule' | 'held'>
 ): ScheduleInputs['held'] => (inputs.schedule.status === 'published' ? [] : inputs.held);
+
+/**
+ * A shift's "at least N at level L" requirements, less the people already
+ * held on it who meet them (#974).
+ *
+ * The seats a holder takes were already subtracted; the qualification they
+ * bring was not, so a re-generation either over-staffed the shift to find a
+ * second senior it did not need, or reported the shift short of one it had.
+ * Credited the way the seats are — in the builder, lowering the count both
+ * engines and the validator already read — rather than by teaching each of
+ * them about held people: the requirement each enforces stays "N qualified
+ * among the people this run assigns", and the builder states the N that is
+ * still open. A requirement the holders fully meet is dropped, not left at 0.
+ *
+ * Qualified means exactly what the validator and both engines count: the
+ * skill held at the level or above, an unrecorded level reading as 0 — never
+ * as qualified, which would assert a competence nobody recorded.
+ */
+export const creditHeldQualified = (
+  requirements: Record<string, { level: number; count: number }>,
+  holders: HeldAssignment[]
+): Record<string, { level: number; count: number }> => {
+  const out: Record<string, { level: number; count: number }> = {};
+  // The validator's own test (qualifiedStaffShortfalls): the skill held, and
+  // its level — 0 when unrecorded — at least the one required.
+  const qualifies = (h: HeldAssignment, skill: string, level: number): boolean =>
+    namesOf(h.skill_levels).some((pair) => pair.split(':')[0] === skill) &&
+    (parseSkillLevels(h.skill_levels)[skill] ?? 0) >= level;
+  for (const [skill, { level, count }] of Object.entries(requirements)) {
+    const credited = holders.filter((h) => qualifies(h, skill, level)).length;
+    if (count - credited > 0) out[skill] = { level, count: count - credited };
+  }
+  return out;
+};

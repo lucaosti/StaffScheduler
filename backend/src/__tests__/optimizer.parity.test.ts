@@ -2436,6 +2436,62 @@ describe("a draft's held work reaches both engines", () => {
 });
 
 /**
+ * A held qualified person counts toward the shift's qualified-staff
+ * requirement in both engines (#974).
+ *
+ * One level-2 nurse is held on a shift needing one level-2 nurse and two
+ * people; the only candidate left holds no nursing skill. Uncredited, both
+ * engines and the validator would see a shift short of its nurse whatever
+ * they did; credited, the requirement is met, the open seat is filled by the
+ * candidate, and nothing is short.
+ */
+describe('a held qualified person reaches both engines', () => {
+  const qualifiedProblem = () =>
+    buildOptimizationProblem({
+      schedule: { id: 1, department_id: 1, start_date: '2026-03-02', end_date: '2026-03-02', status: 'draft' },
+      shifts: [
+        {
+          id: 1,
+          date: '2026-03-02',
+          start_time: '07:00',
+          end_time: '15:00',
+          min_staff: 2,
+          max_staff: 2,
+          qualified_staff: 'Nursing:2:1',
+        },
+      ],
+      employees: [{ id: 8, min_hours_per_week: 0 }],
+      pinned: [],
+      held: [{ employee_id: '7', shift_id: '1', skill_levels: 'Nursing:2' }],
+      pairings: [],
+      contractLimits: new Map(),
+      workingTimeLimits: new Map([[8, { maxHoursPerWeek: 40, maxConsecutiveDays: 5, minRestHoursBetweenShifts: 8 }]]),
+      unavailableByUser: new Map(),
+      externalAssignmentsByUser: new Map(),
+      carried: new Map(),
+      rotationHistory: new Map(),
+    });
+
+  it('the builder states no qualified requirement left open', () => {
+    expect(qualifiedProblem().shifts[0]).toMatchObject({ min_staff: 1, max_staff: 1, qualified_staff: {} });
+  });
+
+  it('the greedy engine fills the open seat with nothing short', async () => {
+    const out = toValidated(await new ScheduleOptimizer().generateGreedySchedule(qualifiedProblem()));
+    expect(out.map((x) => [x.employeeId, x.shiftId])).toEqual([['8', '1']]);
+    expect(qualifiedStaffShortfalls(qualifiedProblem(), out)).toEqual([]);
+  });
+
+  describeOrtools('CP-SAT', () => {
+    it('fills the open seat with nothing short', () => {
+      const out = runPython(qualifiedProblem());
+      expect(out.map((x) => [x.employeeId, x.shiftId])).toEqual([['8', '1']]);
+      expect(qualifiedStaffShortfalls(qualifiedProblem(), out)).toEqual([]);
+    });
+  });
+});
+
+/**
  * CP-SAT's conflict cliques against the pairwise rule they replace (#837).
  *
  * The model states no-double-booking and minimum rest as one AddAtMostOne per

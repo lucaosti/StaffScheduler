@@ -7253,7 +7253,16 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
-                /** @description OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did). Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event. */
+                /** @description CONFLICT: a generation for this schedule is already running. One run per schedule at a time — a second would solve against the same rows and stack on the first. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                /** @description OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did), or an engine returned an assignment to a shift or person it was never given. Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event. */
                 500: {
                     headers: {
                         [name: string]: unknown;

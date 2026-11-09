@@ -9,7 +9,7 @@
  * the metric definitions in one module means every counter/gauge/histogram is
  * registered against one registry that the `/metrics` route renders.
  *
- * WHAT is measured, and why these four:
+ * WHAT is measured, and why these five:
  *   - default process metrics (event-loop lag, heap, GC) — the baseline every
  *     Node service should expose;
  *   - http_request_duration_seconds — a histogram labelled by method/route/
@@ -17,7 +17,9 @@
  *   - db_pool_connections — a gauge of the mysql2 pool (total/free/queued), so a
  *     pool exhaustion (the classic cause of latency cliffs here) is visible;
  *   - optimization_queue_depth — how many optimization jobs are waiting, the
- *     signal that the single-concurrency worker is falling behind.
+ *     signal that the single-concurrency worker is falling behind;
+ *   - optimization_withheld_assignments_total — generated assignments the
+ *     post-solve compliance check refused, by rule (#963).
  *
  * Route labels use the matched route *pattern* (e.g. `/api/v1/schedules/:id`),
  * never the concrete path, so an id per request cannot explode label
@@ -87,6 +89,27 @@ const optimizationQueueDepth = new client.Gauge({
   help: 'Number of optimization jobs waiting in the queue',
   registers: [registry],
 });
+
+/**
+ * Generated assignments the post-solve compliance check withheld (#963), by
+ * the ComplianceEngine rule they would have broken.
+ *
+ * Labelled by rule only — never by schedule, shift or person, which are
+ * unbounded. A non-zero rate means an engine or the problem builder disagrees
+ * with ComplianceEngine about someone's work, which is a defect to chase, not
+ * a normal condition: the counter is how that becomes visible across runs.
+ */
+const withheldAssignments = new client.Counter({
+  name: 'optimization_withheld_assignments_total',
+  help: 'Generated assignments withheld by the post-solve compliance check, by rule',
+  labelNames: ['rule'] as const,
+  registers: [registry],
+});
+
+/** Count one withheld assignment per broken rule. */
+export function recordWithheldAssignment(rule: string): void {
+  withheldAssignments.inc({ rule });
+}
 
 /** Point the pool gauge at the live mysql2 pool (sampled lazily on each scrape). */
 export function registerPoolMetrics(pool: Pool): void {

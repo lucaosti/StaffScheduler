@@ -24,6 +24,7 @@ import { logger } from '../config/logger';
 import { spawn } from 'child_process';
 import { driverDate } from './helpers/driverDate';
 import { OptimizationFailedError } from '../errors';
+import { registry } from '../observability/metrics';
 
 jest.mock('../optimization/ScheduleOptimizerORTools');
 // Only the #811 test below reaches a real optimize(); everywhere else the
@@ -38,6 +39,8 @@ const makePool = () => {
     commit: jest.fn().mockResolvedValue(undefined),
     rollback: jest.fn().mockResolvedValue(undefined),
     release: jest.fn(),
+    // The per-schedule generation lock (GET_LOCK / RELEASE_LOCK): granted.
+    query: jest.fn().mockResolvedValue([[{ acquired: 1 }], null]),
   };
   return {
     pool: { execute, getConnection: jest.fn().mockResolvedValue(conn) } as never,
@@ -71,6 +74,8 @@ interface Fixtures {
   rotationPredecessorRow?: Rows;
   /** Answers the rotation walk's per-predecessor-period worked-shifts read. */
   rotationWorked?: Rows;
+  /** The post-solve compliance check's own read of everyone's work. */
+  recheck?: Rows;
 }
 
 /**
@@ -96,10 +101,11 @@ const MATCHERS: Array<[keyof Fixtures, string]> = [
   ['policies', 'FROM policies'],
   ['unavailability', 'user_unavailability'],
   ['history', 'INTERVAL 90 DAY'],
-  ['external', "sc.status <> 'draft' OR sc.department_id <> ? OR sc.id = ?"],
+  ['external', 'AND NOT (sc.department_id = ? AND sc.id <> ?'],
   ['proposal', 'schedule_replan_proposals'],
   ['rotationPredecessorRow', 'FROM schedules AS sc WHERE sc.id = ?'],
   ['rotationWorked', 'rotation streak: shifts worked in this predecessor period'],
+  ['recheck', '-- post-solve compliance check'],
 ];
 
 const SCHEDULE_ROW = {
@@ -188,18 +194,22 @@ describe('AutoScheduleService.generate', () => {
     // These plumbing tests assert on the greedy path; select it explicitly so
     // the default 'or-tools' route (which would call optimize()) is bypassed.
     config.optimization.engine = 'greedy';
-    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
-      generateGreedySchedule: jest.fn().mockResolvedValue([
+    // Two assignments, of which only those to shifts and people the problem
+    // contains are returned: an engine answering with ids it was never given
+    // fails the run (#963), and most tests here state one shift and one person.
+    const answer = (problem: { shifts: Array<{ id: string }>; employees: Array<{ id: string }> }) =>
+      [
         { shiftId: '10', employeeId: '1' },
         { shiftId: '11', employeeId: '2' },
-      ]),
-      optimize: jest.fn().mockResolvedValue({
-        status: 'OPTIMAL',
-        assignments: [
-          { shiftId: '10', employeeId: '1' },
-          { shiftId: '11', employeeId: '2' },
-        ],
-      }),
+      ].filter(
+        (a) =>
+          problem.shifts.some((s) => s.id === a.shiftId) && problem.employees.some((e) => e.id === a.employeeId)
+      );
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest.fn().mockImplementation(async (problem) => answer(problem)),
+      optimize: jest
+        .fn()
+        .mockImplementation(async (problem) => ({ status: 'OPTIMAL', assignments: answer(problem) })),
     }));
   });
 
@@ -503,8 +513,12 @@ describe('AutoScheduleService.generate', () => {
       // constraining anything: at most one of several candidate generations
       // will ever be published, and counting them all inflates one person's
       // history at the boundary by however many exist. Another department's
-      // draft is a second unit planning the same person, and counts (#963).
-      expect(sql).toContain("sc.status <> 'draft' OR sc.department_id <> ? OR sc.id = ?");
+      // draft is a second unit planning the same person, and counts (#963);
+      // an archived same-department schedule counts only if it was published.
+      expect(sql).toContain(
+        "AND NOT (sc.department_id = ? AND sc.id <> ?\n" +
+          "                       AND (sc.status = 'draft' OR (sc.status = 'archived' AND sc.published_at IS NULL)))"
+      );
       expect(params[1]).toBe(3);
       expect(params[2]).toBe(77);
     });
@@ -852,6 +866,17 @@ describe('AutoScheduleService.generate', () => {
 describe('AutoScheduleService.generate — engine selection and fallback signalling', () => {
   const originalEngine = config.optimization.engine;
 
+  // A valid default for the tests below that state no engine answer of their
+  // own: one assignment to the default fixture's shift and person, from
+  // either path. They used to inherit whatever the previous test left.
+  beforeEach(() => {
+    const one = [{ shiftId: '10', employeeId: '1' }];
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest.fn().mockResolvedValue(one),
+      optimize: jest.fn().mockResolvedValue({ status: 'OPTIMAL', assignments: one }),
+    }));
+  });
+
   afterEach(() => {
     config.optimization.engine = originalEngine;
   });
@@ -1157,7 +1182,7 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(out.engine).toBe('or-tools');
     expect(out.degraded).toBe(true);
     expect(out.degradedReason).toMatch(/Withheld 1 generated assignment\(s\).*user 1 on shift 11 \(MIN_REST_HOURS/);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('user 1 shift 11 [MIN_REST_HOURS'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('user 1 on shift 11 (MIN_REST_HOURS'));
     warn.mockRestore();
   });
 
@@ -1186,6 +1211,108 @@ describe('AutoScheduleService.generate — engine selection and fallback signall
     expect(out.engine).toBe('greedy');
     expect(out.degradedReason).toMatch(/^python3 not found; Withheld 1 generated assignment\(s\)/);
     warn.mockRestore();
+  });
+
+  /**
+   * The check must not trust the loader: a row the problem never saw — the
+   * shape of #963 — is still read by the check's own query, and the
+   * assignment it conflicts with is withheld and counted by rule.
+   */
+  it('withholds against work the loader missed, and counts it on the metric', async () => {
+    config.optimization.engine = 'or-tools';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest.fn(),
+      optimize: jest.fn().mockResolvedValue({ status: 'OPTIMAL', assignments: [{ shiftId: '10', employeeId: '1' }] }),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, {
+      external: [],
+      // The night before shift 10 (08:00 on 2026-05-01): 1 h of rest.
+      recheck: [{ user_id: 1, date: driverDate('2026-04-30'), start_time: '23:00', end_time: '07:00' }],
+    });
+    conn.execute.mockResolvedValue([{ affectedRows: 0 }, null]);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+    const withheldRestCount = async (): Promise<number> => {
+      const metric = await registry.getSingleMetric('optimization_withheld_assignments_total')!.get();
+      return metric.values.find((v) => v.labels.rule === 'MIN_REST_HOURS')?.value ?? 0;
+    };
+    const before = await withheldRestCount();
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(conn.execute).not.toHaveBeenCalled();
+    expect(lastProblemGiven().employees[0].existing_assignments).toEqual([]);
+    expect(out.degraded).toBe(true);
+    expect(out.degradedReason).toContain('user 1 on shift 10 (MIN_REST_HOURS');
+    expect(await withheldRestCount()).toBe(before + 1);
+    warn.mockRestore();
+  });
+
+  it('names at most twenty withheld assignments in the warning, with the total', async () => {
+    config.optimization.engine = 'greedy';
+    const shifts = Array.from({ length: 22 }, (_, i) => ({ ...SHIFT_ROW, id: 100 + i }));
+    // Twenty-two 8 h shifts under a 1 h week: every one is withheld.
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest
+        .fn()
+        .mockResolvedValue(shifts.map((s) => ({ shiftId: String(s.id), employeeId: '1' }))),
+      optimize: jest.fn(),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, { shifts, settings: [{ key: 'max_hours_per_week', value: '1' }] });
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => logger);
+
+    await new AutoScheduleService(pool).generate(1, 7);
+
+    const line = warn.mock.calls.map((c) => String(c[0])).find((m) => m.includes('ComplianceEngine refuses'))!;
+    expect(line).toContain('produced 22 assignment(s)');
+    expect(line).toContain('; and 2 more');
+    warn.mockRestore();
+  });
+
+  it('fails the run, writing nothing, when the engine returns a shift it was never given', async () => {
+    config.optimization.engine = 'greedy';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest.fn().mockResolvedValue([{ shiftId: '999', employeeId: '1' }]),
+      optimize: jest.fn().mockResolvedValue({ status: 'OPTIMAL', assignments: [{ shiftId: '999', employeeId: '1' }] }),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute);
+    const error = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+
+    await expect(new AutoScheduleService(pool).generate(1, 7)).rejects.toThrow(OptimizationFailedError);
+    expect(conn.execute).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it('answers 409 to a second run while the schedule is already being generated', async () => {
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute);
+    conn.query.mockResolvedValueOnce([[{ acquired: 0 }], null]);
+
+    await expect(new AutoScheduleService(pool).generate(1, 7)).rejects.toMatchObject({ status: 409 });
+    expect(execute).not.toHaveBeenCalled();
+    expect(conn.query).toHaveBeenCalledWith('SELECT GET_LOCK(?, 0) AS acquired', ['schedule-generate-1']);
+  });
+
+  it("reports a re-run draft's coverage including the rows it already held", async () => {
+    config.optimization.engine = 'greedy';
+    (ScheduleOptimizer as jest.Mock).mockImplementation(() => ({
+      generateGreedySchedule: jest.fn().mockResolvedValue([{ shiftId: '11', employeeId: '1' }]),
+      optimize: jest.fn().mockResolvedValue({ status: 'OPTIMAL', assignments: [{ shiftId: '11', employeeId: '1' }] }),
+    }));
+    const { pool, conn, execute } = makePool();
+    primeQueries(execute, {
+      shifts: [SHIFT_ROW, { ...SHIFT_ROW, id: 11, date: '2026-05-03' }],
+      held: [{ user_id: 1, shift_id: 10, is_pinned: 0 }],
+    });
+    conn.execute.mockResolvedValue([{ affectedRows: 1 }, null]);
+
+    const out = await new AutoScheduleService(pool).generate(1, 7);
+
+    expect(out.assignmentsCreated).toBe(1);
+    expect(out.coveragePercentage).toBe(100);
   });
 
   it('ignores malformed skill and qualification lists from the database', async () => {

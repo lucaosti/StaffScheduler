@@ -9569,8 +9569,18 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "409": {
+            "description": "CONFLICT: a generation for this schedule is already running. One run per schedule at a time — a second would solve against the same rows and stack on the first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
           "500": {
-            "description": "OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did). Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event.",
+            "description": "OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did), or an engine returned an assignment to a shift or person it was never given. Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event.",
             "content": {
               "application/json": {
                 "schema": {
