@@ -56,7 +56,7 @@ export const createAttendanceRouter = (pool: Pool): Router => {
       if (!employee) {
         return respondError(res, 404, 'NOT_FOUND', 'No matching employee in this device\'s department');
       }
-      const { action, record } = await service.punch(employee.id);
+      const { action, record } = await service.punch(employee.id, req.kiosk!.id);
       res.json({ success: true, data: { action, employeeName: employee.name, record } });
     }
   );

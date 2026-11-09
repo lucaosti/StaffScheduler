@@ -207,6 +207,15 @@ describe('AttendanceService.clockIn — one open record per user (#851)', () => 
 });
 
 describe('AttendanceService.punch', () => {
+  it('fails loudly when the open record vanishes between the two reads of a double tap', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 7, open_seconds: 1 }], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple); // getById: gone
+
+    await expect(new AttendanceService(pool).punch(5, 9)).rejects.toThrow('Failed to retrieve open attendance record');
+  });
+
   it('clocks in when the user has no open record', async () => {
     const { pool, execute } = makePool();
     execute

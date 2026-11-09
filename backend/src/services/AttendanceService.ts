@@ -28,6 +28,29 @@ import { SHIFT_ABS_END_SQL } from '../utils/sql';
 
 type AttendanceStatus = 'pending' | 'approved' | 'rejected';
 
+/**
+ * Where a punch was made (#978): by the employee on their own device, or at a
+ * shared kiosk tablet. A kiosk is bound to one department and physically
+ * placed in it, so it is exempt from the geofence (it sends no coordinates,
+ * and checking them rejected every kiosk clock-in in a fenced department); a
+ * self punch is always checked.
+ */
+export type PunchOrigin = { source: 'self' } | { source: 'kiosk'; kioskDeviceId: number };
+
+const SELF_PUNCH: PunchOrigin = { source: 'self' };
+
+const kioskDeviceIdOf = (origin: PunchOrigin): number | null =>
+  origin.source === 'kiosk' ? origin.kioskDeviceId : null;
+
+/**
+ * A kiosk punch arriving this soon after the same user's clock-in is taken as
+ * a double tap (or a client retry), not as a clock-out (#851). A real shift is
+ * never ten seconds long, and ten seconds comfortably covers a second tap and
+ * a retry after a slow response, while a person who genuinely clocked in by
+ * mistake can still clock out a moment later.
+ */
+const DOUBLE_PUNCH_WINDOW_SECONDS = 10;
+
 interface AttendanceRecord {
   id: number;
   userId: number;
@@ -36,6 +59,8 @@ interface AttendanceRecord {
   clockOut: string | null;
   latitude: number | null;
   longitude: number | null;
+  source: PunchOrigin['source'];
+  kioskDeviceId: number | null;
   status: AttendanceStatus;
   reviewerId: number | null;
   reviewedAt: string | null;
@@ -123,6 +148,8 @@ const mapRow = (row: RowDataPacket): AttendanceRecord => ({
   clockOut: (row.clock_out as string | null) ?? null,
   latitude: row.latitude != null ? Number(row.latitude) : null,
   longitude: row.longitude != null ? Number(row.longitude) : null,
+  source: row.source as PunchOrigin['source'],
+  kioskDeviceId: (row.kiosk_device_id as number | null) ?? null,
   status: row.status as AttendanceStatus,
   reviewerId: (row.reviewer_id as number | null) ?? null,
   reviewedAt: (row.reviewed_at as string | null) ?? null,
@@ -161,7 +188,15 @@ export class AttendanceService {
     return rows.length === 1 ? (rows[0].id as number) : null;
   }
 
-  async clockIn(userId: number, notes: string | null = null, location: GeoPoint | null = null): Promise<AttendanceRecord> {
+  async clockIn(
+    userId: number,
+    notes: string | null = null,
+    location: GeoPoint | null = null,
+    origin: PunchOrigin = SELF_PUNCH
+  ): Promise<AttendanceRecord> {
+    // The friendly fast path for the common case. It is not what guarantees
+    // one open record per user — two requests can both pass it — the UNIQUE
+    // (user_id, open_marker) key on the INSERT below is (#851).
     const [open] = await this.pool.execute<RowDataPacket[]>(
       `SELECT id FROM attendance_records WHERE user_id = ? AND clock_out IS NULL LIMIT 1`,
       [userId]
@@ -172,38 +207,61 @@ export class AttendanceService {
 
     // Enforcement is per-caller: `required` is false (and this is a no-op)
     // unless at least one of the caller's departments has an active fence —
-    // see GeofenceService.isCallerWithinAllowedGeofence.
-    const geoCheck = await this.geofence.isCallerWithinAllowedGeofence(userId, location);
-    if (geoCheck.required && !geoCheck.allowed) {
-      await this.audit.write({
-        actorId: userId,
-        action: 'attendance.clock_in_rejected_geofence',
-        entityType: 'attendance_record',
-        entityId: userId,
-        description: location
-          ? 'Clock-in rejected: outside every geofence configured for this user\'s departments'
-          : 'Clock-in rejected: a geofence is configured but no location was provided',
-        after: location ? { latitude: location.lat, longitude: location.lng } : {},
-      });
-      throw new ValidationError('Clock-in location is outside the allowed area for your department.');
+    // see GeofenceService.isCallerWithinAllowedGeofence. Kiosk punches skip
+    // it: see PunchOrigin.
+    if (origin.source === 'self') {
+      const geoCheck = await this.geofence.isCallerWithinAllowedGeofence(userId, location);
+      if (geoCheck.required && !geoCheck.allowed) {
+        // Audited against the user: a rejected punch creates no record, and
+        // an `attendance_record` entity carrying a user id pointed the trail
+        // at whichever unrelated punch happened to have that id (#978).
+        await this.audit.write({
+          actorId: userId,
+          action: 'attendance.clock_in_rejected_geofence',
+          entityType: 'user',
+          entityId: userId,
+          description: location
+            ? 'Clock-in rejected: outside every geofence configured for this user\'s departments'
+            : 'Clock-in rejected: a geofence is configured but no location was provided',
+          after: location ? { latitude: location.lat, longitude: location.lng } : {},
+        });
+        throw new ValidationError('Clock-in location is outside the allowed area for your department.');
+      }
     }
 
     const shiftAssignmentId = await this.findTodaysAssignment(userId);
-    const [result] = await this.pool.execute<ResultSetHeader>(
-      `INSERT INTO attendance_records (user_id, shift_assignment_id, clock_in, latitude, longitude, notes, status)
-       VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'pending')`,
-      [userId, shiftAssignmentId, location?.lat ?? null, location?.lng ?? null, notes]
-    );
+    let result: ResultSetHeader;
+    try {
+      [result] = await this.pool.execute<ResultSetHeader>(
+        `INSERT INTO attendance_records
+           (user_id, shift_assignment_id, clock_in, latitude, longitude, notes, status, source, kiosk_device_id)
+         VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'pending', ?, ?)`,
+        [userId, shiftAssignmentId, location?.lat ?? null, location?.lng ?? null, notes, origin.source, kioskDeviceIdOf(origin)]
+      );
+    } catch (error) {
+      // The only unique key a clock-in can violate is the one-open-record
+      // key, so the driver's code identifies a concurrent clock-in exactly.
+      if ((error as { code?: string }).code === 'ER_DUP_ENTRY') {
+        throw new ConflictError('An open attendance record already exists for this user');
+      }
+      throw error;
+    }
     const created = await this.getById(result.insertId);
     if (!created) throw new Error('Failed to retrieve created attendance record');
-    logger.info(`Attendance clock-in: id=${created.id} user=${userId}`);
+    logger.info(`Attendance clock-in: id=${created.id} user=${userId} source=${origin.source}`);
     await this.audit.write({
       actorId: userId,
       action: 'attendance.clock_in',
       entityType: 'attendance_record',
       entityId: created.id,
       description: 'Clocked in',
-      after: { id: created.id, clockIn: created.clockIn, shiftAssignmentId: created.shiftAssignmentId },
+      after: {
+        id: created.id,
+        clockIn: created.clockIn,
+        shiftAssignmentId: created.shiftAssignmentId,
+        source: origin.source,
+        kioskDeviceId: kioskDeviceIdOf(origin),
+      },
     });
     return created;
   }
@@ -215,21 +273,45 @@ export class AttendanceService {
    * does from their own page state, so the toggle decision has to be made
    * server-side, atomically with the same query clockIn already runs to
    * detect this case.
+   *
+   * The newest open record is the one closed (ORDER BY, not an arbitrary
+   * LIMIT 1), and one opened less than DOUBLE_PUNCH_WINDOW_SECONDS ago is
+   * returned as it is instead (#851). Two taps that both find no open record
+   * are settled by clockIn's unique key: the second gets a 409.
    */
-  async punch(userId: number): Promise<{ action: 'clocked_in' | 'clocked_out'; record: AttendanceRecord }> {
+  async punch(
+    userId: number,
+    kioskDeviceId: number
+  ): Promise<{ action: 'clocked_in' | 'clocked_out'; record: AttendanceRecord }> {
+    const origin: PunchOrigin = { source: 'kiosk', kioskDeviceId };
     const [open] = await this.pool.execute<RowDataPacket[]>(
-      `SELECT id FROM attendance_records WHERE user_id = ? AND clock_out IS NULL LIMIT 1`,
+      `SELECT id, TIMESTAMPDIFF(SECOND, clock_in, CURRENT_TIMESTAMP) AS open_seconds
+         FROM attendance_records
+        WHERE user_id = ? AND clock_out IS NULL
+        ORDER BY clock_in DESC, id DESC
+        LIMIT 1`,
       [userId]
     );
     if (open.length > 0) {
-      const record = await this.clockOut(userId, open[0].id as number);
+      const openId = open[0].id as number;
+      if (Number(open[0].open_seconds) < DOUBLE_PUNCH_WINDOW_SECONDS) {
+        const record = await this.getById(openId);
+        if (!record) throw new Error('Failed to retrieve open attendance record');
+        return { action: 'clocked_in', record };
+      }
+      const record = await this.clockOut(userId, openId, null, origin);
       return { action: 'clocked_out', record };
     }
-    const record = await this.clockIn(userId);
+    const record = await this.clockIn(userId, null, null, origin);
     return { action: 'clocked_in', record };
   }
 
-  async clockOut(userId: number, id: number, notes: string | null = null): Promise<AttendanceRecord> {
+  async clockOut(
+    userId: number,
+    id: number,
+    notes: string | null = null,
+    origin: PunchOrigin = SELF_PUNCH
+  ): Promise<AttendanceRecord> {
     const [result] = await this.pool.execute<ResultSetHeader>(
       `UPDATE attendance_records
           SET clock_out = CURRENT_TIMESTAMP,
@@ -252,7 +334,9 @@ export class AttendanceService {
       entityType: 'attendance_record',
       entityId: id,
       description: 'Clocked out',
-      after: { clockOut: refreshed.clockOut },
+      // The record's `source` says where it was opened; the clock-out can
+      // happen elsewhere, so each punch's origin is kept here.
+      after: { clockOut: refreshed.clockOut, source: origin.source, kioskDeviceId: kioskDeviceIdOf(origin) },
     });
     return refreshed;
   }
