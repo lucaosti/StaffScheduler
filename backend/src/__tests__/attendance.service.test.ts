@@ -5,6 +5,8 @@
  */
 
 import { AttendanceService } from '../services/AttendanceService';
+import { AuditLogService } from '../services/AuditLogService';
+import { ConflictError } from '../errors';
 
 type Tuple = [unknown, unknown];
 
@@ -110,7 +112,83 @@ describe('AttendanceService.clockIn — geofencing', () => {
 
     const created = await new AttendanceService(pool).clockIn(5, null, { lat: 0.5, lng: 0.5 });
     expect(created.id).toBe(12);
-    expect(execute.mock.calls[3][1]).toEqual([5, null, 0.5, 0.5, null]);
+    expect(execute.mock.calls[3][1]).toEqual([5, null, 0.5, 0.5, null, 'self', null]);
+  });
+
+  it('audits a geofence rejection against the user, not against an attendance record (#978)', async () => {
+    // No record exists for a rejected punch: an `attendance_record` entity
+    // carrying a user id pointed the audit trail at an unrelated punch.
+    const write = jest.spyOn(AuditLogService.prototype, 'write').mockResolvedValue();
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[geofenceRow(square)], null] as Tuple);
+
+    await expect(new AttendanceService(pool).clockIn(5, null, null)).rejects.toThrow(/outside the allowed area/);
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'attendance.clock_in_rejected_geofence', entityType: 'user', entityId: 5 })
+    );
+  });
+
+  it('skips the geofence for a kiosk punch and records the device (#978)', async () => {
+    // A kiosk is bound to one department and physically placed there, and it
+    // sends no coordinates: checking the fence rejected every kiosk clock-in
+    // in a fenced department.
+    const write = jest.spyOn(AuditLogService.prototype, 'write').mockResolvedValue();
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // open-record check
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockResolvedValueOnce([{ insertId: 14 }, null] as Tuple) // INSERT
+      .mockResolvedValueOnce([[buildRow({ id: 14, source: 'kiosk', kiosk_device_id: 9 })], null] as Tuple);
+
+    const created = await new AttendanceService(pool).clockIn(5, null, null, { source: 'kiosk', kioskDeviceId: 9 });
+
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes('department_geofences'))).toBe(false);
+    expect(execute.mock.calls[2][1]).toEqual([5, null, null, null, null, 'kiosk', 9]);
+    expect(created).toMatchObject({ id: 14, source: 'kiosk', kioskDeviceId: 9 });
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'attendance.clock_in', after: expect.objectContaining({ source: 'kiosk', kioskDeviceId: 9 }) })
+    );
+  });
+
+  it('still enforces the geofence on a self punch', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[geofenceRow(square)], null] as Tuple)
+      .mockResolvedValue([{ insertId: 1 }, null] as Tuple);
+
+    await expect(
+      new AttendanceService(pool).clockIn(5, null, null, { source: 'self' })
+    ).rejects.toThrow(/outside the allowed area/);
+  });
+});
+
+describe('AttendanceService.clockIn — one open record per user (#851)', () => {
+  const insertFailing = (error: unknown) => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as Tuple) // open-record check: none (the race window)
+      .mockResolvedValueOnce([[], null] as Tuple) // geofence check
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockRejectedValueOnce(error); // INSERT
+    return new AttendanceService(pool);
+  };
+
+  it('maps the unique-key violation of a concurrent clock-in to a 409 ConflictError', async () => {
+    // Two requests can both pass the open-record check; the UNIQUE
+    // (user_id, open_marker) key rejects the second INSERT. Mapped by the
+    // driver's error code, never by message text.
+    const duplicate = Object.assign(new Error("Duplicate entry '5-1' for key 'uq_attendance_one_open'"), {
+      code: 'ER_DUP_ENTRY',
+    });
+    await expect(insertFailing(duplicate).clockIn(5)).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it('rethrows any other INSERT failure unchanged', async () => {
+    const fault = Object.assign(new Error('connection lost'), { code: 'PROTOCOL_CONNECTION_LOST' });
+    await expect(insertFailing(fault).clockIn(5)).rejects.toBe(fault);
   });
 
   it('is satisfied by any one of several configured fences (multi-department caller)', async () => {
@@ -129,33 +207,73 @@ describe('AttendanceService.clockIn — geofencing', () => {
 });
 
 describe('AttendanceService.punch', () => {
+  it('fails loudly when the open record vanishes between the two reads of a double tap', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 7, open_seconds: 1 }], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple); // getById: gone
+
+    await expect(new AttendanceService(pool).punch(5, 9)).rejects.toThrow('Failed to retrieve open attendance record');
+  });
+
   it('clocks in when the user has no open record', async () => {
     const { pool, execute } = makePool();
     execute
       .mockResolvedValueOnce([[], null] as Tuple) // punch's own open-record check: none
       .mockResolvedValueOnce([[], null] as Tuple) // clockIn's open-record check
-      .mockResolvedValueOnce([[], null] as Tuple) // geofence check: none configured
-      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment
+      .mockResolvedValueOnce([[], null] as Tuple) // findTodaysAssignment (no geofence query for a kiosk)
       .mockResolvedValueOnce([{ insertId: 10 }, null] as Tuple) // INSERT
       .mockResolvedValueOnce([[buildRow({ id: 10 })], null] as Tuple); // getById
 
-    const result = await new AttendanceService(pool).punch(5);
+    const result = await new AttendanceService(pool).punch(5, 9);
 
     expect(result.action).toBe('clocked_in');
     expect(result.record.id).toBe(10);
+    expect(execute.mock.calls[3][1]).toEqual([5, null, null, null, null, 'kiosk', 9]);
   });
 
   it('clocks out the open record when one already exists', async () => {
+    const write = jest.spyOn(AuditLogService.prototype, 'write').mockResolvedValue();
     const { pool, execute } = makePool();
     execute
-      .mockResolvedValueOnce([[{ id: 7 }], null] as Tuple) // punch's own open-record check: one open
+      .mockResolvedValueOnce([[{ id: 7, open_seconds: 3600 }], null] as Tuple) // punch's own open-record check: one open
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple) // clockOut's UPDATE
       .mockResolvedValueOnce([[buildRow({ id: 7, clock_out: '2026-07-10T16:00:00.000Z' })], null] as Tuple); // getById
 
-    const result = await new AttendanceService(pool).punch(5);
+    const result = await new AttendanceService(pool).punch(5, 9);
 
     expect(result.action).toBe('clocked_out');
     expect(result.record.id).toBe(7);
+    expect(write).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'attendance.clock_out', after: expect.objectContaining({ source: 'kiosk', kioskDeviceId: 9 }) })
+    );
+  });
+
+  it('treats a second punch seconds after a clock-in as a double tap, not a clock-out (#851)', async () => {
+    // A zero-length shift is never what a kiosk user meant: the second tap of
+    // a double tap (or a client retry) must not close the record it opened.
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 7, open_seconds: 2 }], null] as Tuple) // open for 2 s
+      .mockResolvedValueOnce([[buildRow({ id: 7 })], null] as Tuple); // getById
+
+    const result = await new AttendanceService(pool).punch(5, 9);
+
+    expect(result.action).toBe('clocked_in');
+    expect(result.record.id).toBe(7);
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes('UPDATE attendance_records'))).toBe(false);
+  });
+
+  it('closes the newest open record, deterministically', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 7, open_seconds: 3600 }], null] as Tuple)
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as Tuple)
+      .mockResolvedValueOnce([[buildRow({ id: 7, clock_out: '2026-07-10T16:00:00.000Z' })], null] as Tuple);
+
+    await new AttendanceService(pool).punch(5, 9);
+
+    expect(execute.mock.calls[0][0]).toMatch(/ORDER BY clock_in DESC, id DESC/);
   });
 });
 
@@ -288,7 +406,7 @@ describe('AttendanceService.clockIn — failure diagnosis', () => {
     const created = await new AttendanceService(pool).clockIn(5, 'note');
 
     expect(created.shiftAssignmentId).toBe(77);
-    expect(execute.mock.calls[3][1]).toEqual([5, 77, null, null, 'note']);
+    expect(execute.mock.calls[3][1]).toEqual([5, 77, null, null, 'note', 'self', null]);
   });
 });
 

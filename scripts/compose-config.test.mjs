@@ -148,3 +148,16 @@ test('phpMyAdmin asks for credentials instead of logging every visitor in (#823)
   assert.equal(environment.PMA_USER, undefined);
   assert.equal(environment.PMA_PASSWORD, undefined);
 });
+
+test('Redis never evicts keys under memory pressure (#979)', () => {
+  // Redis holds the JTI blacklist and the BullMQ optimization queue. Under an
+  // allkeys-* policy a full Redis silently drops a logout's revocation or a
+  // queued job, and BullMQ requires noeviction outright. A volatile-* policy
+  // is no better: every blacklist key carries a TTL, so it is exactly what a
+  // volatile policy evicts. noeviction turns memory pressure into a write
+  // error, which the cache store already falls back from.
+  const { command } = resolved().services.redis;
+  const index = command.indexOf('--maxmemory-policy');
+  assert.notEqual(index, -1, JSON.stringify(command));
+  assert.equal(command[index + 1], 'noeviction');
+});

@@ -12511,7 +12511,7 @@ export interface paths {
         put?: never;
         /**
          * Punch a clock-in or clock-out from a shared kiosk device
-         * @description Authenticated by an `X-Kiosk-Token` device header, not a user session — there is no signed-in user at a shared kiosk. Toggles: clocks the resolved employee in if they have no open record, otherwise clocks them out.
+         * @description Authenticated by an `X-Kiosk-Token` device header, not a user session — there is no signed-in user at a shared kiosk. Toggles: clocks the resolved employee in if they have no open record, otherwise clocks them out. A punch less than 10 seconds after the clock-in is a double tap and returns the open record unchanged. Kiosk punches are exempt from department geofences and record `source: kiosk` and the device id.
          */
         post: {
             parameters: {
@@ -12544,6 +12544,13 @@ export interface paths {
                 };
                 /** @description No active employee with that id in this device's department. */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A concurrent punch opened this employee's record first. */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

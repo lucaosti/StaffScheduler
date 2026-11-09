@@ -119,17 +119,34 @@ export const blacklistJti = async (jti: string, ttlMs: number): Promise<void> =>
   memBlacklist.set(jti, true, ttlMs);
 };
 
-/** True when the JTI has been revoked and not yet expired. */
+/**
+ * True when the JTI has been revoked and not yet expired, in EITHER store.
+ *
+ * Why both, rather than Redis's answer whenever Redis responds (#979): a
+ * logout during a Redis outage is written only to the in-process store, and
+ * Redis, once it recovers, truthfully answers "not revoked" for that jti —
+ * trusting it alone made the logged-out token valid again for the rest of its
+ * lifetime, even on the replica that recorded the logout. The memory read is a
+ * Map lookup, so consulting it on every request costs nothing.
+ *
+ * What remains bounded rather than closed: a revocation written to memory on
+ * one replica is invisible to the others, so during an outage a logged-out
+ * access token is still accepted elsewhere until it expires (JWT_EXPIRES_IN,
+ * 15 minutes by default). Refresh tokens and deactivation live in MySQL and
+ * are unaffected. Failing closed on a Redis error was rejected: it would turn
+ * any Redis outage into an authentication outage.
+ */
 export const isJtiBlacklisted = async (jti: string): Promise<boolean> => {
+  if (memBlacklist.get(jti) === true) return true;
   const client = redis();
   if (client) {
     try {
       return (await client.exists(`${BLACKLIST_PREFIX}${jti}`)) === 1;
     } catch {
-      /* fall through to memory */
+      /* the memory store has already answered */
     }
   }
-  return memBlacklist.get(jti) === true;
+  return false;
 };
 
 /** Returns the cached auth-context JSON for a user, or null on miss/expiry. */

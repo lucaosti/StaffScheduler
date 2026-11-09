@@ -137,6 +137,30 @@ describe('UserService.getUserById / getUserByEmail', () => {
     expect((await svc.getUserByEmail('a@b'))?.id).toBe(1);
     await expect(svc.getUserByEmail('a@b')).rejects.toThrow(/boom/);
   });
+
+  it('getUserByExactEmail compares binary, not under the case- and accent-insensitive collation (#815)', async () => {
+    // Under utf8mb4_unicode_ci `ádmin@acme.com` equals `admin@acme.com`; an
+    // identity provider asserting the former must not be linked to the latter.
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as Tuple);
+    const svc = new UserService(pool);
+
+    expect(await svc.getUserByExactEmail('admin@acme.com')).toBeNull();
+    const [sql, params] = execute.mock.calls[0];
+    expect(sql).toMatch(/LOWER\(email\) COLLATE utf8mb4_bin = \?/);
+    expect(params).toEqual(['admin@acme.com', 'admin@acme.com']);
+  });
+
+  it('getUserByExactEmail delegates to getUserById on a match', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[{ id: 1 }], null] as Tuple)
+      .mockResolvedValueOnce([[userRow], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple)
+      .mockResolvedValueOnce([[], null] as Tuple);
+
+    expect((await new UserService(pool).getUserByExactEmail('a@b'))?.id).toBe(1);
+  });
 });
 
 describe('UserService.getAllUsers filters', () => {

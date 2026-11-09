@@ -16,7 +16,12 @@ import type { RowDataPacket } from 'mysql2/promise';
 import { SsoAuthService } from '../services/SsoAuthService';
 import type { SsoProvider } from '../services/SsoProviderService';
 import { UserService } from '../services/UserService';
+import { TwoFactorService } from '../services/TwoFactorService';
 import { ConflictError, ForbiddenError } from '../errors';
+
+// Automocked: findOrCreateUser asks it whether the account has a second
+// factor; each test states the answer.
+jest.mock('../services/TwoFactorService');
 
 const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -64,6 +69,7 @@ const signIdToken = (claimOverrides: Record<string, unknown> = {}, key = private
     {
       sub: 'idp-subject-1',
       email: 'anna@example.com',
+      email_verified: true,
       given_name: 'Anna',
       family_name: 'Demo',
       nonce: 'expected-nonce',
@@ -189,6 +195,7 @@ describe('SsoAuthService.verifyIdToken', () => {
     expect(profile).toEqual({
       sub: 'idp-subject-1',
       email: 'anna@example.com',
+      emailVerified: true,
       givenName: 'Anna',
       familyName: 'Demo',
       fullName: undefined,
@@ -205,10 +212,22 @@ describe('SsoAuthService.verifyIdToken', () => {
     expect(profile).toEqual({
       sub: 'idp-subject-2',
       email: undefined,
+      emailVerified: false,
       givenName: undefined,
       familyName: undefined,
       fullName: 'Anna Demo',
     });
+  });
+
+  it('treats only a boolean true email_verified claim as verified (#815)', async () => {
+    // A string "true" or any other truthy value is not the OIDC claim's type;
+    // accepting it would let a sloppy IdP vouch for an address it never checked.
+    const profile = await new SsoAuthService({} as never).verifyIdToken(
+      provider,
+      signIdToken({ email_verified: 'true' }),
+      'expected-nonce'
+    );
+    expect(profile.emailVerified).toBe(false);
   });
 
   it('rejects a token signed with a DIFFERENT key than the one JWKS serves', async () => {
@@ -297,7 +316,11 @@ describe('SsoAuthService.findOrCreateUser', () => {
     const execute = jest.fn();
     return { pool: { execute } as never, execute };
   };
-  const profile = { sub: 'idp-subject-1', email: 'anna@example.com', givenName: 'Anna', familyName: 'Demo' };
+  const profile = { sub: 'idp-subject-1', email: 'anna@example.com', emailVerified: true, givenName: 'Anna', familyName: 'Demo' };
+
+  beforeEach(() => {
+    (TwoFactorService.prototype.hasAnyEnabled as jest.Mock).mockResolvedValue(false);
+  });
 
   it('returns the linked user when the (provider, subject) pair is already known', async () => {
     const { pool, execute } = makePool();
@@ -323,7 +346,7 @@ describe('SsoAuthService.findOrCreateUser', () => {
     execute
       .mockResolvedValueOnce([[], null] as [RowDataPacket[], null]) // no existing link
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]); // the INSERT link
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce({ id: 7, isActive: true } as never);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce({ id: 7, isActive: true } as never);
 
     const user = await new SsoAuthService(pool).findOrCreateUser(provider, profile);
     expect(user).toMatchObject({ id: 7 });
@@ -334,11 +357,82 @@ describe('SsoAuthService.findOrCreateUser', () => {
   it('refuses an inactive account found by email', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]);
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce({ id: 7, isActive: false } as never);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce({ id: 7, isActive: false } as never);
 
     await expect(new SsoAuthService(pool).findOrCreateUser(provider, profile)).rejects.toBeInstanceOf(
       ForbiddenError
     );
+  });
+
+  it('refuses to link an existing account when the IdP has not verified the email (#815)', async () => {
+    // Linking by email is only as strong as the IdP's proof that the person
+    // owns the address; without `email_verified: true` it proves nothing.
+    const { pool, execute } = makePool();
+
+    for (const unverified of [{ ...profile, emailVerified: false }, { sub: profile.sub, email: profile.email }]) {
+      execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]);
+      jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce({ id: 7, isActive: true } as never);
+      await expect(new SsoAuthService(pool).findOrCreateUser(provider, unverified)).rejects.toMatchObject({
+        status: 403,
+        code: 'SSO_EMAIL_UNVERIFIED',
+      });
+    }
+    expect(execute.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO sso_identities'))).toBe(false);
+  });
+
+  it('looks the account up by the lower-cased address, compared exactly (#815)', async () => {
+    const { pool, execute } = makePool();
+    execute
+      .mockResolvedValueOnce([[], null] as [RowDataPacket[], null])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]);
+    const lookup = jest
+      .spyOn(UserService.prototype, 'getUserByExactEmail')
+      .mockResolvedValueOnce({ id: 7, isActive: true } as never);
+
+    await new SsoAuthService(pool).findOrCreateUser(provider, { ...profile, email: 'Anna@Example.COM' });
+
+    expect(lookup).toHaveBeenCalledWith('anna@example.com');
+  });
+
+  it('refuses an asserted email with surrounding whitespace instead of trimming it into a match (#815)', async () => {
+    // `admin@acme.com ` is not `admin@acme.com` at the IdP; trimming it would
+    // hand the second account to whoever registered the first.
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]);
+    const lookup = jest.spyOn(UserService.prototype, 'getUserByExactEmail');
+
+    await expect(
+      new SsoAuthService(pool).findOrCreateUser(provider, { ...profile, email: 'anna@example.com ' })
+    ).rejects.toBeInstanceOf(ConflictError);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('refuses SSO sign-in for an already-linked account with two-factor authentication enabled (#815)', async () => {
+    // Password login demands the second factor; issuing a session from the
+    // IdP alone would make SSO a way around it.
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[{ user_id: 42 }], null] as [RowDataPacket[], null]);
+    jest.spyOn(UserService.prototype, 'getUserById').mockResolvedValueOnce({ id: 42, isActive: true } as never);
+    (TwoFactorService.prototype.hasAnyEnabled as jest.Mock).mockResolvedValue(true);
+
+    await expect(new SsoAuthService(pool).findOrCreateUser(provider, profile)).rejects.toMatchObject({
+      status: 403,
+      code: 'SSO_2FA_REQUIRED',
+    });
+    expect(TwoFactorService.prototype.hasAnyEnabled).toHaveBeenCalledWith(42);
+  });
+
+  it('refuses to link an account with two-factor authentication enabled, and records no link (#815)', async () => {
+    const { pool, execute } = makePool();
+    execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce({ id: 7, isActive: true } as never);
+    (TwoFactorService.prototype.hasAnyEnabled as jest.Mock).mockResolvedValue(true);
+
+    await expect(new SsoAuthService(pool).findOrCreateUser(provider, profile)).rejects.toMatchObject({
+      status: 403,
+      code: 'SSO_2FA_REQUIRED',
+    });
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it('throws when the identity provider supplied no email and no account is linked', async () => {
@@ -352,7 +446,7 @@ describe('SsoAuthService.findOrCreateUser', () => {
   it('refuses to create an account when JIT provisioning is disabled', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]);
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce(null);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce(null);
 
     await expect(
       new SsoAuthService(pool).findOrCreateUser({ ...provider, jitProvisioningEnabled: false }, profile)
@@ -364,7 +458,7 @@ describe('SsoAuthService.findOrCreateUser', () => {
     execute
       .mockResolvedValueOnce([[], null] as [RowDataPacket[], null]) // no existing link
       .mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]); // the identity link
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce(null);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce(null);
     const createUser = jest
       .spyOn(UserService.prototype, 'createUser')
       .mockResolvedValueOnce({ id: 99, isActive: true } as never);
@@ -387,7 +481,7 @@ describe('SsoAuthService.findOrCreateUser', () => {
   it('falls back to splitting fullName when the IdP has no given/family name claims', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]).mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]);
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce(null);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce(null);
     const createUser = jest
       .spyOn(UserService.prototype, 'createUser')
       .mockResolvedValueOnce({ id: 100, isActive: true } as never);
@@ -407,7 +501,7 @@ describe('SsoAuthService.findOrCreateUser', () => {
   it('defaults to "SSO User" when the IdP gives no name information at all', async () => {
     const { pool, execute } = makePool();
     execute.mockResolvedValueOnce([[], null] as [RowDataPacket[], null]).mockResolvedValueOnce([{ affectedRows: 1 }, null] as [unknown, null]);
-    jest.spyOn(UserService.prototype, 'getUserByEmail').mockResolvedValueOnce(null);
+    jest.spyOn(UserService.prototype, 'getUserByExactEmail').mockResolvedValueOnce(null);
     const createUser = jest
       .spyOn(UserService.prototype, 'createUser')
       .mockResolvedValueOnce({ id: 101, isActive: true } as never);

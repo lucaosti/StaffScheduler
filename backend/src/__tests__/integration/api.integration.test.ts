@@ -716,7 +716,12 @@ describe('path-parameter mutations run against the real schema', () => {
     async attendanceRecord(): Promise<number> {
       // An open (not clocked-out) record for the admin, so clock-out and the
       // approve/reject actions have a real row to act on. shift_assignment_id
-      // is nullable, so no shift fixture is needed.
+      // is nullable, so no shift fixture is needed. A user holds at most one
+      // open record (#851), so close whatever an earlier case left open.
+      await admin.query(
+        `UPDATE attendance_records SET clock_out = clock_in WHERE user_id = ? AND clock_out IS NULL`,
+        [userId]
+      );
       const [r] = await admin.query<mysql.ResultSetHeader>(
         `INSERT INTO attendance_records (user_id, clock_in, status)
          VALUES (?, NOW(), 'pending')`,
@@ -3148,5 +3153,151 @@ describe('working-time limits reach the optimizer (#838, #883)', () => {
     await withPolicy('max_consecutive_days', { days: 2 }, async () => {
       expect((await generate(scheduleId)).assignmentsCreated).toBe(2);
     });
+  });
+});
+
+describe('attendance punches against the real schema (#851, #978)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+  const SQUARE = JSON.stringify([{ lat: 0, lng: 0 }, { lat: 0, lng: 1 }, { lat: 1, lng: 1 }, { lat: 1, lng: 0 }]);
+
+  const attendanceService = () => {
+    const { AttendanceService } = require('../../services/AttendanceService');
+    const { database } = require('../../config/database');
+    return new AttendanceService(database.getPool());
+  };
+
+  const newPerson = async (inDepartmentId: number | null = null): Promise<number> => {
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active)
+       VALUES (?, 'x', 'Punch', 'Clock', 1)`,
+      [`punch-${tag()}@example.com`]
+    );
+    if (inDepartmentId !== null) {
+      await admin.query(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [
+        person.insertId,
+        inDepartmentId,
+      ]);
+    }
+    return person.insertId;
+  };
+
+  /** A department with one active geofence around (0..1, 0..1). */
+  const fencedDepartment = async (): Promise<number> => {
+    const [dept] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO departments (name, description, is_active) VALUES (?, 'fenced', 1)`,
+      [`fenced-${tag()}`]
+    );
+    await admin.query(
+      `INSERT INTO department_geofences (department_id, name, polygon, is_active) VALUES (?, 'Site', ?, 1)`,
+      [dept.insertId, SQUARE]
+    );
+    return dept.insertId;
+  };
+
+  it('leaves exactly one open record when eight clock-ins race for one user', async () => {
+    // The open-record check and the INSERT are separate statements, so every
+    // request can pass the check before any of them inserts. Only a unique
+    // key makes "one open record per user" hold under concurrency.
+    const personId = await newPerson();
+    const service = attendanceService();
+    const { ConflictError } = require('../../errors');
+
+    const outcomes = await Promise.allSettled(Array.from({ length: 8 }, () => service.clockIn(personId)));
+
+    expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+    for (const outcome of outcomes) {
+      if (outcome.status === 'rejected') expect(outcome.reason).toBeInstanceOf(ConflictError);
+    }
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS open_count FROM attendance_records WHERE user_id = ? AND clock_out IS NULL`,
+      [personId]
+    );
+    expect(Number(rows[0].open_count)).toBe(1);
+  });
+
+  it('accepts a kiosk punch in a geofenced department and stores its source and device', async () => {
+    const departmentInFence = await fencedDepartment();
+    const [device] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO kiosk_devices (name, department_id, token_hash, is_active) VALUES ('Lobby tablet', ?, ?, 1)`,
+      [departmentInFence, tag().padEnd(64, '0').slice(0, 64)]
+    );
+    const personId = await newPerson(departmentInFence);
+
+    const result = await attendanceService().punch(personId, device.insertId);
+
+    expect(result.action).toBe('clocked_in');
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT source, kiosk_device_id FROM attendance_records WHERE id = ?`,
+      [result.record.id]
+    );
+    expect(rows[0]).toMatchObject({ source: 'kiosk', kiosk_device_id: device.insertId });
+    const [audit] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT after_snapshot FROM audit_logs
+        WHERE action = 'attendance.clock_in' AND entity_type = 'attendance_record' AND entity_id = ?`,
+      [result.record.id]
+    );
+    const snapshot = audit[0].after_snapshot;
+    expect(typeof snapshot === 'string' ? JSON.parse(snapshot) : snapshot).toMatchObject({
+      source: 'kiosk',
+      kioskDeviceId: device.insertId,
+    });
+  });
+
+  it('still rejects a self clock-in without a location in a geofenced department', async () => {
+    const personId = await newPerson(await fencedDepartment());
+    const { ValidationError } = require('../../errors');
+
+    await expect(attendanceService().clockIn(personId)).rejects.toBeInstanceOf(ValidationError);
+  });
+});
+
+describe('SSO account linking matches emails exactly (#815)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  /** A local account plus an active provider without JIT provisioning. */
+  const fixture = async () => {
+    const local = `sso-link-${tag()}@example.com`;
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, 'x', 'Sso', 'Link', 1)`,
+      [local]
+    );
+    const [idp] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO sso_providers (name, issuer, client_id, client_secret, authorization_url, token_url, jwks_url, is_active)
+       VALUES (?, 'https://idp.example.com', 'client', 'secret', 'https://idp.example.com/a', 'https://idp.example.com/t', 'https://idp.example.com/j', 1)`,
+      [`idp-${tag()}`]
+    );
+    const { database } = require('../../config/database');
+    const { SsoAuthService } = require('../../services/SsoAuthService');
+    const { SsoProviderService } = require('../../services/SsoProviderService');
+    const provider = await new SsoProviderService(database.getPool()).getById(idp.insertId);
+    return { local, personId: person.insertId, provider, sso: new SsoAuthService(database.getPool()) };
+  };
+
+  const linksFor = async (providerId: number): Promise<number> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS links FROM sso_identities WHERE provider_id = ?`,
+      [providerId]
+    );
+    return Number(rows[0].links);
+  };
+
+  it('does not link an accented variant the column collation would call equal', async () => {
+    // utf8mb4_unicode_ci compares `śso-link…` equal to `sso-link…`.
+    const { local, provider, sso } = await fixture();
+    const { ForbiddenError } = require('../../errors');
+
+    await expect(
+      sso.findOrCreateUser(provider, { sub: `sub-${tag()}`, email: `ś${local.slice(1)}`, emailVerified: true })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await linksFor(provider.id)).toBe(0);
+  });
+
+  it('links the same address in a different letter case', async () => {
+    const { local, personId, provider, sso } = await fixture();
+
+    const user = await sso.findOrCreateUser(provider, { sub: `sub-${tag()}`, email: local.toUpperCase(), emailVerified: true });
+
+    expect(user.id).toBe(personId);
+    expect(await linksFor(provider.id)).toBe(1);
   });
 });
