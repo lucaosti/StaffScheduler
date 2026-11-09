@@ -45,7 +45,7 @@
  * @author Luca Ostinelli
  */
 
-import type { Pool, PoolConnection } from 'mysql2/promise';
+import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { logger } from '../config/logger';
 
 /**
@@ -107,5 +107,37 @@ export const withTransaction = <T>(
         });
       }
       throw error;
+    }
+  });
+
+/**
+ * Runs `work` while holding the MySQL named lock `name`, or throws `busy()`
+ * without running it when another session holds the lock.
+ *
+ * WHY A NAMED LOCK and not `SELECT … FOR UPDATE` on a row. The work this
+ * guards (a schedule generation, #963) reads, runs a solver for seconds and
+ * writes in its own transactions; a row lock would have to keep one
+ * transaction open across all of it, blocking every unrelated writer of that
+ * row for the duration. A named lock belongs to a connection, not a
+ * transaction, binds only callers that ask for it, and is released by the
+ * server if the connection dies — a crashed holder cannot wedge it. It also
+ * holds across backend replicas, which an in-process mutex would not.
+ *
+ * `GET_LOCK(name, 0)` does not wait: a second caller is told at once rather
+ * than queued behind a run whose result makes its own redundant.
+ */
+export const withNamedLock = <T>(
+  pool: Pool,
+  name: string,
+  busy: () => Error,
+  work: () => Promise<T>
+): Promise<T> =>
+  usingConnection(pool, async (conn) => {
+    const [rows] = await conn.query<RowDataPacket[]>('SELECT GET_LOCK(?, 0) AS acquired', [name]);
+    if (Number(rows[0].acquired) !== 1) throw busy();
+    try {
+      return await work();
+    } finally {
+      await conn.query('SELECT RELEASE_LOCK(?)', [name]);
     }
   });

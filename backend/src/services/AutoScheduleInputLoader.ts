@@ -323,18 +323,41 @@ export class AutoScheduleInputLoader {
     const employees = empRows as unknown as EmployeeInputRow[];
     const employeeIds = employees.map((e) => e.id);
 
-    // Commitments on THIS schedule: assignments a previous run published and
-    // people have been told about. The optimizer plans AROUND them rather than
-    // reconsidering them, and the caller's diff reports any it had to break.
-    const pinnedRows = await this.rows(
-      `SELECT sa.user_id, sa.shift_id
+    // Every live assignment already on THIS schedule (#963).
+    //
+    // The pinned ones are commitments a previous run published and people have
+    // been told about: on a published schedule the optimizer plans around them
+    // rather than reconsidering them, and the caller's diff reports any it had
+    // to break.
+    //
+    // The rest matter as much on a draft, and used to be skipped: only pinned
+    // rows were read, so a manual assignment — or a whole earlier run's
+    // output — was invisible to the solve, while the draft path's
+    // INSERT IGNORE kept it. A second generate stacked a second solution on
+    // the first; each was compliant alone and the union gave people 0 h of
+    // rest and 64 h weeks. The builder turns these rows into fixed work.
+    //
+    // The holder's skills travel with the row (#974): a held person who meets
+    // a shift's "at least N at level L" requirement already covers it, and
+    // the holder need not be a candidate any more to have been assigned.
+    const heldRows = await this.rows(
+      `SELECT sa.user_id, sa.shift_id, sa.is_pinned,
+              (SELECT GROUP_CONCAT(CONCAT(sk.name, ':', COALESCE(us.proficiency_level, '')) ORDER BY sk.name)
+                 FROM user_skills us JOIN skills sk ON sk.id = us.skill_id
+                WHERE us.user_id = sa.user_id) AS skill_levels
+         -- assignments already held on this schedule
          FROM shift_assignments sa
          JOIN shifts s ON s.id = sa.shift_id
         WHERE s.schedule_id = ?
-          AND sa.is_pinned = 1
           AND sa.status IN ('pending', 'confirmed')`,
       [scheduleId]
     );
+    const held = heldRows.map((r) => ({
+      employee_id: String(r.user_id),
+      shift_id: String(r.shift_id),
+      pinned: Boolean(r.is_pinned),
+      skill_levels: (r.skill_levels as string | null) ?? null,
+    }));
 
     // Pairing rules constraining who may share a shift. Read for the whole
     // department's staff rather than per shift: the rules are about people,
@@ -418,9 +441,25 @@ export class AutoScheduleInputLoader {
     // constrained by work that will never happen, since at most one of those
     // drafts can ever be published.
     //
-    // So: published schedules, which are what actually happened, PLUS the
-    // chosen predecessor whatever its status — a planner who names a draft as
-    // the schedule this one continues from means it.
+    // So the drafts excluded are exactly those competing generations: drafts
+    // of THIS department, except the chosen predecessor — a planner who names
+    // a draft as the schedule this one continues from means it.
+    //
+    // Everything else counts (#963). It used to be published schedules only,
+    // which also dropped two kinds of real work. Another department's draft
+    // is not a competing version of this one: it is a second unit planning
+    // the same person — a loan, or someone in two departments — and the
+    // simulation found a loaned person given 8 h of rest between two units'
+    // drafts under an 11 h limit. And an archived schedule that was published
+    // is a period that happened. ComplianceEngine counts both, and the
+    // schedule generated here is judged by it afterwards.
+    //
+    // An archived schedule of THIS department that was never published is a
+    // discarded draft — archiving accepts drafts too — and stays excluded
+    // like one: counting it would let an abandoned generation constrain the
+    // one that replaced it. `published_at` is the record that it ever went
+    // live; another department's archived schedule counts either way, as its
+    // drafts do.
     const predecessorId = await this.resolvePredecessorId(scheduleId, schedule);
     const externalRows = await this.rowsForCandidates(
       employeeIds,
@@ -429,15 +468,18 @@ export class AutoScheduleInputLoader {
              JOIN shifts s ON s.id = sa.shift_id
              JOIN schedules sc ON sc.id = s.schedule_id
             WHERE s.schedule_id != ?
-              AND (sc.status = 'published' OR sc.id = ?)
+              AND NOT (sc.department_id = ? AND sc.id <> ?
+                       AND (sc.status = 'draft' OR (sc.status = 'archived' AND sc.published_at IS NULL)))
               AND sa.status IN ('pending', 'confirmed')
               AND sa.user_id IN (${ids})
               AND s.date BETWEEN DATE_SUB(?, INTERVAL 14 DAY) AND DATE_ADD(?, INTERVAL 14 DAY)`,
       [
         scheduleId,
+        schedule.department_id,
         // 0 matches nothing, which is what "no predecessor" has to mean here.
-        // A NULL would make the comparison NULL and silently drop the whole
-        // OR branch — the same result by accident rather than by intent.
+        // A NULL would make `sc.id <> NULL` unknown, the NOT of it unknown,
+        // and silently drop every same-department row — the predecessor's
+        // included — by accident rather than by intent.
         predecessorId ?? 0,
         schedule.start_date,
         schedule.end_date,
@@ -448,10 +490,10 @@ export class AutoScheduleInputLoader {
       schedule,
       shifts,
       employees,
-      pinned: pinnedRows.map((r) => ({
-        employee_id: String(r.user_id),
-        shift_id: String(r.shift_id),
-      })),
+      pinned: held
+        .filter((h) => h.pinned)
+        .map(({ employee_id, shift_id }) => ({ employee_id, shift_id })),
+      held: held.map(({ employee_id, shift_id, skill_levels }) => ({ employee_id, shift_id, skill_levels })),
       pairings: pairingRows.map((r) => ({
         employee_id: String(r.user_id),
         other_id: String(r.other_user_id),

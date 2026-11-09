@@ -7273,9 +7273,9 @@ export interface paths {
                              * @enum {string}
                              */
                             engine?: "or-tools" | "greedy";
-                            /** @description True when the optimal engine was requested but the run fell back to greedy (e.g. OR-Tools unavailable). The result is a draft, not the optimum. */
+                            /** @description True when the optimal engine was requested but the run fell back to greedy (e.g. OR-Tools unavailable), or when the post-solve ComplianceEngine check withheld assignments that would break a working-time limit. The result is a draft, not the optimum. */
                             degraded?: boolean;
-                            /** @description Why the run degraded to greedy, when it did. */
+                            /** @description Why the run degraded, when it did: the fallback reason, and each withheld assignment (user, shift, rule). */
                             degradedReason?: string;
                         };
                     };
@@ -7300,7 +7300,16 @@ export interface paths {
                 401: components["responses"]["Unauthorized"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
-                /** @description OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did). Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event. */
+                /** @description CONFLICT: a generation for this schedule is already running. One run per schedule at a time — a second would solve against the same rows and stack on the first. */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApiError"];
+                    };
+                };
+                /** @description OPTIMIZATION_FAILED: no engine produced a schedule (the greedy fallback itself failed, or the explicitly selected greedy engine did), or an engine returned an assignment to a shift or person it was never given. Nothing was proposed or written; the reason is logged server-side, not returned. Through the job queue the same failure is the job's failedReason and an optimization.failed event. */
                 500: {
                     headers: {
                         [name: string]: unknown;
@@ -10744,7 +10753,7 @@ export interface paths {
                                      * @enum {string}
                                      */
                                     engine?: "or-tools" | "greedy";
-                                    /** @description True when the optimum was requested but the run fell back to greedy. */
+                                    /** @description True when the optimum was requested but the run fell back to greedy, or when the post-solve compliance check withheld assignments. */
                                     degraded?: boolean;
                                     degradedReason?: string;
                                 };

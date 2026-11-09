@@ -286,6 +286,20 @@ jobs:
       - name: Install dependencies (workspace root)
         run: npm ci --prefer-offline --no-audit --no-fund
 
+      # The integration suites below generate schedules through the real API,
+      # and the generated-schedule compliance cases (#963) assert the CP-SAT
+      # engine ran. Without the solver here they silently exercised the greedy
+      # fallback instead, so the same Python + OR-Tools as the backend job.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/optimization-scripts/requirements.txt
+
+      - name: Install optimizer Python dependencies
+        run: pip install -r backend/optimization-scripts/requirements.txt
+
       - name: Install Playwright browsers
         working-directory: frontend
         # WebKit too: see the comment in ops/toolchain/Dockerfile.

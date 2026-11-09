@@ -13,7 +13,9 @@
  *
  * The job id is deterministic per schedule (`schedule:{id}`), so a second
  * generate while one is in flight joins the existing job rather than starting a
- * competing solve over the same rows.
+ * competing solve over the same rows. The synchronous fallback has no job to
+ * join, so `AutoScheduleService.generate` holds a per-schedule lock and a
+ * second concurrent run is answered 409 rather than stacked on the first (#963).
  *
  * WHY THE RESULT ALWAYS CARRIES `engine` AND `degraded`. The optimum comes from
  * the Python CP-SAT solver; if it is unavailable the run degrades to the greedy

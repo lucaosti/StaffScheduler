@@ -1,11 +1,12 @@
 /**
  * Auto-schedule orchestrator (F09).
  *
- * Glues the optimization engine to the database as five named steps:
+ * Glues the optimization engine to the database as six named steps:
  *
  *   load    → AutoScheduleInputLoader, which owns every read
  *   build   → buildOptimizationProblem, a pure function over those rows
  *   solve   → the selected engine, with any degradation surfaced
+ *   check   → ComplianceEngine over what the run would add; violators withheld
  *   diff    → which published commitments this run kept and which it broke
  *   persist → a replan proposal for a published schedule, rows for a draft
  *
@@ -37,15 +38,17 @@
  */
 
 import { Pool, ResultSetHeader } from 'mysql2/promise';
-import { withTransaction } from '../utils/transaction';
+import { withNamedLock, withTransaction } from '../utils/transaction';
+import { recordWithheldAssignment } from '../observability/metrics';
 import { ScheduleOptimizer } from '../optimization/ScheduleOptimizerORTools';
 import type { OptimizationProblem, ScheduleAssignment } from '../optimization/types';
 import { logger } from '../config/logger';
 import { config } from '../config';
-import { OptimizationFailedError } from '../errors';
+import { ConflictError, OptimizationFailedError } from '../errors';
 import { ReplanProposalService } from './ReplanProposalService';
 import { AutoScheduleInputLoader } from './AutoScheduleInputLoader';
-import { buildOptimizationProblem, type ScheduleInputs } from './autoScheduleProblem';
+import { buildOptimizationProblem, fixedOnThisSchedule, type ScheduleInputs } from './autoScheduleProblem';
+import { describeWithheld, listWithheld, withholdNonCompliant } from './generatedScheduleCompliance';
 
 export interface AutoScheduleResult {
   scheduleId: number;
@@ -78,9 +81,10 @@ export interface AutoScheduleResult {
   brokenCommitments: Array<{ userId: number; shiftId: number }>;
   /**
    * True when the optimal engine (or-tools) was requested but the run fell back
-   * to greedy (Python unavailable/timed out, or the solver errored). Always
-   * false for an intentionally-selected greedy draft. Lets the UI flag "this is
-   * a draft, not the optimum" clearly rather than silently.
+   * to greedy (Python unavailable/timed out, or the solver errored), or when
+   * the post-solve compliance check withheld assignments (#963). Otherwise
+   * false, including for an intentionally-selected greedy draft. Lets the UI
+   * flag "this is a draft, not the optimum" clearly rather than silently.
    */
   degraded: boolean;
   /** Why the run degraded, when it did (for logs and the UI banner). */
@@ -104,6 +108,9 @@ interface SolveOutcome {
  * max_allowed_packet.
  */
 const INSERT_CHUNK_SIZE = 500;
+
+/** How many withheld assignments one warning names before giving a count. */
+const WITHHELD_LOG_LIMIT = 20;
 
 /**
  * An outcome, with the zeros every branch shares filled in.
@@ -133,7 +140,27 @@ export class AutoScheduleService {
     this.loader = new AutoScheduleInputLoader(pool);
   }
 
+  /**
+   * One run per schedule at a time (#963).
+   *
+   * Two runs on one draft each read the same held rows, solve as if the other
+   * did not exist, and both insert: the stacking the held-work fix closes for
+   * sequential runs, reopened by concurrency. The queue path already joins a
+   * second request to the running job (its id is per schedule), but the
+   * synchronous fallback had nothing, and the two paths can also overlap each
+   * other. The lock is taken here, around load → persist, so every path is
+   * covered and a second caller gets a 409 instead of a duplicate solve.
+   */
   async generate(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
+    return withNamedLock(
+      this.pool,
+      `schedule-generate-${scheduleId}`,
+      () => new ConflictError('A generation for this schedule is already running'),
+      () => this.generateLocked(scheduleId, createdBy)
+    );
+  }
+
+  private async generateLocked(scheduleId: number, createdBy: number): Promise<AutoScheduleResult> {
     // Null means the schedule holds no shifts — nothing to solve, so the loader
     // stopped before the reads that could only describe who might have worked
     // them, and there are no commitments to keep or break.
@@ -144,7 +171,11 @@ export class AutoScheduleService {
     }
 
     const totalShifts = inputs.shifts.length;
-    const solved = await this.solve(buildOptimizationProblem(inputs), scheduleId);
+    const solved = await this.withholdNonCompliant(
+      inputs,
+      await this.solve(buildOptimizationProblem(inputs), scheduleId),
+      scheduleId
+    );
     const diff = this.diffCommitments(inputs, solved.assignments, scheduleId);
     const { engine, degraded, degradedReason } = solved;
 
@@ -188,10 +219,11 @@ export class AutoScheduleService {
     }
 
     const assignmentsCreated = await this.insertAssignments(solved.assignments, createdBy);
-    const coveragePercentage = Math.min(
-      100,
-      Math.round((assignmentsCreated / totalShifts) * 100)
-    );
+    // The schedule's coverage, not this run's share of it: on a re-run of a
+    // draft the rows already held are staffing too, and leaving them out
+    // reported a fully staffed draft as nearly empty.
+    const staffed = assignmentsCreated + fixedOnThisSchedule(inputs).length;
+    const coveragePercentage = Math.min(100, Math.round((staffed / totalShifts) * 100));
     logger.info(
       `Auto-schedule done for schedule=${scheduleId}: ${assignmentsCreated}/${totalShifts} (${coveragePercentage}%)`
     );
@@ -263,6 +295,46 @@ export class AutoScheduleService {
   }
 
   /**
+   * The safety check between solving and persisting (#963): an assignment
+   * ComplianceEngine would refuse is withheld rather than written or
+   * proposed, and the run says so — see `generatedScheduleCompliance` for why
+   * withholding beat refusing the whole schedule.
+   *
+   * Reported through `degraded`, the signal the UI already treats as "this is
+   * not the optimum the engine was asked for": a schedule with assignments
+   * removed after solving is exactly that, whichever engine produced it. A
+   * degraded reason the solve already carried is kept ahead of this one.
+   *
+   * Each withheld assignment is counted by rule, so a recurring disagreement
+   * between the engines and ComplianceEngine shows on a dashboard rather than
+   * only in whichever run's log someone reads. The log names the first
+   * `WITHHELD_LOG_LIMIT` with a total: a run on a broken problem could
+   * otherwise write thousands of entries into one line.
+   */
+  private async withholdNonCompliant(
+    inputs: ScheduleInputs,
+    solved: SolveOutcome,
+    scheduleId: number
+  ): Promise<SolveOutcome> {
+    const { kept, withheld } = await withholdNonCompliant(this.pool, inputs, solved.assignments);
+    if (withheld.length === 0) return solved;
+
+    for (const w of withheld) for (const rule of w.rules) recordWithheldAssignment(rule);
+    const reason = describeWithheld(withheld);
+    logger.warn(
+      `Optimization for schedule=${scheduleId} (engine ${solved.engine}) produced ` +
+        `${withheld.length} assignment(s) ComplianceEngine refuses; withheld: ` +
+        listWithheld(withheld, WITHHELD_LOG_LIMIT)
+    );
+    return {
+      ...solved,
+      assignments: kept,
+      degraded: true,
+      degradedReason: solved.degradedReason ? `${solved.degradedReason}; ${reason}` : reason,
+    };
+  }
+
+  /**
    * The DIFF IS THE DELIVERABLE, not the schedule.
    *
    * A planner approving a re-solve needs to know what CHANGED for whom, not to
@@ -277,7 +349,12 @@ export class AutoScheduleService {
     assignments: ScheduleAssignment[],
     scheduleId: number
   ): Pick<AutoScheduleResult, 'keptCommitments' | 'brokenCommitments'> {
-    const proposed = new Set(assignments.map((a) => `${a.employeeId}:${a.shiftId}`));
+    // A draft's held rows stay as they are — they were fixed work, not
+    // decisions — so a commitment among them is kept by construction.
+    const proposed = new Set([
+      ...assignments.map((a) => `${a.employeeId}:${a.shiftId}`),
+      ...fixedOnThisSchedule(inputs).map((h) => `${h.employee_id}:${h.shift_id}`),
+    ]);
     const brokenCommitments = inputs.pinned
       .filter((p) => !proposed.has(`${p.employee_id}:${p.shift_id}`))
       .map((p) => ({ userId: Number(p.employee_id), shiftId: Number(p.shift_id) }));

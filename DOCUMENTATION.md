@@ -695,6 +695,42 @@ means the optimum was requested but the run fell back to greedy, so the output
 is a draft; the UI surfaces this prominently and a warning is logged. This makes
 it unambiguous whenever a schedule is a draft rather than the optimum.
 
+**Every run is re-checked by ComplianceEngine before anything is persisted or
+proposed** (#963). Both engines are held to the validator, which proves only that
+they obeyed the problem they were given; this check guards against the problem
+itself having left out work ComplianceEngine counts. So it reads nothing the
+problem was built from: `generatedScheduleCompliance.ts` loads, with its own
+query, every pending/confirmed assignment of the people the run assigns within
+14 days of each candidate, resolves their limits through WorkingTimeLimitsService
+on the candidate's own date, and runs ComplianceEngine's own `checkCompliance`
+over every assignment the run would add — exactly what `evaluateAssignmentCompliance`
+does for a manual assignment, with **one documented difference**: rows on a
+same-department schedule that never happened (a draft other than this one and its
+chosen predecessor, or an archived schedule never published) are excluded, since a
+department's drafts are alternative versions of a period and at most one happens.
+On a published schedule its own rows are excluded too, as its proposal replaces
+them. An assignment the check refuses is **withheld**, never written, and the run
+reports `degraded: true` with a `degradedReason` naming the first five (user,
+shift, rule), logs the first twenty with the total, and counts each on
+`optimization_withheld_assignments_total{rule}`. Withholding was chosen over
+refusing the whole schedule: removing work can never create a working-time
+violation, so the result is always legal and loses only coverage — the accepted
+failure mode of a best-effort engine — whereas refusing would turn one bad pairing
+into an empty result for the planner. An engine that returns a shift or person it
+was never given is not a compliance case but an engine fault: the run fails with
+`OPTIMIZATION_FAILED` and nothing is written.
+
+**One generation per schedule at a time.** `AutoScheduleService.generate` holds the
+MySQL named lock `schedule-generate-<id>` from load to persist; a second caller —
+the synchronous path, a queued job, or both — gets `409 CONFLICT` at once instead of
+a duplicate solve that would stack on the first. A named lock rather than
+`SELECT … FOR UPDATE`: it belongs to a connection, not a transaction, so nothing
+keeps a transaction open across a solve, the server releases it if the holder
+dies, and it holds across replicas.
+
+On a re-run of a draft, `coveragePercentage` counts the rows the draft already held
+as well as those the run created — it describes the schedule, not the run.
+
 Install the Python solver in a virtual environment (the backend spawns `python3`
 from `PATH`, so start it from a shell where the environment is active):
 
@@ -863,9 +899,38 @@ Called by: `AutoScheduleService.generate` → `ScheduleOptimizationOrchestrator.
 Constraints 2, 2b, 5, 6 and 7 also account for shifts the employee already holds
 on **other** schedules (`existing_assignments`), so back-to-back schedule periods
 cannot jointly bust a limit each satisfies alone. **Which** other schedules count
-is a decision, not a sweep: assignments on **published** schedules within ±14 days,
-plus the schedule this one explicitly continues from (`previous_schedule_id`),
-whatever its status. A monthly schedule is consequent on the one before it, and
+is a decision, not a sweep: every live assignment within ±14 days on any other
+schedule **except a draft of the same department** — those are competing
+generations of a period, at most one of which will happen — unless that draft is
+the schedule this one explicitly continues from (`previous_schedule_id`). Another
+department's draft counts (#963): it is a second unit planning the same person —
+a loan, or someone in two departments — and counting only published schedules let
+two units' drafts give a loaned person 8 h of rest under an 11 h limit. An archived
+schedule counts when it was ever published (`published_at` set) or belongs to
+another department: archiving accepts drafts too, and a discarded same-department
+draft must not constrain the generation that replaced it. This is the set
+ComplianceEngine judges a manual assignment against, less the same department's
+schedules that never happened — the same exclusion the post-solve check makes.
+
+**Work already on the draft being generated is fixed work.** Each live assignment
+on the schedule enters the problem as an `existing_assignment` of its holder and
+as a seat taken on its shift (`min_staff`/`max_staff` lowered), so the run fills
+only what is still open. The solve used to ignore these rows while the draft path's
+`INSERT IGNORE` kept them, so a manual assignment was invisible and a second
+`generate` stacked a whole second solution on the first — each compliant alone,
+the union giving people 0 h of rest from a night shift into a morning and 64 h
+weeks. Replacing a draft's unpinned rows on every run was rejected: nothing tells
+an earlier run's row from one a manager made by hand, and silently deleting manual
+work is the worse failure. A published schedule is different — its re-solve
+proposes a whole replacement set, so its rows are the pinned commitments the
+solver weighs instead. Held people also count toward the shift's "at least N at
+level L" requirements (#974): each requirement is lowered by the holders who meet
+it — the skill at that level or above, an unrecorded level reading as 0 — and
+dropped when they meet it fully, the same way the seats are lowered, so the
+validator and both engines keep enforcing "N qualified among the people this run
+assigns" and only the open N changes.
+
+The predecessor exception exists because a monthly schedule is consequent on the one before it, and
 when several generations cover the same period — an abandoned one alongside the
 one that happened — which is the predecessor is the manager's judgement:
 `GET /schedules/:id/predecessor-candidates` lists them, `PUT /schedules/:id`
@@ -1706,6 +1771,7 @@ them ships as an opt-in Docker Compose profile.
 - `db_pool_connections` — a gauge of the mysql2 pool by state
   (`total`/`free`/`in_use`/`queued`), sampled at scrape time;
 - `optimization_queue_depth` — optimization jobs waiting in the BullMQ queue.
+- `optimization_withheld_assignments_total{rule}` — generated assignments the post-solve compliance check withheld, by ComplianceEngine rule (#963). Labelled by rule only, never by id. Any non-zero rate is a disagreement between the engines or the problem builder and ComplianceEngine, and worth chasing.
 
 `/metrics` is mounted **outside** `/api` (a scraper is not a JWT user) and guarded
 by a static bearer token: set `METRICS_TOKEN` and scrapers must send
@@ -2219,7 +2285,7 @@ Both now go through `isInternalPath`, which requires a single leading slash and 
 | Working-time limits live on an effective-dated employment contract | A contract is a shared, named bundle of limits (`employment_contracts`) associated with a person over a period (`user_employment_contracts`). Previously they were columns on `user_preferences`: unshareable, so each person's limits were retyped and drifted independently; undated, so moving to part-time overwrote the value and last month's schedule appeared to violate a limit that did not apply then; and incomplete, since the daily cap was not stored at all — the engines invented `max(8, weekly/5)`, a formula appearing in no contract and no documentation as a decision, yet enforced as a hard constraint. A dedicated entity rather than a `policies` scope because `policies` has no validity period, and effective dating is the whole point. When a schedule period spans a contract change the optimizer takes the **most restrictive** limit in force at any point in it: conservative in the direction that matters, since it can under-schedule someone whose limits rose but never produces a schedule breaching a limit that applied while it ran. Per-shift resolution is the eventual answer and is deliberately not built first, because it makes limits vary per shift and reshapes the problem format both engines agree on. |
 | Equity carries a deviation from the team average, not a raw count | Weekend and night loads were counted per solve, so someone who worked every weekend in March started April level with a colleague who worked none. Carrying raw totals fixes that and creates a worse problem: a person who joined mid-period appears never to have worked a weekend and is chosen for the next ones until they "catch up", which is a penalty for having been hired later. A deviation puts a new joiner at zero — neither owed nor owing. The average is taken over **the candidates of this solve**, not the whole organization, because the comparison that means anything is with the people the solver is choosing between; averaging across departments would compare a ward with an office. Carried values are normalised to be non-negative, which changes nothing the solver optimises (`max − min` is invariant under adding the same constant to every load) and spares both engines a negative lower bound on every load variable. |
 | Labour cost is the lowest objective level, never a weight | `hourly_rate` reaches the CP-SAT engine as the last of four lexicographic levels (MEDIUM > DISRUPTION > SOFT > COST, §6): it can only choose between plans already tied on coverage, disruption, preferences and fairness. It was first kept out of the objective entirely, because a cost term makes the solver systematically prefer cheaper staff and pay correlates with seniority, age and tenure — indirect discrimination by a system nobody reads as a pay decision. That objection holds against a **weighted** term, where "all else equal, pick the cheaper" happens often and lands on the same people every time; as a strict tie-breaker below fairness it cannot trade a person's equity for money. A hard budget ceiling stays rejected: under a tight budget coverage collapses and the solver ends up deciding which shifts go unstaffed, a service decision disguised as a technical constraint. The greedy engine does not read cost at all. |
-| A schedule continues from ONE chosen predecessor, not from every other schedule | The boundary read used to take every other schedule within ±14 days and filter on the *assignment's* status, never the *schedule's* — so drafts and archived generations counted as though they had happened. A planner comparing candidate generations for a period had all of them read at once: one person appeared to be working several overlapping sets of shifts, their consecutive-days and weekly-hours history at the boundary was inflated by however many existed, and the new month was constrained by work that will never happen, since at most one of them can be published. Now: published schedules, which are what happened, plus the explicitly chosen predecessor whatever its status — a planner who names a draft means it. `previous_schedule_id` is a column and not an inferred rule because the inference (latest published schedule for the department ending before this one) is right in the ordinary case and cannot settle the case it exists for; NULL therefore means "resolve the default", not "no predecessor". The candidate list deliberately includes archived schedules — an abandoned generation is precisely what the choice may be between — and flags which one the default would pick, so the UI never re-derives the rule. |
+| A schedule continues from ONE chosen predecessor, not from every other schedule | The boundary read used to take every other schedule within ±14 days and filter on the *assignment's* status, never the *schedule's* — so drafts and archived generations counted as though they had happened. A planner comparing candidate generations for a period had all of them read at once: one person appeared to be working several overlapping sets of shifts, their consecutive-days and weekly-hours history at the boundary was inflated by however many existed, and the new month was constrained by work that will never happen, since at most one of them can be published. Now: every other schedule except the same department's drafts — the competing generations — plus the explicitly chosen predecessor whatever its status, since a planner who names a draft means it. The exclusion was first written as "published only" and that was too wide (#963): another department's draft is a second unit planning the same person, not a competing version of this period, and an archived schedule that was ever published is a period that happened; both are counted by ComplianceEngine, which judges the generated schedule afterwards. A same-department archived schedule that was never published is a discarded draft and stays excluded with the drafts. `previous_schedule_id` is a column and not an inferred rule because the inference (latest published schedule for the department ending before this one) is right in the ordinary case and cannot settle the case it exists for; NULL therefore means "resolve the default", not "no predecessor". The candidate list deliberately includes archived schedules — an abandoned generation is precisely what the choice may be between — and flags which one the default would pick, so the UI never re-derives the rule. |
 | A replanning proposal stores the whole solved plan, not just the diff | The plan sits between solving and deciding, and the world moves in between. Storing only the diff and re-deriving the rest at apply time means trusting that nothing else moved. Re-solving at approval and requiring the diff to match was rejected: a solver is not required to return the same optimum twice, so an approved diff could legitimately fail to reproduce and the planner would have approved a decision the system then declines to make. Storing the whole set and verifying it against live data means what gets applied is exactly what was approved, or nothing. The verification is deliberately narrow — shifts still exist and still belong to the schedule, people are still active — and does **not** re-run the constraint validator: the plan was legal when solved, and re-litigating it here would create a second authority on what is legal. A plan invalidated by a genuine change in the inputs is caught by re-solving, not by a second opinion. |
 | Replanning proposals live in their own table, not `change_requests` | `change_requests` carries a proposed payload and routes it through `approval_workflows`, which is the right shape — but its `apply` executes no domain effect for any change type: it marks the row applied and writes an audit entry, leaving a human to perform the change. A replanning diff cannot be performed by hand, and approving it is precisely what must write the rows. Its payload is also unlike the others: hundreds of assignments plus the diff against what people were told, which has to be verified against live data before it can be applied at all. |
 | Pairing rules are gated on `employee.manage`, not `employee.read` | Every other staff-record read uses `employee.read`, which the default Employee role holds — so the same gate here would publish, to everyone in the organization, the list of which colleagues must be kept apart. An `apart` rule is an inference about two named people even with no text attached: the fact that someone decided these two must not share a shift is itself the sensitive part. Writes take the same permission rather than `preferences.manage`, because a pairing is an employer-imposed constraint on staff, not something anyone wants. The free-text `reason` is deliberately **not** separately gated: a caller who can already see that two named people must be kept apart infers the substance without the sentence, so hiding the text while showing the rule protects nothing and only makes the record less useful to the next manager. A genuine need-to-know tier would belong in the permission catalogue as its own code, not as a field the API omits on a guess. There is no self-service view for the same reason — an employee asking why they are never scheduled with a colleague is asking a question a manager should answer in person. |
