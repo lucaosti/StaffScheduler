@@ -3248,3 +3248,54 @@ describe('attendance punches against the real schema (#851, #978)', () => {
     await expect(attendanceService().clockIn(personId)).rejects.toBeInstanceOf(ValidationError);
   });
 });
+
+describe('SSO account linking matches emails exactly (#815)', () => {
+  const tag = (): string => `${Date.now()}${process.hrtime()[1]}`;
+
+  /** A local account plus an active provider without JIT provisioning. */
+  const fixture = async () => {
+    const local = `sso-link-${tag()}@example.com`;
+    const [person] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO users (email, password_hash, first_name, last_name, is_active) VALUES (?, 'x', 'Sso', 'Link', 1)`,
+      [local]
+    );
+    const [idp] = await admin.query<mysql.ResultSetHeader>(
+      `INSERT INTO sso_providers (name, issuer, client_id, client_secret, authorization_url, token_url, jwks_url, is_active)
+       VALUES (?, 'https://idp.example.com', 'client', 'secret', 'https://idp.example.com/a', 'https://idp.example.com/t', 'https://idp.example.com/j', 1)`,
+      [`idp-${tag()}`]
+    );
+    const { database } = require('../../config/database');
+    const { SsoAuthService } = require('../../services/SsoAuthService');
+    const { SsoProviderService } = require('../../services/SsoProviderService');
+    const provider = await new SsoProviderService(database.getPool()).getById(idp.insertId);
+    return { local, personId: person.insertId, provider, sso: new SsoAuthService(database.getPool()) };
+  };
+
+  const linksFor = async (providerId: number): Promise<number> => {
+    const [rows] = await admin.query<mysql.RowDataPacket[]>(
+      `SELECT COUNT(*) AS links FROM sso_identities WHERE provider_id = ?`,
+      [providerId]
+    );
+    return Number(rows[0].links);
+  };
+
+  it('does not link an accented variant the column collation would call equal', async () => {
+    // utf8mb4_unicode_ci compares `śso-link…` equal to `sso-link…`.
+    const { local, provider, sso } = await fixture();
+    const { ForbiddenError } = require('../../errors');
+
+    await expect(
+      sso.findOrCreateUser(provider, { sub: `sub-${tag()}`, email: `ś${local.slice(1)}`, emailVerified: true })
+    ).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await linksFor(provider.id)).toBe(0);
+  });
+
+  it('links the same address in a different letter case', async () => {
+    const { local, personId, provider, sso } = await fixture();
+
+    const user = await sso.findOrCreateUser(provider, { sub: `sub-${tag()}`, email: local.toUpperCase(), emailVerified: true });
+
+    expect(user.id).toBe(personId);
+    expect(await linksFor(provider.id)).toBe(1);
+  });
+});
