@@ -227,7 +227,7 @@ Step-by-step recipes for adding an endpoint, a page or a migration are in
 | End to end | Playwright, real backend, seeded MySQL and Redis | `cd frontend && npm run test:e2e` | e2e |
 | Backup and restore | real dump, drop, restore | `backup-restore` workflow | weekly and on change |
 | Repository scripts | the audit gate's decision, the mobile build's API-URL check and native-plugin list, the resolved compose configuration (needs the Docker CLI, no daemon) | `npm run test:scripts` (root) | Backend |
-| Simulation harness | a seeded MySQL; not part of CI | `cd backend && npm run sim:run` | — |
+| Simulation harness | a seeded MySQL and Redis; every actor over the real HTTP API; not part of CI | `cd backend && NODE_ENV=test npm run sim:run` | — |
 
 Details of the integration suite, the dead-code tools and the simulation
 harness are in

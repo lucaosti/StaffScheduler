@@ -1,244 +1,258 @@
 /**
- * Simulation org setup.
+ * Simulation org setup — built by the administrator, through the API.
  *
- * Builds the simulated organization from a list of department specs
- * (`name:count` pairs): each department gets (or reuses, when the demo seed
- * already contains it) its own department row, org unit, and approving head
- * — created on the fly with a fresh synthetic manager when missing — plus a
- * roster topped up with synthetic employees until it reaches the requested
- * size. Different specs across runs exercise different structures and
- * different approving managers.
+ * The structure an HR administrator would create on day one: per department
+ * spec (`name:count`) an org unit, a head whose Manager role is SCOPED to that
+ * unit, a department bridged to the unit, and a roster created through
+ * `POST /employees/batch` and placed in the unit. Every step is a real
+ * request with the administrator's own session, so the setup itself
+ * exercises employee creation, role grants, org-unit membership and
+ * department membership.
  *
- * A user already present in more than one department (e.g. the demo admin,
- * who belongs to every demo department) is claimed by the first department
- * that finds them and excluded from later rosters — otherwise the same user
- * id would run as two concurrent employee actors sharing one deterministic
- * RNG stream, filing duplicate requests.
+ * Everything the simulation creates is named `SIM <name>` and every
+ * synthetic account is `sim.<slug>.<n>@simulation.local` — deterministic, so
+ * a second run on the same database reuses what exists and creates only what
+ * is missing, and nothing collides with demo-seed data. The previous setup
+ * adopted demo-seeded department members into the roster; with HTTP actors
+ * that is impossible (their passwords are not the simulation's), and it made
+ * the roster depend on whichever seed the database happened to carry.
  *
- * Schedule periods are NOT created here — the whole point of the rolling
- * simulation (see index.ts) is that nothing is pre-staffed. Every period's
- * shifts start empty and only get filled by the simulation's own
- * request-then-generate rounds, exactly like a real rollout would.
+ * Heads are scoped managers on purpose: a company-wide Manager grant (what the
+ * previous setup inserted) can reach every unit, so no out-of-scope attempt
+ * could ever be denied and the scope probes would test nothing.
  *
  * @author Luca Ostinelli
  */
 
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import bcrypt from 'bcrypt';
-import { MegaLog } from './megaLog';
+import { login, refresh } from './httpAuth';
+import { runWithConcurrency } from './concurrency';
+import { Actor, World } from './world';
 
-const SIM_EMAIL_PREFIX = 'simemp';
-// Exported so HTTP actors (httpAuth.ts) can log in as any synthetic user
-// this module creates — every synthetic user is hashed with this same
-// plaintext.
+// Every synthetic account shares this password; actors log in with it.
 export const SIM_PASSWORD = 'simulation-not-a-real-login';
+
+/** Org-unit and department name prefix for everything the simulation owns. */
+export const SIM_PREFIX = 'SIM ';
 
 export interface DepartmentSpec {
   name: string;
   count: number;
 }
 
-export interface SimOrg {
+interface RoleRow {
+  id: number;
   name: string;
-  departmentId: number;
-  orgUnitId: number;
-  headUserId: number;
-  employeeUserIds: number[];
 }
 
-async function createSyntheticHead(pool: Pool, log: MegaLog, departmentName: string): Promise<number> {
-  const managerRoleId = await (async () => {
-    const [rows] = await pool.execute<RowDataPacket[]>(`SELECT id FROM roles WHERE name = 'Manager' LIMIT 1`);
-    if (rows.length === 0) throw new Error('Role "Manager" not found.');
-    return rows[0].id as number;
-  })();
-
-  const slug = departmentName.toLowerCase().replace(/[^a-z0-9]+/g, '');
-  const email = `simhead-${slug}@simulation.local`;
-  const passwordHash = await bcrypt.hash(SIM_PASSWORD, 4);
-  const [res] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, position, is_active)
-     VALUES (?, ?, 'Sim', 'Head', ?, ?, 1)
-     ON DUPLICATE KEY UPDATE is_active = 1`,
-    [email, passwordHash, `SIM-HEAD-${slug}`, `[SIM] ${departmentName} Head`]
-  );
-  let headUserId = res.insertId;
-  if (!headUserId) {
-    // Row already existed (ON DUPLICATE KEY UPDATE doesn't return its id).
-    const [rows] = await pool.execute<RowDataPacket[]>(`SELECT id FROM users WHERE email = ? LIMIT 1`, [email]);
-    headUserId = rows[0].id as number;
-  }
-  await pool.execute(`INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)`, [
-    headUserId,
-    managerRoleId,
-  ]);
-  log.info(`Created synthetic head user id=${headUserId} (${email}) for department "${departmentName}".`);
-  return headUserId;
+interface Named {
+  id: number;
+  name: string;
 }
 
-async function ensureOrg(
-  pool: Pool,
-  log: MegaLog,
-  departmentName: string
-): Promise<{ departmentId: number; orgUnitId: number; headUserId: number }> {
-  const [deptRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id FROM departments WHERE name = ? LIMIT 1`,
-    [departmentName]
-  );
-  let departmentId: number;
-  if (deptRows.length === 0) {
-    const [res] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO departments (name, description, is_active) VALUES (?, ?, 1)`,
-      [departmentName, `[SIM] ${departmentName}`]
-    );
-    departmentId = res.insertId;
-    log.info(`Department "${departmentName}" not found — created id=${departmentId}.`);
-  } else {
-    departmentId = deptRows[0].id as number;
-  }
+interface EmployeeRow {
+  id: number;
+  email: string;
+}
 
-  const [unitRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT id, manager_user_id FROM org_units WHERE name = ? LIMIT 1`,
-    [departmentName]
-  );
-  let orgUnitId: number;
-  let headUserId: number;
-  if (unitRows.length === 0) {
-    headUserId = await createSyntheticHead(pool, log, departmentName);
-    const [res] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO org_units (name, description, parent_id, manager_user_id, is_active)
-       VALUES (?, ?, NULL, ?, 1)`,
-      [departmentName, `[SIM] ${departmentName}`, headUserId]
-    );
-    orgUnitId = res.insertId;
-    await pool.execute(
-      `INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 1)`,
-      [headUserId, orgUnitId]
-    );
-    log.info(`Org unit "${departmentName}" not found — created id=${orgUnitId} with head id=${headUserId}.`);
-  } else {
-    orgUnitId = unitRows[0].id as number;
-    headUserId = unitRows[0].manager_user_id as number;
-    if (!headUserId) {
-      headUserId = await createSyntheticHead(pool, log, departmentName);
-      await pool.execute(`UPDATE org_units SET manager_user_id = ? WHERE id = ?`, [headUserId, orgUnitId]);
-      await pool.execute(
-        `INSERT IGNORE INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 1)`,
-        [headUserId, orgUnitId]
-      );
-      log.info(`Org unit "${departmentName}" had no manager — assigned synthetic head id=${headUserId}.`);
+const BATCH = 200; // MAX_BATCH_SIZE of batchCreateEmployeesBody
+
+export const slugOf = (name: string): string => name.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+const listOf = <T>(data: unknown, key?: string): T[] => {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    for (const k of [key, 'items', 'rows', 'data', 'employees', 'roles', 'departments', 'units'].filter(Boolean) as string[]) {
+      if (Array.isArray(obj[k])) return obj[k] as T[];
     }
   }
-  return { departmentId, orgUnitId, headUserId };
+  return [];
+};
+
+async function roleIds(world: World): Promise<{ manager: number; employee: number }> {
+  const res = await world.admin.client.get('/roles');
+  if (!world.expectOk(world.admin, res, 'setup.roles')) throw new Error('cannot list roles');
+  const roles = listOf<RoleRow>(res.body.data);
+  const find = (name: string): number => {
+    const role = roles.find((r) => r.name === name);
+    if (!role) throw new Error(`role "${name}" not found`);
+    return role.id;
+  };
+  return { manager: find('Manager'), employee: find('Employee') };
 }
 
-async function topUpEmployees(
-  pool: Pool,
-  log: MegaLog,
-  departmentId: number,
-  orgUnitId: number,
-  departmentName: string,
-  targetCount: number,
-  claimedUserIds: Set<number>
-): Promise<number[]> {
-  const employeeRoleId = await (async () => {
-    const [rows] = await pool.execute<RowDataPacket[]>(`SELECT id FROM roles WHERE name = 'Employee' LIMIT 1`);
-    if (rows.length === 0) throw new Error('Role "Employee" not found.');
-    return rows[0].id as number;
-  })();
-
-  // Roster members must belong to the structure they act in: without a
-  // primary org-unit membership, no approver can be resolved for their
-  // requests (the services now reject such requests loudly at creation).
-  // Some demo-seeded department members have no membership at all — adopt
-  // them into this department's unit, exactly like HR fixing an incomplete
-  // record before the person starts filing requests.
-  const [adoptRes] = await pool.execute<ResultSetHeader>(
-    `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
-     SELECT u.id, ?, 1 FROM users u
-       JOIN user_departments ud ON ud.user_id = u.id
-      WHERE ud.department_id = ? AND u.is_active = 1
-        AND NOT EXISTS (SELECT 1 FROM user_org_units x WHERE x.user_id = u.id AND x.is_primary = 1)`,
-    [orgUnitId, departmentId]
-  );
-  if (adoptRes.affectedRows > 0) {
-    log.info(
-      `Adopted ${adoptRes.affectedRows} pre-existing "${departmentName}" member(s) without a primary org unit into unit id=${orgUnitId}.`
-    );
-  }
-
-  const [existingRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT u.id FROM users u
-       JOIN user_departments ud ON ud.user_id = u.id
-      WHERE ud.department_id = ? AND u.is_active = 1`,
-    [departmentId]
-  );
-  // A user already claimed by an earlier department keeps acting there only.
-  const existingIds = existingRows.map((r) => r.id as number).filter((id) => !claimedUserIds.has(id));
-
-  const missing = targetCount - existingIds.length;
-  if (missing <= 0) {
-    log.info(
-      `Roster already has ${existingIds.length} employees in "${departmentName}" (>= requested ${targetCount}) — no new users created.`
-    );
-    return existingIds;
-  }
-
-  const passwordHash = await bcrypt.hash(SIM_PASSWORD, 4);
-  const [maxRows] = await pool.execute<RowDataPacket[]>(
-    `SELECT COUNT(*) AS n FROM users WHERE email LIKE ?`,
-    [`${SIM_EMAIL_PREFIX}%@simulation.local`]
-  );
-  const startIndex = (maxRows[0].n as number) + 1;
-
-  const newIds: number[] = [];
-  for (let i = 0; i < missing; i++) {
-    const idx = startIndex + i;
-    const email = `${SIM_EMAIL_PREFIX}${String(idx).padStart(5, '0')}@simulation.local`;
-    const [userRes] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO users (email, password_hash, first_name, last_name, employee_id, position, is_active)
-       VALUES (?, ?, 'Sim', ?, ?, ?, 1)`,
-      [email, passwordHash, String(idx), `SIM-${idx}`, `[SIM] ${departmentName}`]
-    );
-    const userId = userRes.insertId;
-    await pool.execute(`INSERT IGNORE INTO user_roles (user_id, role_id, scope_org_unit_id) VALUES (?, ?, NULL)`, [
-      userId,
-      employeeRoleId,
-    ]);
-    await pool.execute(`INSERT INTO user_departments (user_id, department_id) VALUES (?, ?)`, [userId, departmentId]);
-    await pool.execute(
-      `INSERT INTO user_org_units (user_id, org_unit_id, is_primary) VALUES (?, ?, 1)`,
-      [userId, orgUnitId]
-    );
-    newIds.push(userId);
-  }
-  log.info(`Created ${newIds.length} new synthetic employees (total roster: ${existingIds.length + newIds.length}).`);
-  return [...existingIds, ...newIds];
+async function ensureUnit(world: World, name: string): Promise<number> {
+  const admin = world.admin;
+  const list = await admin.client.get('/org/units');
+  world.expectOk(admin, list, 'setup.org_units.list');
+  const existing = listOf<Named>(list.body.data).find((u) => u.name === name);
+  if (existing) return existing.id;
+  const created = await admin.client.post<Named>('/org/units', { name, description: `[SIM] ${name}`, parentId: null });
+  if (!world.expectOk(admin, created, 'setup.org_units.create')) throw new Error(`cannot create unit ${name}`);
+  return created.body.data.id;
 }
 
-/** Sets up (or tops up) the whole simulated org: one department, org unit,
- *  approving head, and roster per spec. Rosters are disjoint — a user found
- *  in several departments acts only in the first one that claimed them. */
-export async function setupSimOrgs(pool: Pool, log: MegaLog, specs: DepartmentSpec[]): Promise<SimOrg[]> {
-  log.section('SETUP: simulated organization');
-  log.info(`Structure: ${specs.map((s) => `${s.name}=${s.count}`).join(', ')} (${specs.length} departments).`);
+async function ensureDepartment(world: World, name: string, orgUnitId: number, headId: number): Promise<number> {
+  const admin = world.admin;
+  const list = await admin.client.get('/departments', { search: name });
+  world.expectOk(admin, list, 'setup.departments.list');
+  const existing = listOf<Named>(list.body.data).find((d) => d.name === name);
+  if (existing) return existing.id;
+  const created = await admin.client.post<Named>('/departments', {
+    name,
+    description: `[SIM] ${name}`,
+    managerId: headId,
+    orgUnitId,
+  });
+  if (!world.expectOk(admin, created, 'setup.departments.create')) throw new Error(`cannot create department ${name}`);
+  return created.body.data.id;
+}
 
-  const claimedUserIds = new Set<number>();
-  const orgs: SimOrg[] = [];
+async function findUserByEmail(world: World, email: string): Promise<number | null> {
+  const res = await world.admin.client.get('/employees', { search: email, pageSize: 5 });
+  world.expectOk(world.admin, res, 'setup.employees.search');
+  const row = listOf<EmployeeRow>(res.body.data).find((e) => e.email === email);
+  return row ? row.id : null;
+}
+
+/** Creates the given accounts in batches; returns email → id for all of them. */
+async function createAccounts(
+  world: World,
+  accounts: Array<{ email: string; firstName: string; lastName: string; employeeId: string; position: string }>,
+  employeeRoleId: number,
+  departmentId: number | null
+): Promise<Map<string, number>> {
+  const ids = new Map<string, number>();
+  for (let i = 0; i < accounts.length; i += BATCH) {
+    const chunk = accounts.slice(i, i + BATCH);
+    const res = await world.admin.client.post<{ results: Array<{ index: number; success: boolean; data?: { id: number }; error?: unknown }> }>(
+      '/employees/batch',
+      {
+        employees: chunk.map((a) => ({
+          ...a,
+          password: SIM_PASSWORD,
+          roleIds: [employeeRoleId],
+          hourlyRate: 20,
+          ...(departmentId ? { departmentIds: [departmentId] } : {}),
+        })),
+      }
+    );
+    if (!world.expectOk(world.admin, res, 'setup.employees.batch')) throw new Error('employee batch failed');
+    for (const row of res.body.data.results) {
+      if (row.success && row.data) ids.set(chunk[row.index].email, row.data.id);
+      else world.log.info(`batch row ${chunk[row.index].email} not created: ${JSON.stringify(row.error)}`);
+    }
+  }
+  return ids;
+}
+
+async function ensureHead(world: World, spec: DepartmentSpec, orgUnitId: number, roles: { manager: number; employee: number }): Promise<number> {
+  const admin = world.admin;
+  const slug = slugOf(spec.name);
+  const email = `sim.${slug}.head@simulation.local`;
+  let headId = await findUserByEmail(world, email);
+  if (headId === null) {
+    const created = await createAccounts(
+      world,
+      [{ email, firstName: 'Head', lastName: spec.name, employeeId: `SIM-${slug}-HEAD`, position: `[SIM] ${spec.name} head` }],
+      roles.employee,
+      null
+    );
+    headId = created.get(email) ?? null;
+    if (headId === null) throw new Error(`cannot create head for ${spec.name}`);
+  }
+  // Manager scoped to the unit (see the header). Re-granting an existing
+  // grant is a 409, which is fine on a rerun.
+  const grant = await admin.client.post(`/roles/users/${headId}`, {
+    roleId: roles.manager,
+    scopeOrgUnitId: orgUnitId,
+    justification: '[SIM] department head',
+  });
+  world.outcome(admin, grant, 'setup.grant_manager');
+  const member = await admin.client.post(`/org/units/${orgUnitId}/members`, { userId: headId, isPrimary: true });
+  world.outcome(admin, member, 'setup.head_membership');
+  const unit = await admin.client.put(`/org/units/${orgUnitId}`, { managerUserId: headId });
+  world.expectOk(admin, unit, 'setup.unit_manager');
+  return headId;
+}
+
+export async function setupSimOrgs(world: World, specs: DepartmentSpec[], concurrency: number): Promise<void> {
+  world.log.section('SETUP: simulated organization (administrator, over HTTP)');
+  const roles = await roleIds(world);
+
   for (const spec of specs) {
-    const { departmentId, orgUnitId, headUserId } = await ensureOrg(pool, log, spec.name);
-    log.info(`Using department "${spec.name}" id=${departmentId}, org unit id=${orgUnitId}, head user id=${headUserId}.`);
-    const employeeUserIds = await topUpEmployees(
-      pool,
-      log,
+    const name = `${SIM_PREFIX}${spec.name}`;
+    const slug = slugOf(spec.name);
+    const orgUnitId = await ensureUnit(world, name);
+    const headId = await ensureHead(world, spec, orgUnitId, roles);
+    const departmentId = await ensureDepartment(world, name, orgUnitId, headId);
+    world.outcome(world.admin, await world.admin.client.post(`/departments/${departmentId}/users`, { userId: headId }), 'setup.head_department');
+
+    // Roster: reuse what a previous run created, create the rest.
+    const existingRes = await world.admin.client.get(`/employees/department/${departmentId}`);
+    world.expectOk(world.admin, existingRes, 'setup.roster.list');
+    const existing = new Map(listOf<EmployeeRow>(existingRes.body.data).map((e) => [e.email, e.id]));
+    const wanted = Array.from({ length: spec.count }, (_, i) => {
+      const n = String(i + 1).padStart(5, '0');
+      return {
+        email: `sim.${slug}.${n}@simulation.local`,
+        firstName: 'Sim',
+        lastName: `${spec.name} ${n}`,
+        employeeId: `SIM-${slug}-${n}`,
+        position: `[SIM] ${spec.name}`,
+      };
+    });
+    const missing = wanted.filter((w) => !existing.has(w.email));
+    const created = await createAccounts(world, missing, roles.employee, departmentId);
+    // Placed concurrently, as an HR team working in parallel would. A failure
+    // is a finding, and is then retried on its own: a person left without a
+    // primary unit would make every later request of theirs unroutable, and
+    // the run would report that consequence instead of continuing to test.
+    const failed: typeof missing = [];
+    await runWithConcurrency(missing.filter((m) => created.has(m.email)), concurrency, async (m) => {
+      const res = await world.admin.client.post(`/org/units/${orgUnitId}/members`, { userId: created.get(m.email), isPrimary: true });
+      if (!world.expectOk(world.admin, res, 'setup.employee_membership')) failed.push(m);
+    });
+    for (const m of failed) {
+      const res = await world.admin.client.post(`/org/units/${orgUnitId}/members`, { userId: created.get(m.email), isPrimary: true });
+      world.expectOk(world.admin, res, 'setup.employee_membership.retry');
+    }
+    world.log.info(
+      `Department "${name}": unit #${orgUnitId}, department #${departmentId}, head #${headId}, ` +
+        `${existing.size} existing + ${created.size} new employee account(s).`
+    );
+
+    world.departments.push({
+      name,
       departmentId,
       orgUnitId,
-      spec.name,
-      spec.count,
-      claimedUserIds
-    );
-    for (const id of employeeUserIds) claimedUserIds.add(id);
-    orgs.push({ name: spec.name, departmentId, orgUnitId, headUserId, employeeUserIds });
+      head: { kind: 'MANAGER', userId: headId, email: `sim.${slug}.head@simulation.local` } as Actor,
+      employees: wanted.map((w) => ({ kind: 'EMPLOYEE', userId: created.get(w.email) ?? existing.get(w.email) ?? 0, email: w.email }) as Actor),
+    });
   }
-  return orgs;
+}
+
+/** Logs every head and employee in with their own browser profile. */
+export async function loginEveryone(world: World, concurrency: number): Promise<void> {
+  world.log.section('LOGIN: every actor opens their own session');
+  for (const dept of world.departments) {
+    const placement = { orgUnitId: dept.orgUnitId, departmentId: dept.departmentId };
+    // Each session is rotated once right away, as the SPA does on mount: it
+    // proves the refresh cookie came back scoped to the refresh path.
+    dept.head = await login(world, 'MANAGER', dept.head.email, SIM_PASSWORD, placement);
+    await refresh(world, dept.head);
+    dept.employees = await runWithConcurrency(dept.employees, concurrency, async (e) => {
+      const actor = await login(world, 'EMPLOYEE', e.email, SIM_PASSWORD, placement);
+      await refresh(world, actor);
+      return actor;
+    });
+    const scope = dept.head.allowedOrgUnitIds;
+    world.log.info(
+      `${dept.name}: head #${dept.head.userId} reach=${scope === null ? 'company-wide' : JSON.stringify(scope)}, ` +
+        `${dept.employees.length} employee session(s).`
+    );
+    if (scope === null) {
+      world.dbFinding(`head of ${dept.name}`, 'a unit-scoped Manager grant was reported as company-wide reach');
+    }
+  }
 }
