@@ -97,7 +97,9 @@ describe('POST /api/attendance/kiosk/punch', () => {
       record: { id: 100, userId: 42 },
     });
     expect(KioskService.prototype.resolveEmployee).toHaveBeenCalledWith('E-042', 3);
-    expect(AttendanceService.prototype.punch).toHaveBeenCalledWith(42);
+    // The device id travels with the punch so the record and its audit entry
+    // say which tablet it came from (#978).
+    expect(AttendanceService.prototype.punch).toHaveBeenCalledWith(42, 9);
   });
 
   it('returns 404 when the employee id does not resolve within the kiosk department', async () => {
