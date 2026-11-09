@@ -440,6 +440,8 @@
   "delegations.revoking": "جارٍ الإلغاء…",
   "delegations.validation.delegateeRequired": "معرّف المستخدم المفوَّض إليه مطلوب.",
   "delegations.validation.permissionRequired": "مطلوب رمز صلاحية واحد على الأقل.",
+  "delegations.validation.notDelegableForUnit": "{{code}} يسري على المؤسسة كلها ولا يمكن تفويضه لوحدة واحدة.",
+  "delegations.form.unitScopeHint": "عند التفويض لوحدة واحدة يمكن نقل هذه الرموز فقط: {{codes}}.",
   "delegations.validation.expiryRequired": "تاريخ/وقت الانتهاء مطلوب.",
   "changeRequests.title": "طلبات التغيير",
   "changeRequests.subtitle": "اقترح تغييرات تظهر كقرارات إدارية عند الموافقة عليها",

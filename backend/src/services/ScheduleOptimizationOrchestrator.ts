@@ -31,6 +31,7 @@ import { Schedule } from '../types';
 import { logger } from '../config/logger';
 import { DateUtils } from '../utils';
 import { DAY_MS, dateToMs } from '../optimization/shiftTime';
+import { unitCondition } from './access/AccessPolicy';
 
 export class ScheduleOptimizationOrchestrator {
   constructor(private pool: Pool) {}
@@ -155,7 +156,13 @@ export class ScheduleOptimizationOrchestrator {
     }
   }
 
-  async getSchedulesByUser(userId: number): Promise<Schedule[]> {
+  /**
+   * `orgUnitIds` bounds the list to schedules of those units — for a manager
+   * reading someone else's schedules, who may see the person but not every unit
+   * the person has worked in (#813 review). Absent = unrestricted.
+   */
+  async getSchedulesByUser(userId: number, orgUnitIds?: number[]): Promise<Schedule[]> {
+    const scope = unitCondition('d.org_unit_id', orgUnitIds);
     try {
       const [rows] = await this.pool.execute<RowDataPacket[]>(
         `SELECT
@@ -173,10 +180,10 @@ export class ScheduleOptimizationOrchestrator {
           FROM shifts sh
           JOIN shift_assignments sa ON sh.id = sa.shift_id
           WHERE sa.user_id = ?
-        )
+        )${scope ? ` AND ${scope.sql}` : ''}
         GROUP BY s.id
         ORDER BY s.start_date DESC`,
-        [userId]
+        [userId, ...(scope?.params ?? [])]
       );
       return rows.map((row: any) => ({
         id: row.id,

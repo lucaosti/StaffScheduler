@@ -846,7 +846,9 @@ describe(`API contract fuzzing (seed ${SEED}, ${ITERATIONS} per class)`, () => {
  */
 const KNOWN_FAILURES: Record<string, number> = {
   // #900: expiry strings reach a DATETIME column unconverted (500 on an ISO timestamp).
-  'POST /delegations | 5xx | 500': 900,
+  // POST /delegations no longer reaches the insert at the default seed: the
+  // delegation-scope checks (#814) refuse the generated request first. The
+  // defect is still there for a request that passes them, so #900 stays open.
   'POST /roles/bulk-assign | 5xx | 500': 900,
   'POST /roles/users/{userId} | 5xx | 500': 900,
   // #903, undocumented statuses: 4xx the operation does not document (and 201 where 200 is documented).

@@ -50,6 +50,8 @@ import { UserService } from '../services/UserService';
 import { RbacService } from '../services/RbacService';
 import { ShiftService } from '../services/ShiftService';
 import { AssignmentService } from '../services/AssignmentService';
+import { NotFoundError } from '../errors';
+import { policyPool } from './helpers/policyPool';
 import { AuditLogService } from '../services/AuditLogService';
 
 import { createUsersRouter } from '../routes/users';
@@ -188,7 +190,7 @@ describe('shifts route — pagination and org-unit scope filter', () => {
     expect(ShiftService.prototype.getAllShifts).toHaveBeenCalled();
   });
 
-  it('GET /:id returns 403 when shift org-unit is outside caller scope', async () => {
+  it('GET /:id returns 404 when shift org-unit is outside caller scope', async () => {
     authMock.authenticate = (req: any, _res: any, next: any) => {
       req.user = { id: 1, email: 'a@x', isActive: true, permissions: require('./helpers/permissions').ALL_PERMISSIONS, allowedOrgUnitIds: [99] };
       next();
@@ -199,13 +201,15 @@ describe('shifts route — pagination and org-unit scope filter', () => {
       scheduleId: 1,
       departmentOrgUnitId: 1,
     });
-    const app = mount('/api/shifts', createShiftsRouter(fakePool));
+    const policy = policyPool();
+    policy.row(null, [1]);
+    const app = mount('/api/shifts', createShiftsRouter(policy.pool));
     const res = await request(app).get('/api/shifts/1');
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('GET /:id returns 403 when shift orgUnitId is null and caller has restricted scope', async () => {
+  it('GET /:id returns 404 when the shift belongs to no org unit and caller has restricted scope', async () => {
     authMock.authenticate = (req: any, _res: any, next: any) => {
       req.user = { id: 1, email: 'a@x', isActive: true, permissions: require('./helpers/permissions').ALL_PERMISSIONS, allowedOrgUnitIds: [5] };
       next();
@@ -216,9 +220,11 @@ describe('shifts route — pagination and org-unit scope filter', () => {
       departmentOrgUnitId: null,
       orgUnitId: null,
     });
-    const app = mount('/api/shifts', createShiftsRouter(fakePool));
+    const policy = policyPool();
+    policy.row(null, [null]);
+    const app = mount('/api/shifts', createShiftsRouter(policy.pool));
     const res = await request(app).get('/api/shifts/2');
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
   });
 });
 
@@ -234,15 +240,15 @@ describe('assignments route — dept error, confirm null, decline null', () => {
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
 
-  it('PATCH /:id/confirm 404 when getAssignmentById returns null', async () => {
-    (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValueOnce(null);
+  it('PATCH /:id/confirm 404 when the assignment does not exist', async () => {
+    (AssignmentService.prototype.confirmAssignment as jest.Mock).mockRejectedValueOnce(new NotFoundError('Assignment not found'));
     const res = await request(app()).patch('/api/assignments/1/confirm');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('PATCH /:id/decline 404 when getAssignmentById returns null', async () => {
-    (AssignmentService.prototype.getAssignmentById as jest.Mock).mockResolvedValueOnce(null);
+  it('PATCH /:id/decline 404 when the assignment does not exist', async () => {
+    (AssignmentService.prototype.declineAssignment as jest.Mock).mockRejectedValueOnce(new NotFoundError('Assignment not found'));
     const res = await request(app()).patch('/api/assignments/1/decline');
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe('NOT_FOUND');

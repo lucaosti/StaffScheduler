@@ -70,9 +70,12 @@ import { KioskService } from '../services/KioskService';
 import { createAttendanceRouter } from '../routes/attendance';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { mountRouter } from './helpers/mountRouter';
+import { policyPool } from './helpers/policyPool';
 
-const fakePool = {} as never;
-const app = () => mountRouter('/api/attendance', createAttendanceRouter(fakePool));
+// Record ownership and org units come from AccessPolicy, the one query left on
+// the pool once the services are mocked.
+const policy = policyPool();
+const app = () => mountRouter('/api/attendance', createAttendanceRouter(policy.pool));
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -298,6 +301,7 @@ describe('GET /api/attendance/:id', () => {
 
   it('lets the owner read their own record', async () => {
     currentUser = { id: 2, role: 'employee', email: 'e@example.com' };
+    policy.row(2);
     (AttendanceService.prototype.getById as jest.Mock).mockResolvedValue({ id: 5, userId: 2 });
 
     const res = await request(app()).get('/api/attendance/5');
@@ -306,6 +310,7 @@ describe('GET /api/attendance/:id', () => {
 
   it("blocks an employee from reading someone else's record", async () => {
     currentUser = { id: 2, role: 'employee', email: 'e@example.com' };
+    policy.row(9);
     (AttendanceService.prototype.getById as jest.Mock).mockResolvedValue({ id: 5, userId: 9 });
 
     const res = await request(app()).get('/api/attendance/5');

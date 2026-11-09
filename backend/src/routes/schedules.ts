@@ -42,6 +42,8 @@ import {
   cancelOptimization,
 } from '../services/OptimizationQueue';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
+import { scopeFilter } from '../services/access/AccessPolicy';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
@@ -60,17 +62,17 @@ export const createSchedulesRouter = (pool: Pool) => {
   const router = Router();
   const scheduleService = new ScheduleService(pool);
   const replanProposals = new ReplanProposalService(pool);
+  // Every route touching one schedule (or a department's) holds it to the
+  // caller's org-unit scope for the permission that admitted them — see
+  // services/access/AccessPolicy.ts for the rule and why it answers 404.
+  const scope = accessScope(pool);
 
 // departmentId/startDate/endDate were documented but never read: the handler
 // applied only the caller's org-unit scope, so a filtered request returned
 // every schedule the caller could see.
 router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(scheduleListQuery), async (req: Request, res: Response) => {
-  const scope = req.user?.allowedOrgUnitIds;
   const { page: _page, pageSize: _pageSize, ...queryFilters } = res.locals.query;
-  const filters = {
-    ...queryFilters,
-    ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
-  };
+  const filters = { ...queryFilters, orgUnitIds: scopeFilter(req.user!, 'schedule.read') };
   const pagination = parsePagination(req);
   if (pagination) {
     const [total, schedules] = await Promise.all([
@@ -83,7 +85,7 @@ router.get('/', authenticate, requirePermission('schedule.read'), validateQuery(
   res.json({ success: true, data: schedules });
 });
 
-router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.getScheduleById(id);
@@ -94,21 +96,10 @@ router.get('/:id', authenticate, requirePermission('schedule.read'), validatePar
     });
   }
 
-  const scope = req.user?.allowedOrgUnitIds;
-  if (scope !== null && scope !== undefined) {
-    const deptOrgUnitId = schedule.departmentOrgUnitId ?? null;
-    if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Access to this schedule is outside your scope' },
-      });
-    }
-  }
-
   res.json({ success: true, data: schedule });
 });
 
-router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.getScheduleWithShifts(id);
@@ -119,22 +110,13 @@ router.get('/:id/shifts', authenticate, requirePermission('schedule.read'), vali
     });
   }
 
-  // Enforce org-unit scope — same rule as GET /:id.
-  const scope = req.user?.allowedOrgUnitIds;
-  if (scope !== null && scope !== undefined) {
-    const deptOrgUnitId = schedule.departmentOrgUnitId ?? null;
-    if (deptOrgUnitId === null || !scope.includes(deptOrgUnitId)) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Access to this schedule is outside your scope' },
-      });
-    }
-  }
-
   res.json({ success: true, data: schedule });
 });
 
-router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), async (req: Request, res: Response) => {
+// The body's department is where the schedule will live, so it is held to the
+// same scope as the schedule itself — otherwise a scoped manager could create
+// schedules inside a unit they do not govern.
+router.post('/', authenticate, requirePermission('schedule.manage'), validateBody(createScheduleBody), scope.reach('schedule.manage', 'department', 'body.departmentId'), scope.reach('schedule.manage', 'schedule', 'body.previousScheduleId'), async (req: Request, res: Response) => {
   // Guaranteed by authenticate, as on every protected route.
   const user = req.user!;
 
@@ -147,7 +129,7 @@ router.post('/', authenticate, requirePermission('schedule.manage'), validateBod
   });
 });
 
-router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), async (_req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(updateScheduleBody), scope.reach('schedule.manage', 'schedule', 'params.id'), scope.reach('schedule.manage', 'department', 'body.departmentId'), scope.reach('schedule.manage', 'schedule', 'body.previousScheduleId'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.updateSchedule(id, res.locals.body);
@@ -158,7 +140,7 @@ router.put('/:id', authenticate, requirePermission('schedule.manage'), validateP
   });
 });
 
-router.delete('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('schedule.manage'), validateParams(idParam), scope.reach('schedule.manage', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   await scheduleService.deleteSchedule(id);
@@ -168,31 +150,25 @@ router.delete('/:id', authenticate, requirePermission('schedule.manage'), valida
   });
 });
 
-router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), scope.reach('schedule.read', 'department', 'params.departmentId'), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
   const schedules = await scheduleService.getSchedulesByDepartment(departmentId);
   res.json({ success: true, data: schedules });
 });
 
-// Allowed when: the caller holds schedule.manage OR is querying their own schedules.
-router.get('/user/:userId', authenticate, validateParams(userIdParam), async (req: Request, res: Response) => {
+// Allowed when: the caller is querying their own schedules, or holds
+// schedule.manage over a unit the person belongs to.
+// A manager sees, of the person's schedules, only those of their own units.
+router.get('/user/:userId', authenticate, validateParams(userIdParam), scope.ownerOr('schedule.manage', 'user', 'params.userId'), async (req: Request, res: Response) => {
   const { userId } = res.locals.params;
-  const actor = req.user;
 
-  const canManage = actor?.permissions?.includes('schedule.manage') ?? false;
-  if (!canManage && actor?.id !== userId) {
-    return res.status(403).json({
-      success: false,
-      error: { code: 'FORBIDDEN', message: 'Access denied' }
-    });
-  }
-
-  const schedules = await scheduleService.getSchedulesByUser(userId);
+  const orgUnitIds = req.user!.id === userId ? undefined : scopeFilter(req.user!, 'schedule.manage');
+  const schedules = await scheduleService.getSchedulesByUser(userId, orgUnitIds);
   res.json({ success: true, data: schedules });
 });
 
-router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
+router.patch('/:id/publish', authenticate, requirePermission('schedule.publish'), validateParams(idParam), validateBody(auditReasonBody), scope.reach('schedule.publish', 'schedule', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const reason = res.locals.body.reason;
@@ -204,7 +180,7 @@ router.patch('/:id/publish', authenticate, requirePermission('schedule.publish')
   });
 });
 
-router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), async (req: Request, res: Response) => {
+router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'), validateParams(idParam), scope.reach('schedule.manage', 'schedule', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const schedule = await scheduleService.archiveSchedule(id, req.user!.id);
@@ -215,7 +191,7 @@ router.patch('/:id/archive', authenticate, requirePermission('schedule.manage'),
   });
 });
 
-router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), async (_req: Request, res: Response) => {
+router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage'), validateParams(idParam), validateBody(duplicateScheduleBody), scope.reach('schedule.manage', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const { name, startDate, endDate } = res.locals.body;
 
@@ -236,7 +212,7 @@ router.post('/:id/duplicate', authenticate, requirePermission('schedule.manage')
 // cancel — instead of holding the request open for minutes. Without Redis it
 // falls back to running synchronously and returns 200 with the result, so a
 // zero-Redis deployment still works (at the cost of a long request).
-router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (req: Request, res: Response) => {
+router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), scope.reach('schedule.optimize', 'schedule', 'params.id'), async (req: Request, res: Response) => {
   const { id } = res.locals.params;
   const user = req.user!;
 
@@ -273,7 +249,7 @@ router.post('/:id/generate', authenticate, requirePermission('schedule.optimize'
 // cover the same period, which one actually happened is a manager's judgement
 // rather than something the system can infer. This is the list to choose from;
 // `PUT /schedules/:id` records the choice as `previousScheduleId`.
-router.get('/:id/predecessor-candidates', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/predecessor-candidates', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   res.json({ success: true, data: await scheduleService.getPredecessorCandidates(res.locals.params.id) });
 });
 
@@ -291,7 +267,7 @@ router.get('/:id/predecessor-candidates', authenticate, requirePermission('sched
 // Gating it on `schedule.optimize` would let anyone who can press "generate"
 // rearrange a live schedule, which is exactly the hole this whole mechanism
 // exists to close.
-router.get('/:id/replan-proposals', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/replan-proposals', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), scope.reach('schedule.optimize', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   res.json({ success: true, data: await replanProposals.listForSchedule(res.locals.params.id) });
 });
 
@@ -306,7 +282,7 @@ const proposalOfSchedule = async (scheduleId: number, proposalId: number) => {
   return proposal;
 };
 
-router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
+router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), scope.reach('schedule.publish', 'schedule', 'params.id'), async (req: Request, res: Response) => {
   const { id, proposalId } = res.locals.params;
   await proposalOfSchedule(id, proposalId);
   const applied = await replanProposals.apply(proposalId, req.user!.id, res.locals.body.reason ?? null);
@@ -317,14 +293,14 @@ router.post('/:id/replan-proposals/:proposalId/apply', authenticate, requirePerm
   });
 });
 
-router.post('/:id/replan-proposals/:proposalId/reject', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), async (req: Request, res: Response) => {
+router.post('/:id/replan-proposals/:proposalId/reject', authenticate, requirePermission('schedule.publish'), validateParams(idAndProposalIdParam), validateBody(auditReasonBody), scope.reach('schedule.publish', 'schedule', 'params.id'), async (req: Request, res: Response) => {
   const { id, proposalId } = res.locals.params;
   await proposalOfSchedule(id, proposalId);
   const rejected = await replanProposals.reject(proposalId, req.user!.id, res.locals.body.reason ?? null);
   res.json({ success: true, data: rejected, message: 'Plan rejected; the schedule is unchanged' });
 });
 
-router.get('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), scope.reach('schedule.optimize', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const status = await getOptimizationStatus(id);
   if (!status) {
@@ -336,7 +312,7 @@ router.get('/:id/optimization', authenticate, requirePermission('schedule.optimi
   res.json({ success: true, data: status });
 });
 
-router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), scope.reach('schedule.optimize', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
   const cancelled = await cancelOptimization(id);
   if (!cancelled) {

@@ -40,10 +40,14 @@ import {
   employeePairingListQuery,
 } from '../schemas';
 import { EmployeePairingService } from '../services/EmployeePairingService';
+import { accessScope } from '../middleware/accessScope';
 
 export const createEmployeePairingsRouter = (pool: Pool) => {
   const router = Router();
   const service = new EmployeePairingService(pool);
+  // A pairing binds two people, so it is the caller's only when BOTH are
+  // inside their scope (the `pairing` kind requires every party; #813 review).
+  const scope = accessScope(pool);
 
   router.get(
     '/',
@@ -61,6 +65,7 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateParams(idParam),
+    scope.reach('employee.manage', 'pairing', 'params.id'),
     async (_req: Request, res: Response) => {
       res.json({ success: true, data: await service.getById(res.locals.params.id) });
     }
@@ -71,6 +76,8 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateBody(createEmployeePairingBody),
+    scope.reach('employee.manage', 'user', 'body.userId'),
+    scope.reach('employee.manage', 'user', 'body.otherUserId'),
     async (_req: Request, res: Response) => {
       const created = await service.create(res.locals.body);
       res.status(201).json({ success: true, data: created, message: 'Pairing rule created' });
@@ -83,6 +90,7 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     requirePermission('employee.manage'),
     validateParams(idParam),
     validateBody(updateEmployeePairingBody),
+    scope.reach('employee.manage', 'pairing', 'params.id'),
     async (_req: Request, res: Response) => {
       const updated = await service.updateReason(res.locals.params.id, res.locals.body.reason);
       res.json({ success: true, data: updated, message: 'Pairing rule updated' });
@@ -94,6 +102,7 @@ export const createEmployeePairingsRouter = (pool: Pool) => {
     authenticate,
     requirePermission('employee.manage'),
     validateParams(idParam),
+    scope.reach('employee.manage', 'pairing', 'params.id'),
     async (_req: Request, res: Response) => {
       await service.remove(res.locals.params.id);
       res.json({ success: true, message: 'Pairing rule deleted' });

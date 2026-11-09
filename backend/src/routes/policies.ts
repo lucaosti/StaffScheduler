@@ -26,6 +26,7 @@ import { validateBody, validateParams, validateQuery } from '../middleware/valid
 import { createPolicyExceptionBody, createPolicyBody, updatePolicyBody, validateAssignmentBody, updateApprovalMatrixBody, optionalNotesBody, idParam, changeTypeParam, codeParam, policyExceptionListQuery } from '../schemas';
 import { PolicyService } from '../services/PolicyService';
 import { PolicyExceptionService } from '../services/PolicyExceptionService';
+import { accessScope } from '../middleware/accessScope';
 import { ApprovalMatrixService } from '../services/ApprovalMatrixService';
 import { PolicyValidator } from '../services/PolicyValidator';
 import { CompliancePresetService } from '../services/CompliancePresetService';
@@ -39,6 +40,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
   const router = Router();
   const policies = new PolicyService(pool);
   const exceptions = new PolicyExceptionService(pool);
+  const scope = accessScope(pool);
   const matrix = new ApprovalMatrixService(pool);
   const validator = new PolicyValidator(pool);
   const presets = new CompliancePresetService(pool);
@@ -111,7 +113,9 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     res.status(201).json({ success: true, data: created });
   });
 
-  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  // Deciding an exception for another unit's shift (or person) is that unit's
+  // decision: held to the approver's scope (#813 review).
+  router.post('/exceptions/:id/approve', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('policy.approve', 'policyException', 'params.id'), async (req: Request, res: Response) => {
     const updated = await exceptions.approve(
       res.locals.params.id,
       req.user!.id,
@@ -121,7 +125,7 @@ export const createPoliciesRouter = (pool: Pool): Router => {
     res.json({ success: true, data: updated });
   });
 
-  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), async (req: Request, res: Response) => {
+  router.post('/exceptions/:id/reject', requirePermission('policy.approve'), validateParams(idParam), validateBody(optionalNotesBody), scope.reach('policy.approve', 'policyException', 'params.id'), async (req: Request, res: Response) => {
     const updated = await exceptions.reject(
       res.locals.params.id,
       req.user!.id,

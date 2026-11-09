@@ -31,6 +31,8 @@ import { AuditLogService } from '../services/AuditLogService';
 import { ExportService } from '../services/ExportService';
 import { shiftColumns } from '../services/exportColumns';
 import { authenticate, requirePermission } from '../middleware/auth';
+import { accessScope } from '../middleware/accessScope';
+import { scopeFilter } from '../services/access/AccessPolicy';
 import { parsePagination, sendPaginated } from '../middleware/pagination';
 import { validateParams, validateBody, validateQuery } from '../middleware/validation';
 import {
@@ -51,6 +53,9 @@ export const createShiftsRouter = (pool: Pool) => {
   const templateService = new ShiftTemplateService(pool);
 const forecastService = new DemandForecastService(pool);
 const exporter = new ExportService(new AuditLogService(pool));
+// Org-unit scope for every route touching one shift, schedule or department —
+// see services/access/AccessPolicy.ts.
+const scope = accessScope(pool);
 
 /**
  * The listing filters, org-unit scope included.
@@ -59,12 +64,11 @@ const exporter = new ExportService(new AuditLogService(pool));
  * The scope clause is the part that must not be written twice.
  */
 const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
-  const scope = req.user?.allowedOrgUnitIds;
   const { date, startDate, endDate, page: _page, pageSize: _pageSize, format: _format, ...rest } = query;
   // `date` is the documented single-day convenience form. An explicit range wins
   // if both are supplied.
   return {
-    ...(scope !== null && scope !== undefined ? { orgUnitIds: scope } : {}),
+    orgUnitIds: scopeFilter(req.user!, 'schedule.read'),
     ...rest,
     ...(date ? { startDate: date, endDate: date } : {}),
     ...(startDate ? { startDate } : {}),
@@ -74,12 +78,12 @@ const listFilters = (req: Request, query: z.infer<typeof shiftListQuery>) => {
 
 // Shift Template Routes
 
-router.get('/templates', authenticate, requirePermission('schedule.read'), async (_req: Request, res: Response) => {
-  const templates = await templateService.getAllShiftTemplates();
+router.get('/templates', authenticate, requirePermission('schedule.read'), async (req: Request, res: Response) => {
+  const templates = await templateService.getAllShiftTemplates(scopeFilter(req.user!, 'schedule.read'));
   res.json({ success: true, data: templates });
 });
 
-router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.get('/templates/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const template = await templateService.getShiftTemplateById(id);
@@ -93,7 +97,7 @@ router.get('/templates/:id', authenticate, requirePermission('schedule.read'), v
   res.json({ success: true, data: template });
 });
 
-router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), async (_req: Request, res: Response) => {
+router.post('/templates', authenticate, requirePermission('shift.manage'), validateBody(createShiftTemplateBody), scope.reach('shift.manage', 'department', 'body.departmentId'), async (_req: Request, res: Response) => {
   const template = await templateService.createShiftTemplate(res.locals.body);
 
   res.status(201).json({
@@ -103,7 +107,7 @@ router.post('/templates', authenticate, requirePermission('shift.manage'), valid
   });
 });
 
-router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), async (_req: Request, res: Response) => {
+router.put('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftTemplateBody), scope.reach('shift.manage', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const template = await templateService.updateShiftTemplate(id, res.locals.body);
@@ -121,7 +125,7 @@ router.put('/templates/:id', authenticate, requirePermission('shift.manage'), va
   });
 });
 
-router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/templates/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), scope.reach('shift.manage', 'shiftTemplate', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const success = await templateService.deleteShiftTemplate(id);
@@ -169,12 +173,12 @@ router.get('/export', authenticate, requirePermission('schedule.read'), validate
 });
 
 // Before `/:id`, so "staffing-suggestion" is not read as a shift id.
-router.get('/staffing-suggestion', authenticate, requirePermission('schedule.read'), validateQuery(staffingSuggestionQuery), async (_req: Request, res: Response) => {
+router.get('/staffing-suggestion', authenticate, requirePermission('schedule.read'), validateQuery(staffingSuggestionQuery), scope.reach('schedule.read', 'department', 'query.departmentId'), async (_req: Request, res: Response) => {
   const suggestion = await forecastService.suggestMinStaff(res.locals.query);
   res.json({ success: true, data: suggestion });
 });
 
-router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), async (req: Request, res: Response) => {
+router.get('/:id', authenticate, requirePermission('schedule.read'), validateParams(idParam), scope.reach('schedule.read', 'shift', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const shift = await shiftService.getShiftById(id);
@@ -185,22 +189,13 @@ router.get('/:id', authenticate, requirePermission('schedule.read'), validatePar
     });
   }
 
-  // Enforce org-unit scope when the caller has a restricted scope.
-  const scope = req.user?.allowedOrgUnitIds;
-  if (scope !== null && scope !== undefined) {
-    const shiftOrgUnitId = (shift as any).orgUnitId ?? (shift as any).departmentOrgUnitId ?? null;
-    if (shiftOrgUnitId === null || !scope.includes(shiftOrgUnitId)) {
-      return res.status(403).json({
-        success: false,
-        error: { code: 'FORBIDDEN', message: 'Access to this shift is outside your scope' },
-      });
-    }
-  }
-
   res.json({ success: true, data: shift });
 });
 
-router.post('/', authenticate, requirePermission('shift.manage'), validateBody(createShiftBody), async (_req: Request, res: Response) => {
+// Both body ids are checked: the shift belongs to its department, but it is
+// also listed under its schedule, and either one in another unit would place a
+// shift where the caller has no authority.
+router.post('/', authenticate, requirePermission('shift.manage'), validateBody(createShiftBody), scope.reach('shift.manage', 'schedule', 'body.scheduleId'), scope.reach('shift.manage', 'department', 'body.departmentId'), async (_req: Request, res: Response) => {
   const shift = await shiftService.createShift(res.locals.body);
 
   res.status(201).json({
@@ -210,7 +205,7 @@ router.post('/', authenticate, requirePermission('shift.manage'), validateBody(c
   });
 });
 
-router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftBody), async (_req: Request, res: Response) => {
+router.put('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), validateBody(updateShiftBody), scope.reach('shift.manage', 'shift', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   const shift = await shiftService.updateShift(id, res.locals.body);
@@ -221,7 +216,7 @@ router.put('/:id', authenticate, requirePermission('shift.manage'), validatePara
   });
 });
 
-router.delete('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), async (_req: Request, res: Response) => {
+router.delete('/:id', authenticate, requirePermission('shift.manage'), validateParams(idParam), scope.reach('shift.manage', 'shift', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
 
   await shiftService.deleteShift(id);
@@ -231,14 +226,17 @@ router.delete('/:id', authenticate, requirePermission('shift.manage'), validateP
   });
 });
 
-router.get('/schedule/:scheduleId', authenticate, validateParams(scheduleIdParam), async (_req: Request, res: Response) => {
+// These two used to require no permission at all: any signed-in account could
+// read any schedule's or department's shifts (#813). They are reads of the
+// schedule, so they carry its permission and its scope.
+router.get('/schedule/:scheduleId', authenticate, requirePermission('schedule.read'), validateParams(scheduleIdParam), scope.reach('schedule.read', 'schedule', 'params.scheduleId'), async (_req: Request, res: Response) => {
   const { scheduleId } = res.locals.params;
 
   const shifts = await shiftService.getShiftsBySchedule(scheduleId);
   res.json({ success: true, data: shifts });
 });
 
-router.get('/department/:departmentId', authenticate, validateParams(departmentIdParam), async (_req: Request, res: Response) => {
+router.get('/department/:departmentId', authenticate, requirePermission('schedule.read'), validateParams(departmentIdParam), scope.reach('schedule.read', 'department', 'params.departmentId'), async (_req: Request, res: Response) => {
   const { departmentId } = res.locals.params;
 
   const shifts = await shiftService.getShiftsByDepartment(departmentId);

@@ -176,6 +176,7 @@ describe('EmployeeLoanService.create — pending loan with approverUserId covers
       updated_at: 't',
     };
     execute
+      .mockResolvedValueOnce([[{ 1: 1 }], null] as Tuple) // membership in the lending unit
       .mockResolvedValueOnce([{ insertId: 5, affectedRows: 1 }, null] as Tuple) // INSERT loan
       .mockResolvedValueOnce([[loanRow], null] as Tuple)              // getById
       .mockResolvedValueOnce([{ insertId: 1 }, null] as Tuple)       // audit INSERT for loan.create

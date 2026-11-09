@@ -31,10 +31,14 @@ import {
   assignEmploymentContractBody,
 } from '../schemas';
 import { EmploymentContractService } from '../services/EmploymentContractService';
+import { accessScope } from '../middleware/accessScope';
 
 export const createEmploymentContractsRouter = (pool: Pool) => {
   const router = Router();
   const service = new EmploymentContractService(pool);
+  // Contracts themselves are an organization-wide catalog; which contract a
+  // PERSON is on is that person's, and held to the caller's scope (#813 review).
+  const scope = accessScope(pool);
 
   router.get('/', authenticate, requirePermission('employee.read'), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await service.list() });
@@ -42,11 +46,11 @@ export const createEmploymentContractsRouter = (pool: Pool) => {
 
   // Registered before `/:id` so the literal segment is not matched as an id —
   // see shifts.ts, where the same ordering is load-bearing.
-  router.get('/users/:userId', authenticate, requirePermission('employee.read'), validateParams(userIdParam), async (_req: Request, res: Response) => {
+  router.get('/users/:userId', authenticate, requirePermission('employee.read'), validateParams(userIdParam), scope.reach('employee.read', 'user', 'params.userId'), async (_req: Request, res: Response) => {
     res.json({ success: true, data: await service.assignmentsForUser(res.locals.params.userId) });
   });
 
-  router.post('/users/:userId', authenticate, requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(assignEmploymentContractBody), async (_req: Request, res: Response) => {
+  router.post('/users/:userId', authenticate, requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(assignEmploymentContractBody), scope.reach('preferences.manage', 'user', 'params.userId'), async (_req: Request, res: Response) => {
     const assigned = await service.assign({
       userId: res.locals.params.userId,
       ...res.locals.body,

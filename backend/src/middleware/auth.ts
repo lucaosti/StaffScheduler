@@ -225,9 +225,10 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     // roles this is a no-op (null = full access, zero extra queries).
     user.allowedOrgUnitIds = await rbac.computeAllowedOrgUnitIds(roles);
 
-    // Compute per-permission org-unit restrictions from scoped delegations.
-    // Empty array is the common case — no extra work when no scoped delegations exist.
-    user.delegationScopes = await rbac.getEffectiveDelegationScopes(userId);
+    // The org-unit scope of each delegated code, which overrides the role scope
+    // for that code (AccessPolicy.scopeFor). Empty — one query, nothing more —
+    // for the common case of a user with no active delegations.
+    user.delegationScopes = await rbac.getEffectiveDelegationScopes(userId, user.allowedOrgUnitIds);
 
     await _setCachedAuthContext(userId, user);
     req.user = user;
@@ -256,7 +257,9 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
  * @param code - Required permission code (e.g. `schedule.manage`)
  */
 export const requirePermission = (code: string) => {
-  return (req: Request, res: Response, next: NextFunction) => {
+  // Tagged with its code so the authorization matrix suite can read each
+  // route's gate off the middleware chain and hold it to the declared table.
+  return Object.assign((req: Request, res: Response, next: NextFunction) => {
     const user = req.user;
 
     if (!user) {
@@ -280,7 +283,7 @@ export const requirePermission = (code: string) => {
     }
 
     next();
-  };
+  }, { requiredPermission: code });
 };
 
 /**
