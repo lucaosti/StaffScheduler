@@ -123,6 +123,9 @@ export interface AttendanceRecord {
   clockOut?: string | Date | null;
   latitude?: number | null;
   longitude?: number | null;
+  /** Where the record was opened: the employee's own device or a shared kiosk. */
+  source?: 'self' | 'kiosk';
+  kioskDeviceId?: ID | null;
   status: 'pending' | 'approved' | 'rejected';
   reviewerId?: ID | null;
   reviewedAt?: string | Date | null;

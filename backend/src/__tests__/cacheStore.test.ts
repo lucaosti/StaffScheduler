@@ -150,6 +150,23 @@ describe('cacheStore — Redis backend', () => {
     await expect(isJtiBlacklisted('jti-fallback')).resolves.toBe(true);
   });
 
+  it('still honours a revocation written to memory during an outage once Redis answers again (#979)', async () => {
+    // The logout lands while Redis is down, so only the in-process store has
+    // it. When Redis recovers it answers "not revoked" for that jti, and
+    // trusting that answer alone would make the logged-out token valid again
+    // for the rest of its lifetime, on the very replica that recorded it.
+    redisMock.set.mockRejectedValue(new Error('redis down'));
+    await blacklistJti('jti-outage', 5000);
+
+    redisMock.exists.mockResolvedValue(0);
+    await expect(isJtiBlacklisted('jti-outage')).resolves.toBe(true);
+  });
+
+  it('reports a jti revoked only in Redis as blacklisted', async () => {
+    redisMock.exists.mockResolvedValue(1);
+    await expect(isJtiBlacklisted('jti-elsewhere')).resolves.toBe(true);
+  });
+
   it('falls back to memory on a failed auth-context read/write', async () => {
     redisMock.set.mockRejectedValue(new Error('down'));
     redisMock.get.mockRejectedValue(new Error('down'));
