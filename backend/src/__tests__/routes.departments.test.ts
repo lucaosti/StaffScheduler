@@ -25,7 +25,12 @@ jest.mock('../middleware/auth', () => ({
     };
     next();
   },
-  requirePermission: () => (_req: any, _res: any, next: any) => next(),
+  // Enforces the code like the real guard: some routes now carry their gate as
+  // middleware rather than an in-handler check.
+  requirePermission: (code: string) => (req: any, res: any, next: any) =>
+    req.user?.permissions?.includes(code)
+      ? next()
+      : res.status(403).json({ success: false, error: { code: 'FORBIDDEN', message: 'Insufficient privileges' } }),
   requireModule: () => (_req: any, _res: any, next: any) => next(),
   userHasPermission: (user: any, code: string) =>
     Boolean(user && user.permissions && user.permissions.includes(code)),

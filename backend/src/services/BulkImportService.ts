@@ -20,7 +20,8 @@ import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { usingConnection } from '../utils/transaction';
 import bcrypt from 'bcrypt';
 import { config } from '../config';
-import { UserAuthorityService } from './UserAuthorityService';
+import { UserAuthorityService } from './access/UserAuthorityService';
+import { AccessPolicy } from './access/AccessPolicy';
 import { User } from '../types';
 
 interface ImportRowError {
@@ -214,7 +215,7 @@ export class BulkImportService {
     // Rows name their role, so an import is a role grant like any other and is
     // held to the same anti-escalation rule — checked for the whole file before
     // anything is written, consistent with the all-or-nothing import (#809).
-    await new UserAuthorityService(this.pool).assertCanAssignRoleNames(actor, rows.map((r) => r.roleName));
+    await new UserAuthorityService(this.pool, 'employee.manage').assertCanAssignRoleNames(actor, rows.map((r) => r.roleName));
 
     return usingConnection(this.pool, async (conn) => {
       try {
@@ -275,10 +276,20 @@ export class BulkImportService {
     });
   }
 
-  async importShifts(csv: string): Promise<ImportResult> {
+  /**
+   * Every row names a schedule and a department, and both must lie in the
+   * importer's `shift.manage` scope — checked for the whole file, one query per
+   * kind, before anything is written. A row naming another unit's id is a 404
+   * like any out-of-scope reference (AccessPolicy), not a row error: reporting
+   * it per row would confirm that the id exists.
+   */
+  async importShifts(csv: string, actor: User): Promise<ImportResult> {
     const parsed = parseCsv(csv);
     const { rows, errors } = mapShiftRows(parsed);
     if (errors.length > 0) return { inserted: 0, errors };
+    const policy = new AccessPolicy(this.pool);
+    await policy.assertReach(actor, 'shift.manage', 'schedule', rows.map((r) => r.scheduleId));
+    await policy.assertReach(actor, 'shift.manage', 'department', rows.map((r) => r.departmentId));
 
     return usingConnection(this.pool, async (conn) => {
       try {

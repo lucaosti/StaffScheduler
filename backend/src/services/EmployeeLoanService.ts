@@ -23,13 +23,14 @@
  */
 
 import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { ConflictError, ForbiddenError, NotFoundError } from '../errors';
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../errors';
 import { logger } from '../config/logger';
 import { ApproverResolutionService } from './ApproverResolutionService';
 import { ApprovalDecisionService } from './ApprovalDecisionService';
 import { NotificationService } from './NotificationService';
 import { AuditLogService } from './AuditLogService';
 import { DateUtils } from '../utils';
+import { unitCondition } from './access/AccessPolicy';
 
 type LoanStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'ended';
 
@@ -61,6 +62,8 @@ interface CreateLoanInput {
 }
 
 interface ListLoanFilters {
+  /** The approver's org-unit scope; a loan is visible from either end. Absent = unrestricted. */
+  orgUnitIds?: number[];
   userId?: number;
   toOrgUnitId?: number;
   fromOrgUnitId?: number;
@@ -109,6 +112,16 @@ export class EmployeeLoanService {
     if (input.endDate < input.startDate) throw new ConflictError('endDate must be on or after startDate');
     if (input.fromOrgUnitId === input.toOrgUnitId) {
       throw new ConflictError('source and target unit must differ');
+    }
+    // A loan lends a member of the source unit. Without this check the source
+    // was a free label: a manager of unit A could "lend" a person who has never
+    // belonged to A, and the loan's scope (and approval) would follow the label.
+    const [membership] = await this.pool.execute<RowDataPacket[]>(
+      'SELECT 1 FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1',
+      [input.userId, input.fromOrgUnitId]
+    );
+    if (membership.length === 0) {
+      throw new ValidationError('The person does not belong to the lending org unit');
     }
 
     const workflowCtx = { actorUserId: input.requestedBy, orgUnitId: input.toOrgUnitId };
@@ -215,6 +228,12 @@ export class EmployeeLoanService {
     if (filters.status) {
       conditions.push('status = ?');
       params.push(filters.status);
+    }
+    const to = unitCondition('to_org_unit_id', filters.orgUnitIds);
+    const from = unitCondition('from_org_unit_id', filters.orgUnitIds);
+    if (to && from) {
+      conditions.push(`(${to.sql} OR ${from.sql})`);
+      params.push(...to.params, ...from.params);
     }
     const where = conditions.length ? ` WHERE ${conditions.join(' AND ')}` : '';
     const [rows] = await this.pool.execute<RowDataPacket[]>(

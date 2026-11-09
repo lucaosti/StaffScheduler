@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createDelegation,
   listDelegations,
+  listUnitDelegableCodes,
   revokeDelegation,
   type CreateDelegationBody,
   type Delegation,
@@ -26,6 +27,18 @@ export function useDelegationsQuery() {
       const res = await listDelegations();
       return res.data ?? [];
     },
+  });
+}
+
+/** The codes the server accepts in a delegation scoped to one org unit. */
+export function useUnitDelegableCodesQuery() {
+  return useQuery({
+    queryKey: [...delegationsKey, 'delegable-for-unit'] as const,
+    queryFn: async (): Promise<string[]> => {
+      const res = await listUnitDelegableCodes();
+      return res.data?.permissionCodes ?? [];
+    },
+    staleTime: Infinity,
   });
 }
 

@@ -34,7 +34,7 @@ const requiredPermissions: string[] = [];
 
 jest.mock('../middleware/auth', () => ({
   authenticate: (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-    (req as unknown as { user: unknown }).user = { id: 7 };
+    (req as unknown as { user: unknown }).user = { id: 7, permissions: ['employee.read', 'employee.manage', 'preferences.manage'], allowedOrgUnitIds: null };
     next();
   },
   requirePermission: (code: string) => {

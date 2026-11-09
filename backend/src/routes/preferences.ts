@@ -15,10 +15,13 @@ import { authenticate, requirePermission } from '../middleware/auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import { userIdParam, upsertPreferencesBody, upsertOwnPreferencesBody } from '../schemas';
 import { PreferencesService } from '../services/PreferencesService';
+import { accessScope } from '../middleware/accessScope';
 
 export const createPreferencesRouter = (pool: Pool): Router => {
   const router = Router();
   const service = new PreferencesService(pool);
+  // Another person's preferences are theirs: held to the caller's scope (#813 review).
+  const scope = accessScope(pool);
 
   router.use(authenticate);
 
@@ -36,13 +39,13 @@ export const createPreferencesRouter = (pool: Pool): Router => {
     res.json({ success: true, data });
   });
 
-  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), async (_req: Request, res: Response) => {
+  router.get('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), scope.reach('preferences.manage', 'user', 'params.userId'), async (_req: Request, res: Response) => {
     const userId = res.locals.params.userId;
     const data = await service.getByUserId(userId);
     res.json({ success: true, data });
   });
 
-  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), async (_req: Request, res: Response) => {
+  router.put('/:userId', requirePermission('preferences.manage'), validateParams(userIdParam), validateBody(upsertPreferencesBody), scope.reach('preferences.manage', 'user', 'params.userId'), async (_req: Request, res: Response) => {
     const userId = res.locals.params.userId;
     const data = await service.upsert(userId, res.locals.body);
     res.json({ success: true, data });
