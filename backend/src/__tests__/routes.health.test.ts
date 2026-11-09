@@ -15,13 +15,13 @@ jest.mock('../config/database', () => ({
 // Redis is on by default; mock the module so these tests control whether it is
 // reported and whether it is reachable, without opening a socket.
 const isRedisConfigured = jest.fn();
-const isRedisHealthy = jest.fn();
+const getRedisHealth = jest.fn();
 jest.mock('../config/redis', () => ({
   isRedisConfigured: () => isRedisConfigured(),
-  isRedisHealthy: () => isRedisHealthy(),
+  getRedisHealth: () => getRedisHealth(),
 }));
 
-import healthRoutes from '../routes/health';
+import healthRoutes, { HEALTH_CHECK_TIMEOUT_MS } from '../routes/health';
 
 const mountApp = (): express.Express => {
   const app = express();
@@ -33,7 +33,7 @@ beforeEach(() => {
   isHealthy.mockReset();
   // Default: Redis not configured, so the base tests see only the database.
   isRedisConfigured.mockReturnValue(false);
-  isRedisHealthy.mockReset();
+  getRedisHealth.mockReset();
 });
 
 describe('GET /api/health', () => {
@@ -53,7 +53,7 @@ describe('GET /api/health', () => {
   it('reports redis connected when configured and reachable', async () => {
     isHealthy.mockResolvedValueOnce(true);
     isRedisConfigured.mockReturnValue(true);
-    isRedisHealthy.mockResolvedValueOnce(true);
+    getRedisHealth.mockResolvedValueOnce('connected');
     const res = await request(mountApp()).get('/api/health');
     expect(res.status).toBe(200);
     expect(res.body.data.services.redis).toBe('connected');
@@ -62,11 +62,38 @@ describe('GET /api/health', () => {
   it('reports redis disconnected when configured but unreachable (DB still healthy → 200)', async () => {
     isHealthy.mockResolvedValueOnce(true);
     isRedisConfigured.mockReturnValue(true);
-    isRedisHealthy.mockResolvedValueOnce(false);
+    getRedisHealth.mockResolvedValueOnce('disconnected');
     const res = await request(mountApp()).get('/api/health');
     // Redis is a soft dependency: its outage does not fail the health check.
     expect(res.status).toBe(200);
     expect(res.body.data.services.redis).toBe('disconnected');
+  });
+
+  it('reports redis degraded when it is connected but not answering (#970)', async () => {
+    isHealthy.mockResolvedValueOnce(true);
+    isRedisConfigured.mockReturnValue(true);
+    getRedisHealth.mockResolvedValueOnce('degraded');
+    const res = await request(mountApp()).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.data.services.redis).toBe('degraded');
+  });
+
+  it('answers 503 within its own time limit when the database check hangs (#970)', async () => {
+    isHealthy.mockReturnValueOnce(new Promise(() => undefined));
+    const started = Date.now();
+    const res = await request(mountApp()).get('/api/health');
+    expect(res.status).toBe(503);
+    expect(res.body.data.services.database).toBe('disconnected');
+    expect(Date.now() - started).toBeLessThan(HEALTH_CHECK_TIMEOUT_MS + 1000);
+  });
+
+  it('answers within its own time limit when the redis check hangs (#970)', async () => {
+    isHealthy.mockResolvedValueOnce(true);
+    isRedisConfigured.mockReturnValue(true);
+    getRedisHealth.mockReturnValueOnce(new Promise(() => undefined));
+    const res = await request(mountApp()).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body.data.services.redis).toBe('degraded');
   });
 
   it('503 when DB is unhealthy', async () => {

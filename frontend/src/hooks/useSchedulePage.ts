@@ -184,7 +184,10 @@ const waitForOptimization = async (
     if (signal?.aborted) throw abortError();
     const state = status.data?.state;
     if (state === 'completed') return status.data?.result;
-    if (state === 'failed') throw new ApiError(status.data?.failedReason || messages.failed);
+    // A cancelled job (#966) is as finished as a failed one; its reason says so.
+    if (state === 'failed' || state === 'cancelled') {
+      throw new ApiError(status.data?.failedReason || messages.failed);
+    }
     // 'waiting' / 'active' / 'unknown' → keep polling.
   }
   throw new ApiError(messages.timedOut);
@@ -294,7 +297,7 @@ export function useFinishedOptimizationRefresh() {
         .getOptimizationStatus(scheduleId)
         .then((status) => {
           const state = status.data?.state;
-          if (state !== 'completed' && state !== 'failed') return;
+          if (state !== 'completed' && state !== 'failed' && state !== 'cancelled') return;
           unfinishedOptimizations.delete(scheduleId);
           void invalidateScheduleDependents(queryClient);
         })

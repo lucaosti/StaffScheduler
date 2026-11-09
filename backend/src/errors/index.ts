@@ -20,7 +20,13 @@ export class AppError extends Error {
   constructor(
     message: string,
     public readonly status: number,
-    public readonly code: string
+    public readonly code: string,
+    /**
+     * Rendered as the envelope's `details` array when present: structured
+     * reasons a client can act on (the rules an assignment broke), where the
+     * message is only the first of them in prose.
+     */
+    public readonly details?: readonly object[]
   ) {
     super(message);
     this.name = new.target.name;
@@ -74,6 +80,62 @@ export class NotFoundError extends AppError {
 export class ConflictError extends AppError {
   constructor(message = 'Request conflicts with the current state') {
     super(message, 409, 'CONFLICT');
+  }
+}
+
+/**
+ * 409 — an assignment refused by a working-time rule or a business policy
+ * (#830). The code names the rule (`COMPLIANCE_MAX_WEEKLY_HOURS`,
+ * `POLICY_MANUAL_ASSIGNMENT_LOCKED`, …) and `details` lists every violation,
+ * not just the first. It used to be a plain `Error` with an ad-hoc `code`,
+ * which the error middleware rightly treats as an internal fault: the planner
+ * got 500 and a generic message instead of the rule they had run into.
+ */
+export class AssignmentRuleViolationError extends AppError {
+  constructor(message: string, code: string, violations: readonly object[]) {
+    super(message, 409, code, violations);
+  }
+}
+
+/**
+ * 503 — a transient condition outside the request stopped it: a transaction
+ * that kept losing lock conflicts, a dependency that could not be reached.
+ *
+ * Typed rather than left to the generic 500 because the client must be able
+ * to tell "try again shortly" from "this is broken": a 500 reads as a defect
+ * and is not retried, while a 503 with `Retry-After` is the standard answer a
+ * client, a proxy and the frontend's request layer all treat as transient.
+ * `retryAfterSeconds` becomes that header in the error middleware.
+ */
+export class ServiceUnavailableError extends AppError {
+  constructor(
+    message = 'Service temporarily unavailable, please retry',
+    public readonly retryAfterSeconds = 1
+  ) {
+    super(message, 503, 'SERVICE_UNAVAILABLE');
+  }
+}
+
+/**
+ * 409 — an optimization job that cannot be cancelled any more: it already
+ * completed or failed (#966). A distinct code so a client can tell "too
+ * late, the run finished" from a generic conflict and re-read its result.
+ */
+export class OptimizationNotCancellableError extends AppError {
+  constructor(message = 'The optimization run has already finished and cannot be cancelled') {
+    super(message, 409, 'OPTIMIZATION_NOT_CANCELLABLE');
+  }
+}
+
+/**
+ * 409 — the optimization run was cancelled while it ran (#966). Raised by the
+ * engines when the run's cancellation signal fires, so the run stops before
+ * anything is persisted; in practice it ends a queued job, whose failure the
+ * status endpoint reports as `cancelled`.
+ */
+export class OptimizationCancelledError extends AppError {
+  constructor(message = 'The optimization run was cancelled') {
+    super(message, 409, 'OPTIMIZATION_CANCELLED');
   }
 }
 

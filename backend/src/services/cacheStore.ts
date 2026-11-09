@@ -28,7 +28,7 @@
  * (and thus multi-instance operation) is not in play.
  */
 
-import { getRedis, isRedisConfigured } from '../config/redis';
+import { getRequestPathRedis, reportRedisFailure } from '../config/redis';
 
 /**
  * Bounded in-process TTL map used when Redis is unavailable. Exported so its
@@ -97,8 +97,14 @@ const pruneTimer = setInterval(() => {
 }, 60 * 60 * 1000);
 pruneTimer.unref();
 
-/** Redis client only when configured; null selects the in-process fallback. */
-const redis = () => (isRedisConfigured() ? getRedis() : null);
+/**
+ * Redis client only when it should serve the request path right now; null
+ * selects the in-process fallback — Redis unconfigured, its connection down,
+ * or a command having just failed (#970: see getRequestPathRedis). Every
+ * failed command is reported, which is what routes the following requests
+ * around a hung Redis instead of each waiting out its own timeout.
+ */
+const redis = getRequestPathRedis;
 
 /**
  * Revokes a token by its JTI until `ttlMs` from now (its natural expiry), so a
@@ -112,8 +118,8 @@ export const blacklistJti = async (jti: string, ttlMs: number): Promise<void> =>
     try {
       await client.set(`${BLACKLIST_PREFIX}${jti}`, '1', 'EX', ttlSec);
       return;
-    } catch {
-      /* fall through to memory */
+    } catch (err) {
+      reportRedisFailure('jti.blacklist', err); // and fall through to memory
     }
   }
   memBlacklist.set(jti, true, ttlMs);
@@ -125,8 +131,8 @@ export const isJtiBlacklisted = async (jti: string): Promise<boolean> => {
   if (client) {
     try {
       return (await client.exists(`${BLACKLIST_PREFIX}${jti}`)) === 1;
-    } catch {
-      /* fall through to memory */
+    } catch (err) {
+      reportRedisFailure('jti.check', err); // and fall through to memory
     }
   }
   return memBlacklist.get(jti) === true;
@@ -138,8 +144,8 @@ export const getAuthContext = async (userId: number): Promise<string | null> => 
   if (client) {
     try {
       return await client.get(`${AUTHCTX_PREFIX}${userId}`);
-    } catch {
-      /* fall through to memory */
+    } catch (err) {
+      reportRedisFailure('authctx.get', err); // and fall through to memory
     }
   }
   return memAuthCtx.get(String(userId)) ?? null;
@@ -153,8 +159,8 @@ export const setAuthContext = async (userId: number, json: string, ttlMs: number
     try {
       await client.set(`${AUTHCTX_PREFIX}${userId}`, json, 'EX', ttlSec);
       return;
-    } catch {
-      /* fall through to memory */
+    } catch (err) {
+      reportRedisFailure('authctx.set', err); // and fall through to memory
     }
   }
   memAuthCtx.set(String(userId), json, ttlMs);
@@ -171,8 +177,8 @@ export const invalidateAuthContext = async (userId: number): Promise<void> => {
   if (client) {
     try {
       await client.del(`${AUTHCTX_PREFIX}${userId}`);
-    } catch {
-      /* fall through to also clear memory */
+    } catch (err) {
+      reportRedisFailure('authctx.invalidate', err); // and fall through to also clear memory
     }
   }
   memAuthCtx.delete(String(userId));
@@ -221,8 +227,8 @@ export const incrementCounter = async (
         ttlMs = windowMs;
       }
       return { count, resetTime: new Date(Date.now() + ttlMs) };
-    } catch {
-      /* fall through to memory */
+    } catch (err) {
+      reportRedisFailure('counter.increment', err); // and fall through to memory
     }
   }
 
@@ -242,8 +248,8 @@ export const resetCounter = async (key: string): Promise<void> => {
   if (client) {
     try {
       await client.del(`${COUNTER_PREFIX}${key}`);
-    } catch {
-      /* fall through to also clear memory */
+    } catch (err) {
+      reportRedisFailure('counter.reset', err); // and fall through to also clear memory
     }
   }
   memCounters.delete(key);

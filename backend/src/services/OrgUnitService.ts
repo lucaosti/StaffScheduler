@@ -8,8 +8,8 @@
  * @author Luca Ostinelli
  */
 
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { usingConnection } from '../utils/transaction';
+import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { withTransaction } from '../utils/transaction';
 import { ConflictError, NotFoundError } from '../errors';
 import { logger } from '../config/logger';
 import { AuditLogService } from './AuditLogService';
@@ -378,6 +378,57 @@ export class OrgUnitService {
     return chain;
   }
 
+  /**
+   * Serializes membership changes for one person (#964).
+   *
+   * Placing someone ran `UPDATE … SET is_primary = 0 WHERE user_id = ?` and
+   * then an INSERT. The UPDATE is a range scan, so it took next-key and gap
+   * locks — including, for someone with no membership yet, the gap at the end
+   * of the index that every other newcomer shares — and the INSERT then
+   * needed an insert-intention lock in a gap another transaction held: a
+   * deadlock InnoDB resolved by failing one request with 500 (61 of 130
+   * placements at concurrency 16).
+   *
+   * Two changes remove the cycle rather than retry around it:
+   *
+   *   - the person's `users` row is locked first, so every membership change
+   *     for one person queues on that single lock before touching
+   *     `user_org_units`. The `users` row rather than the membership rows
+   *     because those may not exist yet, and a lock on rows that do not
+   *     exist is a gap lock — the very thing that deadlocked;
+   *   - the demotion locks only the rows it changes, by primary key (see
+   *     demotePrimaries), so no transaction holds a range lock another one's
+   *     INSERT could need.
+   *
+   * What remains is the backstop: `withTransaction` re-runs a transaction
+   * that still loses a lock conflict.
+   */
+  private async lockPersonMemberships(conn: PoolConnection, userId: number): Promise<void> {
+    await conn.execute(`SELECT id FROM users WHERE id = ? FOR UPDATE`, [userId]);
+  }
+
+  /**
+   * Clears the person's current primary flag, locking exact rows only.
+   *
+   * The SELECT is a plain consistent read, which takes no locks at all; it is
+   * safe because the caller already holds the person's `users` row lock —
+   * every writer of this person's memberships queues on it — and because it
+   * is the transaction's first consistent read, taken after that lock was
+   * granted, so it sees everything the previous holder committed. The UPDATE
+   * then names rows by primary key, which locks those records and no gap.
+   */
+  private async demotePrimaries(conn: PoolConnection, userId: number): Promise<void> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id FROM user_org_units WHERE user_id = ? AND is_primary = 1`,
+      [userId]
+    );
+    if (rows.length === 0) return;
+    await conn.execute(
+      `UPDATE user_org_units SET is_primary = 0 WHERE id IN (${rows.map(() => '?').join(', ')})`,
+      rows.map((r) => r.id)
+    );
+  }
+
   /** Adds a membership (idempotent on the unique key). */
   async addMember(
     userId: number,
@@ -385,26 +436,15 @@ export class OrgUnitService {
     isPrimary = false,
     actorId?: number
   ): Promise<UserOrgUnit> {
-    await usingConnection(this.pool, async (conn) => {
-      try {
-        await conn.beginTransaction();
-        if (isPrimary) {
-          await conn.execute(
-            `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
-            [userId]
-          );
-        }
-        await conn.execute(
-          `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
-           VALUES (?, ?, ?)
-           ON DUPLICATE KEY UPDATE is_primary = VALUES(is_primary)`,
-          [userId, orgUnitId, isPrimary ? 1 : 0]
-        );
-        await conn.commit();
-      } catch (err) {
-        await conn.rollback();
-        throw err;
-      }
+    await withTransaction(this.pool, async (conn) => {
+      await this.lockPersonMemberships(conn, userId);
+      if (isPrimary) await this.demotePrimaries(conn, userId);
+      await conn.execute(
+        `INSERT INTO user_org_units (user_id, org_unit_id, is_primary)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE is_primary = VALUES(is_primary)`,
+        [userId, orgUnitId, isPrimary ? 1 : 0]
+      );
     });
     const [rows] = await this.pool.execute<RowDataPacket[]>(
       `SELECT * FROM user_org_units WHERE user_id = ? AND org_unit_id = ? LIMIT 1`,
@@ -424,24 +464,17 @@ export class OrgUnitService {
   }
 
   async setPrimary(userId: number, orgUnitId: number, actorId?: number): Promise<void> {
-    await usingConnection(this.pool, async (conn) => {
-      try {
-        await conn.beginTransaction();
-        await conn.execute(
-          `UPDATE user_org_units SET is_primary = 0 WHERE user_id = ?`,
-          [userId]
-        );
-        const [res] = await conn.execute<ResultSetHeader>(
-          `UPDATE user_org_units SET is_primary = 1
-            WHERE user_id = ? AND org_unit_id = ?`,
-          [userId, orgUnitId]
-        );
-        if (res.affectedRows === 0) throw new NotFoundError('Membership not found');
-        await conn.commit();
-      } catch (err) {
-        await conn.rollback();
-        throw err;
-      }
+    // Same lock order as addMember, so a placement and a primary change for
+    // one person queue on each other instead of deadlocking.
+    await withTransaction(this.pool, async (conn) => {
+      await this.lockPersonMemberships(conn, userId);
+      await this.demotePrimaries(conn, userId);
+      const [res] = await conn.execute<ResultSetHeader>(
+        `UPDATE user_org_units SET is_primary = 1
+          WHERE user_id = ? AND org_unit_id = ?`,
+        [userId, orgUnitId]
+      );
+      if (res.affectedRows === 0) throw new NotFoundError('Membership not found');
     });
     await this.audit.write({
       actorId: actorId ?? null,

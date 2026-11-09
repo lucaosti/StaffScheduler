@@ -9,8 +9,11 @@
 
 import { Router, Request, Response } from 'express';
 import { database } from '../config/database';
-import { logger } from '../config/logger';
-import { isRedisConfigured, isRedisHealthy } from '../config/redis';
+import { getRedisHealth, isRedisConfigured, type RedisHealth } from '../config/redis';
+import { settleWithin } from '../utils/timeout';
+
+/** Longest the health endpoint waits on any one dependency before answering. */
+export const HEALTH_CHECK_TIMEOUT_MS = 2_000;
 
 // Single source of truth for the service version. Works from both src/ (ts-node)
 // and dist/ (compiled) since the relative position to package.json is the same.
@@ -29,53 +32,49 @@ const router = Router();
  * @returns {Object} System health status and metrics
  */
 router.get('/', async (_req: Request, res: Response) => {
-  try {
-    const dbHealthy = await database.isHealthy();
+  // Both checks bounded (#970): a dependency that is connected but frozen
+  // never rejects, and a health check that waits on it hangs exactly when the
+  // load balancer most needs an answer. Run in parallel, so the endpoint
+  // answers within one limit, not the sum of two. A check that rejects counts
+  // as down, so nothing here throws.
+  const [dbHealthy, redisReported] = await Promise.all([
+    settleWithin(database.isHealthy(), HEALTH_CHECK_TIMEOUT_MS, false),
     // Redis is optional: report its state only when configured, so a
     // single-instance deployment without Redis is not flagged "degraded" for
     // a dependency it deliberately does not use.
-    const redisReported = isRedisConfigured() ? await isRedisHealthy() : null;
+    isRedisConfigured()
+      ? settleWithin<RedisHealth>(getRedisHealth(), HEALTH_CHECK_TIMEOUT_MS, 'degraded')
+      : Promise.resolve(null),
+  ]);
 
-    // Unauthenticated endpoint: expose only what a load balancer needs.
-    // Environment name, uptime and process metrics are internal details
-    // that would otherwise leak to anyone who can reach the API.
-    const healthCheck = {
-      status: dbHealthy ? 'healthy' : 'degraded',
-      timestamp: new Date().toISOString(),
-      version: SERVICE_VERSION,
-      services: {
-        database: dbHealthy ? 'connected' : 'disconnected',
-        ...(redisReported !== null
-          ? { redis: redisReported ? 'connected' : 'disconnected' }
-          : {}),
-      }
-    };
-
-    if (!dbHealthy) {
-      return res.status(503).json({
-        success: false,
-        error: {
-          code: 'SERVICE_UNAVAILABLE',
-          message: 'Database connection unavailable'
-        },
-        data: healthCheck
-      });
+  // Unauthenticated endpoint: expose only what a load balancer needs.
+  // Environment name, uptime and process metrics are internal details
+  // that would otherwise leak to anyone who can reach the API.
+  const healthCheck = {
+    status: dbHealthy ? 'healthy' : 'degraded',
+    timestamp: new Date().toISOString(),
+    version: SERVICE_VERSION,
+    services: {
+      database: dbHealthy ? 'connected' : 'disconnected',
+      ...(redisReported !== null ? { redis: redisReported } : {}),
     }
+  };
 
-    res.json({
-      success: true,
-      data: healthCheck
-    });
-  } catch (error) {
-    logger.error('Health check DB query failed:', error);
-    res.status(503).json({
+  if (!dbHealthy) {
+    return res.status(503).json({
       success: false,
       error: {
         code: 'SERVICE_UNAVAILABLE',
-        message: 'Health check failed'
-      }
+        message: 'Database connection unavailable'
+      },
+      data: healthCheck
     });
   }
+
+  res.json({
+    success: true,
+    data: healthCheck
+  });
 });
 
 /**
@@ -88,7 +87,7 @@ router.get('/', async (_req: Request, res: Response) => {
  * @returns {Object} Readiness status
  */
 router.get('/ready', async (_req: Request, res: Response) => {
-  const isReady = await database.isHealthy();
+  const isReady = await settleWithin(database.isHealthy(), HEALTH_CHECK_TIMEOUT_MS, false);
 
   if (isReady) {
     res.json({

@@ -314,14 +314,24 @@ router.get('/:id/optimization', authenticate, requirePermission('schedule.optimi
 
 router.delete('/:id/optimization', authenticate, requirePermission('schedule.optimize'), validateParams(idParam), scope.reach('schedule.optimize', 'schedule', 'params.id'), async (_req: Request, res: Response) => {
   const { id } = res.locals.params;
-  const cancelled = await cancelOptimization(id);
-  if (!cancelled) {
+  // A finished job throws OptimizationNotCancellableError (409) from the queue.
+  const outcome = await cancelOptimization(id);
+  if (!outcome) {
     return res.status(404).json({
       success: false,
       error: { code: 'NOT_FOUND', message: 'No optimization job to cancel' },
     });
   }
-  res.json({ success: true, message: 'Optimization cancelled' });
+  // 202 for a running job: the stop is requested and happens within a
+  // second or so, observable as state "cancelled" on GET (#966).
+  if (outcome === 'cancelling') {
+    return res.status(202).json({
+      success: true,
+      data: { state: 'cancelling' },
+      message: 'Cancellation requested; the run stops shortly',
+    });
+  }
+  res.json({ success: true, data: { state: 'cancelled' }, message: 'Optimization cancelled' });
 });
 
   return router;

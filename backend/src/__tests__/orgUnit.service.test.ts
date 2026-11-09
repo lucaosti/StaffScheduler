@@ -117,21 +117,39 @@ describe('OrgUnitService.setPrimary', () => {
   it('demotes existing primaries and promotes the target', async () => {
     const { pool, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // demote
+      .mockResolvedValueOnce([[{ id: 7 }], null]) // lock the person (#964)
+      .mockResolvedValueOnce([[{ id: 31 }], null]) // their current primary
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]) // demote it, by id
       .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // promote
 
     const service = new OrgUnitService(pool);
     await service.setPrimary(7, 11);
-    expect(conn.execute).toHaveBeenCalledTimes(2);
-    expect(conn.execute.mock.calls[0][0]).toMatch(/SET is_primary = 0/);
-    expect(conn.execute.mock.calls[1][0]).toMatch(/SET is_primary = 1/);
+    expect(conn.execute).toHaveBeenCalledTimes(4);
+    expect(conn.execute.mock.calls[0][0]).toMatch(/FROM users WHERE id = \? FOR UPDATE/);
+    expect(conn.execute.mock.calls[1][0]).toMatch(/SELECT id FROM user_org_units WHERE user_id = \? AND is_primary = 1/);
+    // By primary key, not by user: a range UPDATE takes the gap locks that deadlocked.
+    expect(conn.execute.mock.calls[2]).toEqual([expect.stringMatching(/SET is_primary = 0 WHERE id IN \(\?\)/), [31]]);
+    expect(conn.execute.mock.calls[3][0]).toMatch(/SET is_primary = 1/);
     expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('skips the demotion when the person has no primary yet', async () => {
+    const { pool, conn } = makePool();
+    conn.execute
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[], null]) // no current primary
+      .mockResolvedValueOnce([{ affectedRows: 1 }, null]); // promote
+
+    await new OrgUnitService(pool).setPrimary(7, 11);
+    expect(conn.execute).toHaveBeenCalledTimes(3);
+    expect(conn.execute.mock.calls[2][0]).toMatch(/SET is_primary = 1/);
   });
 
   it('rolls back when membership is missing', async () => {
     const { pool, conn } = makePool();
     conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, null])
+      .mockResolvedValueOnce([[{ id: 7 }], null])
+      .mockResolvedValueOnce([[], null])
       .mockResolvedValueOnce([{ affectedRows: 0 }, null]);
 
     const service = new OrgUnitService(pool);

@@ -78,12 +78,19 @@ export async function runPollingBatch<Row extends RowDataPacket, Result = void>(
       await conn.commit();
       return rows.length;
     } catch (err) {
-      await conn.rollback();
+      // Guarded: a poll fails mostly because the connection or the server
+      // went away, which is exactly when the rollback fails too. Unguarded,
+      // that second rejection escaped the tick as an unhandled rejection and
+      // took the process down with it (#825).
+      await conn.rollback().catch(() => undefined);
       logger.error(`${config.label} poll failed`, { error: err instanceof Error ? err.message : err });
       return 0;
     }
   });
 }
+
+/** Longest pause between attempts while a worker's dependency stays down. */
+const MAX_BACKOFF_MS = 60_000;
 
 export interface PollingWorkerController {
   /**
@@ -101,15 +108,70 @@ export interface PollingWorkerController {
  * Builds the start/stop pair for one worker: a singleton unref'd interval
  * timer calling `processOnce`, with its own module-scoped handle so a
  * second `start()` while one is already running arms nothing new.
+ *
+ * WHY THE TICK OWNS ITS FAILURES (#825). The tick used to be
+ * `void processOnce(pool)`. When MySQL is down, `pool.getConnection()`
+ * rejects before `runPollingBatch` reaches its own catch, the rejection had
+ * no handler, and Node's default for an unhandled rejection is to exit — so
+ * every replica, all polling the same database, crash-looped for as long as
+ * the outage lasted. The tick now:
+ *
+ *   - catches everything `processOnce` rejects with, so nothing escapes;
+ *   - logs an outage once, at its start, and once more when it ends, rather
+ *     than at every tick of a multi-minute outage;
+ *   - backs off exponentially from the poll interval (capped at a minute),
+ *     so a down database is not hammered by five workers on every replica;
+ *   - never starts while the previous tick is still running, so a slow or
+ *     hanging poll cannot stack concurrent claims behind it.
+ *
+ * Backoff is measured against the interval timer rather than re-arming a
+ * timeout per tick: the single unref'd interval stays the only timer, which
+ * keeps start/stop and the "never keeps a bare process alive" property
+ * exactly as they were.
  */
 export function createPollingWorker(label: string, processOnce: (pool: Pool) => Promise<number>): PollingWorkerController {
   let timer: ReturnType<typeof setInterval> | null = null;
+  /**
+   * One run's tick. The in-flight flag and the backoff belong to the run, not
+   * to the worker: a tick still in flight when the worker is stopped must not
+   * hold back the ticks of a run started after it.
+   */
+  const createTick = (pool: Pool, pollMs: number) => {
+    let running = false;
+    let failures = 0;
+    let nextAttemptAt = 0;
+    return async (): Promise<void> => {
+      if (running || Date.now() < nextAttemptAt) return;
+      running = true;
+      try {
+        await processOnce(pool);
+        if (failures > 0) logger.info(`${label} worker recovered after ${failures} failed poll(s)`);
+        failures = 0;
+        nextAttemptAt = 0;
+      } catch (err) {
+        failures += 1;
+        const backoffMs = Math.min(pollMs * 2 ** failures, MAX_BACKOFF_MS);
+        nextAttemptAt = Date.now() + backoffMs;
+        if (failures === 1) {
+          logger.error(`${label} worker poll failed; backing off until it recovers`, {
+            error: err instanceof Error ? err.message : String(err),
+            code: (err as { code?: unknown } | null)?.code,
+          });
+        } else {
+          logger.debug(`${label} worker poll still failing`, { failures, backoffMs });
+        }
+      } finally {
+        running = false;
+      }
+    };
+  };
 
   return {
     start(pool: Pool, pollMs: number, isEnabled?: () => boolean): void {
       if (timer || (isEnabled && !isEnabled())) return;
+      const tick = createTick(pool, pollMs);
       timer = setInterval(() => {
-        void processOnce(pool);
+        void tick();
       }, pollMs);
       timer.unref?.();
       logger.info(`${label} worker started`);

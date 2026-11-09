@@ -54,8 +54,13 @@ export class AssignmentValidator {
    * `startTime` means the shift runs into the following day.
    *
    * Pass the transaction `connection` as `executor` when the check must see
-   * (and be serialized with) uncommitted rows of the surrounding transaction —
-   * otherwise two concurrent assignments can each find no conflict.
+   * uncommitted rows of the surrounding transaction. That alone does NOT
+   * serialize it with other transactions: this is a plain read, blind to their
+   * uncommitted inserts, so two concurrent bookings of one person could each
+   * find no conflict and both commit (#829). A caller that inserts on the
+   * strength of this check must first hold the person's lock — see
+   * `AssignmentService.createAssignment`, which locks the `users` row before
+   * its first read.
    */
   async checkConflicts(
     userId: number,
